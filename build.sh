@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Parse command line arguments
-LOCAL_ONLY=false
-if [ "$1" == "--local" ] || [ "$1" == "-l" ]; then
-    LOCAL_ONLY=true
+BUILD_ALL=false
+if [ "$1" == "--all" ] || [ "$1" == "-a" ]; then
+    BUILD_ALL=true
 fi
 
 # Detect current OS
@@ -21,10 +21,10 @@ fi
 NAME=$(node -p "require('./package.json').name")
 VERSION=$(node -p "require('./package.json').version")
 
-if [ "$LOCAL_ONLY" = true ]; then
-    echo "Building $NAME v$VERSION (${CURRENT_OS} only, local mode)"
+if [ "$BUILD_ALL" = true ]; then
+    echo "Building $NAME v$VERSION (all platforms)"
 else
-    echo "Building $NAME v$VERSION"
+    echo "Building $NAME v$VERSION (${CURRENT_OS})"
 fi
 echo "================================"
 
@@ -142,24 +142,21 @@ echo "Copying VS Code settings to dist..."
 mkdir -p dist/assets/.vscode
 cp public/assets/.vscode/settings.json dist/assets/.vscode/settings.json
 
-# Step 6: Build Electron for Linux and Windows
-echo "Building Electron applications..."
+# Step 6: Build Electron
+echo "Building Electron application..."
 
-if [ "$LOCAL_ONLY" = true ]; then
-    # Build only for current OS
-    if [ "$CURRENT_OS" = "windows" ]; then
-        echo "Building Windows version..."
-        npx electron-builder build --windows --dir
-    else
-        echo "Building Linux version..."
-        ELECTRON_DISABLE_SANDBOX=1 npx electron-builder build --linux --dir
-    fi
-else
+if [ "$BUILD_ALL" = true ]; then
     # Build for both platforms
     echo "Building Linux version..."
     ELECTRON_DISABLE_SANDBOX=1 npx electron-builder build --linux --dir
     echo "Building Windows version..."
     npx electron-builder build --windows --dir
+elif [ "$CURRENT_OS" = "windows" ]; then
+    echo "Building Windows version..."
+    npx electron-builder build --windows --dir
+else
+    echo "Building Linux version..."
+    ELECTRON_DISABLE_SANDBOX=1 npx electron-builder build --linux --dir
 fi
 
 # Rename the unpacked folders to use app name
@@ -234,44 +231,21 @@ if [ -d "production/${NAME}-windows" ]; then
     fi
 fi
 
-# Step 9: Zip both electron apps with version in filename
-if [ "$LOCAL_ONLY" = false ]; then
-    echo "Creating zip archives..."
-
-    if [ -d "production/${NAME}-linux" ]; then
-        echo "Zipping Linux build..."
-        cd production
-        zip -r "${NAME}-linux-v${VERSION}.zip" ${NAME}-linux
-        cd ..
-        echo "Created: production/${NAME}-linux-v${VERSION}.zip"
-    fi
-
-    if [ -d "production/${NAME}-windows" ]; then
-        echo "Zipping Windows build..."
-        cd production
-        zip -r "${NAME}-windows-v${VERSION}.zip" ${NAME}-windows
-        cd ..
-        echo "Created: production/${NAME}-windows-v${VERSION}.zip"
-    fi
-fi
-
 echo ""
 echo "================================"
 echo "Build complete! Version: $VERSION"
 
-if [ "$LOCAL_ONLY" = true ]; then
-    if [ "$CURRENT_OS" = "windows" ]; then
-        echo "Windows build: production/${NAME}-windows/"
-    else
-        echo "Linux build: production/${NAME}-linux/"
-        echo ""
-        echo "Note: For Linux, remember to run after extracting:"
-        echo "  sudo chown root chrome-sandbox"
-        echo "  sudo chmod 4755 chrome-sandbox"
-    fi
+if [ "$BUILD_ALL" = true ]; then
+    echo "Linux build: production/${NAME}-linux/"
+    echo "Windows build: production/${NAME}-windows/"
+    echo ""
+    echo "Note: For Linux, remember to run after extracting:"
+    echo "  sudo chown root chrome-sandbox"
+    echo "  sudo chmod 4755 chrome-sandbox"
+elif [ "$CURRENT_OS" = "windows" ]; then
+    echo "Windows build: production/${NAME}-windows/"
 else
-    echo "Linux build: production/${NAME}-linux-v${VERSION}.zip"
-    echo "Windows build: production/${NAME}-windows-v${VERSION}.zip"
+    echo "Linux build: production/${NAME}-linux/"
     echo ""
     echo "Note: For Linux, remember to run after extracting:"
     echo "  sudo chown root chrome-sandbox"

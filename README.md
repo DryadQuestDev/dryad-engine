@@ -30,7 +30,7 @@ A Vue-based game engine for creating UI-heavy games like visual novels, dating s
 git clone https://github.com/DryadQuestDev/dryad-engine.git
 cd dryad-engine
 npm install
-./build.sh --local
+./build.sh
 
 # Linux
 ./production/dryad-engine-linux/dryad-engine
@@ -38,8 +38,6 @@ npm install
 # Windows
 ./production/dryad-engine-windows/dryad-engine.exe
 ```
-
-The `--local` (or `-l`) flag builds for your current OS only. Omit it to build both Linux and Windows and zip them(requires zip library).
 
 ## Documentation
 
