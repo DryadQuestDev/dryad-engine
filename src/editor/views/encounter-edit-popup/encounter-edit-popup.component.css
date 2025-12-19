@@ -1,0 +1,162 @@
+/* Basic styles, adapt as needed using existing project variables/classes */
+
+:host {
+    display: block; /* Needed for the overlay to work correctly */
+  }
+  
+  .popup-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 500;
+  }
+  
+  .popup-content {
+    background-color: var(--background-color, #fff); /* Use CSS variable or default */
+    color: var(--text-color, #333);
+    padding: 20px 25px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    min-width: 350px;
+    max-width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  
+  .popup-title {
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 1.4em;
+    border-bottom: 1px solid var(--border-color, #eee);
+    padding-bottom: 10px;
+  }
+  
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); /* Responsive grid */
+    gap: 15px 20px;
+    margin-bottom: 20px;
+  }
+  
+  .form-field {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .form-field label {
+    font-weight: bold;
+    margin-bottom: 5px;
+    font-size: 0.9em;
+    color: var(--text-muted-color, #666);
+  }
+  
+  .form-field input[type="text"],
+  .form-field input[type="number"] {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color-light, #ccc);
+    border-radius: 4px;
+    background-color: var(--input-background-color, #fff);
+    color: var(--input-text-color, #333);
+    width: 100%; /* Ensure inputs fill the grid column */
+    box-sizing: border-box; /* Include padding and border in width */
+  }
+  
+  .form-field input:focus {
+    outline: none;
+    border-color: var(--primary-color, #007bff);
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+  }
+  
+  .form-field-readonly {
+    opacity: 0.7;
+  }
+  .form-field-readonly span {
+    background-color: var(--background-color-light, #f8f8f8);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-family: var(--font-family-mono);
+    font-size: 0.9em;
+    word-break: break-all;
+  }
+  
+  .popup-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 25px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color, #eee);
+  }
+  
+  /* Basic Button Styling (adapt to project's button classes/styles) */
+  .button {
+    padding: 8px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s ease;
+  }
+  
+  .button.primary {
+    background-color: var(--primary-color, #007bff);
+    color: #fff;
+  }
+  .button.primary:hover {
+    background-color: var(--primary-color-dark, #0056b3);
+  }
+  
+  .button.secondary {
+    background-color: var(--secondary-button-bg, #6c757d);
+    color: #fff;
+  }
+  .button.secondary:hover {
+    background-color: var(--secondary-button-bg-dark, #5a6268);
+  }
+  
+  /* --- Autocomplete Styles --- */
+  .form-field-full-width {
+    grid-column: 1 / -1; /* Make the image field span full width if needed */
+  }
+  
+  .autocomplete-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .autocomplete-preview {
+    max-width: 30px;
+    max-height: 30px;
+    object-fit: contain;
+    vertical-align: middle; /* Align image nicely with text */
+  }
+  
+  .autocomplete-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  /* Preview image below the input */
+  .selected-image-preview {
+    display: block; /* Ensure it takes its own line */
+    margin-top: 10px;
+    max-width: 100px;
+    max-height: 100px;
+    object-fit: contain;
+    border: 1px solid var(--border-color-light, #ccc);
+    border-radius: 4px;
+  }
+  
+  /* Optional: Adjust spinner position */
+  .mat-mdc-option .mat-mdc-progress-spinner {
+    display: inline-block;
+    margin-right: 8px;
+  } 

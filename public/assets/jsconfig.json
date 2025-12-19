@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "module": "esnext",
+    "target": "esnext",
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "strictFunctionTypes": false,
+    "strictPropertyInitialization": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": [
+    "games_assets/**/*.js",
+    "games_assets/**/*.mjs",
+    "games_files/**/*.js",
+    "games_files/**/*.mjs",
+    "engine_files/types.d.ts"
+  ],
+  "exclude": ["node_modules"]
+}

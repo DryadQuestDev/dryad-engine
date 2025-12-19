@@ -1,0 +1,150 @@
+.dform {
+  padding: 10px 0px 500px 15px;
+  max-width: 1000px;
+}
+
+/* Wrapper for spacing */
+.form-field-wrapper {
+  margin-bottom: 1rem;
+  /* Spacing between fields */
+}
+
+.form-field-wrapper:last-child {
+  margin-bottom: 0;
+  /* No bottom margin for last field in a group */
+}
+
+.new_item_form {
+  background-color: #f4f4f5;
+  /* Slightly different background */
+}
+
+.new_item_form .form-field-wrapper:last-child {
+  margin-bottom: 0;
+  /* No bottom margin for last field in add form */
+}
+
+.new_item_form,
+.item-in-array {
+  border: 1px solid gray;
+}
+
+.item_header .item_title {
+  margin: 0;
+}
+
+.item-in-array {
+  background-color: #fafafa;
+}
+
+.item-in-array .form-field-wrapper:last-child {
+  margin-bottom: 0;
+}
+
+/* Keep utility classes needed for layout */
+.absolute {
+  position: absolute;
+}
+
+.top-0 {
+  top: 0;
+}
+
+.right-0 {
+  right: 0;
+}
+
+.mt-0 {
+  margin-top: 0;
+}
+
+.mt-1 {
+  margin-top: 0.25rem;
+}
+
+.mr-1 {
+  margin-right: 0.25rem;
+}
+
+.mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.mb-3 {
+  margin-bottom: 1rem;
+}
+
+.mb-4 {
+  margin-bottom: 1.5rem;
+}
+
+.p-4 {
+  padding: 1rem;
+}
+
+.border-round {
+  border-radius: 6px;
+}
+
+.border-1 {
+  border-width: 1px;
+}
+
+.border-surface-300 {
+  border-color: #d4d4d8;
+}
+
+/* Styles for item header using standard CSS */
+.item_header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  /* Add some space below the header */
+}
+
+.item_title_with_buttons {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.item_header .item_title {
+  margin-bottom: 0;
+  /* Remove default heading margin */
+}
+
+.custom-popup-button {
+  margin-left: 0.75rem;
+}
+
+/* Plugin Data Accordion Styles */
+.plugin-data-container {
+  overflow-y: auto;
+}
+
+.plugin-item {
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  padding: 1rem;
+  background-color: #fafafa;
+}
+
+.plugin-name {
+  color: #2563eb;
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 0;
+}
+
+.plugin-json-display {
+  background-color: #f4f4f5;
+  padding: 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: var(--font-family-mono);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}

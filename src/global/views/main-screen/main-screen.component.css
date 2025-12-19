@@ -1,0 +1,573 @@
+/* Base layout for the entire screen */
+.main_screen {
+  --column-width: 350px;
+  /* CSS variable for column width */
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  /* Full viewport height */
+  width: 100vw;
+  /* Full viewport width */
+  color: #333;
+  /* Dark text color */
+  overflow: hidden;
+  /* Prevent scrollbars on the main screen itself */
+}
+
+/* Header styling */
+.main_header {
+  display: flex;
+  justify-content: space-between;
+  /* Distribute items */
+  align-items: center;
+  /* Vertically center items */
+  padding: 10px 20px;
+  background-color: #444;
+  /* Darker grey header */
+  color: #fff;
+  /* White text */
+  flex-shrink: 0;
+  /* Prevent header from shrinking */
+}
+
+.header_left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Space between items on the left */
+}
+
+.header_right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Space between social buttons and engine name */
+}
+
+.engine_name {
+  font-size: 1.1em;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #6a4c93, #9b7ec4);
+  /* Purple gradient theme */
+  border-radius: 4px;
+  border: 1px solid #7d5ba6;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.save_list_container {
+  background-color: #fff;
+  padding: 12px;
+  border-radius: 5px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  flex: 0 0 var(--column-width);
+  /* Fixed width using CSS variable */
+  min-width: var(--column-width);
+  min-height: 0;
+  /* Prevents flex items from overflowing in some cases */
+}
+
+.header_item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-radius: 5px;
+  font-weight: 600;
+  font-size: 0.95em;
+  background-color: #555;
+  /* Slightly lighter than header background */
+  border: 1px solid #666;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.header_item i {
+  font-size: 1.1em;
+}
+
+.header_item:hover:not(.disabled) {
+  background-color: #666;
+  /* Slightly lighter grey on hover */
+  border-color: #888;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+}
+
+.header_item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Install button - make it prominent with green color */
+.header_item.install-button {
+  background: linear-gradient(135deg, #4CAF50, #45a049);
+  border-color: #3d8b40;
+  font-size: 1em;
+  padding: 10px 20px;
+  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+}
+
+.header_item.install-button:hover:not(.disabled) {
+  background: linear-gradient(135deg, #45a049, #3d8b40);
+  border-color: #2e7d32;
+  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.4);
+}
+
+.header_item.install-button.disabled {
+  background: linear-gradient(135deg, #a5d6a7, #81c784);
+  border-color: #66bb6a;
+  opacity: 0.6;
+}
+
+.promo_button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  text-decoration: none;
+}
+
+.promo_button img {
+  height: 100%;
+  width: auto;
+  display: block;
+}
+
+.promo_button:hover {
+  opacity: 0.8;
+  transform: scale(1.05);
+}
+
+/* GitHub button specific styling */
+.promo_button[href*="github"] {
+  background-color: #2a2a2a;
+  /* Dark background for GitHub button */
+}
+
+.promo_button[href*="github"] img {
+  filter: brightness(0) invert(1);
+  /* Make GitHub image white */
+}
+
+/* Main content area styling */
+.main_content {
+  display: flex;
+  flex-grow: 1;
+  /* Allow content to fill remaining space */
+  padding: 20px;
+  gap: 20px;
+  /* Space between columns */
+  overflow: auto;
+  /* Allow scrolling if content overflows */
+}
+
+/* Column styling */
+.column {
+  background-color: #fff;
+  /* White background for columns */
+  padding: 15px;
+  border-radius: 5px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  /* Subtle shadow */
+  display: flex;
+  flex-direction: column;
+  /* Stack content vertically within columns */
+  overflow: auto;
+  /* Allow scrolling within columns if needed */
+  min-height: 0;
+  /* Added to help with flex column overflow */
+}
+
+/* First two columns have fixed width */
+.column:nth-child(1),
+.column:nth-child(2) {
+  flex: 0 0 var(--column-width);
+  /* Fixed width using CSS variable */
+  min-width: var(--column-width);
+}
+
+/* Third column takes remaining space */
+.column:nth-child(3) {
+  flex: 1;
+  /* Takes all remaining space */
+  min-width: 0;
+}
+
+/* Specific styling for mod content area */
+.mod_content {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  /* Light border */
+  border-radius: 3px;
+  flex-grow: 1;
+  /* Allow mod info to fill space in its column */
+  background-color: #f9f9f9;
+  /* Slightly off-white */
+  overflow: auto;
+  /* Scroll if mod info is long */
+}
+
+/* Styling for the 'no games' message */
+.no_games {
+  text-align: center;
+  padding: 40px;
+  font-style: italic;
+  color: #888;
+  /* Grey text */
+}
+
+/* Game and Mod list styling */
+.game_and_mods_list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Space between game sections */
+  overflow-y: auto;
+  /* Allow vertical scrolling if list is long */
+  flex-grow: 1;
+  /* Allow list to take available space */
+}
+
+.game_section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mod_list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* Space between items */
+  padding-left: 10px;
+  /* Indent mods slightly */
+}
+
+.game_item,
+.mod_item {
+  padding: 8px 12px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.game_item:hover,
+.mod_item:hover {
+  background-color: #f5f5f5;
+  /* Light background on hover */
+  border-color: #ddd;
+}
+
+.game_item.selected,
+.mod_item.selected {
+  background-color: #e0eaff;
+  /* Light blue background for selected */
+  border-color: #a8c7fa;
+  font-weight: bold;
+}
+
+/* Mods section styling */
+.mods_section {
+  margin-left: 15px;
+  padding-left: 15px;
+  border-left: 3px solid #a8c7fa;
+  display: flex;
+  flex-direction: column;
+  background-color: #f9f9f9;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.mods_section h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.95em;
+  color: #666;
+  font-weight: 600;
+}
+
+/* Mod item internal structure */
+.mod_item {
+  display: flex;
+  flex-direction: column;
+}
+
+.mod_header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Space between checkbox and name */
+}
+
+.mod_choose {
+  /* Placeholder for checkbox styling */
+  width: 20px;
+  height: 20px;
+  border: 1px solid #ccc;
+  text-align: center;
+  line-height: 18px;
+  /* Center potential content vertically */
+  font-size: 12px;
+  cursor: pointer;
+  /* Indicate it's clickable */
+  position: relative;
+  /* Needed for pseudo-element positioning */
+  background-color: #fff;
+  /* Default background */
+  transition: background-color 0.2s ease;
+  /* Smooth transition */
+}
+
+.mod_choose:hover {
+  background-color: #f0f0f0;
+  /* Light grey on hover */
+}
+
+/* Styling for the active checkbox */
+.mod_choose.active {
+  background-color: #a8c7fa;
+  /* Same blue as selected item */
+  border-color: #7faded;
+}
+
+/* Simple checkmark using pseudo-element */
+.mod_choose.active::after {
+  content: '\2713';
+  /* Unicode checkmark character */
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  /* White checkmark */
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.mod_name {
+  flex-grow: 1;
+  /* Allow name to take remaining space */
+  font-weight: 500;
+  /* Slightly bolder name */
+}
+
+/* Info content styling for game/mod details in third column */
+.info_content {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 5px;
+  flex-grow: 1;
+  overflow-y: auto;
+}
+
+.info_header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 15px;
+  border-bottom: 2px solid #ddd;
+  padding-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.info_name {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #333;
+}
+
+.info_author {
+  font-size: 0.95em;
+  color: #777;
+  font-style: italic;
+}
+
+.info_version {
+  font-size: 0.85em;
+  color: #999;
+  margin-left: auto;
+}
+
+.info_description {
+  font-size: 1em;
+  color: #555;
+  line-height: 1.6;
+  margin-bottom: 15px;
+}
+
+/* Play button styling */
+.play_button {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: white;
+  padding: 18px 48px;
+  text-align: center;
+  font-size: 1.4em;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 15px;
+  box-shadow:
+    0 4px 15px rgba(16, 185, 129, 0.5),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+  border: none;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+}
+
+.play_button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.5s ease;
+}
+
+.play_button:hover::before {
+  left: 100%;
+}
+
+.play_button:hover {
+  background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 6px 20px rgba(16, 185, 129, 0.6),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.play_button:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow:
+    0 2px 8px rgba(16, 185, 129, 0.4),
+    0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.play_button.disabled {
+  background: linear-gradient(135deg, #bdbdbd 0%, #9e9e9e 100%);
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  filter: grayscale(1);
+}
+
+.play_button.disabled:hover {
+  transform: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* No game/mod selected message */
+.no_game_selected_message,
+.no_mods_message {
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+  color: #888;
+}
+
+/* Cover Assets Gallery Styling */
+.cover-gallery {
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.gallery-item-image,
+.gallery-item-video {
+  width: 100%;
+  height: auto;
+  max-height: 500px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+.gallery-thumbnail {
+  width: 100%;
+  height: 60px;
+  object-fit: cover;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+/* Version compatibility warning styles */
+.version-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background-color: #fff4e5;
+  border: 1px solid #ffe0b2;
+  border-radius: 4px;
+  color: #e65100;
+  font-size: 0.9em;
+  margin-bottom: 15px;
+}
+
+.version-warning i {
+  font-size: 1.2em;
+  flex-shrink: 0;
+}
+
+/* Incompatible mod styling */
+.mod_item.incompatible {
+  opacity: 0.6;
+  background-color: #fafafa;
+}
+
+.mod_item.incompatible .mod_name {
+  color: #999;
+}
+
+.mod_choose.disabled {
+  background-color: #e0e0e0;
+  border-color: #bbb;
+  cursor: not-allowed;
+}
+
+.mod_choose.disabled:hover {
+  background-color: #e0e0e0;
+}
+
+.incompatible-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background-color: #ffccbc;
+  color: #d84315;
+  font-size: 0.75em;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.mod-version-warning {
+  margin-top: 8px;
+  padding: 8px;
+  background-color: #fff4e5;
+  border-left: 3px solid #ff9800;
+  font-size: 0.85em;
+  color: #e65100;
+  line-height: 1.4;
+}

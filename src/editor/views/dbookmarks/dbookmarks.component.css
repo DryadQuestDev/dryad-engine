@@ -1,0 +1,108 @@
+.buttons_container {
+    margin-top: 20px;
+}
+
+.dbookmarks button {
+    width: 100%;
+    margin-bottom: 5px;
+}
+
+.bookmark_list {
+    margin-top: 15px;
+    overflow-y: auto;
+    /* Add scroll if list is long */
+    border-top: 1px solid var(--surface-d);
+}
+
+
+.bookmark_title {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    color: #333333;
+}
+
+.bookmark_title:hover {
+    background-color: #dbeafe;
+}
+
+.bookmark_title.active {
+    background-color: #3b82f6;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+.map_options {
+    padding: 5px 0px;
+}
+
+.map-state-description {
+    padding: 10px;
+    margin-bottom: 8px;
+    border: 1px solid rgb(163, 163, 163);
+    border-radius: 4px;
+    font-size: 0.9em;
+    background-color: rgb(236, 236, 236);
+}
+
+.action-icons {
+    display: flex;
+    gap: 0px;
+    flex-wrap: nowrap;
+    padding: 4px 0;
+    justify-content: center;
+    align-items: center;
+}
+
+.action-icon-btn {
+    min-width: 2rem;
+    height: 2rem;
+    transition: all 0.2s ease;
+    font-weight: bold;
+}
+
+.action-icon-btn:not(.active-state) {
+    color: #000000 !important;
+}
+
+.action-icon-btn.active-state {
+    background-color: transparent !important;
+    color: #22c55e !important;
+}
+
+.page-divider {
+    padding: 8px 12px;
+    margin: 8px 0 4px 0;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.85em;
+    color: #6c757d;
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    border-top: 1px solid #d4d4d8;
+    border-bottom: 1px solid #d4d4d8;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.page-divider:hover {
+    background-color: #e5e7eb;
+    border-color: #9ca3af;
+}
+
+.page-divider.current-page {
+    background-color: #565656;
+    color: #ffffff;
+    font-weight: 700;
+    border-color: #212121;
+}
+
+.page-divider.current-page:hover {
+    background-color: #404040;
+    border-color: #000000;
+}

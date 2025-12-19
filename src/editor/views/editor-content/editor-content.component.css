@@ -1,0 +1,62 @@
+.editor-content {
+  display: flex; /* Use Flexbox */
+  gap: 1rem; /* Re-apply gap for Flexbox */
+  height: calc(100vh - 120px); 
+  overflow: hidden; /* Prevent the container itself from scrolling */
+  position: relative; /* Needed for absolute positioning of children */
+  
+}
+
+.column {
+  overflow-y: auto; /* Enable vertical scrolling */
+  max-height: 100%; /* Limit height to the container's height */
+  padding: 15px 0 0 15px;
+  /* You might need additional padding or styling here */
+}
+
+/* Define flex properties for direct children columns */
+.editor-content > .editor-left {
+  flex: 0 0 200px; /* Don't grow, don't shrink, base width 200px */
+  /* Note: .column styles still apply (overflow, max-height) */
+}
+
+.editor-content > .editor-right {
+  flex: 1 1 auto; /* Grow, shrink, base on auto */
+  min-width: 0; /* Important for flex items containing large content */
+   /* Note: .column styles still apply (overflow, max-height) */
+  transition: opacity 0.15s ease-in-out; /* Smooth fade transition */
+}
+
+/* Fade out during page navigation to hide scroll jumps */
+.editor-content > .editor-right.navigating {
+  opacity: 0.3;
+}
+
+.left-column-toggle {
+  position: absolute;
+  top: 0px;
+  left: 5px;
+  z-index: 10; /* Ensure it's above other content */
+
+  /* Make it smaller */
+  width: 32px !important; 
+  height: 32px !important;
+  padding: 0; /* Reset padding if needed for size */
+
+  /* Make it darker */
+  background-color:#777 ; /* Dark grey background */
+  color: #eee; /* Light grey icon color */
+  border: none; /* Remove default border if any */
+}
+
+/* Optional: Adjust hover/focus if needed */
+.left-column-toggle:hover {
+  background-color: #555 !important; /* Slightly lighter on hover */
+  border: none !important;
+}
+
+.left-column-toggle:focus {
+  outline: 1px solid #aaa !important; /* Simple focus outline */
+  box-shadow: none; /* Remove default PrimeVue focus shadow if desired */
+}
+

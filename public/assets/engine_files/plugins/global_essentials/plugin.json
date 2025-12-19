@@ -1,0 +1,198 @@
+{
+  "id": "global_essentials",
+  "name": "Essentials",
+  "description": "A global plugin that adds default traits for items and characters, as well as default fallback images for encounters. Don't turn off this plugin unless you know what you are doing.",
+  "author": "Nekon",
+  "version": "0.0.2",
+  "tabs": [],
+  "data": {
+    "character_traits": [
+      {
+        "id": "art_dx",
+        "type": "number",
+        "description": "Default x shift of Character Art in % to adjust for the space around the character in its image asset. Used both in Scenes and Character Sheet.",
+        "uid": "px4dO7PysJYh"
+      },
+      {
+        "id": "art_dy",
+        "type": "number",
+        "description": "Default y shift of Character Art in % to adjust for the space around the character in its image asset. Used both in Scenes and Character Sheet.",
+        "uid": "2vnRqYZmymQn"
+      },
+      {
+        "id": "art_scale",
+        "type": "number",
+        "description": "Scale size of character art",
+        "uid": "IlTj1SBqYLI6"
+      },
+      {
+        "id": "face_shift_scale",
+        "type": "number",
+        "description": "Scaling of the character doll to fit inside the face container.",
+        "uid": "RcwH0eSuxuCz"
+      },
+      {
+        "id": "face_shift_x",
+        "type": "number",
+        "uid": "YnfDAXnxU4BU"
+      },
+      {
+        "id": "face_shift_y",
+        "uid": "w5xp86mJnrqE",
+        "type": "number"
+      },
+      {
+        "type": "image",
+        "id": "face_static",
+        "uid": "9nmGAtilhzjA",
+        "description": "Static image. If present, takes precedence over Face Picker."
+      },
+      {
+        "id": "name",
+        "type": "string",
+        "uid": "UGeygoK22kTg",
+        "order": -1
+      },
+      {
+        "id": "title_color",
+        "type": "color",
+        "uid": "aR1kfGQ93TUx",
+        "description": "Color of character's title"
+      }
+    ],
+    "properties" : [
+            {
+    "id": "colored_character_title",
+    "name": "Colored Character Title",
+    "type": "number",
+    "default_value_number": 1,
+    "description": "0 - 'title_color' character trait is not used\n1 - 'title_color' is used",
+    "max_value": 1,
+    "min_value": 0,
+    "uid": "6BasdasdRdrNSE6o8r"
+    },
+      {
+    "id": "colored_character_text",
+    "name": "Colored Character Text",
+    "type": "number",
+    "default_value_number": 1,
+    "description": "0 - 'title_color' character trait is not used\n1 - 'title_color' is used for all text. \n2 - 'title_color' is used only for text inside quotes.",
+    "max_value": 2,
+    "min_value": 0,
+    "uid": "6BRdrNSE6o8r"
+    }
+    ],
+    "item_traits": [
+      {
+        "type": "image",
+        "id": "image",
+        "is_persistent": true,
+        "description": "Item icon",
+        "uid": "quHdNmFViJ3R"
+      },
+      {
+        "id": "name",
+        "type": "string",
+        "description": "Name of the item",
+        "uid": "L0VDOodQPgu9",
+        "is_persistent": true
+      },
+      {
+        "id": "description",
+        "type": "htmlarea",
+        "description": "Item description text",
+        "uid": "8xK9mNpQ2wLr",
+        "is_persistent": true
+      },
+      {
+        "id": "max_stack",
+        "type": "number",
+        "description": "The maximum stack size of the item. 0/undefined - not stackable, -1 - unlimited stack size",
+        "uid": "ZMe02qMGRiZb"
+      },
+      {
+        "id": "weight",
+        "type": "number",
+        "description": "Item weight (for encumbrance)",
+        "uid": "3pR7tYvW5nDx"
+      }
+    ],
+    "item_properties": [
+    {
+      "id": "durability",
+      "name": "Durability",
+      "is_resource": true,
+      "description": "Item's durability",
+      "uid": "QNDtd9wRq0eS"
+    }
+    ],
+    "item_attributes": [
+    {
+    "id": "rarity",
+    "values": [
+      "common",
+      "uncommon",
+      "rare",
+      "epic",
+      "legendary"
+    ],
+    "description": "Item rarity tier",
+    "uid": "rLfghb4Ukzjm"
+    }
+    ],
+    "dev/encounters_default": [
+      {
+        "id": "climb_down",
+        "image": "assets/engine_assets/encounters/default/climb_down.png"
+      },
+      {
+        "id": "climb_up",
+        "image": "assets/engine_assets/encounters/default/climb_up.png"
+      },
+      {
+        "id": "enter",
+        "image": "assets/engine_assets/encounters/default/enter.png"
+      },
+      {
+        "id": "exit",
+        "image": "assets/engine_assets/encounters/default/exit.png"
+      },
+      {
+        "id": "hand",
+        "image": "assets/engine_assets/encounters/default/hand.png"
+      },
+      {
+        "id": "inspect",
+        "image": "assets/engine_assets/encounters/default/inspect.png"
+      },
+      {
+        "id": "jump",
+        "image": "assets/engine_assets/encounters/default/jump.png"
+      },
+      {
+        "id": "loot",
+        "image": "assets/engine_assets/encounters/default/loot.png"
+      },
+      {
+        "id": "stairs",
+        "image": "assets/engine_assets/encounters/default/stairs.png"
+      },
+      {
+        "id": "stairs_down",
+        "image": "assets/engine_assets/encounters/default/stairs_down.png"
+      },
+      {
+        "id": "stairs_up",
+        "image": "assets/engine_assets/encounters/default/stairs_up.png"
+      },
+      {
+        "id": "trade",
+        "image": "assets/engine_assets/encounters/default/trade.png"
+      },
+      {
+        "id": "world",
+        "image": "assets/engine_assets/encounters/default/world.png"
+      }
+    ]
+  }
+}

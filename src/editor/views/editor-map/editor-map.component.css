@@ -1,0 +1,350 @@
+.editor-content {
+    /* height: 100%; */
+    user-select: none;
+}
+
+.editor-map-container {
+    position: relative;
+    overflow: auto;
+    background: black;
+    height: 90vh;
+    /* 80vh Give container explicit height less than content */
+    margin-top: -15px;
+
+}
+
+.map-wrapper {
+    background-color: rgb(207, 207, 207);
+    width: 100%;
+    transform-origin: top left;
+    /* border: 5px solid #555; */
+}
+
+.map-image {
+    position: absolute;
+    transform-origin: top left;
+    outline: #c0e1fd solid 5px;
+}
+
+.encounter-wrapper {
+    position: absolute;
+    /* Establish a stacking context */
+    z-index: 1;
+    /* Ensure it's above the image (adjust value if needed) */
+}
+
+
+.coordinates {
+    position: sticky;
+    z-index: 999;
+    pointer-events: none;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+    top: 5px;
+    left: 14px;
+    width: fit-content;
+}
+
+.screen-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 5px solid rgba(247, 6, 6, 0.722);
+    aspect-ratio: 16 / 9;
+    pointer-events: none;
+}
+
+.map {
+    position: relative;
+    /* overflow-x: auto;
+    overflow-y: auto;*/
+}
+
+.map-svg {
+    z-index: 100;
+    pointer-events: none;
+    position: absolute;
+    user-select: none;
+    top: calc(var(--map-padding, 0) * -1px);
+    left: calc(var(--map-padding, 0) * -1px);
+    overflow: visible;
+}
+
+.map-svg g rect {
+    pointer-events: all;
+    user-select: none;
+}
+
+.map-svg text {
+    pointer-events: none;
+}
+
+.map-svg g rect {
+    fill: rgba(0, 0, 0, 0.5);
+    stroke: var(--inactive-mod);
+    stroke-width: 1;
+}
+
+/* Style for rooms from the active non-core mod */
+.map-svg g rect.active {
+    fill: rgba(0, 0, 0, 0.5);
+    stroke: var(--active-mod);
+    cursor: default
+}
+
+.map-svg g line.door {
+    stroke: var(--inactive-mod);
+    stroke-width: 2;
+}
+
+.map-svg g line.door.active {
+    stroke: var(--active-mod);
+}
+
+
+.svg_contour {
+    position: absolute;
+    pointer-events: none;
+}
+
+.poly_encounter {
+    pointer-events: fill;
+    stroke: var(--active-mod);
+}
+
+/* Wrapper for positioning and scaling */
+.encounter-wrapper {
+    position: absolute;
+    z-index: 3;
+    transform-origin: top left;
+    /* Scale from top-left */
+    outline: 2px solid var(--inactive-mod);
+    transform-box: fill-box;
+    /* Apply transform relative to content */
+    /* z-index is set via binding */
+    /* width/height can be auto or set if needed */
+}
+
+/* Active state outline on the wrapper */
+.encounter-wrapper.active {
+    outline: 2px solid var(--active-mod);
+}
+
+/* Encounter image/element itself */
+.encounter {
+    display: block;
+    /* Good practice for images that might have transforms */
+    transform-origin: center;
+    /* Rotate around center */
+    /* Removed position, z-index, outline, transform-box */
+}
+
+/* Style for room selected for connection */
+.map-svg g rect.selected-for-connection {
+    stroke: var(--selected);
+    /* Bright cyan stroke */
+    stroke-width: 3;
+    /* Thicker stroke */
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* --- Add Room Popup Styles --- */
+/* Rename to generic popup */
+.generic-popup {
+    /* Position is set via ngStyle in the component */
+    background-color: #333;
+    /* Dark background */
+    color: #eee;
+    /* Light text */
+    border: 1px solid #555;
+    border-radius: 5px;
+    padding: 15px;
+    z-index: 1001;
+    /* Ensure it's above map elements */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    min-width: 200px;
+    /* Prevent it from being too small */
+}
+
+/* Rename nested selectors */
+.generic-popup h5 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #fff;
+}
+
+.generic-popup .p-field {
+    margin-bottom: 10px;
+}
+
+.generic-popup .p-field label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.9em;
+}
+
+.generic-popup input[pInputText] {
+    width: 100%;
+    /* Make input fill container width */
+}
+
+.generic-popup .p-error {
+    color: #ff7b7b;
+    /* Reddish color for errors */
+    font-size: 0.9em;
+    margin-top: 5px;
+    margin-bottom: 10px;
+}
+
+.generic-popup .popup-buttons {
+    display: flex;
+    justify-content: flex-end;
+    /* Align buttons to the right */
+    gap: 5px;
+    /* Space between buttons */
+    margin-top: 15px;
+}
+
+/* --- End Generic Popup Styles --- */
+
+.poly_encounter.selected {
+    stroke: cyan !important;
+}
+
+.encounter-wrapper.selected {
+    outline: 2px solid cyan !important;
+}
+
+.svg_contour {
+    position: absolute;
+    top: calc(var(--map-padding, 0) * -1px);
+    left: calc(var(--map-padding, 0) * -1px);
+    pointer-events: none;
+    overflow: visible;
+}
+
+.poly_encounter {
+    pointer-events: fill;
+    stroke: #ccc;
+}
+
+.poly_encounter.active {
+    stroke: var(--active-mod);
+}
+
+/* --- Polygon Point Styles --- */
+.polygon-point {
+    fill: rgba(0, 255, 255, 0.5);
+    stroke: cyan;
+    stroke-width: 1;
+    cursor: pointer;
+    pointer-events: auto;
+    vector-effect: non-scaling-stroke;
+}
+
+.polygon-point.hover {
+    fill: rgba(255, 255, 0, 0.7);
+    stroke: yellow;
+}
+
+.polygon-point.dragging {
+    fill: rgba(38, 255, 0, 0.7);
+    stroke: rgb(4, 255, 0);
+    cursor: grabbing;
+}
+
+/* Optional line connecting points during edit */
+.polygon-edit-lines {
+    stroke: var(--selected);
+    stroke-width: 0.5;
+    pointer-events: none;
+    vector-effect: non-scaling-stroke;
+}
+
+.fog_layer {
+    pointer-events: none;
+    z-index: 99;
+    position: absolute;
+}
+
+.visible_masks {
+    background: lemonchiffon;
+}
+
+/* Style for room selected for fog editing */
+.map-svg g rect.room-rect.selected-for-fog {
+    stroke: var(--selected);
+    stroke-width: 3;
+}
+
+/* Container for fog editing elements */
+.fog-polygon-editor {
+    pointer-events: none;
+    /* Container doesn't block */
+    z-index: 4;
+    /* Above rooms/doors, below UI popups */
+}
+
+/* Polygon outline shown during editing */
+.fog-polygon-editing-poly {
+    stroke: var(--selected);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+/* --- Fog Polygon Point Styles --- */
+.fog-polygon-point {
+    fill: var(--selected);
+    stroke: var(--selected);
+    stroke-width: 1;
+    cursor: pointer;
+    pointer-events: auto;
+    /* Points are interactive */
+    vector-effect: non-scaling-stroke;
+    pointer-events: all !important;
+}
+
+.fog-polygon-point.hover {
+    fill: rgba(255, 255, 0, 0.7);
+    /* Yellow when hovered */
+    stroke: yellow;
+}
+
+.fog-polygon-point.dragging {
+    fill: rgba(38, 255, 0, 0.7);
+    stroke: rgb(4, 255, 0);
+    cursor: grabbing;
+}
+
+.error-message {
+    color: #D32F2F;
+    background-color: #FFEBEE;
+    padding: 10px;
+    border: 1px solid #D32F2F;
+    text-align: center;
+}
+
+.room-id-text {
+    fill: white;
+    font-size: 20px;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    stroke: black;
+    stroke-width: 0.5px;
+}

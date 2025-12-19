@@ -1,0 +1,146 @@
+.dsearch-container {
+    /* Add specific container styles if needed */
+    border: 1px solid gray;
+    border-radius: 20px;
+    padding: 1rem;
+    background-color: #f8f8f8; /* Match background */
+    margin-bottom: 1rem; /* Replaces mb-4 */
+    /* p-fluid is handled by PrimeVue */
+}
+
+/* Grid setup (replaces p-formgrid grid usage pattern) */
+.form-grid {
+    display: grid;
+}
+
+/* Basic Filters Grid Columns (replaces col-*, md:col-*, lg:col-*) */
+.basic-filters-grid > .field {
+    grid-column: span 12 / span 12; /* Default: full width on small screens */
+}
+
+
+/* Range Filters Grid Columns */
+.range-filters-grid {
+    display: grid;
+}
+
+
+
+
+/* Consistent spacing for form fields */
+.field {
+    margin-bottom: 5px;
+}
+.form-grid .field:last-child {
+     margin-bottom: 0;
+}
+
+/* Ensure labels in FloatLabel don't overlap */
+:deep(.p-float-label > label) {
+    /* Adjust if necessary */
+}
+
+/* Input Group styling */
+
+.p-inputnumber{
+    width: 100px;
+}
+.p-inputgroup .p-inputnumber input {
+    text-align: center;
+}
+/* Assuming p-inputgroup-addon is handled by PrimeVue */
+
+/* Accordion Header Styling */
+:deep(.p-accordion .p-accordion-header-link) {
+    /* Target the link inside the header for flex layout */
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 0.5rem; /* Replaces gap-2 */
+}
+
+:deep(.p-accordion .p-accordion-header-link > span.header-text) {
+    font-weight: bold; /* Replaces font-bold */
+    white-space: nowrap; /* Replaces white-space-nowrap */
+}
+
+/* Section/Group Headers */
+.group-header {
+  padding: 0;
+  color: #5f6969;
+  margin: 0 0 10px 0; 
+  font-weight: bold; /* Replaces font-medium (using bold for clarity) */
+}
+
+/* Specific margin for selection group container */
+.selection-group {
+    margin-bottom: 0.75rem; /* Replaces mb-3 */
+}
+
+/* Options Container (for checkboxes) */
+.options-container {
+    display: flex;
+    flex-wrap: wrap; /* Replaces flex-wrap */
+    gap: 0.75rem; /* Replaces gap-3 */
+}
+
+/* Individual Option Item (checkbox + label) */
+.option-item {
+    display: flex;
+    align-items: center; /* Replaces align-items-center */
+}
+
+/* Labels next to checkboxes/switches */
+.option-label {
+    margin-left: 0.5rem; /* Replaces ml-2 */
+}
+
+/* Tag Filter Group */
+.tag-filter-group {
+    border: 1px solid var(--surface-border); /* Use theme variable */
+    border-radius: var(--border-radius); /* Use theme variable */
+    margin-bottom: 1rem; /* Replaces mb-4 */
+}
+.tag-filter-group:last-child {
+    margin-bottom: 0;
+}
+
+/* Tag Group Header (Path + Logic Switch) */
+.tag-group-header {
+    display: flex;
+    justify-content: space-between; /* Replaces justify-content-between */
+    align-items: center; /* Replaces align-items-center */
+    margin-bottom: 0.5rem; /* Replaces mb-2 */
+}
+
+/* Tag Logic Switch Container */
+.tag-logic-container {
+    display: flex;
+    align-items: center; /* Replaces align-items-center */
+}
+
+/* Tag Logic Label */
+.tag-logic-label {
+    margin-right: 0.5rem; /* Replaces mr-2 */
+    font-size: 0.875rem; /* Replaces text-sm */
+    color: var(--text-color); /* Use primary text color */
+}
+
+/* Helper text (No unique values) */
+.no-options-text {
+    color: var(--text-color-secondary); /* Replaces text-color-secondary */
+    font-size: 0.875rem;
+    width: 100%; /* Ensure it takes full width if needed */
+}
+
+/* Utility classes replacements */
+.label-block {
+    display: block; /* Replaces block */
+    margin-bottom: 0.25rem; /* Replaces mb-1 */
+}
+
+/* PrimeVue utility classes used:
+    p-fluid, mb-4, p-formgrid, grid, field, col-*, md:col-*, lg:col-*, flex, align-items-end, align-items-center, justify-content-between, w-full,
+    gap-2, gap-3, font-bold, white-space-nowrap, block, mb-1, mb-2, mb-3, p-inputgroup, p-inputgroup-addon, flex-wrap,
+    ml-2, mr-2, text-color-secondary, mb-0
+*/
