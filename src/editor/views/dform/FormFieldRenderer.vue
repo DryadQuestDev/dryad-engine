@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PropType, computed, ref, watch, onMounted, onUnmounted, nextTick, toRefs } from 'vue';
+import { PropType, computed, ref, watch, onMounted } from 'vue';
 import { Schemable, Schema } from '../../../utility/schema';
 import InputText from 'primevue/inputtext';
 import InputNumber from 'primevue/inputnumber';
@@ -14,14 +14,12 @@ import ColorPicker from 'primevue/colorpicker';
 import Dialog from 'primevue/dialog';
 import { useSortable } from '@vueuse/integrations/useSortable'
 import { Editor as AppEditor } from '../../../editor/editor'; // Adjust the relative path based on your project structure
-import AutoComplete from 'primevue/autocomplete';
-import type { Subscription } from 'rxjs';
-import { isImage, isVideo } from '../../../utility/functions';
 import { Global } from '../../../global/global';
 import NestedSchemaRenderer from './NestedSchemaRenderer.vue';
 import { watchDebounced } from '@vueuse/core';
-import WebPSettingsHeader from './WebPSettingsHeader.vue';
 import TriStateSwitch from './TriStateSwitch.vue';
+import FileInput from './FileInput.vue';
+import RangeInput from './RangeInput.vue';
 import { preserveScroll } from './preserveScrollDirective';
 
 // Get editor instance
@@ -58,219 +56,7 @@ function submitPrompt(value: string | null) {
 
 
 
-// Video thumbnail generation
-const videoThumbnails = ref<Map<string, string>>(new Map());
 
-async function generateVideoThumbnail(videoPath: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.crossOrigin = 'anonymous';
-    video.preload = 'metadata';
-    video.muted = true; // Mute to avoid autoplay restrictions
-
-    let hasResolved = false;
-    let errorCount = 0;
-
-    video.onloadeddata = () => {
-      if (hasResolved) return;
-      // Seek to the first frame
-      video.currentTime = 0.1; // Use 0.1 instead of 0 for better compatibility
-    };
-
-    video.onseeked = () => {
-      if (hasResolved) return;
-
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth || 320;
-        canvas.height = video.videoHeight || 240;
-
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-          hasResolved = true;
-          resolve(dataUrl);
-        } else {
-          if (!hasResolved) {
-            hasResolved = true;
-            reject(new Error('Could not get canvas context'));
-          }
-        }
-      } catch (error) {
-        if (!hasResolved) {
-          console.error('Error generating video thumbnail:', error);
-          hasResolved = true;
-          reject(error);
-        }
-      } finally {
-        // Clean up
-        video.pause();
-        video.src = '';
-        video.load();
-      }
-    };
-
-    video.onerror = (e) => {
-      errorCount++;
-      // Only reject on the first error and if we haven't already resolved
-      if (!hasResolved && errorCount === 1) {
-        console.warn('Error loading video for thumbnail (may be recoverable):', videoPath, e);
-        // Give it a moment - sometimes the video loads despite the error
-        setTimeout(() => {
-          if (!hasResolved) {
-            hasResolved = true;
-            reject(new Error('Failed to load video'));
-          }
-        }, 500);
-      }
-    };
-
-    // Add timeout to prevent hanging
-    setTimeout(() => {
-      if (!hasResolved) {
-        hasResolved = true;
-        reject(new Error('Video thumbnail generation timeout'));
-      }
-    }, 5000);
-
-    video.src = videoPath;
-    video.load();
-  });
-}
-
-// Get or generate video thumbnail
-async function getOrGenerateThumbnail(videoPath: string): Promise<string> {
-  if (videoThumbnails.value.has(videoPath)) {
-    return videoThumbnails.value.get(videoPath)!;
-  }
-
-  try {
-    const thumbnail = await generateVideoThumbnail(videoPath);
-    videoThumbnails.value.set(videoPath, thumbnail);
-    return thumbnail;
-  } catch (error) {
-    console.error('Failed to generate thumbnail for:', videoPath, error);
-    // Return a placeholder or empty string
-    return '';
-  }
-}
-
-// --- WebP Conversion State ---
-const isConverting = ref(false);
-const conversionError = ref<string | null>(null);
-const convertedFiles = ref<Set<string>>(new Set()); // Track files we've already converted
-
-// Helper to format bytes
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-}
-
-// File sizes cache for dropdown display
-const fileSizes = ref<Map<string, string>>(new Map());
-
-// Fetch file size for a given path (Electron only)
-async function fetchFileSize(filePath: string): Promise<void> {
-  // Only fetch file sizes in Electron environment
-  if (global.storageService.getName() !== 'electron') {
-    return;
-  }
-
-  try {
-    const sizeInBytes = await global.getFileSize(filePath);
-    fileSizes.value.set(filePath, formatBytes(sizeInBytes));
-  } catch (error) {
-    console.error(`Failed to get size for ${filePath}:`, error);
-    fileSizes.value.set(filePath, '');
-  }
-}
-
-// Shared WebP conversion logic
-async function convertFileToWebP(filePath: string): Promise<string | null> {
-  isConverting.value = true;
-  conversionError.value = null;
-
-  try {
-    // Convert to WebP
-    const result = await editor.convertPngToWebP(filePath);
-
-    // Calculate savings
-    const savings = result.originalSize - result.newSize;
-    const savingsPercent = Math.round((savings / result.originalSize) * 100);
-
-    // Backup original if setting is enabled
-    if (editor.webpBackupOriginal.value) {
-      try {
-        const backupResult = await editor.backupFile(filePath);
-
-        // Show success with backup info
-        global.addNotification(
-          global.getString('webp_conversion_success_backup', {
-            savings: formatBytes(savings),
-            percent: savingsPercent,
-            path: backupResult.backupPath
-          })
-        );
-      } catch (backupError) {
-        console.error('Failed to backup original file:', backupError);
-        global.addNotification(global.getString('webp_backup_failed'));
-
-        // Still show conversion success
-        global.addNotification(
-          global.getString('webp_conversion_success', {
-            savings: formatBytes(savings),
-            percent: savingsPercent
-          })
-        );
-      }
-    } else {
-      // No backup - just show conversion success
-      global.addNotification(
-        global.getString('webp_conversion_success_no_backup', {
-          savings: formatBytes(savings),
-          percent: savingsPercent
-        })
-      );
-    }
-
-    // Update file suggestions cache: replace original with WebP
-    const originalIndex = fileSuggestions.value.indexOf(filePath);
-    if (originalIndex !== -1) {
-      fileSuggestions.value.splice(originalIndex, 1, result.webpPath);
-    }
-
-    // Update file cache: replace original with WebP
-    editor.updateFileCacheEntry(filePath, result.webpPath);
-
-    // Remove old file size from cache and fetch new WebP size
-    fileSizes.value.delete(filePath);
-    fetchFileSize(result.webpPath).catch(err => {
-      console.warn('Failed to fetch size for new WebP file:', err);
-    });
-
-    return result.webpPath;
-
-  } catch (error) {
-    console.error('WebP conversion failed:', error);
-
-    // Show error notification
-    global.addNotification(
-      global.getString('webp_conversion_failed', {
-        file: filePath
-      })
-    );
-
-    conversionError.value = error instanceof Error ? error.message : 'Unknown error';
-    return null;
-  } finally {
-    isConverting.value = false;
-  }
-}
-// --- End WebP Conversion State ---
 
 // MOVE defineProps UP
 const props = defineProps({
@@ -323,8 +109,8 @@ watch(() => props.itemData, (newItemData, oldItemData) => { // Watch props.itemD
 
     // If _core has attributes, use them as the base (prepend)
     if (props.parentCoreDataItem &&
-        props.parentCoreDataItem.attributes &&
-        Array.isArray(props.parentCoreDataItem.attributes)) {
+      props.parentCoreDataItem.attributes &&
+      Array.isArray(props.parentCoreDataItem.attributes)) {
       // Prepend _core attributes to preserve order (_core first, then mod)
       selectedAttributes = [
         ...props.parentCoreDataItem.attributes,
@@ -429,63 +215,6 @@ const fieldId = computed(() => {
   return `${props.fieldKey.toString()}${props.labelContext.replace(/[^a-zA-Z0-9]/g, '')}`;
 })
 
-// --- File Search & Suggestions Logic (Moved Higher) ---
-const fileSuggestions = ref<string[]>([]);
-const fileResultsSubscription = ref<Subscription | null>(null);
-
-function handleFileSearch(event: { query: string }) {
-  const editor = AppEditor.getInstance();
-  const fileType = props.baseFieldSchema.fileType || '';
-  if (editor) {
-    editor.searchFiles(event.query, fileType);
-  } else {
-    console.error("Editor instance not available for file search.");
-  }
-}
-
-// Subscribe/unsubscribe based on field type (file OR file[])
-watch(() => props.baseFieldSchema.type, (newType, oldType) => {
-  const editor = AppEditor.getInstance();
-  const isFileType = newType === 'file' || newType === 'file[]';
-  const wasFileType = oldType === 'file' || oldType === 'file[]';
-
-  if (isFileType && editor && !fileResultsSubscription.value) { // Subscribe only if it's a file type and not already subscribed
-    // console.log('Subscribing to file results');
-    fileResultsSubscription.value = editor.filteredFileResults$.subscribe(results => {
-      // console.log('Received file suggestions:', results);
-      fileSuggestions.value = results;
-    });
-  } else if (!isFileType && wasFileType && fileResultsSubscription.value) { // Unsubscribe if it's no longer a file type and was subscribed
-    // console.log('Unsubscribing from file results');
-    fileResultsSubscription.value.unsubscribe();
-    fileResultsSubscription.value = null;
-    fileSuggestions.value = []; // Clear suggestions
-  }
-}, { immediate: true });
-
-onUnmounted(() => {
-  if (fileResultsSubscription.value) {
-    // console.log('Unsubscribing from file results on unmount');
-    fileResultsSubscription.value.unsubscribe();
-  }
-});
-
-// Make dropdown panel scrollable without focusing it (to preserve input text)
-watch(fileSuggestions, (newSuggestions) => {
-  if (newSuggestions.length > 0) {
-    // Wait for dropdown to render
-    nextTick(() => {
-      // Find the dropdown panel
-      const panelElement = document.querySelector('.p-autocomplete-overlay');
-      if (panelElement instanceof HTMLElement) {
-        // Don't set tabindex or focus - let it be scrollable via CSS overflow
-        // The panel will be scrollable when mouse is over it without needing focus
-        panelElement.style.overflow = 'auto';
-      }
-    });
-  }
-});
-// --- End File Search & Suggestions Logic ---
 
 // --- State for Schema Switch ---
 const isNestedSchemaEnabled = ref(false);
@@ -725,79 +454,6 @@ function deleteNumberItem(index: number) {
   }
 }
 // --- End Number Array Logic ---
-
-// --- File Array Logic ---
-const fileListContainer = ref<HTMLElement | null>(null);
-const localFileArray = ref<(string | null)[]>([]); // Use string | null
-
-// Sync prop changes to local file array state
-watch(() => props.modelValue, (newVal) => {
-  if (props.baseFieldSchema.type === 'file[]') {
-    if (Array.isArray(newVal)) {
-      // Ensure only strings are present (filter out any nulls from the prop)
-      const stringsOnly = newVal.filter(v => typeof v === 'string');
-
-      // Ensure at least one null placeholder if array is empty or last item is not null
-      const needsNullField = stringsOnly.length === 0 || stringsOnly[stringsOnly.length - 1] !== null;
-      const newState: (string | null)[] = needsNullField ? [...stringsOnly, null] : [...stringsOnly];
-
-      // Update only if structurally different
-      if (JSON.stringify(newState) !== JSON.stringify(localFileArray.value)) {
-        localFileArray.value = newState;
-      }
-    } else {
-      // Initialize if not an array
-      if (localFileArray.value.length === 0 || localFileArray.value[0] !== null) {
-        localFileArray.value = [null];
-      }
-    }
-  }
-}, { immediate: true, deep: true });
-
-// Watch local file array state for changes
-watch(localFileArray, (newList) => {
-  if (props.baseFieldSchema.type === 'file[]') {
-    // Auto-add new null field if the last one is filled (not null)
-    if (newList.length > 0 && newList[newList.length - 1] !== null) {
-      localFileArray.value.push(null);
-    }
-    // Remove duplicate null field at the end
-    else if (newList.length > 1 && newList[newList.length - 1] === null && newList[newList.length - 2] === null) {
-      localFileArray.value.pop();
-      return; // Prevent immediate re-emission after pop
-    }
-
-    // Emit changes back to parent, but ALWAYS filter out the trailing null
-    // This ensures the emitted value matches what gets saved to the file
-    const listToEmit = [...localFileArray.value];
-    const listWithoutTrailingNull = listToEmit.length > 0 && listToEmit[listToEmit.length - 1] === null
-      ? listToEmit.slice(0, -1)
-      : listToEmit;
-
-    // Emit only if the array content has actually changed from the prop
-    const currentPropValue = Array.isArray(props.modelValue) ? props.modelValue : [];
-    if (JSON.stringify(listWithoutTrailingNull) !== JSON.stringify(currentPropValue)) {
-      emit('update:modelValue', listWithoutTrailingNull);
-    }
-  }
-}, { deep: true });
-
-// Setup sorting for files
-useSortable(fileListContainer, localFileArray, {
-  handle: '.drag-handle',
-  animation: 150,
-  filter: '.non-draggable-empty',
-  preventOnFilter: false,
-});
-
-function deleteFileItem(index: number) {
-  if (localFileArray.value.length === 1 && localFileArray.value[0] === null) return;
-  localFileArray.value.splice(index, 1);
-  if (localFileArray.value.length === 0) {
-    localFileArray.value.push(null);
-  }
-}
-// --- End File Array Logic ---
 
 // --- Schema Array Logic ---
 const schemaListContainer = ref<HTMLElement | null>(null);
@@ -1061,161 +717,8 @@ watchDebounced(internalValue, (newValue, oldValue) => {
   }
 }, { deep: true, debounce: 300 });
 
-// --- WebP Conversion Watch (Single File) ---
-// Watch for file selection and handle conversion
-watch(internalValue, async (newPath, oldPath) => {
-  // Only process if:
-  // 1. Running in Electron environment
-  // 2. New value exists
-  // 3. It's a PNG, JPG, or JPEG file
-  // 4. Auto-convert is enabled
-  // 5. Value actually changed
-  // 6. It's a file field
-  // 7. NOT from assets/engine_assets (engine assets should not be converted)
-  if (global.storageService.getName() !== 'electron' ||
-    !newPath ||
-    typeof newPath !== 'string' ||
-    !/\.(png|jpe?g)$/i.test(newPath) ||
-    !editor.webpAutoConvert.value ||
-    newPath === oldPath ||
-    props.baseFieldSchema.type !== 'file' ||
-    newPath.startsWith('assets/engine_assets')) {
-    return;
-  }
-
-  // Convert to WebP using shared logic
-  const webpPath = await convertFileToWebP(newPath);
-
-  // Update field value to WebP path if conversion succeeded
-  if (webpPath) {
-    internalValue.value = webpPath;
-  }
-}, { flush: 'post' });
-// --- End WebP Conversion Watch (Single File) ---
-
-// --- WebP Conversion Watch (File Array) ---
-// Watch for file array changes and handle conversion
-watch(localFileArray, async (newArray) => {
-  console.log('[WebP File Array] Watcher triggered', {
-    fieldType: props.baseFieldSchema.type,
-    isElectron: global.storageService.getName() === 'electron',
-    autoConvert: editor.webpAutoConvert.value,
-    newArray: JSON.parse(JSON.stringify(newArray))
-  });
-
-  // Only process if it's a file[] field
-  if (props.baseFieldSchema.type !== 'file[]' ||
-      global.storageService.getName() !== 'electron' ||
-      !editor.webpAutoConvert.value) {
-    console.log('[WebP File Array] Skipping - conditions not met');
-    return;
-  }
-
-  // Find items that need conversion
-  for (let i = 0; i < newArray.length; i++) {
-    const filePath = newArray[i];
-
-    console.log(`[WebP File Array] Checking index ${i}:`, {
-      filePath,
-      isString: typeof filePath === 'string',
-      isPngJpg: filePath && typeof filePath === 'string' ? /\.(png|jpe?g)$/i.test(filePath) : false,
-      alreadyConverted: filePath ? convertedFiles.value.has(filePath) : false,
-      notEngine: filePath && typeof filePath === 'string' ? !filePath.startsWith('assets/engine_assets') : false
-    });
-
-    // Only convert if:
-    // 1. New value exists
-    // 2. It's a string
-    // 3. It's a PNG, JPG, or JPEG file
-    // 4. Not already converted
-    // 5. NOT from assets/engine_assets
-    if (!filePath ||
-        typeof filePath !== 'string' ||
-        !/\.(png|jpe?g)$/i.test(filePath) ||
-        convertedFiles.value.has(filePath) ||
-        filePath.startsWith('assets/engine_assets')) {
-      continue;
-    }
-
-    console.log(`[WebP File Array] Converting: ${filePath}`);
-
-    // Mark as being processed to avoid duplicate conversions
-    convertedFiles.value.add(filePath);
-
-    // Convert to WebP using shared logic
-    const webpPath = await convertFileToWebP(filePath);
-
-    // Update array item to WebP path if conversion succeeded
-    if (webpPath) {
-      console.log(`[WebP File Array] Conversion successful, updating index ${i} to: ${webpPath}`);
-      localFileArray.value[i] = webpPath;
-      // Add the webp path to converted files too (in case it appears again)
-      convertedFiles.value.add(webpPath);
-    } else {
-      // Remove from converted set if conversion failed, so user can try again
-      convertedFiles.value.delete(filePath);
-    }
-  }
-}, { deep: true, flush: 'post' });
-// --- End WebP Conversion Watch (File Array) ---
-
-// Generate thumbnails for video files when they're selected
-watch(() => props.modelValue, async (newValue) => {
-  // For single file fields
-  if (props.baseFieldSchema.type === 'file' && typeof newValue === 'string' && isVideo(newValue)) {
-    if (!videoThumbnails.value.has(newValue)) {
-      await getOrGenerateThumbnail(newValue);
-    }
-  }
-}, { immediate: true });
-
-// Generate thumbnails for video files in file arrays
-watch(localFileArray, async (newArray) => {
-  if (props.baseFieldSchema.type === 'file[]') {
-    for (const item of newArray) {
-      if (item && typeof item === 'string' && isVideo(item)) {
-        if (!videoThumbnails.value.has(item)) {
-          await getOrGenerateThumbnail(item);
-        }
-      }
-    }
-  }
-}, { deep: true, immediate: true });
-
-// Generate thumbnails for video files in suggestions
-watch(fileSuggestions, async (newSuggestions) => {
-  const fileType = props.baseFieldSchema.fileType;
-
-  // Fetch file sizes for all suggestions
-  for (const suggestion of newSuggestions) {
-    if (!fileSizes.value.has(suggestion)) {
-      fetchFileSize(suggestion).catch(err => {
-        console.warn('Failed to fetch file size for suggestion:', suggestion, err);
-      });
-    }
-  }
-
-  // Generate video thumbnails if needed
-  if (fileType === 'asset' || fileType === 'video') {
-    for (const suggestion of newSuggestions) {
-      if (isVideo(suggestion) && !videoThumbnails.value.has(suggestion)) {
-        // Generate thumbnails asynchronously without blocking
-        getOrGenerateThumbnail(suggestion).catch(err => {
-          console.warn('Failed to generate thumbnail for suggestion:', suggestion, err);
-        });
-      }
-    }
-  }
-}, { deep: true });
-
-
 onMounted(() => {
 
-});
-
-// Cleanup video thumbnails on unmount
-onUnmounted(() => {
-  videoThumbnails.value.clear();
 });
 </script>
 
@@ -1247,6 +750,17 @@ onUnmounted(() => {
           :maxFractionDigits="2" v-tooltip.left="tooltip" @input="(event) => internalValue = event.value" />
         <label :for="fieldId">{{ label }}</label>
       </FloatLabel>
+      <div class="core-data-display" v-if="parentCoreDataItem !== null">
+        <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
+      </div>
+    </div>
+
+    <!-- Range Input -->
+    <div v-else-if="fieldType === 'range'" class="field-container">
+      <div v-tooltip.left="tooltip" class="input-wrapper">
+        <label class="range-label">{{ label }}</label>
+        <RangeInput v-model="internalValue" :step="stepValue" />
+      </div>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
       </div>
@@ -1306,7 +820,8 @@ onUnmounted(() => {
           v-tooltip.left="tooltip" editorStyle="height: 200px" class="w-full" />
 
         <Textarea v-else v-model="htmlContent" autoResize v-tooltip.left="tooltip" class="w-full html-source-editor"
-          :style="{ minHeight: '200px', fontFamily: 'var(--font-family-mono)', fontSize: '0.875rem' }" v-preserve-scroll />
+          :style="{ minHeight: '200px', fontFamily: 'var(--font-family-mono)', fontSize: '0.875rem' }"
+          v-preserve-scroll />
       </div>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
@@ -1395,98 +910,11 @@ onUnmounted(() => {
 
     <!-- File Field (Single) -->
     <div v-else-if="fieldType === 'file'" class="field-container file-field">
-      <!-- Layout for Image, Asset, or Video File Type -->
-      <div v-if="fileType === 'image' || fileType === 'asset' || fileType === 'video'"
-        class="input-wrapper flex items-center gap-2">
-
-        <div class="inline-preview-wrapper flex-shrink-0">
-          <!-- Show image if it's an image file -->
-          <img v-if="internalValue && isImage(internalValue)" :src="internalValue" :alt="`Preview of ${internalValue}`"
-            class="inline-preview-image" />
-          <!-- Show video thumbnail if it's a video file -->
-          <img v-else-if="internalValue && isVideo(internalValue) && videoThumbnails.get(internalValue)"
-            :src="videoThumbnails.get(internalValue)" :alt="`Video thumbnail of ${internalValue}`"
-            class="inline-preview-image" />
-        </div>
-
-        <div class="flex-grow file-input-container">
-          <FloatLabel variant="on" class="p-float-label-variant-on w-full">
-            <AutoComplete v-model="internalValue" :suggestions="fileSuggestions" @complete="handleFileSearch"
-              forceSelection :delay="50" :inputId="fieldId" v-tooltip.left="tooltip" class="w-full"
-              :loading="isConverting" :disabled="isConverting" :autoOptionFocus="false">
-
-              <!-- Header slot for WebP settings (sticky at top, Electron only) -->
-              <template #header
-                v-if="(fileType === 'image' || fileType === 'asset') && global.storageService.getName() === 'electron'">
-                <div @mousedown.stop @click.stop @wheel.stop>
-                  <WebPSettingsHeader />
-                </div>
-              </template>
-
-              <template #option="slotProps">
-                <div class="flex items-center gap-2 suggestion-item">
-
-                  <!-- Show image thumbnail in suggestions -->
-                  <img v-if="isImage(slotProps.option)" :src="slotProps.option" class="suggestion-image"
-                    @error="($event.target as HTMLImageElement).style.display = 'none'" />
-
-                  <!-- Show video thumbnail in suggestions -->
-                  <img v-else-if="isVideo(slotProps.option) && videoThumbnails.get(slotProps.option)"
-                    :src="videoThumbnails.get(slotProps.option)" class="suggestion-image"
-                    @error="($event.target as HTMLImageElement).style.display = 'none'" />
-
-                  <div class="flex-grow">
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="flex-grow">
-                        <span>{{ slotProps.option }}</span>
-
-                        <!-- Show conversion indicator for PNG/JPG/JPEG when auto-convert is on (Electron only) -->
-                        <span
-                          v-if="global.storageService.getName() === 'electron' && editor.webpAutoConvert.value && /\.(png|jpe?g)$/i.test(slotProps.option) && !slotProps.option.startsWith('assets/engine_assets')"
-                          class="conversion-indicator">
-                          → .webp
-                        </span>
-
-                        <!-- Show optimized badge for existing WebP files (Electron only) -->
-                        <span
-                          v-if="global.storageService.getName() === 'electron' && slotProps.option.endsWith('.webp')"
-                          class="optimized-badge">
-                          ✓ Optimized
-                        </span>
-                      </div>
-
-                      <!-- Show file size -->
-                      <span v-if="fileSizes.get(slotProps.option)" class="file-size-badge">
-                        {{ fileSizes.get(slotProps.option) }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </AutoComplete>
-            <label :for="fieldId">{{ label }}</label>
-          </FloatLabel>
-
-          <!-- Loading overlay during conversion -->
-          <div v-if="isConverting" class="conversion-loading-overlay">
-            <i class="pi pi-spin pi-spinner"></i>
-            <span>Converting to WebP...</span>
-          </div>
-        </div>
+      <div class="input-wrapper">
+        <FileInput v-model="internalValue"
+          :file-type="fileType as 'image' | 'video' | 'asset' | 'atlas' | 'json' | 'spine_skeleton' | 'audio' | 'css' | 'js'"
+          :label="label" :tooltip="tooltip" :field-id="fieldId" />
       </div>
-      <!-- Layout for Other File Types -->
-      <FloatLabel v-else variant="on" class="p-float-label-variant-on w-full input-wrapper">
-
-        <AutoComplete v-model="internalValue" :suggestions="fileSuggestions" @complete="handleFileSearch" forceSelection
-          :delay="50" :inputId="fieldId" v-tooltip.left="tooltip" class="w-full">
-          <!-- No image previews needed for non-image suggestions -->
-          <template #option="slotProps">
-
-            <span>{{ slotProps.option }}</span>
-          </template>
-        </AutoComplete>
-        <label :for="fieldId">{{ label }}</label>
-      </FloatLabel>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
       </div>
@@ -1495,87 +923,11 @@ onUnmounted(() => {
     <!-- File Array -->
     <div v-else-if="fieldType === 'file[]'" class="field-container file-array-field">
       <div class="input-wrapper">
-        <label class="block mb-2 font-medium">{{ label }}</label>
-
-        <div v-tooltip.left="tooltip" ref="fileListContainer" class="space-y-2">
-          <div v-for="(item, index) in localFileArray" :key="index" class="flex items-center gap-2 file-array-item"
-            :class="{ 'non-draggable-empty': index === localFileArray.length - 1 && item === null }">
-            <Button icon="pi pi-bars" text rounded class="drag-handle cursor-move p-button-sm"
-              aria-label="Drag to reorder" />
-
-            <!-- Inline Preview for Image, Asset, or Video -->
-            <!-- Show image preview -->
-            <img v-if="(fileType === 'image' || fileType === 'asset' || fileType === 'video') && item && isImage(item)"
-              :src="item" class="file-array-preview" alt="Preview"
-              @error="($event.target as HTMLImageElement).style.display = 'none'" />
-
-            <!-- Show video thumbnail preview -->
-            <img
-              v-else-if="(fileType === 'asset' || fileType === 'video') && item && isVideo(item) && videoThumbnails.get(item)"
-              :src="videoThumbnails.get(item)" class="file-array-preview" alt="Video Preview"
-              @error="($event.target as HTMLImageElement).style.display = 'none'" />
-
-            <AutoComplete v-model="localFileArray[index]" :suggestions="fileSuggestions" @complete="handleFileSearch"
-              forceSelection :delay="50" class="flex-grow" :inputClass="'w-full'" :loading="isConverting"
-              :disabled="isConverting" :autoOptionFocus="false">
-
-              <!-- Header slot for WebP settings (sticky at top, Electron only) -->
-              <template #header
-                v-if="(fileType === 'image' || fileType === 'asset') && global.storageService.getName() === 'electron'">
-                <div @mousedown.stop @click.stop @wheel.stop>
-                  <WebPSettingsHeader />
-                </div>
-              </template>
-
-              <!-- Custom Item Template -->
-              <template #option="slotProps">
-                <div class="flex items-center gap-2 suggestion-item">
-
-                  <!-- Show image thumbnail in suggestions -->
-                  <img v-if="isImage(slotProps.option)" :src="slotProps.option" class="suggestion-image"
-                    @error="($event.target as HTMLImageElement).style.display = 'none'" />
-
-                  <!-- Show video thumbnail in suggestions -->
-                  <img v-else-if="isVideo(slotProps.option) && videoThumbnails.get(slotProps.option)"
-                    :src="videoThumbnails.get(slotProps.option)" class="suggestion-image"
-                    @error="($event.target as HTMLImageElement).style.display = 'none'" />
-
-                  <div class="flex-grow">
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="flex-grow">
-                        <span>{{ slotProps.option }}</span>
-
-                        <!-- Show conversion indicator for PNG/JPG/JPEG when auto-convert is on (Electron only) -->
-                        <span
-                          v-if="global.storageService.getName() === 'electron' && editor.webpAutoConvert.value && /\.(png|jpe?g)$/i.test(slotProps.option) && !slotProps.option.startsWith('assets/engine_assets')"
-                          class="conversion-indicator">
-                          → .webp
-                        </span>
-
-                        <!-- Show optimized badge for existing WebP files (Electron only) -->
-                        <span v-if="global.storageService.getName() === 'electron' && slotProps.option.endsWith('.webp')"
-                          class="optimized-badge">
-                          ✓ Optimized
-                        </span>
-                      </div>
-
-                      <!-- Show file size -->
-                      <span v-if="fileSizes.get(slotProps.option)" class="file-size-badge">
-                        {{ fileSizes.get(slotProps.option) }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </AutoComplete>
-
-            <Button icon="pi pi-trash" severity="danger" class="p-button-sm" aria-label="Remove Item"
-              @click="deleteFileItem(index)" :disabled="localFileArray.length === 1 && localFileArray[0] === null" />
-          </div>
-        </div>
+        <FileInput v-model="internalValue"
+          :file-type="fileType as 'image' | 'video' | 'asset' | 'atlas' | 'json' | 'spine_skeleton' | 'audio' | 'css' | 'js'"
+          :label="label" :tooltip="tooltip" :field-id="fieldId" :multiple="true" />
       </div>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
-
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
       </div>
     </div>
@@ -1584,16 +936,26 @@ onUnmounted(() => {
     <div v-else-if="fieldType === 'schema'" class="field-container nested-schema-field">
       <div class="input-wrapper">
 
-        <div v-tooltip.left="tooltip" class="flex items-center gap-2 mb-2">
-          <ToggleSwitch v-model="isNestedSchemaEnabled" :inputId="fieldId + '-switch'">
-
-          </ToggleSwitch>
-          <label class="font-medium">{{ label }}</label>
+        <div v-tooltip.left="tooltip" class="schema-header">
+          <ToggleSwitch v-model="isNestedSchemaEnabled" :inputId="fieldId + '-switch'" />
+          <label>{{ label }}</label>
+          <InputText v-if="isNestedSchemaEnabled"
+            :modelValue="editor.schemaKeyFilters.value[fieldKey] ?? ''"
+            @update:modelValue="val => editor.schemaKeyFilters.value[fieldKey] = val ?? ''"
+            placeholder="Filter keys..."
+            size="small"
+            class="schema-key-filter-input" />
+          <Button v-if="isNestedSchemaEnabled && editor.schemaKeyFilters.value[fieldKey]"
+            icon="pi pi-times"
+            size="small"
+            severity="secondary"
+            text
+            @click="editor.schemaKeyFilters.value[fieldKey] = ''" />
         </div>
         <NestedSchemaRenderer v-if="isNestedSchemaEnabled && objectsSchema" :schema="objectsSchema"
           :modelValue="internalValue" @update:modelValue="emit('update:modelValue', $event)"
           :core-data-for-nested-schema="fieldCoreValue" :item-data="props.itemData" :root-schema="props.rootSchema"
-          :field-id-prefix="fieldId" />
+          :field-id-prefix="fieldId" :filter-key="fieldKey" />
       </div>
     </div>
 
@@ -1710,6 +1072,29 @@ onUnmounted(() => {
   text-transform: uppercase;
 }
 
+/* Range input label */
+.range-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+/* Schema field header */
+.schema-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.schema-header label {
+  font-weight: 500;
+}
+
+.schema-key-filter-input {
+  max-width: 200px;
+}
+
 /* Styles from Dform that apply per field */
 .unsupported-field {
   color: var(--p-red-500);
@@ -1782,75 +1167,6 @@ onUnmounted(() => {
   width: 2rem;
 }
 
-/* Styles for inline image preview (single file) */
-.inline-preview-wrapper {
-  width: 150px;
-  height: 150px;
-  border: 1px dashed var(--p-surface-300);
-  border-radius: var(--p-border-radius);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: var(--p-surface-50);
-  overflow: hidden;
-}
-
-.inline-preview-image {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-/* Ensure suggestion images still work */
-.suggestion-item {
-  padding: 0.25rem 0;
-  /* Add some padding */
-}
-
-.suggestion-image {
-  width: 32px;
-  /* Adjust size as needed */
-  height: 32px;
-  object-fit: cover;
-  border-radius: 4px;
-  vertical-align: middle;
-  /* Align with text */
-}
-
-/* File Array Styles (can share with others or be specific) */
-.file-array-field .font-medium {
-  font-weight: 500;
-}
-
-.file-array-item .p-button-sm {
-  height: 2rem;
-  width: 2rem;
-  flex-shrink: 0;
-  /* Prevent buttons from shrinking */
-}
-
-.file-array-item .p-autocomplete {
-  /* Ensure AutoComplete takes available space */
-  flex-grow: 1;
-}
-
-/* Style for inline preview in file array */
-.file-array-preview {
-  /* Adjust size as needed */
-  width: 40px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid var(--p-surface-300);
-  flex-shrink: 0;
-  /* Prevent shrinking */
-}
-
-/* Adjust flex-shrink for inline preview wrapper */
-.flex-shrink-0 {
-  flex-shrink: 0;
-}
 
 /* Styles for nested schema */
 .nested-schema-field .font-medium {
@@ -1900,79 +1216,5 @@ onUnmounted(() => {
 
 .justify-between {
   justify-content: space-between;
-}
-
-/* WebP Conversion Styles */
-.file-input-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.conversion-indicator {
-  color: var(--p-primary-600);
-  font-size: 0.85rem;
-  margin-left: 0.5rem;
-}
-
-.optimized-badge {
-  color: var(--p-green-600);
-  font-size: 0.85rem;
-  margin-left: 0.5rem;
-  font-weight: 500;
-}
-
-.file-size-badge {
-  color: var(--p-text-muted-color);
-  font-size: 0.75rem;
-  padding: 0.125rem 0.375rem;
-  background-color: var(--p-surface-100);
-  border-radius: 0.25rem;
-  white-space: nowrap;
-  margin-left: auto;
-}
-
-.conversion-loading-overlay {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  margin-top: 0.5rem;
-  background-color: var(--p-primary-50);
-  color: var(--p-primary-700);
-  border-radius: var(--p-border-radius);
-  font-size: 0.9rem;
-}
-
-.conversion-loading-overlay .pi-spinner {
-  font-size: 1.2rem;
-}
-
-/* Prevent dropdown from closing when interacting with WebP header or scrolling */
-:deep(.p-autocomplete-overlay) {
-  pointer-events: auto;
-  outline: none;
-  /* Remove focus outline */
-}
-
-:deep(.p-autocomplete-header) {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background-color: white;
-}
-
-:deep(.p-autocomplete-list) {
-  overflow-y: auto;
-  max-height: 300px;
-}
-
-/* Make the overlay panel focusable and scrollable */
-:deep(.p-autocomplete-overlay .p-autocomplete-overlay) {
-  overflow: visible;
-}
-
-:deep(.p-autocomplete-overlay .p-autocomplete-list-container) {
-  overflow-y: auto;
 }
 </style>

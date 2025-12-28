@@ -1,6 +1,6 @@
 # Abilities
 
-Abilities are **structured data** - the engine provides the data layer, but not specific UI implementations like battle systems or skill menus.
+Abilities are **structured data** - the engine provides the data layer, but not specific UI implementations like battle systems or ability menus.
 
 **Why?** Different games need different implementations. A turn-based RPG, an action game, and a card battler all use abilities differently. The engine gives you the data foundation; you build (or use a plugin for) the game-specific logic.
 
@@ -12,7 +12,7 @@ Abilities are **structured data** - the engine provides the data layer, but not 
 - Access merged ability data from your code
 
 **What you provide:**
-- The UI (battle screen, skill menu, cooldown display)
+- The UI (battle screen, anility menu, cooldown display)
 - The game logic (what happens when an ability is used)
 
 ---

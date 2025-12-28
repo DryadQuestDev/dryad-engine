@@ -215,7 +215,7 @@ onUnmounted(() => {
     </transition>
 
     <transition name="fade">
-      <DocsViewer v-if="global.isDocsOpen.value" />
+      <DocsViewer v-if="global.openViewer.value" />
     </transition>
 
     <!-- Global ConfirmDialog for replacing native confirm/alert -->

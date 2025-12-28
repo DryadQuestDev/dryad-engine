@@ -342,12 +342,12 @@ export class LocalhostStorageService implements StorageService {
     }
 
     // --- Documentation Methods ---
-    async readDocFile(category: string, page: string, language: string = 'en'): Promise<{
+    async readDocFile(category: string, page: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
         content?: string;
         error?: string;
     }> {
         try {
-            const response = await fetch(`/assets/engine_files/docs/${language}/${category}/${page}.md`);
+            const response = await fetch(`/assets/${basePath}/${language}/${category}/${page}.md`);
             if (!response.ok) {
                 return { error: `Documentation file not found: ${category}/${page}.md` };
             }
@@ -359,7 +359,7 @@ export class LocalhostStorageService implements StorageService {
         }
     }
 
-    async searchDocs(query: string, language: string = 'en'): Promise<{
+    async searchDocs(query: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
         results?: any[];
         total?: number;
         error?: string;

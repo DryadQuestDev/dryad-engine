@@ -1320,7 +1320,7 @@ export class InitSystem {
 
             let character
             if (data.template) {
-                character = this.game.characterSystem.createCharacterFromTemplate(data.id, data.template);
+                character = this.game.characterSystem.createCharacter(data.id, data.template);
                 gameLogger.info(`[createCharacter] Created character "${data.id}" from template "${data.template}"${data.party ? ' and added to party' : ''}`);
             } else {
                 character = this.game.characterSystem.createCharacter(data.id, data);
@@ -1552,7 +1552,7 @@ export class InitSystem {
                 }
 
                 // Create item from template
-                const item = this.game.itemSystem.createItemFromTemplate(itemId);
+                const item = this.game.itemSystem.createItem(itemId);
                 if (!item) {
                     throw new Error(`Item template with id "${itemId}" not found.`);
                 }

@@ -416,18 +416,27 @@ const currentSubtabName = computed(() => {
   return currentSubtab?.name ?? global.getString("tab." + editor.mainTab + "." + editor.secondaryTab);
 });
 
+// Computed property for new item id
+const newItemId = computed(() => {
+  return editor.newItem.value?.id || '';
+});
+
+// Computed property to check if add button should be disabled
+const isAddButtonDisabled = computed(() => {
+  return !newItemId.value;
+});
+
 </script>
 
 <template>
   <div class="dbookmarks">
     <div class="buttons_container">
       <div class="add_button" v-if="editor.isArray.value">
-        <Button raised icon="pi pi-plus" @click="addItem" severity="success" size="small" class="mt-2">Add New
-          {{ editor.title.value }}</Button>
+        <Button raised icon="pi pi-plus" @click="addItem" :severity="isAddButtonDisabled ? 'secondary' : 'success'" size="small" class="mt-2" :disabled="isAddButtonDisabled">Add {{ newItemId || editor.title.value }}</Button>
       </div>
       <div class="save_button">
-        <Button raised icon="pi pi-plus" @click="saveActiveObject"
-          :severity="editor.hasUnsavedChanges.value ? 'warning' : 'secondary'" size="small" class="mt-2">Save
+        <Button raised icon="pi pi-save" @click="saveActiveObject"
+          :severity="editor.hasUnsavedChanges.value ? 'warning' : 'secondary'" size="small" class="mt-2" :disabled="!editor.hasUnsavedChanges.value">Save
           {{ currentSubtabName }}</Button>
       </div>
     </div>

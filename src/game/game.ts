@@ -10,6 +10,7 @@ import { gameLogger } from './utils/logger';
 import { Character } from './core/character/character';
 import { Inventory } from './core/character/inventory';
 import { Item } from './core/character/item';
+import { Status } from './core/character/status';
 import { Choice } from './core/content/choice';
 export class Game {
 
@@ -199,12 +200,12 @@ export class Game {
     return Array.from(this.characterSystem.characters.value.values());
   }
 
-  public createCharacter(characterId: string, template: any): Character {
-    return this.characterSystem.createCharacter(characterId, template);
+  public createCharacter(characterId: string, template: any, skipEvents: boolean = false): Character {
+    return this.characterSystem.createCharacter(characterId, template, skipEvents);
   }
 
-  public createCharacterFromTemplate(characterId: string, templateId: string): Character {
-    return this.characterSystem.createCharacterFromTemplate(characterId, templateId);
+  public createStatus(template: any | string): Status {
+    return this.characterSystem.createStatus(template);
   }
 
   public addCharacter(character: Character, isParty: boolean = false): void {
@@ -215,15 +216,15 @@ export class Game {
     return this.characterSystem.isCharacterInParty(character);
   }
 
-  public addToParty(character: Character): void {
+  public addToParty(character: Character | string): void {
     this.characterSystem.addToParty(character);
   }
 
-  public removeFromParty(character: Character): void {
+  public removeFromParty(character: Character | string): void {
     this.characterSystem.removeFromParty(character);
   }
 
-  public deleteCharacter(character: Character): void {
+  public deleteCharacter(character: Character | string): void {
     this.characterSystem.deleteCharacter(character);
   }
 
@@ -239,12 +240,8 @@ export class Game {
     return this.itemSystem.getLearnedRecipes();
   }
 
-  public createInventory(id: string): Inventory {
-    return this.itemSystem.createInventory(id);
-  }
-
-  public createInventoryFromTemplate(templateId: string, inventoryId?: string): Inventory {
-    return this.itemSystem.createInventoryFromTemplate(templateId, inventoryId);
+  public createInventory(id: string, template?: any | string): Inventory {
+    return this.itemSystem.createInventory(id, template);
   }
 
   public addInventory(inventory: Inventory): void {
@@ -259,12 +256,8 @@ export class Game {
     this.itemSystem.openExchange(inventoryId, state);
   }
 
-  public createItem(template: any): Item {
+  public createItem(template: any | string): Item {
     return this.itemSystem.createItem(template);
-  }
-
-  public createItemFromTemplate(templateId: string): Item {
-    return this.itemSystem.createItemFromTemplate(templateId);
   }
 
   public getInventory(id: string): Inventory | null {

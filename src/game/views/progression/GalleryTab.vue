@@ -311,7 +311,7 @@ const getSkinLayerStyleOptions = (layerId: string) => {
 // Computed: Preview character for undiscovered
 const previewCharacterUndiscovered = computed(() => {
   if (selectedTabType.value !== 'characters' || !selectedItemId.value) return null;
-  return game.characterSystem.createCharacterFromTemplate('_gallery_preview_undiscovered', selectedItemId.value, true);
+  return game.characterSystem.createCharacter('_gallery_preview_undiscovered', selectedItemId.value, true);
 });
 
 // Computed: Preview character for discovered with tweaks

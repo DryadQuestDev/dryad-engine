@@ -1,4 +1,7 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell, globalShortcut, screen } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, globalShortcut, screen, nativeTheme } = require('electron');
+
+// Force light theme regardless of OS settings
+nativeTheme.themeSource = 'light';
 const { OAuth2Client } = require('google-auth-library');
 const { google } = require('googleapis');
 const http = require('http');
@@ -117,19 +120,19 @@ function createWindow() {
         {
           label: 'Discord',
           click: async () => {
-            await shell.openExternal('https://discord.gg/Q5JJnQRVcB');
+            await shell.openExternal('https://discord.gg/3aAmjtesHU');
           },
         },
         {
           label: 'Reddit',
           click: async () => {
-            await shell.openExternal('https://www.reddit.com/r/dryadquest/');
+            await shell.openExternal('https://www.reddit.com/r/DryadEngine');
           },
         },
         {
-          label: 'Help',
+          label: 'GitHub',
           click: async () => {
-            await shell.openExternal('https://docs.google.com/document/d/1vekjx2oc0KXf7ZXM5spIvg2mFZGqhQNKujBv7x7i6w4');
+            await shell.openExternal('https://github.com/DryadQuestDev/dryad-engine');
           },
         },
       ],
@@ -391,17 +394,39 @@ ipcMain.handle("show-file-in-folder", async (event, filePath) => {
 
 // --- End Google Auth IPC Handlers ---
 
+// Normalize text for search (strips markdown, normalizes Unicode)
+function normalizeForSearch(text) {
+  return text
+    // Strip markdown syntax
+    .replace(/#{1,6}\s/g, '')          // headings
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold (preserve content)
+    .replace(/\*([^*]+)\*/g, '$1')     // italic (preserve content)
+    .replace(/__([^_]+)__/g, '$1')     // bold alt
+    .replace(/_([^_]+)_/g, '$1')       // italic alt
+    .replace(/`([^`]+)`/g, '$1')       // inline code (preserve content)
+    .replace(/```[\s\S]*?```/g, '')    // code blocks
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links (keep text)
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1') // images
+    // Normalize Unicode
+    .replace(/[\u2010-\u2015\u2212]/g, '-') // various hyphens → regular hyphen
+    .replace(/[\u2018\u2019]/g, "'")        // smart quotes → straight
+    .replace(/[\u201C\u201D]/g, '"')        // smart double quotes
+    .replace(/\u2026/g, '...')              // ellipsis
+    .replace(/\u00A0/g, ' ')                // non-breaking space
+    .toLowerCase();
+}
+
 // 🔍 Search Documentation Files (Electron IPC)
-ipcMain.handle("search-docs", async (_, searchQuery, language = 'en') => {
+ipcMain.handle("search-docs", async (_, searchQuery, language = 'en', basePath = 'engine_files/docs') => {
   try {
     if (!searchQuery || typeof searchQuery !== 'string' || searchQuery.trim().length < 2) {
       return { results: [], error: 'Search query must be at least 2 characters' };
     }
 
-    const query = searchQuery.toLowerCase().trim();
+    const query = normalizeForSearch(searchQuery.trim());
 
     // Use sandboxed path resolution
-    const docsPath = getSafeAbsolutePath(`engine_files/docs/${language}`);
+    const docsPath = getSafeAbsolutePath(`${basePath}/${language}`);
     if (!docsPath) {
       return { results: [], error: 'Invalid documentation path' };
     }
@@ -440,9 +465,9 @@ ipcMain.handle("search-docs", async (_, searchQuery, language = 'en') => {
               const titleLine = lines.find(line => line.startsWith('# '));
               const title = titleLine ? titleLine.replace(/^#\s+/, '') : entry.name.replace('.md', '');
 
-              // Search through content
-              const lowerContent = content.toLowerCase();
-              const queryIndex = lowerContent.indexOf(query);
+              // Search through content (normalize to handle markdown and Unicode)
+              const normalizedContent = normalizeForSearch(content);
+              const queryIndex = normalizedContent.indexOf(query);
 
               if (queryIndex !== -1) {
                 // Find which line contains the match
@@ -456,23 +481,16 @@ ipcMain.handle("search-docs", async (_, searchQuery, language = 'en') => {
                   }
                 }
 
-                // Extract context around the match
+                // Extract context around the match (from normalized content so positions match)
                 const start = Math.max(0, queryIndex - contextLength);
-                const end = Math.min(content.length, queryIndex + query.length + contextLength);
-                let context = content.substring(start, end);
-
-                // Clean up context (remove markdown syntax for display)
-                context = context
-                  .replace(/#{1,6}\s/g, '') // Remove heading markers
-                  .replace(/\*\*/g, '') // Remove bold
-                  .replace(/\*/g, '') // Remove italic
-                  .replace(/`/g, '') // Remove code markers
+                const end = Math.min(normalizedContent.length, queryIndex + query.length + contextLength);
+                let context = normalizedContent.substring(start, end)
                   .replace(/\n+/g, ' ') // Replace newlines with spaces
                   .trim();
 
                 // Add ellipsis if context was truncated
                 if (start > 0) context = '...' + context;
-                if (end < content.length) context = context + '...';
+                if (end < normalizedContent.length) context = context + '...';
 
                 const page = entry.name.replace('.md', '');
                 const categoryPath = category || path.basename(path.dirname(fullPath));
@@ -510,14 +528,14 @@ ipcMain.handle("search-docs", async (_, searchQuery, language = 'en') => {
 // --- End Docs Search IPC Handler ---
 
 // 📖 Read Documentation File (Electron IPC)
-ipcMain.handle("read-doc-file", async (_, category, page, language = 'en') => {
+ipcMain.handle("read-doc-file", async (_, category, page, language = 'en', basePath = 'engine_files/docs') => {
   try {
     if (!category || !page) {
       return { error: 'Category and page are required' };
     }
 
     // Use sandboxed path resolution
-    const docPath = getSafeAbsolutePath(`engine_files/docs/${language}/${category}/${page}.md`);
+    const docPath = getSafeAbsolutePath(`${basePath}/${language}/${category}/${page}.md`);
     if (!docPath) {
       return { error: 'Invalid documentation path' };
     }

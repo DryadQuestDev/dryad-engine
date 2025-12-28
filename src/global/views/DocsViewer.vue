@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Global } from '../global';
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, Ref } from 'vue';
 import { useStorage } from '@vueuse/core';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
@@ -23,14 +23,15 @@ const md = new MarkdownIt({
   }
 });
 
-// State management
-const collapsedGroups = ref(new Set<string>());
-const activeTab = useStorage('docs-active-tab', 'fundamentals.overview');
-const docContent = ref('');
-const isLoading = ref(false);
-const loadError = ref('');
-const contentContainerRef = ref<HTMLElement | null>(null);
-const sidebarRef = ref<HTMLElement | null>(null);
+// Normalize text for search/highlight (handles Unicode characters like non-breaking hyphens)
+function normalizeForSearch(text: string): string {
+  return text
+    .replace(/[\u2010-\u2015\u2212]/g, '-') // various hyphens → regular hyphen
+    .replace(/[\u2018\u2019]/g, "'")        // smart quotes → straight
+    .replace(/[\u201C\u201D]/g, '"')        // smart double quotes
+    .replace(/\u00A0/g, ' ')                // non-breaking space
+    .toLowerCase();
+}
 
 // Hardcoded documentation tree structure (for ordering)
 const DOCS_TREE: Record<string, string[]> = {
@@ -38,11 +39,73 @@ const DOCS_TREE: Record<string, string[]> = {
   'dungeons': ['what_is_dungeon', 'dungeon_template', 'google_docs_integration', 'quests', 'glossary'],
   'characters': ['characters_overview', 'actor_slots', 'skills', 'characters_computed', 'abilities', 'characters_api'],
   'items': ['items_overview', 'exchange', 'apply', 'items_api'],
-  'resources': ['audio', 'assets', 'galleries'],
+  'resources': ['audio', 'assets', 'galleries', 'file_browser'],
   'miscellaneous': ['properties', 'store', 'data'],
   'advanced': ['set_up_coding', 'vue', '3rd_party', 'registry', 'debugging', 'plugins', 'releasing_game'],
   'builtins': ['actions', 'placeholders', 'conditions', 'game_events', 'states', 'components_export', 'component_slots'],
 };
+
+const CHANGELOG_TREE: Record<string, string[]> = {
+  '0.2': ['0.2.0'],
+};
+
+// Viewer configuration - all settings for each viewer type
+const VIEWER_CONFIG: Record<string, {
+  tree: Record<string, string[]>;
+  basePath: string;
+  title: string;
+  storageKey: string;
+  defaultTab: string;
+  useLocale: boolean;
+}> = {
+  docs: {
+    tree: DOCS_TREE,
+    basePath: 'engine_files/docs',
+    title: '📚 Dryad Engine Documentation',
+    storageKey: 'docs-active-tab',
+    defaultTab: 'introduction/overview',
+    useLocale: true
+  },
+  changelog: {
+    tree: CHANGELOG_TREE,
+    basePath: 'engine_files/changelog',
+    title: '📋 Changelog',
+    storageKey: 'changelog-active-tab',
+    defaultTab: '0.2/0.2.0',
+    useLocale: false
+  }
+};
+
+// Computed properties for current viewer
+const viewerType = computed(() => global.openViewer.value || 'docs');
+const currentConfig = computed(() => VIEWER_CONFIG[viewerType.value] || VIEWER_CONFIG.docs);
+const currentTree = computed(() => currentConfig.value.tree);
+
+// Create storages from config (use / as separator for clarity with version numbers)
+const activeTabStorages: Record<string, Ref<string>> = Object.fromEntries(
+  Object.entries(VIEWER_CONFIG).map(([key, config]) => [
+    key,
+    useStorage(config.storageKey, config.defaultTab)
+  ])
+);
+
+// Get current active tab based on viewer type
+const activeTab = computed({
+  get: () => activeTabStorages[viewerType.value]?.value || VIEWER_CONFIG.docs.defaultTab,
+  set: (val) => {
+    if (activeTabStorages[viewerType.value]) {
+      activeTabStorages[viewerType.value].value = val;
+    }
+  }
+});
+
+// State management
+const collapsedGroups = ref(new Set<string>());
+const docContent = ref('');
+const isLoading = ref(false);
+const loadError = ref('');
+const contentContainerRef = ref<HTMLElement | null>(null);
+const sidebarRef = ref<HTMLElement | null>(null);
 
 // Documentation language and state
 const availableLanguages = ref<string[]>([]);
@@ -69,7 +132,7 @@ const currentLanguage = computed(() => {
 // Load available documentation languages
 async function loadAvailableLanguages() {
   try {
-    const languages = await global.listFolders('engine_files/docs');
+    const languages = await global.listFolders(currentConfig.value.basePath);
 
     if (languages && languages.length > 0) {
       availableLanguages.value = languages;
@@ -89,7 +152,8 @@ async function validateDocsTree() {
   orphanedFiles.value = [];
 
   try {
-    const categories = await global.listFolders(`engine_files/docs/${currentLanguage.value}`);
+    const basePath = currentConfig.value.basePath;
+    const categories = await global.listFolders(`${basePath}/${currentLanguage.value}`);
 
     if (!categories || categories.length === 0) {
       return;
@@ -99,7 +163,7 @@ async function validateDocsTree() {
 
     // Scan filesystem to find all .md files
     for (const category of categories) {
-      const files = await global.listFiles(`engine_files/docs/${currentLanguage.value}/${category}`);
+      const files = await global.listFiles(`${basePath}/${currentLanguage.value}/${category}`);
 
       if (files && files.length > 0) {
         const pages = files
@@ -109,16 +173,17 @@ async function validateDocsTree() {
         if (pages.length > 0) {
           foundFiles.set(category, pages);
           // Mark pages as existing
-          pages.forEach(page => existingPages.value.add(`${category}.${page}`));
+          pages.forEach(page => existingPages.value.add(`${category}/${page}`));
         }
       }
     }
 
-    // Find orphaned files (files that exist but aren't in DOCS_TREE)
+    // Find orphaned files (files that exist but aren't in current tree)
     const orphaned: string[] = [];
+    const tree = currentTree.value;
 
     for (const [category, pages] of foundFiles.entries()) {
-      const expectedPages = DOCS_TREE[category] || [];
+      const expectedPages = tree[category] || [];
 
       for (const page of pages) {
         if (!expectedPages.includes(page)) {
@@ -138,7 +203,7 @@ async function validateDocsTree() {
 
 // Check if a page exists in the filesystem
 function pageExists(category: string, page: string): boolean {
-  return existingPages.value.has(`${category}.${page}`);
+  return existingPages.value.has(`${category}/${page}`);
 }
 
 // Change documentation language
@@ -147,12 +212,13 @@ async function changeDocsLanguage(lang: string) {
   await validateDocsTree();
 
   // Reset to first available tab if current tab doesn't exist in new language
-  const [category, page] = activeTab.value.split('.');
+  const [category, page] = activeTab.value.split('/');
   if (!pageExists(category, page)) {
-    const firstCategory = Object.keys(DOCS_TREE)[0];
-    const firstPage = DOCS_TREE[firstCategory]?.[0];
+    const tree = currentTree.value;
+    const firstCategory = Object.keys(tree)[0];
+    const firstPage = tree[firstCategory]?.[0];
     if (firstCategory && firstPage) {
-      activeTab.value = `${firstCategory}.${firstPage}`;
+      activeTab.value = `${firstCategory}/${firstPage}`;
     }
   }
 }
@@ -175,17 +241,17 @@ function isGroupCollapsed(groupId: string): boolean {
 
 // Set active tab
 function setActiveTab(category: string, page: string) {
-  activeTab.value = `${category}.${page}`;
+  activeTab.value = `${category}/${page}`;
 }
 
 // Check if tab is active
 function isTabActive(category: string, page: string): boolean {
-  return activeTab.value === `${category}.${page}`;
+  return activeTab.value === `${category}/${page}`;
 }
 
 // Load and render markdown content
 async function loadDocumentation() {
-  const [category, page] = activeTab.value.split('.');
+  const [category, page] = activeTab.value.split('/');
 
   if (!category || !page) {
     docContent.value = '';
@@ -196,7 +262,7 @@ async function loadDocumentation() {
   loadError.value = '';
 
   try {
-    const result = await global.readDocFile(category, page, currentLanguage.value);
+    const result = await global.readDocFile(category, page, currentLanguage.value, currentConfig.value.basePath);
 
     if (result.error || !result.content) {
       throw new Error(result.error || 'No content returned');
@@ -237,7 +303,7 @@ async function searchDocs() {
   showSearchResults.value = true;
 
   try {
-    const result = await global.searchDocs(query, currentLanguage.value);
+    const result = await global.searchDocs(query, currentLanguage.value, currentConfig.value.basePath);
 
     if (result.error) {
       console.error('Search error:', result.error);
@@ -245,7 +311,7 @@ async function searchDocs() {
     } else {
       const results = result.results || [];
       // Sort results so current page appears first
-      const [currentCategory, currentPage] = activeTab.value.split('.');
+      const [currentCategory, currentPage] = activeTab.value.split('/');
       results.sort((a: any, b: any) => {
         const aIsCurrent = a.category === currentCategory && a.page === currentPage;
         const bIsCurrent = b.category === currentCategory && b.page === currentPage;
@@ -266,9 +332,9 @@ async function searchDocs() {
 // Navigate to a search result
 async function goToSearchResult(result: any) {
   // Store the search term for highlighting
-  highlightTerm.value = searchQuery.value.toLowerCase().trim();
+  highlightTerm.value = searchQuery.value.trim();
 
-  const targetTab = `${result.category}.${result.page}`;
+  const targetTab = `${result.category}/${result.page}`;
   const isAlreadyActive = activeTab.value === targetTab;
 
   setActiveTab(result.category, result.page);
@@ -294,22 +360,22 @@ function clearSearch() {
 function highlightInText(text: string, query: string): string {
   if (!query || !text) return text;
 
-  const lowerText = text.toLowerCase();
-  const lowerQuery = query.toLowerCase().trim();
+  const normalizedText = normalizeForSearch(text);
+  const normalizedQuery = normalizeForSearch(query.trim());
 
   let result = '';
   let lastIndex = 0;
-  let currentIndex = lowerText.indexOf(lowerQuery);
+  let currentIndex = normalizedText.indexOf(normalizedQuery);
 
   while (currentIndex !== -1) {
     // Add text before match
     result += text.substring(lastIndex, currentIndex);
 
-    // Add highlighted match
-    result += `<mark class="search-highlight-result">${text.substring(currentIndex, currentIndex + lowerQuery.length)}</mark>`;
+    // Add highlighted match (use original text for display)
+    result += `<mark class="search-highlight-result">${text.substring(currentIndex, currentIndex + normalizedQuery.length)}</mark>`;
 
-    lastIndex = currentIndex + lowerQuery.length;
-    currentIndex = lowerText.indexOf(lowerQuery, lastIndex);
+    lastIndex = currentIndex + normalizedQuery.length;
+    currentIndex = normalizedText.indexOf(normalizedQuery, lastIndex);
   }
 
   // Add remaining text
@@ -476,40 +542,61 @@ function highlightSearchTerm() {
   // Normalize text nodes after removing marks to merge adjacent text nodes
   markdownContent.normalize();
 
-  // Function to highlight text in a single text node
-  function highlightInTextNode(node: Node) {
+  // Get search terms to highlight - try full phrase first, then individual words
+  const fullTerm = normalizeForSearch(highlightTerm.value);
+  let searchTerms = [fullTerm];
+
+  // Function to highlight text in a single text node for given terms
+  function highlightInTextNode(node: Node, terms: string[]): boolean {
     if (node.nodeType !== Node.TEXT_NODE || !node.textContent) {
-      return;
+      return false;
     }
 
     const text = node.textContent;
-    const lowerText = text.toLowerCase();
-    const searchTerm = highlightTerm.value;
-    const index = lowerText.indexOf(searchTerm);
+    const normalizedText = normalizeForSearch(text);
 
-    if (index === -1) {
-      return;
+    // Find all matches for all terms
+    const matches: { start: number; end: number }[] = [];
+    for (const term of terms) {
+      let idx = normalizedText.indexOf(term);
+      while (idx !== -1) {
+        matches.push({ start: idx, end: idx + term.length });
+        idx = normalizedText.indexOf(term, idx + 1);
+      }
+    }
+
+    if (matches.length === 0) {
+      return false;
+    }
+
+    // Sort matches by start position and merge overlapping
+    matches.sort((a, b) => a.start - b.start);
+    const merged: { start: number; end: number }[] = [];
+    for (const m of matches) {
+      if (merged.length === 0 || m.start > merged[merged.length - 1].end) {
+        merged.push({ ...m });
+      } else {
+        merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, m.end);
+      }
     }
 
     // Create a document fragment with highlighted text
     const fragment = document.createDocumentFragment();
     let lastIndex = 0;
 
-    let currentIndex = index;
-    while (currentIndex !== -1) {
+    for (const { start, end } of merged) {
       // Add text before match
-      if (currentIndex > lastIndex) {
-        fragment.appendChild(document.createTextNode(text.substring(lastIndex, currentIndex)));
+      if (start > lastIndex) {
+        fragment.appendChild(document.createTextNode(text.substring(lastIndex, start)));
       }
 
-      // Add highlighted match
+      // Add highlighted match (use original text for display)
       const mark = document.createElement('mark');
       mark.className = 'search-highlight';
-      mark.textContent = text.substring(currentIndex, currentIndex + searchTerm.length);
+      mark.textContent = text.substring(start, end);
       fragment.appendChild(mark);
 
-      lastIndex = currentIndex + searchTerm.length;
-      currentIndex = lowerText.indexOf(searchTerm, lastIndex);
+      lastIndex = end;
     }
 
     // Add remaining text
@@ -519,28 +606,50 @@ function highlightSearchTerm() {
 
     // Replace the text node with the fragment
     node.parentNode?.replaceChild(fragment, node);
+    return true;
   }
 
   // Walk through all text nodes
-  function walkNodes(node: Node) {
+  function walkNodes(node: Node, terms: string[]) {
     if (node.nodeType === Node.TEXT_NODE) {
-      highlightInTextNode(node);
+      highlightInTextNode(node, terms);
     } else {
       // Process child nodes (create array copy since we're modifying DOM)
       const children = Array.from(node.childNodes);
-      children.forEach(child => walkNodes(child));
+      children.forEach(child => walkNodes(child, terms));
     }
   }
 
-  walkNodes(markdownContent);
+  // Try to find and highlight the full search term
+  walkNodes(markdownContent, searchTerms);
 
   // Scroll to first highlight
-  const firstHighlight = markdownContent.querySelector('.search-highlight');
-  if (firstHighlight) {
-    firstHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  let scrollTarget: Element | null = markdownContent.querySelector('.search-highlight');
+
+  // Fallback: if no highlight, use search query to find scroll location
+  if (!scrollTarget && highlightTerm.value) {
+    const queryWords = normalizeForSearch(highlightTerm.value).split(/\s+/);
+
+    // Try progressively shorter portions of the query (from end first)
+    for (let len = queryWords.length; len >= 2 && !scrollTarget; len--) {
+      const searchStr = queryWords.slice(-len).join(' '); // Last N words
+
+      const walker = document.createTreeWalker(markdownContent, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (normalizeForSearch(node.textContent || '').includes(searchStr)) {
+          scrollTarget = node.parentElement;
+          break;
+        }
+      }
+    }
   }
 
-  // Clear highlight term after use (so it doesn't persist on manual navigation)
+  if (scrollTarget) {
+    scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // Clear after use
   highlightTerm.value = '';
 }
 
@@ -558,7 +667,7 @@ async function scrollSidebarToActive() {
 // Watch for tab changes and load content
 watch(activeTab, async () => {
   // Expand the group containing the active tab
-  const [category] = activeTab.value.split('.');
+  const [category] = activeTab.value.split('/');
   if (collapsedGroups.value.has(category)) {
     collapsedGroups.value.delete(category);
     collapsedGroups.value = new Set(collapsedGroups.value);
@@ -575,13 +684,13 @@ watch(currentLanguage, async () => {
 
 function handleClickOutside(event: MouseEvent) {
   if (event.target === event.currentTarget) {
-    global.toggleDocs();
+    global.closeViewer();
   }
 }
 
 function handleEscKey(event: KeyboardEvent) {
   if (event.key === 'Escape') {
-    global.toggleDocs();
+    global.closeViewer();
   }
 }
 
@@ -604,7 +713,7 @@ onUnmounted(() => {
     <div class="docs-container-bg" @click="handleClickOutside">
       <div class="docs-container-content">
         <div class="docs-header">
-          <h1>📚 Dryad Engine Documentation</h1>
+          <h1>{{ currentConfig.title }}</h1>
 
           <!-- Language selector -->
           <div class="language-selector">
@@ -650,7 +759,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <button class="close-button" @click="global.toggleDocs()">✕</button>
+          <button class="close-button" @click="global.closeViewer()">✕</button>
         </div>
 
         <div class="docs-body">
@@ -673,16 +782,17 @@ onUnmounted(() => {
               </div>
 
               <!-- Navigation tree -->
-              <div v-else v-for="(pages, category) in DOCS_TREE" :key="category" class="nav-group">
+              <div v-else v-for="(pages, category) in currentTree" :key="category" class="nav-group">
                 <div class="nav-group-header" @click="toggleGroup(category)">
                   <span class="collapse-icon">{{ isGroupCollapsed(category) ? '▶' : '▼' }}</span>
-                  <span class="nav-group-title">{{ global.getString('docs.' + category) }}</span>
+                  <span class="nav-group-title">{{ currentConfig.useLocale ? global.getString('docs.' + category) :
+                    category }}</span>
                 </div>
                 <div v-if="!isGroupCollapsed(category)" class="nav-group-items">
                   <div v-for="page in pages" :key="page" class="nav-item"
                     :class="{ active: isTabActive(category, page), inactive: !pageExists(category, page) }"
                     @click="setActiveTab(category, page)">
-                    {{ global.getString('docs.' + category + '.' + page) }}
+                    {{ currentConfig.useLocale ? global.getString('docs.' + category + '.' + page) : page }}
                   </div>
                 </div>
               </div>
@@ -702,7 +812,7 @@ onUnmounted(() => {
                 <p>{{ loadError }}</p>
                 <p class="error-hint">
                   Make sure the documentation file exists at:
-                  <code>/assets/engine_files/docs/{{ global.selectedLanguage }}/{{ activeTab.replace('.', '/') }}.md</code>
+                  <code>/assets/{{ currentConfig.basePath }}/{{ currentLanguage }}/{{ activeTab }}.md</code>
                 </p>
               </div>
 

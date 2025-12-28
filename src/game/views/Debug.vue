@@ -94,7 +94,7 @@ async function backToEditor() {
 
     <!-- Documentation Button -->
     <div class="docs-button-container">
-      <Button label="📚 Documentation" @click="global.toggleDocs()" class="docs-button" />
+      <Button label="📚 Documentation" @click="global.setViewer('docs')" class="docs-button" />
     </div>
 
     <!-- Custom tabs -->

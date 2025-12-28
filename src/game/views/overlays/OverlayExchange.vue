@@ -116,7 +116,7 @@ const hoveredCurrencyItem = computed(() => {
   const template = game.itemSystem.itemTemplatesMap.get(hoveredCurrencyId.value);
   if (!template) return null;
 
-  return game.itemSystem.createItemFromTemplate(hoveredCurrencyId.value);
+  return game.itemSystem.createItem(hoveredCurrencyId.value);
 });
 
 // Currency hover handlers
@@ -190,7 +190,7 @@ function moveItem(item: Item, source: Inventory, target: Inventory, quantity: nu
       // Add currency to seller (source = the inventory giving away the item)
       // Skip validation to allow currency payment even if inventory is over weight/size limit
       for (const [currencyId, amount] of Object.entries(totalPrice)) {
-        const currencyItem = game.itemSystem.createItemFromTemplate(currencyId);
+        const currencyItem = game.itemSystem.createItem(currencyId);
         source.addItem(currencyItem, amount, true); // true = skipValidation
       }
 
@@ -297,7 +297,7 @@ function handleLootAll() {
 
         // Add currency to seller (exchange)
         for (const [currencyId, amount] of Object.entries(totalPrice)) {
-          const currencyItem = game.itemSystem.createItemFromTemplate(currencyId);
+          const currencyItem = game.itemSystem.createItem(currencyId);
           exchangeInventory.value.addItem(currencyItem, amount);
         }
       }

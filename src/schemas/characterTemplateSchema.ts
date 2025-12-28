@@ -17,6 +17,7 @@ export const CharacterTemplateSchema = {
             item_default: { type: 'chooseOne', fromFile: 'item_templates', tooltip: 'If set, when the character is created, the item from this template will be created and equipped in this slot.' }
         }
     },
+    starting_statuses: { type: 'chooseMany', fromFile: 'character_statuses', tooltip: 'Statuses to apply to the character when created.' },
     skill_trees: { type: 'chooseMany', fromFile: 'skill_trees', tooltip: 'Skill trees that this character can learn.' },
     gallery: {
         type: 'schema', objects: {

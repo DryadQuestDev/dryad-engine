@@ -93,6 +93,11 @@ export class Editor {
   public webpLossless: Ref<boolean> = ref(false);
   // --- End WebP Conversion Settings ---
 
+  // --- Schema Key Filter ---
+  // Stores filter text per schema field key (persists across array items)
+  public schemaKeyFilters: Ref<Record<string, string>> = ref({});
+  // --- End Schema Key Filter ---
+
   // --- Custom Component Registry ---
   private editorCustomComponents = new Map<string, EditorCustomComponent>();
   // --- End Custom Component Registry ---
@@ -1013,11 +1018,12 @@ export class Editor {
     }
 
     if (this.isArray.value) {
-      if (this.schema?.value?.order) {
-        this.activeObject.value = this.activeObject.value.sort((a: any, b: any) => a.order || 0 - b.order || 0);
-      } else {
-        this.activeObject.value = this.activeObject.value.sort((a: any, b: any) => a.id.localeCompare(b.id));
-      }
+      this.activeObject.value = this.activeObject.value.sort((a: any, b: any) => {
+        const orderA = a.order ?? 0;
+        const orderB = b.order ?? 0;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.id.localeCompare(b.id);
+      });
     }
 
     let selected_game = this.selectedGame ?? '';

@@ -927,7 +927,7 @@ export class Inventory {
         // Add output items with animation tracking
         if (recipe.output_items) {
             for (const output of recipe.output_items) {
-                const item = game.itemSystem.createItemFromTemplate(output.item_id!);
+                const item = game.itemSystem.createItem(output.item_id!);
                 const createdItems = this.addItem(item, output.quantity || 1);
 
                 // Mark items for animation

@@ -2,7 +2,10 @@
 import { computed } from 'vue';
 import type { PropType } from 'vue';
 import type { Schema, Schemable } from '../../../utility/schema';
-import FormFieldRenderer from './FormFieldRenderer.vue'; // Assuming FormFieldRenderer is in the same directory
+import FormFieldRenderer from './FormFieldRenderer.vue';
+import { Editor } from '../../../editor/editor';
+
+const editor = Editor.getInstance();
 
 const props = defineProps({
   schema: {
@@ -29,12 +32,30 @@ const props = defineProps({
   rootSchema: { // The schema for the full top-level item
     type: Object as PropType<Schema>,
     required: true
+  },
+  filterKey: { // Key to look up filter text in editor.schemaKeyFilters
+    type: String,
+    default: ''
   }
 });
 
 const emit = defineEmits(['update:modelValue']);
 
 const internalObject = computed(() => props.modelValue || {});
+
+const filteredSchema = computed(() => {
+  const filterText = props.filterKey ? editor.schemaKeyFilters.value[props.filterKey] : '';
+  if (!filterText) {
+    return props.schema;
+  }
+  const filtered: Schema = {};
+  for (const key in props.schema) {
+    if (key.toLowerCase().includes(filterText.toLowerCase())) {
+      filtered[key] = props.schema[key];
+    }
+  }
+  return filtered;
+});
 
 function updateNestedField(key: string | number | symbol, value: any) {
   const newObject = { ...internalObject.value, [key as string]: value };
@@ -48,7 +69,7 @@ function updateNestedField(key: string | number | symbol, value: any) {
     <div v-if="!props.schema || Object.keys(props.schema).length === 0" class="text-orange-500">
       No schema defined for this nested object, or schema is empty.
     </div>
-    <div v-for="(fieldSchema, fieldKey) in schema" :key="fieldKey.toString()" class="form-field-wrapper">
+    <div v-for="(fieldSchema, fieldKey) in filteredSchema" :key="fieldKey.toString()" class="form-field-wrapper">
       <FormFieldRenderer
         :base-field-schema="fieldSchema" 
         :field-key="fieldKey.toString()"

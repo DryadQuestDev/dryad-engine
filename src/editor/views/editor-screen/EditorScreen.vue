@@ -224,7 +224,7 @@ function openLoadGamePopup() {
           v-tooltip.bottom="'Load save in dev mode'" class="load-game-button" text />
 
         <!-- Documentation Button -->
-        <Button label="📚 Docs" @click="global.toggleDocs()" v-tooltip.bottom="'View engine documentation'"
+        <Button label="📚 Docs" @click="global.setViewer('docs')" v-tooltip.bottom="'View engine documentation'"
           class="docs-button" text />
 
         <Select :modelValue="editor.selectedGame" :options="editor.filteredGames.value" @change="handleGameChange"

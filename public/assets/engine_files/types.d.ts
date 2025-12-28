@@ -601,48 +601,48 @@ interface Game {
   getAllCharacters(): Character[];
 
   /**
-   * Create a character from a custom template object.
-   * Use this when you need to dynamically create character templates at runtime.
+   * Create a character from a template object or registered template ID.
    * @param characterId - Unique ID for the new character
-   * @param template - Custom template object with character properties
+   * @param template - Template object with character properties OR a template ID string
+   * @param skipEvents - If true, skip triggering creation events (for gallery previews, etc.)
    * @returns The created character
+   * @throws Error if template ID string is provided but not found
    * @example
-   * const customTemplate = {
+   * // From a registered template ID
+   * const npc = game.createCharacter('shopkeeper', 'shopkeeper_template');
+   * game.addCharacter(npc);
+   *
+   * // From a custom template object
+   * const customNpc = game.createCharacter('custom_npc', {
    *   traits: { name: 'Custom NPC' },
    *   stats: { health: 100, strength: 10 },
    *   attributes: { sex: 'male' }
-   * };
-   * const npc = game.createCharacter('custom_npc', customTemplate);
-   * game.addCharacter(npc);
+   * });
+   * game.addCharacter(customNpc);
    */
-  createCharacter(characterId: string, template: any): Character;
+  createCharacter(characterId: string, template: any | string, skipEvents?: boolean): Character;
 
   /**
-   * Create a character from a registered template.
-   * @param characterId - Unique ID for the new character
-   * @param templateId - Template ID to create the character from
-   * @returns The created character
-   * @throws Error if template not found
+   * Create a status from a template object or registered template ID.
+   * @param template - Status template object OR a template ID string
+   * @returns The created status
+   * @throws Error if template ID string is provided but not found
    * @example
-   * const npc = game.createCharacterFromTemplate('shopkeeper', 'shopkeeper_template');
+   * // From a registered template ID
+   * const buff = game.createStatus('strength_buff');
+   * character.addStatus(buff);
+   *
+   * // From a custom template object
+   * const customStatus = game.createStatus({
+   *   id: 'custom_buff',
+   *   stats: { strength: 10 },
+   *   maxStacks: 3
+   * });
+   * character.addStatus(customStatus);
    */
-  createCharacterFromTemplate(characterId: string, templateId: string): Character;
+  createStatus(template: any | string): Status;
 
   /**
-   * Add a character to the game.
-   * @param character - The character to add
-   * @param isParty - Whether to also add the character to the party (default: false)
-   * @throws Error if character with same ID already exists
-   * @example
-   * const npc = game.createCharacterFromTemplate('merchant', 'merchant_template');
-   * game.addCharacter(npc); // Add without joining party
-   * game.addCharacter(npc, true); // Add and join party
-   */
-  addCharacter(character: Character, isParty?: boolean): void;
-
-  /**
-   * Check if a character is in the party.
-   * @param character - Character instance or character ID string
    * @returns true if character is in the party
    * @example
    * if (game.isCharacterInParty('alice')) {
@@ -654,33 +654,53 @@ interface Game {
   /**
    * Add a character to the party.
    * Triggers character_join_party event.
-   * @param character - The character to add to the party
+   * @param character - Character instance or character ID string
    * @example
+   * game.addToParty('alice');
+   * // or
    * const npc = game.getCharacter('alice');
    * game.addToParty(npc);
    */
-  addToParty(character: Character): void;
+  addToParty(character: Character | string): void;
 
   /**
    * Remove a character from the party.
    * Triggers character_leave_party event.
-   * @param character - The character to remove from the party
+   * @param character - Character instance or character ID string
    * @example
+   * game.removeFromParty('alice');
+   * // or
    * const npc = game.getCharacter('alice');
    * game.removeFromParty(npc);
    */
-  removeFromParty(character: Character): void;
+  removeFromParty(character: Character | string): void;
 
   /**
    * Delete a character from the game entirely.
-   * Also removes their private inventory and removes them from the party.
-   * Triggers character_delete event.
-   * @param character - The character to delete
+   * Also removes their private inventory and removes them from the party.   * Add a character to the game.
+   * @param character - The character to add
+   * @param isParty - Whether to also add the character to the party (default: false)
+   * @throws Error if character with same ID already exists
    * @example
+   * const npc = game.createCharacter('merchant', 'merchant_template');
+   * game.addCharacter(npc); // Add without joining party
+   * game.addCharacter(npc, true); // Add and join party
+   */
+  addCharacter(character: Character, isParty?: boolean): void;
+
+  /**
+   * Check if a character is in the party.
+   * @param character - Character instance or character ID string
+
+   * Triggers character_delete event.
+   * @param character - Character instance or character ID string
+   * @example
+   * game.deleteCharacter('temporary_npc');
+   * // or
    * const npc = game.getCharacter('temporary_npc');
    * game.deleteCharacter(npc);
    */
-  deleteCharacter(character: Character): void;
+  deleteCharacter(character: Character | string): void;
 
   // ============================================
   // Item System
@@ -708,27 +728,26 @@ interface Game {
   getLearnedRecipes(): Set<string>;
 
   /**
-   * Create a new empty inventory.
+   * Create an inventory, optionally populated from a template.
    * @param id - Unique identifier for the inventory
+   * @param template - Optional template object or template ID string to populate the inventory
    * @returns The created inventory
-   * @throws Error if inventory with same ID already exists
+   * @throws Error if inventory with same ID already exists, or if template ID not found
    * @example
+   * // Create empty inventory
    * const chest = game.createInventory('treasure_chest_1');
+   *
+   * // Create from template ID
+   * const shop = game.createInventory('shop_1', 'blacksmith_shop');
+   *
+   * // Create from custom template object
+   * const custom = game.createInventory('custom_inv', {
+   *   items: [{ item_id: 'gold', quantity: 100 }],
+   *   max_size: 20,
+   *   recipes: ['sword_recipe']
+   * });
    */
-  createInventory(id: string): Inventory;
-
-  /**
-   * Create an inventory from a registered template.
-   * The template defines initial items, size limits, and recipes.
-   * @param templateId - The inventory template ID
-   * @param inventoryId - Optional custom ID (defaults to templateId)
-   * @returns The created inventory
-   * @throws Error if template not found
-   * @example
-   * const shop = game.createInventoryFromTemplate('blacksmith_shop');
-   * const customShop = game.createInventoryFromTemplate('blacksmith_shop', 'my_shop_1');
-   */
-  createInventoryFromTemplate(templateId: string, inventoryId?: string): Inventory;
+  createInventory(id: string, template?: any | string): Inventory;
 
   /**
    * Add an existing inventory instance to the game.
@@ -764,11 +783,16 @@ interface Game {
   openExchange(inventoryId: string, state: 'loot' | 'trade'): void;
 
   /**
-   * Create an item from a custom template object.
-   * Use this when you need to dynamically create item templates at runtime.
-   * @param template - Custom item template object
+   * Create an item from a template object or registered template ID.
+   * @param template - Item template object OR a template ID string
    * @returns The created item
+   * @throws Error if template ID string is provided but not found
    * @example
+   * // From a registered template ID
+   * const sword = game.createItem('iron_sword');
+   * inventory.addItem(sword);
+   *
+   * // From a custom template object
    * const customItem = game.createItem({
    *   id: 'custom_sword',
    *   traits: { name: 'Custom Sword', damage: 25 },
@@ -776,18 +800,7 @@ interface Game {
    *   tags: ['weapon', 'sword']
    * });
    */
-  createItem(template: any): Item;
-
-  /**
-   * Create an item from a registered template.
-   * @param templateId - The item template ID
-   * @returns The created item
-   * @throws Error if template not found
-   * @example
-   * const sword = game.createItemFromTemplate('iron_sword');
-   * inventory.addItem(sword);
-   */
-  createItemFromTemplate(templateId: string): Item;
+  createItem(template: any | string): Item;
 
   /**
    * Get an inventory by ID.
@@ -1948,7 +1961,7 @@ interface Item {
  * @example
  * // Get a character's inventory and add an item
  * const inventory = character.getPrivateInventory();
- * const sword = game.itemSystem.createItemFromTemplate('iron_sword');
+ * const sword = game.createItem('iron_sword');
  * inventory.addItem(sword);
  *
  * @example

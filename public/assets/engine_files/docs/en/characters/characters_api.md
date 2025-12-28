@@ -33,26 +33,25 @@ Get all characters in the game.
 const allChars = game.getAllCharacters();
 ```
 
-### createCharacter(id, template)
+### createCharacter(id, template, skipEvents?)
 
-Create a character from a custom template object.
+Create a character from a template object or registered template ID.
 
 ```js
+// From a registered template ID
+const shopkeeper = game.createCharacter("shopkeeper_1", "shopkeeper_template");
+game.addCharacter(shopkeeper);
+
+// From a custom template object
 const npc = game.createCharacter("custom_npc", {
   traits: { name: "Custom NPC" },
   stats: { health: 100, strength: 10 },
   attributes: { sex: "male" }
 });
 game.addCharacter(npc);
-```
 
-### createCharacterFromTemplate(id, templateId)
-
-Create a character from a registered template.
-
-```js
-const shopkeeper = game.createCharacterFromTemplate("shopkeeper_1", "shopkeeper_template");
-game.addCharacter(shopkeeper);
+// Skip creation events (for previews, etc.)
+const preview = game.createCharacter("preview", "some_template", true);
 ```
 
 ### addCharacter(character, isParty?)
@@ -76,27 +75,47 @@ if (game.isCharacterInParty("alice")) {
 
 ### addToParty(character)
 
-Add a character to the party. Triggers `character_join_party` event.
+Add a character to the party. Accepts character instance or ID string. Triggers `character_join_party` event.
 
 ```js
-const npc = game.getCharacter("alice");
-game.addToParty(npc);
+game.addToParty("alice");  // Using ID string
+game.addToParty(npc);      // Using Character instance
 ```
 
 ### removeFromParty(character)
 
-Remove a character from the party. Triggers `character_leave_party` event.
+Remove a character from the party. Accepts character instance or ID string. Triggers `character_leave_party` event.
 
 ```js
-game.removeFromParty(npc);
+game.removeFromParty("alice");  // Using ID string
+game.removeFromParty(npc);      // Using Character instance
 ```
 
 ### deleteCharacter(character)
 
-Delete a character from the game entirely. Removes their private inventory and removes them from party. Triggers `character_delete` event.
+Delete a character from the game entirely. Accepts character instance or ID string. Removes their private inventory and removes them from party. Triggers `character_delete` event.
 
 ```js
-game.deleteCharacter(npc);
+game.deleteCharacter("alice");  // Using ID string
+game.deleteCharacter(npc);      // Using Character instance
+```
+
+### createStatus(template)
+
+Create a status from a template object or registered template ID.
+
+```js
+// From a registered template ID
+const buff = game.createStatus("strength_buff");
+character.addStatus(buff);
+
+// From a custom template object
+const customStatus = game.createStatus({
+  id: "custom_buff",
+  stats: { strength: 10 },
+  maxStacks: 3
+});
+character.addStatus(customStatus);
 ```
 
 ---

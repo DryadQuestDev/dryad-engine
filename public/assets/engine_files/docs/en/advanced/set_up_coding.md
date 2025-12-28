@@ -199,5 +199,5 @@ Point the AI agent to specific folders in `assets` directory for context:
 
 - ->builtins.actions - Built-in actions reference
 - ->builtins.game_events - Game events reference
-- ->advanced.overview - Vue components and advanced scripting
+- ->advanced.vue - Vue components and advanced scripting
 

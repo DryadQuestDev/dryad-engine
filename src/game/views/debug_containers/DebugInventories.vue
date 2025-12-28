@@ -64,7 +64,7 @@ const addItemToInventory = (inventoryId: string) => {
   }
 
   try {
-    const item = game.itemSystem.createItemFromTemplate(templateId);
+    const item = game.itemSystem.createItem(templateId);
     inventory.addItem(item, quantity);
 
     // Success notification

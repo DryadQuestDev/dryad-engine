@@ -2,7 +2,7 @@
  * Represents the definition for a single field within a schema.
  */
 export interface Schemable {
-  type: 'uid' | 'string' | 'number' | 'boolean' | 'textarea' | 'htmlarea' | 'chooseOne' | 'chooseMany' | 'string[]' | 'number[]' | 'file' | 'file[]' | 'schema' | 'schema[]' | 'color';
+  type: 'uid' | 'string' | 'number' | 'boolean' | 'textarea' | 'htmlarea' | 'chooseOne' | 'chooseMany' | 'string[]' | 'number[]' | 'file' | 'file[]' | 'schema' | 'schema[]' | 'color' | 'range';
   label?: string;
   tooltip?: string;
   options?: any[];
@@ -45,6 +45,7 @@ type MappedBaseType<T extends Schema> = {
   T[K]['type'] extends 'boolean' ? boolean :
   T[K]['type'] extends 'string[]' | 'file[]' | 'chooseMany' ? string[] :
   T[K]['type'] extends 'number[]' ? number[] :
+  T[K]['type'] extends 'range' ? [number, number] : // Handle 'range' type as tuple
   T[K]['type'] extends 'schema' ? SchemaToType<NonNullable<T[K]['objects']>> : // Handle 'schema' type
   T[K]['type'] extends 'schema[]' ? SchemaToType<NonNullable<T[K]['objects']>>[] : // Handle 'schema[]' type
   never;

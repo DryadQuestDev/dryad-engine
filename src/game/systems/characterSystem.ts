@@ -104,8 +104,23 @@ export class CharacterSystem {
 
 
 
-  public createCharacter(characterId: string, obj: CharacterTemplateObject, fromGallery: boolean = false): Character {
-    // console.log("createCharacter", characterId, obj);
+  public createCharacter(characterId: string, template: CharacterTemplateObject | string, skipEvents: boolean = false): Character {
+    // console.log("createCharacter", characterId, template);
+
+    // If template is a string, look it up from the templates map
+    let templateId: string | undefined;
+    let obj: CharacterTemplateObject;
+    if (typeof template === 'string') {
+      templateId = template;
+      const found = this.templatesMap.get(template);
+      if (!found) {
+        throw new Error(`CharacterTemplate with id "${template}" not found.`);
+      }
+      obj = found;
+    } else {
+      obj = template;
+    }
+
     // deep clone template to avoid mutating the original object
     let deepClone = JSON.parse(JSON.stringify(obj));
 
@@ -121,7 +136,11 @@ export class CharacterSystem {
     // Debug: console.log(character);
 
 
-    if (!fromGallery) {
+    if (templateId) {
+      character.templateId = templateId;
+    }
+
+    if (!skipEvents) {
       // create private inventory
       let uid = "_character_" + character.id;
       let inv = Game.getInstance().itemSystem.createInventory(uid);
@@ -139,13 +158,19 @@ export class CharacterSystem {
 
         // create and equip item in slot if item_default is set
         if (slot.item_default) {
-          let item = Game.getInstance().itemSystem.createItemFromTemplate(slot.item_default);
+          let item = Game.getInstance().itemSystem.createItem(slot.item_default);
           let inventory = character.getPrivateInventory();
           if (inventory) {
             let addedItem = inventory.addItem(item, 1, true)[0];
             inventory.equipSlot(itemSlot, addedItem, character as unknown as Character);
           }
         }
+      }
+
+      // add default statuses
+      for (let statusId of deepClone.starting_statuses || []) {
+        let status = this.createStatus(statusId);
+        character.addStatus(status);
       }
 
       //this.characters.value.set(characterId, character);
@@ -163,16 +188,6 @@ export class CharacterSystem {
     return character as unknown as Character;
   }
 
-  public createCharacterFromTemplate(characterId: string, templateId: string, ingoreEventTriggers: boolean = false): Character {
-    let template = this.templatesMap.get(templateId);
-    if (!template) {
-      throw new Error(`CharacterTemplate with id "${templateId}" not found.`);
-    }
-    let character = this.createCharacter(characterId, template, ingoreEventTriggers);
-    character.templateId = templateId;
-    return character;
-  }
-
   public addCharacter(character: Character, isParty: boolean = false) {
 
     if (this.characters.value.has(character.id)) {
@@ -184,6 +199,22 @@ export class CharacterSystem {
       this.addToParty(character);
     }
 
+  }
+
+  public createStatus(template: any | string): Status {
+    let statusObject: any;
+    if (typeof template === 'string') {
+      statusObject = Game.getInstance().characterSystem.statusesMap.get(template);
+      if (!statusObject) {
+        throw new Error(`Status with id "${template}" not found.`);
+      }
+    } else {
+      statusObject = template;
+    }
+    let status = reactive(new Status());
+    status.id = statusObject.id;
+    status.setValues(statusObject);
+    return status;
   }
 
   /**
@@ -219,7 +250,15 @@ export class CharacterSystem {
     return this.partyIds.value.has(charId);
   }
 
-  public addToParty(character: Character) {
+  public addToParty(character: Character | string) {
+    if (typeof character === 'string') {
+      const found = this.characters.value.get(character);
+      if (!found) {
+        throw new Error(`Character with id "${character}" not found.`);
+      }
+      character = found;
+    }
+
     let isCharacterInParty = this.isCharacterInParty(character);
     if (isCharacterInParty) {
       return;
@@ -245,7 +284,14 @@ export class CharacterSystem {
     this.game.trigger('character_join_party', character);
   }
 
-  public deleteCharacter(character: Character) {
+  public deleteCharacter(character: Character | string) {
+    if (typeof character === 'string') {
+      const found = this.characters.value.get(character);
+      if (!found) {
+        throw new Error(`Character with id "${character}" not found.`);
+      }
+      character = found;
+    }
 
     // delete private inventory
     let inv = character.getPrivateInventory();
@@ -263,7 +309,15 @@ export class CharacterSystem {
   }
 
 
-  public removeFromParty(character: Character) {
+  public removeFromParty(character: Character | string) {
+    if (typeof character === 'string') {
+      const found = this.characters.value.get(character);
+      if (!found) {
+        throw new Error(`Character with id "${character}" not found.`);
+      }
+      character = found;
+    }
+
     // Transfer equipped items from party inventory back to private inventory
     const partyInventory = Game.getInstance().itemSystem.getInventory(PARTY_INVENTORY_ID);
     const privateInventory = character.getPrivateInventory();

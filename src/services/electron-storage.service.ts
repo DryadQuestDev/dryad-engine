@@ -375,7 +375,7 @@ export class ElectronStorageService implements StorageService {
 
     // --- Documentation Methods ---
 
-    async readDocFile(category: string, page: string, language: string = 'en'): Promise<{
+    async readDocFile(category: string, page: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
         content?: string;
         error?: string;
     }> {
@@ -384,10 +384,10 @@ export class ElectronStorageService implements StorageService {
             console.error('ElectronStorageService.readDocFile: Invalid category or page provided');
             return { error: 'Invalid category or page' };
         }
-        return this.invokeElectron('read-doc-file', category, page, language);
+        return this.invokeElectron('read-doc-file', category, page, language, basePath);
     }
 
-    async searchDocs(query: string, language: string = 'en'): Promise<{
+    async searchDocs(query: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
         results?: any[];
         total?: number;
         error?: string;
@@ -396,6 +396,6 @@ export class ElectronStorageService implements StorageService {
             console.error('ElectronStorageService.searchDocs: Query must be at least 2 characters');
             return { results: [], error: 'Query must be at least 2 characters' };
         }
-        return this.invokeElectron('search-docs', query, language);
+        return this.invokeElectron('search-docs', query, language, basePath);
     }
 }

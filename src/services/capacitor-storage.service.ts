@@ -157,14 +157,14 @@ export class CapacitorStorageService implements StorageService {
     }
 
     // --- Documentation Methods ---
-    async readDocFile(category: string, page: string, language: string = 'en'): Promise<{
+    async readDocFile(category: string, page: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
         content?: string;
         error?: string;
     }> {
         throw new Error('CapacitorStorageService.readDocFile() is not implemented yet');
     }
 
-    async searchDocs(query: string, language: string = 'en'): Promise<{
+    async searchDocs(query: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
         results?: any[];
         total?: number;
         error?: string;

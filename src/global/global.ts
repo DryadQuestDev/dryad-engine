@@ -84,7 +84,7 @@ export class Global {
 
   public userSettings!: Ref<Record<string, any>>;
 
-  public isDocsOpen = ref(false);
+  public openViewer: Ref<string> = ref('');
 
   public engineVersion: string = "0.0.0"; // Initialized in constructor now
 
@@ -107,8 +107,12 @@ export class Global {
     this.isMenuOpen.value = !this.isMenuOpen.value;
   }
 
-  public toggleDocs() {
-    this.isDocsOpen.value = !this.isDocsOpen.value;
+  public setViewer(type: string) {
+    this.openViewer.value = this.openViewer.value === type ? '' : type;
+  }
+
+  public closeViewer() {
+    this.openViewer.value = '';
   }
 
   public async init() {
@@ -543,8 +547,7 @@ export class Global {
           continue;
         }
         //console.log("[createDefaultEntities] Creating missing inventory:", inventoryObject.id);
-        let inventory = game.itemSystem.createInventoryFromTemplate(inventoryObject.id);
-        game.itemSystem.addInventory(inventory);
+        game.itemSystem.createInventory(inventoryObject.id, inventoryObject.id);
       }
     }
 
@@ -564,7 +567,7 @@ export class Global {
           continue;
         }
         //console.log("[createDefaultEntities] Creating missing character:", characterObject.id);
-        let character = game.characterSystem.createCharacterFromTemplate(characterObject.id, characterObject.id);
+        let character = game.characterSystem.createCharacter(characterObject.id, characterObject.id);
         game.characterSystem.addCharacter(character, characterObject.add_to_party);
       }
     }
@@ -1163,19 +1166,19 @@ export class Global {
   }
 
   // Documentation methods
-  async readDocFile(category: string, page: string, language: string = 'en'): Promise<{
+  async readDocFile(category: string, page: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
     content?: string;
     error?: string;
   }> {
-    return this.storageService.readDocFile(category, page, language);
+    return this.storageService.readDocFile(category, page, language, basePath);
   }
 
-  async searchDocs(query: string, language: string = 'en'): Promise<{
+  async searchDocs(query: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
     results?: any[];
     total?: number;
     error?: string;
   }> {
-    return this.storageService.searchDocs(query, language);
+    return this.storageService.searchDocs(query, language, basePath);
   }
 
   /**

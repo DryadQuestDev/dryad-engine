@@ -24,7 +24,7 @@ const characters = computed<Character[]>(() => {
 
 function createCharacter() {
   if (selectedCharacter.value && newCharacterId.value) {
-    let character = game.characterSystem.createCharacterFromTemplate(newCharacterId.value, selectedCharacter.value);
+    let character = game.characterSystem.createCharacter(newCharacterId.value, selectedCharacter.value);
     if (character) {
       game.characterSystem.addCharacter(character, true);
     }

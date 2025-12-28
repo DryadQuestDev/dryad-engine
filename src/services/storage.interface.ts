@@ -92,11 +92,11 @@ export interface StorageService {
     }>;
 
     // --- Documentation Methods ---
-    readDocFile(category: string, page: string, language?: string): Promise<{
+    readDocFile(category: string, page: string, language?: string, basePath?: string): Promise<{
         content?: string;
         error?: string;
     }>;
-    searchDocs(query: string, language?: string): Promise<{
+    searchDocs(query: string, language?: string, basePath?: string): Promise<{
         results?: any[];
         total?: number;
         error?: string;

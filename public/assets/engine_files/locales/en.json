@@ -220,6 +220,7 @@
   "docs.resources.audio": "Audio",
   "docs.resources.assets": "Assets",
   "docs.resources.galleries": "Galleries",
+  "docs.resources.file_browser": "File Browser",
   "docs.miscellaneous": "Miscellaneous",
   "docs.miscellaneous.properties": "Properties",
   "docs.miscellaneous.store": "Store",

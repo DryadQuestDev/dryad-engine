@@ -71,45 +71,48 @@ export class ItemSystem {
     }
 
 
-    public createInventory(id: string): Inventory {
+    public createInventory(id: string, template?: any | string): Inventory {
         let isInventoryExists = this.inventories.value.has(id);
         if (isInventoryExists) {
             throw new Error(`Inventory with id "${id}" already exists.`);
         }
 
-        let inventory = new Inventory(); // removed reactive()
+        let inventory = new Inventory();
         inventory.id = id;
         this.inventories.value.set(id, inventory);
-        return inventory;
-    }
 
-    public createInventoryFromTemplate(templateId: string, inventoryId?: string): Inventory {
-        let template = this.inventoryTemplatesMap.get(templateId);
-        if (!template) {
-            throw new Error(`Template "${templateId}" not found`);
+        // If template is provided, populate the inventory
+        if (template) {
+            let templateObj: any;
+            if (typeof template === 'string') {
+                const found = this.inventoryTemplatesMap.get(template);
+                if (!found) {
+                    throw new Error(`Inventory template "${template}" not found`);
+                }
+                templateObj = found;
+            } else {
+                templateObj = template;
+            }
+
+            // Add items from template
+            for (let itemTemplateObject of templateObj.items || []) {
+                let itemId = itemTemplateObject.item_id || "";
+                let quantity = itemTemplateObject.quantity || 1;
+                let item = this.createItem(itemId);
+                inventory.addItem(item, quantity);
+            }
+
+            // Set inventory properties
+            inventory.name = templateObj.name || '';
+            inventory.maxSize = templateObj.max_size || 0;
+            inventory.maxWeight = templateObj.max_weight || 0;
+            inventory.interactive = templateObj.interactive || '';
+
+            // Add recipes
+            for (let recipeId of templateObj.recipes || []) {
+                inventory.addRecipe(recipeId);
+            }
         }
-
-        if (!inventoryId) {
-            inventoryId = templateId;
-        }
-
-        let inventory = this.createInventory(inventoryId);
-        for (let itemTemplateObject of template.items || []) {
-            let itemId = itemTemplateObject.item_id || "";
-            let quantity = itemTemplateObject.quantity || 1;
-            let item = this.createItemFromTemplate(itemId);
-            inventory.addItem(item, quantity);
-        }
-
-        inventory.name = template.name || '';
-        inventory.maxSize = template.max_size || 0;
-        inventory.maxWeight = template.max_weight || 0;
-        inventory.interactive = template.interactive || '';
-        for (let recipeId of template.recipes || []) {
-            inventory.addRecipe(recipeId);
-        }
-
-        // TODO: create items from template etc
 
         return inventory;
     }
@@ -191,7 +194,20 @@ export class ItemSystem {
         };
     }
 
-    public createItem(obj: ItemTemplateObject): Item {
+    public createItem(template: ItemTemplateObject | string): Item {
+        // If template is a string, look it up from the templates map
+        let obj: ItemTemplateObject;
+        if (typeof template === 'string') {
+            const found = this.itemTemplatesMap.get(template);
+            if (!found) {
+                throw new Error(`Item template "${template}" not found`);
+            }
+            // deep clone template to avoid mutating the original object
+            obj = JSON.parse(JSON.stringify(found));
+        } else {
+            obj = template;
+        }
+
         let item = reactive(new Item());
         item.uid = this.game.createUid();
 
@@ -228,17 +244,6 @@ export class ItemSystem {
         this.game.trigger('item_create', item as Item);
 
         return item;
-    }
-
-    public createItemFromTemplate(templateId: string): Item {
-        let template = this.itemTemplatesMap.get(templateId);
-        if (!template) {
-            throw new Error(`Template "${templateId}" not found`);
-        }
-
-        // deep clone template to avoid mutating the original object
-        let templateClone = JSON.parse(JSON.stringify(template));
-        return this.createItem(templateClone);
     }
 
     /**

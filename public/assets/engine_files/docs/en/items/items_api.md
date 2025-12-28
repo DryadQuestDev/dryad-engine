@@ -8,41 +8,39 @@ API reference for working with items and inventories in code.
 
 ### createItem(template)
 
-Create an item from a custom template object.
+Create an item from a template object or registered template ID.
 
 ```js
+// From a registered template ID
+const sword = game.createItem("iron_sword");
+inventory.addItem(sword);
+
+// From a custom template object
 const customItem = game.createItem({
   id: "custom_sword",
-  traits: { name: "Custom Sword", damage: 25 },
+  traits: { name: "Custom Sword", description: "My mighty custom sword." },
   slots: ["weapon_slot"],
   tags: ["weapon", "sword"]
 });
 ```
 
-### createItemFromTemplate(templateId)
+### createInventory(id, template?)
 
-Create an item from a registered template.
-
-```js
-const sword = game.createItemFromTemplate("iron_sword");
-inventory.addItem(sword);
-```
-
-### createInventory(id)
-
-Create a new empty inventory.
+Create an inventory, optionally populated from a template.
 
 ```js
+// Create empty inventory
 const chest = game.createInventory("treasure_chest_1");
-```
 
-### createInventoryFromTemplate(templateId, inventoryId?)
+// Create from template ID
+const shop = game.createInventory("shop_1", "blacksmith_shop");
 
-Create an inventory from a registered template. Template defines initial items, size limits, and recipes.
-
-```js
-const shop = game.createInventoryFromTemplate("blacksmith_shop");
-const customShop = game.createInventoryFromTemplate("blacksmith_shop", "my_shop_1");
+// Create from custom template object
+const custom = game.createInventory("custom_inv", {
+  items: [{ item_id: "gold", quantity: 100 }],
+  max_size: 20,
+  recipes: ["sword_recipe"]
+});
 ```
 
 ### addInventory(inventory)

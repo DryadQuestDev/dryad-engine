@@ -134,7 +134,7 @@ Items define which slots they can go into. Characters define which slots they ha
 
 | Method | Description |
 |--------|-------------|
-| `game.createItemFromTemplate(id)` | Create an item instance |
+| `game.createItem(id)` | Create an item instance |
 | `game.getInventory(id)` | Get an inventory by ID |
 | `inventory.addItem(item, quantity)` | Add items to inventory |
 | `inventory.getItemsById(id)` | Find items by template ID |
@@ -147,7 +147,7 @@ Items define which slots they can go into. Characters define which slots they ha
 
 | Task | Steps |
 |------|-------|
-| Give player a sword | `game.createItemFromTemplate('iron_sword')` → `inventory.addItem(sword)` |
+| Give player a sword | `game.createItem('iron_sword')` → `inventory.addItem(sword)` |
 | Check and deduct gold | `inventory.canAffordPrice({ gold: 100 })` → `inventory.deductCurrency({ gold: 100 })` |
 
 ---

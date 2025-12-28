@@ -215,7 +215,7 @@ onMounted(async () => {
         <a href="https://github.com/DryadQuestDev/dryad-engine" target="_blank" class="promo_button">
           <img src="/assets/engine_assets/ui/promo/github_button.png" alt="GitHub" />
         </a>
-        <div class="engine_name">Dryad Engine v{{ global.engineVersion }}</div>
+        <div class="engine_name" @click="global.setViewer('changelog')" style="cursor: pointer;">Dryad Engine v{{ global.engineVersion }}</div>
       </div>
     </div>
 
