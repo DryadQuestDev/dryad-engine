@@ -122,7 +122,7 @@ setup() {
 
 ```html
 <!-- In template: access reactive properties directly -->
-<p>Health: {{ mc.getResource("health") }} / {{ mc.getStat("max_health").value }}</p>
+<p>Health: {{ mc.getResource("health") }} / {{ mc.getStat("health") }}</p>
 <p>Name: {{ mc.getTrait("name") }}</p>
 ```
 
@@ -154,7 +154,7 @@ setup() {
   // Computed recalculates when dependencies change
   const healthPercent = computed(() => {
     const current = mc.getResource("health");
-    const max = mc.getStat("max_health").value;
+    const max = mc.getStat("health");
     return Math.round((current / max) * 100);
   });
 
@@ -333,7 +333,7 @@ const QuickSaveButton = defineComponent({
   setup() {
     function quickSave() {
       game.saveGame("quicksave");
-      game.addFlash("Game saved!");
+      game.showNotification("Game saved!");
     }
 
     return { quickSave };

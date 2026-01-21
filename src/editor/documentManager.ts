@@ -51,6 +51,10 @@ export class DocumentManager {
     public isLoading = ref(false);
     public error = ref<string | null>(null);
     public successMessage = ref<string | null>(null); // Added for success messages
+    public pendingAuthUrl = ref<string | null>(null); // Auth URL when popup is blocked
+
+    // Check if running in localhost mode (browser can't auto-open popups reliably)
+    public isLocalhost = computed(() => this.storageService.getName() === 'localhost');
 
     // --- New Reactive State ---
     public oauthAppConfigs = reactive<OAuthAppConfig[]>([]);
@@ -81,12 +85,11 @@ export class DocumentManager {
     private cleanupAuthCallback: (() => void) | undefined;
     private authFlowContext = reactive<{ tokenName?: string; oauthAppClientId?: string }>({});
 
-    
     constructor() {
         this.storageService = Global.getInstance().storageService;
         this.editorInstance = Editor.getInstance(); // Get editor instance
 
-        if (this.storageService.getName() !== 'electron') {
+        if (!this.storageService.supportsGoogleAuth()) {
             return;
         }
 
@@ -153,6 +156,7 @@ export class DocumentManager {
     private clearMessages() {
         this.error.value = null;
         this.successMessage.value = null;
+        this.pendingAuthUrl.value = null;
     }
 
     private loadGlobalDefaultUserTokenId() {
@@ -301,7 +305,8 @@ export class DocumentManager {
             this.error.value = "Token name cannot be empty.";
             return;
         }
-        if (this.userTokens.some(t => t.userGivenName === tokenName.trim())) {
+        const existingToken = this.userTokens.some(t => t.userGivenName === tokenName.trim());
+        if (existingToken) {
              this.error.value = `A token with the name "${tokenName.trim()}" already exists. Choose a unique name.`;
              return;
         }
@@ -329,24 +334,32 @@ export class DocumentManager {
             };
 
             const result = await this.storageService.startGoogleAuth(toRaw(clientSecretJsonContent));
-            
+
             if (result.error) {
                 this.error.value = result.error;
-                await this.storageService.stopOAuthServer(); 
+                await this.storageService.stopOAuthServer();
             } else if (result.authUrl) {
-                if (typeof this.storageService.openExternalUrl === 'function') {
-                    const openResult = await this.storageService.openExternalUrl(result.authUrl);
-                    if (openResult && openResult.success) {
-                        this.successMessage.value = "Please complete authentication in your browser. Waiting for callback...";
-                        this.isOAuthServerWaitingForCallback.value = true;
-                    } else {
-                        this.error.value = `Failed to open authentication URL. Error: ${openResult?.error}`;
-                        await this.storageService.stopOAuthServer();
+                // For localhost, always show the URL as a clickable link (browser blocks async popups)
+                // For electron, try to auto-open
+                if (this.isLocalhost.value) {
+                    this.pendingAuthUrl.value = result.authUrl;
+                    this.successMessage.value = "Click the link to authenticate with Google:";
+                } else {
+                    let opened = false;
+                    if (typeof this.storageService.openExternalUrl === 'function') {
+                        const openResult = await this.storageService.openExternalUrl(result.authUrl);
+                        opened = openResult?.success === true;
                     }
-                } else { 
-                    this.error.value = "Cannot open URL automatically.";
-                    await this.storageService.stopOAuthServer();
+
+                    if (opened) {
+                        this.successMessage.value = "Please complete authentication in your browser. Waiting for callback...";
+                    } else {
+                        // Popup was blocked or openExternalUrl not available - show the URL for manual click
+                        this.pendingAuthUrl.value = result.authUrl;
+                        this.successMessage.value = "Click the link below to authenticate:";
+                    }
                 }
+                this.isOAuthServerWaitingForCallback.value = true;
             } else { 
                  this.error.value = "Failed to get authentication URL from main process.";
                  await this.storageService.stopOAuthServer();
@@ -552,7 +565,12 @@ export class DocumentManager {
 
         // Check if we have a refresh token
         if (!storedToken.tokenData.refresh_token) {
-            console.error('[DocumentManager] No refresh token available. Re-authentication required.');
+            // If token hasn't actually expired yet, allow the API call
+            if (expiryDate && expiryDate > now) {
+                console.warn('[DocumentManager] Cannot refresh token (no refresh_token), but token still valid. Proceeding...');
+                return true;
+            }
+            console.error('[DocumentManager] No refresh token available and token expired. Re-authentication required.');
             this.error.value = Global.getInstance().getString('google_auth_token_expired_no_refresh');
             Global.getInstance().addNotificationId('google_auth_token_expired_no_refresh');
             return false;
@@ -561,7 +579,13 @@ export class DocumentManager {
         // Get the OAuth app config for this token
         const oauthApp = this.oauthAppConfigs.find(app => app.clientId === storedToken.linkedOAuthAppClientId);
         if (!oauthApp) {
-            console.error('[DocumentManager] OAuth app config not found for token refresh.');
+            // If token hasn't actually expired yet (just within buffer), allow the API call
+            // The 5-minute buffer is for proactive refresh, not a hard requirement
+            if (expiryDate && expiryDate > now) {
+                console.warn('[DocumentManager] Cannot refresh token (no OAuth config), but token still valid. Proceeding...');
+                return true;
+            }
+            console.error('[DocumentManager] OAuth app config not found for token refresh and token expired.');
             this.error.value = Global.getInstance().getString('google_auth_oauth_config_missing');
             Global.getInstance().addNotificationId('google_auth_oauth_config_missing');
             return false;
@@ -640,7 +664,7 @@ export class DocumentManager {
     public async fetchDocument(documentId: string): Promise<any | null> {
         this.clearMessages();
         let currentActiveToken = this.activeStoredToken.value;
-        if (this.storageService.getName() === "electron" && (!currentActiveToken || !currentActiveToken.tokenData.access_token)) {
+        if (this.storageService.supportsGoogleAuth() && (!currentActiveToken || !currentActiveToken.tokenData.access_token)) {
             this.error.value = Global.getInstance().getString('google_auth_no_token');
             Global.getInstance().addNotificationId('google_auth_no_token');
             return null;
@@ -649,7 +673,7 @@ export class DocumentManager {
         let doc: any = null;
         try {
             // Refresh token if needed before making API call
-            if (this.storageService.getName() === "electron" && currentActiveToken) {
+            if (this.storageService.supportsGoogleAuth() && currentActiveToken) {
                 const refreshSuccess = await this.refreshTokenIfNeeded(currentActiveToken);
                 if (!refreshSuccess) {
                     this.isLoading.value = false;
@@ -662,7 +686,7 @@ export class DocumentManager {
 
             const idMatch = documentId.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
             const docIdToFetch = idMatch ? idMatch[1] : documentId;
-            const accessToken = this.storageService.getName() === "electron" ? currentActiveToken?.tokenData?.access_token || '' : '';
+            const accessToken = this.storageService.supportsGoogleAuth() ? currentActiveToken?.tokenData?.access_token || '' : '';
             const result = await this.storageService.getGoogleDocument(accessToken, docIdToFetch);
             if (result.error) {
                 if (result.error.includes("401") || result.error.includes("403") || result.error.toLowerCase().includes("token has been expired")) {

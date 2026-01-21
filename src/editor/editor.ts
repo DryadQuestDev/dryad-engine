@@ -1536,8 +1536,10 @@ export class Editor {
    * @param fileType The category of file (e.g., 'image', 'video') used to determine extensions.
    */
   public searchFiles(searchTerm: string, fileType: string): void {
-    console.log(`[Editor] searchFiles called with term: '${searchTerm}', type: '${fileType}'`);
-    this.fileSearchSubject.next({ searchTerm, fileType });
+    // Normalize Windows backslashes to forward slashes
+    const normalizedTerm = searchTerm.replace(/\\/g, '/');
+    console.log(`[Editor] searchFiles called with term: '${normalizedTerm}', type: '${fileType}'`);
+    this.fileSearchSubject.next({ searchTerm: normalizedTerm, fileType });
   }
 
   /**
@@ -1584,6 +1586,22 @@ export class Editor {
         return processedSchema;
       } else if (isSchemable) { // It's a Schemable object
         const fieldSchema = { ...currentSchema } as Schemable; // Clone to avoid modifying original
+
+        // Handle fromLogic for dynamic option generation
+        if (fieldSchema.fromLogic) {
+          console.log(`[Editor] Processing fromLogic '${fieldSchema.fromLogic}' with type '${fieldSchema.type}'`);
+          try {
+            const logicOptions = this.getFromLogicOptions(fieldSchema.fromLogic);
+            if (fieldSchema.type === 'chooseOne' || fieldSchema.type === 'chooseMany') {
+              fieldSchema.options = logicOptions;
+            }
+          } catch (error) {
+            console.warn(`[Editor] Could not get options for fromLogic: ${fieldSchema.fromLogic}`, error);
+            if (fieldSchema.type === 'chooseOne' || fieldSchema.type === 'chooseMany') {
+              fieldSchema.options = [];
+            }
+          }
+        }
 
         if (fieldSchema.fromFile) {
           console.log(`[Editor] Processing fromFile '${fieldSchema.fromFile}' with type '${fieldSchema.type}'`);
@@ -1683,6 +1701,15 @@ export class Editor {
       if (hasAndCondition) {
         passesAndCondition = Object.entries(fieldSchema.fromFileTypeAnd!).every(([key, expectedValue]) => {
           const actualValue = this.getNestedValue(item, key);
+          // Support array-contains checks
+          if (Array.isArray(actualValue)) {
+            if (Array.isArray(expectedValue)) {
+              // All expected values must be in actual array
+              return expectedValue.every(v => actualValue.includes(v));
+            }
+            // Single expected value must be in actual array
+            return actualValue.includes(expectedValue);
+          }
           return actualValue === expectedValue;
         });
       }
@@ -1691,6 +1718,15 @@ export class Editor {
       if (hasOrCondition) {
         passesOrCondition = Object.entries(fieldSchema.fromFileTypeOr!).some(([key, expectedValue]) => {
           const actualValue = this.getNestedValue(item, key);
+          // Support array-contains checks
+          if (Array.isArray(actualValue)) {
+            if (Array.isArray(expectedValue)) {
+              // At least one expected value must be in actual array
+              return expectedValue.some(v => actualValue.includes(v));
+            }
+            // Single expected value must be in actual array
+            return actualValue.includes(expectedValue);
+          }
           // Support array values: check if actualValue is included in the array
           if (Array.isArray(expectedValue)) {
             return expectedValue.includes(actualValue);
@@ -2002,6 +2038,52 @@ export class Editor {
     return this.global.backupOriginalFile(path);
   }
   // --- End WebP Conversion Methods ---
+
+  // --- fromLogic Options Methods ---
+  /**
+   * Get options for a fromLogic field based on the logic type
+   * @param logicType - The type of logic to apply (e.g., 'available_sources')
+   * @returns Array of option values
+   */
+  public getFromLogicOptions(logicType: string): string[] {
+    switch (logicType) {
+      case 'available_sources':
+        return this.getAvailableSources();
+      default:
+        console.warn(`[Editor] Unknown fromLogic type: ${logicType}`);
+        return [];
+    }
+  }
+
+  /**
+   * Get all available data sources (files with isArray: true) from editor tabs
+   * Used for pool definitions to select which entity type to draw from
+   */
+  private getAvailableSources(): string[] {
+    const sources: string[] = [];
+    const allTabs = this.getAllTabs();
+
+    for (const tab of allTabs) {
+      for (const subtab of tab.subtabs) {
+        // Only include array-type files that have a schema
+        if (subtab.isArray && subtab.file && subtab.schema) {
+          // Exclude pool-related files to prevent circular references
+          // Exclude dev/ files (internal development tools)
+          // Exclude [dungeon] files (dungeon-specific, not global templates)
+          if (
+            !subtab.file.includes('pool_') &&
+            !subtab.file.startsWith('dev/') &&
+            !subtab.file.includes('[dungeon]')
+          ) {
+            sources.push(subtab.file);
+          }
+        }
+      }
+    }
+
+    return sources;
+  }
+  // --- End fromLogic Options Methods ---
 
   // --- Custom Component Registry Methods ---
   /**

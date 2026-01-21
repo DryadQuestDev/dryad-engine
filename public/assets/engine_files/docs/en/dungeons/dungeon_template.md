@@ -43,6 +43,18 @@ You can quickly see **which actions, flags, anchors, and inventories** you’ve 
 - **Spot missing hooks** (e.g. a flag you set but never check).  
 - **Keep large dungeons coherent** as they grow.
 
-Use these helpers whenever your dungeon starts getting big – they’re there to save you from manual tracking in a huge wall of text.
+Use these helpers whenever your dungeon starts getting big – they're there to save you from manual tracking in a huge wall of text.
 
 @en/template/4.png
+
+## Importing Content into the Engine
+
+Once your dungeon content is ready, you have two options to get it into the engine:
+
+**Option 1: Copy and Paste (No Setup Required)**
+Simply select all content in your Google Doc (`Ctrl+A`), copy it (`Ctrl+C`), and paste it directly into the `dungeon_content` field in your dungeon's config. This works immediately with no additional setup.
+
+**Option 2: Google Docs API Integration**
+For a more streamlined workflow where the engine fetches your document directly, you can set up the Google Docs API integration. This requires a one-time setup but allows you to pull content updates without manual copy-pasting.
+
+See ->dungeons.google_docs_integration for setup instructions.

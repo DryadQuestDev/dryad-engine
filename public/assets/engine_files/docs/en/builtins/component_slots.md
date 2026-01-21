@@ -27,6 +27,8 @@ Injection slots render **all registered components** together. They act as exten
 | Slot | Where it appears |
 |------|------------------|
 | `character-face` | Character face display |
+| `character-sheet-top` | Top of character sheet (above stats) |
+| `character-sheet-bottom` | Bottom of character sheet (below inventory) |
 | `debug-panel` | Debug panel |
 | `events-container` | Events/dialogue area |
 | `exploration-state` | Inside exploration view |

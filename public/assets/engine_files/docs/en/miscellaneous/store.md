@@ -77,6 +77,25 @@ Delete a store and all its data.
 game.deleteStore("temporary_combat_data");
 ```
 
+### useStore(id, key?)
+
+Convenience wrapper that returns a reactive `ComputedRef` to store data.
+
+```js
+// Get reactive ref to entire store
+const runsStore = game.useStore("runs");
+
+// Get reactive ref to specific item
+const run = game.useStore("runs", runUid);
+```
+
+This is equivalent to wrapping `getStore()` in `computed()` manually:
+
+```js
+// These are functionally identical:
+const val = game.useStore("myStore", "key");
+const val = vue.computed(() => game.getStore("myStore").get("key"));
+```
 ---
 
 ## Map Methods

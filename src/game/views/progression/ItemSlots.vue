@@ -9,6 +9,7 @@ import { useItemPopup } from './useItemPopup';
 
 const props = defineProps<{
   character: Character;
+  disabled?: boolean; // Disable item click/drag while keeping hover tooltips
 }>();
 
 // Get only equipped items from the party inventory for this specific character
@@ -69,7 +70,7 @@ const itemSlotsWithItems = computed(() => {
       left: slotData.slot.x + '%',
       top: slotData.slot.y + '%'
     }">
-      <ItemSlot v-if="slotData.item" :item="slotData.item" class="equipped-item" @hover="handleItemHover" />
+      <ItemSlot v-if="slotData.item" :item="slotData.item" :disabled="props.disabled === true" class="equipped-item" @hover="handleItemHover" />
       <div v-else class="empty-slot">
         <img v-if="slotData.emptySlotImage" :src="slotData.emptySlotImage" alt="Empty slot" class="empty-slot-image" />
       </div>
@@ -81,8 +82,8 @@ const itemSlotsWithItems = computed(() => {
         ...floatingStyles,
         willChange: 'transform'
       }" @mouseenter="handlePopupEnter" @mouseleave="handlePopupLeave">
-        <!-- ItemChoices at the top (only if there are choices) -->
-        <div v-if="hasChoices" class="item-choices-wrapper">
+        <!-- ItemChoices at the top (only if there are choices and not disabled) -->
+        <div v-if="hasChoices && props.disabled !== true" class="item-choices-wrapper">
           <ItemChoices :item="displayedItem!" />
         </div>
 

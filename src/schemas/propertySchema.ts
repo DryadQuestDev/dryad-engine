@@ -3,6 +3,7 @@ import { Schema, SchemaToType } from '../utility/schema';
 export const PropertySchema = {
   uid: { type: 'uid', required: true, tooltip: 'Unique identifier for the property.' },
   id: { type: 'string', required: true, tooltip: 'Property ID used to reference this property in code.' },
+  is_constant: { type: 'boolean', tooltip: 'If true, value cannot be changed at runtime and is excluded from saves.' },
   name: { type: 'string', tooltip: 'Display name for the property.' }, //todo: remove?
   description: { type: "textarea", tooltip: 'Detailed description of what this property represents.' },
 
@@ -10,10 +11,10 @@ export const PropertySchema = {
 
   // for numbers only
   precision: { type: 'number', tooltip: 'Number of decimal places. E.g., 0->69, 1->69.5, 2->69.57', show: { type: ['number'] } },
-  is_negative: { type: 'boolean', tooltip: 'If true, reducing this value is positive (e.g., damage taken). Used for UI coloring.', show: { type: ['number'] } },
-  min_value: { type: 'number', tooltip: 'Minimum allowed value for this property.', show: { type: ['number'] } },
-  max_value: { type: 'number', tooltip: 'Maximum allowed value for this property.', show: { type: ['number'] } },
-  can_overflow: { type: 'boolean', tooltip: 'If true, the value can exceed the maximum value.', show: { type: ['number'] } },
+  is_negative: { type: 'boolean', tooltip: 'If true, reducing this value is positive (e.g., damage taken). Used for UI coloring.', show: { type: ['number'], is_constant: [false, undefined] } },
+  min_value: { type: 'number', tooltip: 'Minimum allowed value for this property.', show: { type: ['number'], is_constant: [false, undefined] } },
+  max_value: { type: 'number', tooltip: 'Maximum allowed value for this property.', show: { type: ['number'], is_constant: [false, undefined] } },
+  can_overflow: { type: 'boolean', tooltip: 'If true, the value can exceed the maximum value.', show: { type: ['number'], is_constant: [false, undefined] } },
 
   // type-specific default values
   default_value_number: { type: 'number', tooltip: 'Default number value.', show: { type: ['number'] } },

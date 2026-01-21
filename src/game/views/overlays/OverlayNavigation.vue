@@ -391,6 +391,9 @@ function closeFullMap() {
             <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
               ref="flashContentElement" class="flash-content"
               v-html="game.dungeonSystem.cachedFlashArray.value.join('<br>')"></div>
+
+            <!-- Scene choices for text dungeons -->
+            <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
           </div>
         </div>
 

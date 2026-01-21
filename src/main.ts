@@ -44,6 +44,11 @@ app.config.errorHandler = (err, _instance, info) => {
   );
 };
 
+// Configure Vue warning handler (keeps warnings visible in production)
+app.config.warnHandler = (msg, _instance, trace) => {
+  gameLogger.warn(`[Vue] ${msg}${trace ? '\n' + trace : ''}`);
+};
+
 // Initialize global error handlers for non-Vue errors
 initGlobalErrorHandlers();
 

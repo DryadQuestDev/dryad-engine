@@ -238,7 +238,7 @@ const statusId = character.getSkillStatusId("fire_magic", "slot_fireball");
 ```js
 // Triggered when a skill is learned
 game.on("skill_learned", (treeId, skillId, level) => {
-  game.addFlash("Learned a new skill!");
+  game.showNotification("Learned a new skill!");
 });
 
 // Triggered when a skill is unlearned

@@ -53,9 +53,9 @@ interface GameEvents {
   /** Triggered when entering a dungeon */
   dungeon_enter: (dungeonId: string, roomId: string) => boolean | void;
   /** Triggered before entering a room */
-  room_enter_before: (roomId: string) => boolean | void;
+  room_enter_before: (roomId: string, dungeonId: string) => boolean | void;
   /** Triggered after entering a room */
-  room_enter_after: (roomId: string) => boolean | void;
+  room_enter_after: (roomId: string, dungeonId: string) => boolean | void;
   /** Triggered before a scene plays */
   scene_play_before: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
   /** Triggered after a scene plays */
@@ -222,6 +222,58 @@ interface Asset {
   skins?: string[];
   /** Whether to loop Spine animation */
   loop?: boolean;
+}
+
+/**
+ * DungeonLine - A single line/scene entry in a dungeon.
+ * Line IDs use prefixes: # (scenes), ~ (choices), @ (encounters), ! (encounter choices), $ (templates)
+ */
+interface DungeonLine {
+  /** Line identifier with type prefix (e.g., "#room1.greetings.1.1.1", "$dungeon_name") */
+  id: string;
+  /** The content/text of the line */
+  val: string;
+  /** Optional parameters for the line */
+  params?: Record<string, any>;
+  /** Optional anchor point */
+  anchor?: string;
+}
+
+/**
+ * DungeonData - Runtime data for a dungeon instance.
+ * Tracks visited rooms, events, flags, and other state.
+ */
+interface DungeonData {
+  /** Current dungeon level */
+  dungeonLvl: number;
+  /** Set of visited room IDs */
+  visitedRooms: Set<string>;
+  /** Set of visible room IDs */
+  visibleRooms: Set<string>;
+  /** Set of visited event IDs */
+  visitedEvents: Set<string>;
+  /** Set of viewed event IDs */
+  viewEvents: Set<string>;
+  /** Set of visited inventory IDs */
+  visitedInventories: Set<string>;
+  /** Set of visited choice IDs */
+  visitedChoices: Set<string>;
+  /** Map of flag names to values */
+  flags: Map<string, number>;
+  /** Set a flag value */
+  setFlag(id: string, value: number): void;
+  /** Get a flag value (returns 0 if not set) */
+  getFlag(id: string): number;
+  /** Add to a flag value */
+  addFlag(id: string, value: number): void;
+  /** Remove a flag */
+  removeFlag(id: string): boolean;
+  /** Check if a room has been visited */
+  isRoomVisited(roomId: string): boolean;
+  /** Check if a room is visible */
+  isRoomVisible(roomId: string): boolean;
+  /** Check if an event has been visited */
+  isEventVisited(eventId: string): boolean;
 }
 
 interface Game {
@@ -486,6 +538,71 @@ interface Game {
    * game.enter('forest.entrance'); // Enter specific dungeon and room
    */
   enter(val: string): void;
+
+  /**
+   * Play a specific scene in a dungeon. Accepts shorthand that is resolved internally.
+   * @param sceneId - The scene ID (shorthand like "#room.scene" or full "#room.scene.1.1.1"), or null to exit
+   * @param dungeonId - Optional dungeon ID (uses current dungeon if null)
+   * @example
+   * game.playScene('#room1.greetings'); // Shorthand, resolved to #room1.greetings.1.1.1
+   * game.playScene('#room1.intro', 'forest_dungeon'); // With specific dungeon
+   * game.playScene('&my_anchor'); // Jump to anchor
+   * game.playScene(null); // Exit current scene
+   */
+  playScene(sceneId: string | null, dungeonId?: string | null): void;
+
+  /**
+   * Resolve a shorthand scene reference to a full scene ID and dungeon ID.
+   * Useful when you need to resolve the scene before calling playScene, e.g., to validate or modify.
+   * @param value - The scene reference (shorthand or full ID)
+   * @returns Object with resolved sceneId and dungeonId (dungeonId is null if not specified in reference)
+   * @example
+   * // Resolve dungeon.room.scene format
+   * const { sceneId, dungeonId } = game.resolveSceneId('factions.goblins.scouts');
+   * // sceneId: '#goblins.scouts.1.1.1', dungeonId: 'factions'
+   * game.playScene(sceneId, dungeonId);
+   *
+   * // Resolve room.scene format (uses current dungeon)
+   * const resolved = game.resolveSceneId('tavern.greeting');
+   * // sceneId: '#tavern.greeting.1.1.1', dungeonId: null
+   *
+   * // Resolve anchor format
+   * const anchor = game.resolveSceneId('&my_anchor');
+   * // Returns the scene ID where the anchor is defined
+   */
+  resolveSceneId(value: string): { sceneId: string | null, dungeonId: string | null };
+
+  /**
+   * Get the current dungeon ID.
+   * @param dungeonId - Optional dungeon ID to return (uses current if null)
+   * @returns The dungeon ID
+   * @example
+   * const id = game.getDungeonId(); // Get current dungeon ID
+   * const id = game.getDungeonId('forest'); // Returns 'forest'
+   */
+  getDungeonId(dungeonId?: string | null): string;
+
+  /**
+   * Get a dungeon line by its exact ID. Does not resolve shorthand.
+   * @param lineId - The exact line ID (e.g., "#room1.greetings.1.1.1", "$dungeon_name")
+   * @param dungeonId - Optional dungeon ID (uses current if null)
+   * @returns The DungeonLine object
+   * @example
+   * const line = game.getLineByDungeonId('#room1.greetings.1.1.1');
+   * const name = game.getLineByDungeonId('$dungeon_name');
+   */
+  getLineByDungeonId(lineId: string, dungeonId?: string | null): DungeonLine;
+
+  /**
+   * Get dungeon runtime data by ID.
+   * @param id - The dungeon ID
+   * @returns The DungeonData object with visited rooms, flags, etc.
+   * @example
+   * const data = game.getDungeonDataById('forest');
+   * console.log(data.visitedRooms); // Set of visited room IDs
+   * console.log(data.getFlag('boss_defeated')); // Get flag value
+   */
+  getDungeonDataById(id: string): DungeonData;
 
   /**
    * Add assets to the current scene.
@@ -903,18 +1020,40 @@ interface Game {
    */
   deleteStore(id: string): void;
 
+  /**
+   * Get a reactive computed reference to store data.
+   * Use this in Vue components instead of getStore() to maintain reactivity.
+   * @param id - The store ID
+   * @param key - Optional key to get a specific item from the store
+   * @returns A computed ref that reactively tracks the store data
+   * @example
+   * // Get reactive ref to specific item - automatically updates when store changes
+   * const run = game.useStore("runs", runUid);
+   * // Access with .value in setup, automatic in template
+   * console.log(run.value?.turn);
+   *
+   * // No need to wrap in computed() - it's already reactive
+   * const faction = computed(() => run.value?.factions[factionId]); // Still need computed for derived values
+   */
+  useStore<T = any>(id: string, key?: string): import('vue').ComputedRef<T | undefined>;
+
   // ============================================
   // Data Access
   // ============================================
 
   /**
    * Get game data by file path. Provides centralized access to all game data.
+   * Returns a deep copy by default. Pass `noCopy: true` for read-only access without copying.
    * @param filePath - File path identifier (e.g., "character_stats", "dungeons/my_dungeon/content_parsed", "plugins_data/my_plugin/my_schema")
+   * @param noCopy - If true, returns original data (read-only, do not mutate)
    * @returns Map of data indexed by ID.
    * @throws Error if data not found
    * @example
-   * // Core data
+   * // Core data (returns copy, safe to modify)
    * const stats = game.getData("character_stats");
+   *
+   * // Read-only access (no copy, better performance)
+   * const stats = game.getData("character_stats", true);
    *
    * // Get a specific item from the Map
    * const healthStat = game.getData("character_stats")?.get("health");
@@ -928,7 +1067,7 @@ interface Game {
    * // Plugin data
    * const pluginData = game.getData("plugins_data/my_plugin/my_schema");
    */
-  getData(filePath: string): Map<string, any> | undefined;
+  getData(filePath: string, noCopy?: boolean): Map<string, any> | undefined;
 
   /**
    * Get a global property by ID.
@@ -937,6 +1076,112 @@ interface Game {
    * @throws Error if property not found
    */
   getProperty(id: string): Property;
+
+  // ============================================
+  // Pool System (Weighted Random Selection)
+  // ============================================
+
+  /**
+   * Draw items from a pool using weighted random selection.
+   * Pools are configured in the editor with filter-based entity groups.
+   *
+   * @param entry - Pool entry ID (string) or custom entry object
+   * @param settings - Optional draw settings
+   * @returns Array of template IDs drawn from the pool
+   *
+   * @example
+   * // Basic usage - draw from a predefined pool entry
+   * const items = game.drawFromPool('common_loot');
+   *
+   * @example
+   * // Multiple draws with unique results
+   * const rewards = game.drawFromPool('boss_drops', {
+   *   draws: 3,
+   *   unique: true  // No duplicate items
+   * });
+   *
+   * @example
+   * // Chance mode - each entity has weight% chance to win
+   * const bonusLoot = game.drawFromPool('rare_rewards', {
+   *   type: 'chance'  // weight is 0-100% probability
+   * });
+   *
+   * @example
+   * // Custom runtime entry (no need to define in editor)
+   * const custom = game.drawFromPool({
+   *   pool: 'item_pool',
+   *   entities: [
+   *     { weight: 80, count: 2, filters_include: { 'traits.rarity': ['common'] } },
+   *     { weight: 20, count: 1, filters_include: { 'traits.rarity': ['rare'] } }
+   *   ]
+   * });
+   *
+   * @example
+   * // Using $all for AND logic in filters
+   * const weapons = game.drawFromPool({
+   *   pool: 'item_pool',
+   *   entities: [{
+   *     weight: 1,
+   *     count: 1,
+   *     filters_include: {
+   *       'tags': { $all: ['weapon', 'melee'] },  // Must have BOTH tags
+   *       'traits.rarity': ['common', 'uncommon']  // Either rarity (OR)
+   *     }
+   *   }]
+   * });
+   */
+  drawFromPool(entry: string | PoolEntry, settings?: PoolSettings): string[];
+
+  /**
+   * Draw items from a collection based on random selection.
+   * Accepts Array, Map, or Record as input and always returns an array of drawn items.
+   *
+   * @param data - Collection to draw from (Array, Map, or Record)
+   * @param settings - Optional draw settings
+   * @returns Array of drawn items
+   *
+   * @example
+   * // Get regions data and draw 3 weighted random regions
+   * const regions = game.getData('plugins_data/my_plugin/regions');
+   * const selected = game.drawFromCollection(regions, { type: 'weight', count: 3 });
+   *
+   * @example
+   * // Uniform random selection from an array
+   * const enemies = [{ id: 'goblin' }, { id: 'orc' }, { id: 'troll' }];
+   * const spawned = game.drawFromCollection(enemies, { type: 'uniform', count: 2 });
+   *
+   * @example
+   * // Chance-based selection (each item rolled independently)
+   * const loot = game.drawFromCollection(items, { type: 'chance', count: 1 });
+   * // May return 0 or more items based on each item's 'chance' field
+   */
+  drawFromCollection<T>(
+    data: T[] | Map<string, T> | Record<string, T>,
+    settings?: CollectionSettings
+  ): T[];
+
+  /**
+   * Convert a Record to an array of objects with id and value fields.
+   * Useful for preparing data for drawFromCollection.
+   *
+   * @param data - Record to convert
+   * @param valueField - Name for the value field (e.g., 'weight', 'amount', 'chance')
+   * @returns Array of objects with id and the specified value field
+   *
+   * @example
+   * // Convert faction weights to array for weighted drawing
+   * const weights = { goblins: 50, orcs: 30, satyrs: 20 };
+   * const pool = game.toEntries(weights, 'weight');
+   * // Result: [{ id: 'goblins', weight: 50 }, { id: 'orcs', weight: 30 }, { id: 'satyrs', weight: 20 }]
+   * const drawn = game.drawFromCollection(pool, { type: 'weight', count: 2 });
+   *
+   * @example
+   * // Use for resource amounts
+   * const resources = { gold: 100, wood: 50 };
+   * const list = game.toEntries(resources, 'amount');
+   * // Result: [{ id: 'gold', amount: 100 }, { id: 'wood', amount: 50 }]
+   */
+  toEntries<T>(data: Record<string, T>, valueField: string): { id: string;[key: string]: T | string }[];
 
   // ============================================
   // Logic System (Conditions, Actions, Placeholders)
@@ -992,7 +1237,7 @@ interface Game {
    * @param computer - Function that computes the stat value
    * @example
    * game.registerStatComputer("damage", (character) => {
-   *   return character.getStat('power').value * 10;
+   *   return character.getStat('power') * 10;
    * });
    */
   registerStatComputer(key: string, computer: Function): void;
@@ -1059,6 +1304,17 @@ interface Game {
    * game.showNotification("Hello, world!");
    */
   showNotification(message: string): void;
+
+  /**
+   * Check if dev mode is enabled.
+   * Dev mode is enabled when localStorage has 'devMode' set to 'true'.
+   * @returns true if dev mode is enabled
+   * @example
+   * if (game.isDevMode()) {
+   *   console.log('Debug info:', someData);
+   * }
+   */
+  isDevMode(): boolean;
 }
 
 /**
@@ -1099,7 +1355,7 @@ interface CharacterSkinLayerObject {
  * @example
  * // Get a character and read their stats
  * const mc = game.getCharacter('mc');
- * const health = mc.getStat('health').value;
+ * const health = mc.getStat('health');
  * const currentHp = mc.getResource('health');
  *
  * @example
@@ -1114,6 +1370,9 @@ interface Character {
 
   /** Template ID this character was created from */
   templateId: string;
+
+  /** Tags for this character */
+  tags: string[];
 
   /** Custom actions registered on this character */
   actions: Record<string, any>;
@@ -1153,6 +1412,27 @@ interface Character {
    * Can be reassigned in character_render listeners to filter/modify displayed layers.
    */
   renderedLayers: CharacterSkinLayerObject[];
+
+  // ============================================
+  // ID Methods
+  // ============================================
+
+  /**
+   * Get the character's ID.
+   * @returns The character ID
+   * @example
+   * const id = character.getId();
+   */
+  getId(): string;
+
+  /**
+   * Set the character's ID.
+   * Also updates the private inventory ID to match.
+   * @param id - The new character ID
+   * @example
+   * character.setId('new_character_id');
+   */
+  setId(id: string): void;
 
   // ============================================
   // Skill Tree Methods
@@ -1293,6 +1573,31 @@ interface Character {
    */
   getStatus(id: string): Status;
 
+  /**
+   * Set a status's stack count with proper resource adjustment.
+   * Use this instead of direct `status.currentStacks` assignment when you need
+   * replenishable resources (like health) to adjust with the stat change.
+   * @param statusId - The status ID
+   * @param newStacks - The new stack count
+   * @throws Error if status doesn't exist
+   * @example
+   * character.setStatusStacks("power_buff", 3);
+   */
+  setStatusStacks(statusId: string, newStacks: number): void;
+
+  /**
+   * Add stacks to a status with proper resource adjustment.
+   * Use this instead of `status.addStacks()` when you need replenishable
+   * resources (like health) to adjust with the stat change.
+   * @param statusId - The status ID
+   * @param amount - Number of stacks to add (default: 1)
+   * @returns true if stacks were added successfully
+   * @throws Error if status doesn't exist
+   * @example
+   * character.addStatusStacks("poison", 2);
+   */
+  addStatusStacks(statusId: string, amount?: number): boolean;
+
   // ============================================
   // Trait & Attribute Methods
   // ============================================
@@ -1342,14 +1647,27 @@ interface Character {
   // ============================================
 
   /**
-   * Get a stat's computed value (sum of all status contributions).
+   * Get a stat's computed value directly as a number.
+   * Works reactively in Vue templates and computed properties.
    * @param name - The stat name
-   * @returns Object with reactive value property
+   * @returns The stat value
    * @throws Error if stat doesn't exist in schema
    * @example
-   * const maxHealth = character.getStat('health').value;
+   * const maxHealth = character.getStat('health');
    */
-  getStat(name: string): { value: number };
+  getStat(name: string): number;
+
+  /**
+   * Get a stat's reactive ComputedRef.
+   * Use when you need the ref itself (e.g., for watch() or storing).
+   * @param name - The stat name
+   * @returns Reactive ref that updates when stat changes
+   * @throws Error if stat doesn't exist in schema
+   * @example
+   * const healthRef = character.getStatRef('health');
+   * watch(healthRef, (newVal) => console.log('Health changed:', newVal));
+   */
+  getStatRef(name: string): { value: number };
 
   /**
    * Get the current value of a resource (e.g., current HP).
@@ -1605,7 +1923,7 @@ interface Property {
   name?: string;
 
   /** Data type of this property */
-  type: 'number' | 'boolean' | 'string' | 'array';
+  type: 'number' | 'boolean' | 'string' | 'array' | 'object';
 
   /** Decimal precision for number types (e.g., 2 = two decimal places) */
   precision?: number;
@@ -1614,20 +1932,29 @@ interface Property {
   isNegative?: boolean;
 
   /** The default value this property was initialized with */
-  defaultValue?: number | boolean | string | any[];
+  defaultValue?: number | boolean | string | any[] | Record<string, any>;
 
   /** Whether the value can exceed maxValue (for number types) */
   canOverflow?: boolean;
 
   /**
+   * Whether this property is constant and excluded from save files.
+   * Constant properties cannot be modified at runtime - any attempt to change
+   * the value will log a warning and be ignored.
+   * Use this for game constants that modders can override in property definitions.
+   */
+  skipSave: boolean;
+
+  /**
    * The current value of the property.
    * For number types, setting this value will automatically apply clamping and precision.
+   * For constant properties (skipSave=true), attempting to set this will be ignored.
    * @example
    * const corruption = game.getProperty('corruption');
    * corruption.currentValue = 50;
    * console.log(corruption.currentValue); // 50
    */
-  currentValue: number | boolean | string | any[] | undefined;
+  currentValue: any;
 
   // ============================================
   // Value Accessors
@@ -1639,16 +1966,17 @@ interface Property {
    * @example
    * const value = game.getProperty('corruption').getCurrentValue();
    */
-  getCurrentValue(): number | boolean | string | any[] | undefined;
+  getCurrentValue(): number | boolean | string | any[] | Record<string, any> | undefined;
 
   /**
    * Set the current value of the property.
    * For number types, the value will be clamped to min/max bounds and precision applied.
+   * For constant properties (skipSave=true), this will log a warning and be ignored.
    * @param value - The new value to set
    * @example
    * game.getProperty('corruption').setCurrentValue(100);
    */
-  setCurrentValue(value: number | boolean | string | any[]): void;
+  setCurrentValue(value: number | boolean | string | any[] | Record<string, any>): void;
 
   /**
    * Add a value to the current value (number types only).
@@ -1974,7 +2302,7 @@ interface Item {
  *
  * @example
  * // Work with currencies
- * const goldAmount = inventory.getCurrencyAmount('gold');
+ * const goldAmount = inventory.getItemQuantity('gold');
  * if (inventory.canAffordPrice({ gold: 100 })) {
  *   inventory.deductCurrency({ gold: 100 });
  * }
@@ -2224,14 +2552,15 @@ interface Inventory {
   canAfford(item: Item): boolean;
 
   /**
-   * Get the total amount of a specific currency in this inventory.
-   * Only counts unequipped currency items.
-   * @param currencyId - The currency item template ID
-   * @returns Total quantity of unequipped currency items
+   * Get the total quantity of a specific item in this inventory.
+   * Only counts unequipped items.
+   * @param itemId - The item template ID
+   * @returns Total quantity of unequipped items with this ID
    * @example
-   * const goldAmount = inventory.getCurrencyAmount('gold');
+   * const goldAmount = inventory.getItemQuantity('gold');
+   * const potionCount = inventory.getItemQuantity('health_potion');
    */
-  getCurrencyAmount(currencyId: string): number;
+  getItemQuantity(itemId: string): number;
 
   /**
    * Check if this inventory can afford a specific price.
@@ -2511,11 +2840,202 @@ interface Choice {
   setParams(params: Record<string, any> | undefined): void;
 }
 
+/**
+ * PoolSettings - Configuration for pool drawing operations.
+ *
+ * @example
+ * // Weight mode (default) - one entity wins based on relative weights
+ * game.drawFromPool('loot_table', { type: 'weight' });
+ *
+ * @example
+ * // Chance mode - each entity has weight% independent chance
+ * game.drawFromPool('bonus_drops', { type: 'chance' });
+ *
+ * @example
+ * // Multiple unique draws
+ * game.drawFromPool('starter_pack', { draws: 5, unique: true });
+ */
+interface PoolSettings {
+  /**
+   * Selection mode for entities.
+   * - 'weight': One entity wins based on weighted random (default)
+   * - 'chance': Each entity has weight% chance to win independently (0+ winners)
+   */
+  type?: 'weight' | 'chance';
+
+  /**
+   * Number of times to draw from the pool.
+   * Each draw selects winner(s) and draws their count of items.
+   * @default 1
+   */
+  draws?: number;
+
+  /**
+   * If true, drawn items are removed from the pool for subsequent draws.
+   * Prevents duplicate items across all draws.
+   * @default false
+   */
+  unique?: boolean;
+
+  /**
+   * Use runtime data instead of the pool's configured source.
+   * Accepts either a Map or an array of objects.
+   * Arrays are auto-converted to Map using each item's `id` or `uid` property as key.
+   */
+  customData?: Map<string, any> | any[];
+}
+
+/**
+ * CollectionSettings - Configuration for drawFromCollection operations.
+ *
+ * @example
+ * // Weight mode - uses 'weight' field, always returns exactly count items
+ * game.drawFromCollection(data, { type: 'weight', count: 3 });
+ *
+ * @example
+ * // Uniform mode - equal probability, returns exactly count items
+ * game.drawFromCollection(data, { type: 'uniform', count: 2 });
+ *
+ * @example
+ * // Chance mode - uses 'chance' field (0-100%), may return 0 or more items
+ * game.drawFromCollection(data, { type: 'chance', count: 1 });
+ */
+interface CollectionSettings {
+  /**
+   * Selection mode for items.
+   * - 'uniform': Equal probability for all items (default)
+   * - 'weight': Uses 'weight' field on items (default: 1)
+   * - 'chance': Uses 'chance' field as percentage (default: 50%)
+   */
+  type?: 'uniform' | 'weight' | 'chance';
+
+  /**
+   * Number of items to draw.
+   * For 'uniform' and 'weight': returns exactly this many items.
+   * For 'chance': each item is rolled this many times independently.
+   * @default 1
+   */
+  count?: number;
+
+  /**
+   * If true, drawn items cannot be selected again.
+   * Only applies to 'uniform' and 'weight' modes.
+   * @default false
+   */
+  unique?: boolean;
+}
+
+/**
+ * PoolEntry - A pool entry definition for weighted random selection.
+ * Can be created in the editor or constructed at runtime.
+ */
+interface PoolEntry {
+  /** Reference to the pool definition ID */
+  pool: string;
+
+  /** Entity groups to draw from */
+  entities?: PoolEntityGroup[];
+
+  /** Tags for categorizing entries */
+  tags?: string[];
+}
+
+/**
+ * PoolEntityGroup - An entity group within a pool entry.
+ * Each group has its own weight/chance, count, and filters.
+ */
+interface PoolEntityGroup {
+  /** Optional identifier for the entity group */
+  id?: string;
+
+  /**
+   * Relative weight for 'weight' mode selection.
+   * Can be any positive number (e.g., 1, 10, 100, 10000).
+   * Higher weight = higher probability of being selected.
+   * @default 1
+   */
+  weight?: number;
+
+  /**
+   * Percentage chance (0-100) for 'chance' mode selection.
+   * Each entity has an independent chance to be selected.
+   * @default 50
+   */
+  chance?: number;
+
+  /**
+   * Number of items to draw when this entity wins.
+   * @default 1
+   */
+  count?: number;
+
+  /**
+   * Include filters - items must match ALL specified criteria.
+   * Filter formats:
+   * - Array `['a', 'b']`: Item has ANY of these values (OR)
+   * - Object `{ $all: ['a', 'b'] }`: Item has ALL values (AND)
+   * - Range `{ min: 1, max: 10 }`: Numeric value in range
+   * - Boolean/String: Exact match
+   */
+  filters_include?: Record<string, any>;
+
+  /**
+   * Exclude filters - items matching ANY criteria are excluded.
+   * Same format as filters_include.
+   */
+  filters_exclude?: Record<string, any>;
+}
+
+// ============================================
+// Global Type Aliases (for JSDoc: @param {Character} etc.)
+// ============================================
+
+type _GameEvents = GameEvents;
+type _CustomComponent = CustomComponent;
+type _ActionObject = ActionObject;
+type _Asset = Asset;
+type _DungeonLine = DungeonLine;
+type _DungeonData = DungeonData;
+type _Game = Game;
+type _CharacterSkinLayerObject = CharacterSkinLayerObject;
+type _Character = Character;
+type _Property = Property;
+type _Item = Item;
+type _Inventory = Inventory;
+type _Status = Status;
+type _ItemSlot = ItemSlot;
+type _Choice = Choice;
+type _PoolSettings = PoolSettings;
+type _CollectionSettings = CollectionSettings;
+type _PoolEntry = PoolEntry;
+type _PoolEntityGroup = PoolEntityGroup;
+
 // ============================================
 // Global Window Interface
 // ============================================
 
 declare global {
+  // Expose engine types globally for game scripts
+  type GameEvents = _GameEvents;
+  type CustomComponent = _CustomComponent;
+  type ActionObject = _ActionObject;
+  type Asset = _Asset;
+  type DungeonLine = _DungeonLine;
+  type DungeonData = _DungeonData;
+  type Game = _Game;
+  type CharacterSkinLayerObject = _CharacterSkinLayerObject;
+  type Character = _Character;
+  type Property = _Property;
+  type Item = _Item;
+  type Inventory = _Inventory;
+  type Status = _Status;
+  type ItemSlot = _ItemSlot;
+  type Choice = _Choice;
+  type PoolSettings = _PoolSettings;
+  type CollectionSettings = _CollectionSettings;
+  type PoolEntry = _PoolEntry;
+  type PoolEntityGroup = _PoolEntityGroup;
+
   interface Window {
     engine: {
       game: Game;
@@ -2527,14 +3047,55 @@ declare global {
       fastCopy: typeof FastCopyTypes;
       /** Reusable Vue components for custom scripts */
       components: {
-        /** Character face/portrait component. Props: character (Character) */
-        CharacterFace: any;
-        /** Full character doll with skin layers. Props: character (Character), width?, height?, showFace? */
-        CharacterDoll: any;
-        /** Background asset component for rendering images/videos/spine with transitions. Props: asset (Asset) */
-        BackgroundAsset: any;
+        // === General ===
         /** Renders all components registered to a slot. Props: slot (string). Use to create custom extensible UI areas. */
         CustomComponentContainer: any;
+        /** Generic animated progress bar for percentage-based values. Props: current (number), max (number), barColor?, bgColor?, width?, height?, hideMax? */
+        ProgressBar: any;
+
+        // === Characters ===
+        /** Character face/portrait component. Props: character (Character), showName? (boolean), size? (number, default 100), borderRadius? (string, default "50%") */
+        CharacterFace: any;
+        /** Full character doll with skin layers. Props: character (Character) */
+        CharacterDoll: any;
+        /** Default character sheet layout with statuses, stats, and inventory sections. Props: character (Character) */
+        CharacterSheet: any;
+        /** Displays character stats organized into groups. Props: character (Character), groups? (StatGroup[]) */
+        CharacterStats: any;
+        /** Displays character statuses as compact bricks with hover popups. Props: character (Character) */
+        CharacterStatuses: any;
+        /** Renders a character in a scene slot with animation support. Props: character (Character), slot (SceneSlot), showItemSlots?, enableAppear? */
+        CharacterSlot: any;
+        /** Displays character doll with stats/statuses panel. Supports single or multiple characters with face switching. Props: characters (Character | Character[]), initialIndex? */
+        CharacterViewer: any;
+        /** Renders a single stat entry as resource bar or text. Props: character (Character), statId (string). Emits: statHover, statLeave */
+        StatEntity: any;
+
+        // === Items ===
+        /** Displays an inventory with item grid. Props: inventory_id (string) */
+        InventoryComponent: any;
+        /** Displays inventory header with count and weight stats. Props: inventory_id (string) */
+        InventoryHeader: any;
+        /** Renders a grid of items with popup support. Props: items ((Item | null)[]) */
+        ItemGrid: any;
+        /** Renders a single item slot with icon, quantity, durability. Props: item (Item). Emits: click, dragstart, hover */
+        ItemSlot: any;
+        /** Displays equipped item slots for a character. Props: character (Character) */
+        ItemSlots: any;
+        /** Displays detailed item information in a popup card. Props: item (Item) */
+        ItemCard: any;
+        /** Displays available actions/choices for an item. Props: item (Item) */
+        ItemChoices: any;
+
+        // === Skills ===
+        /** Renders a skill tree with nodes, connections, and skill learning. Props: character (Character) */
+        SkillTree: any;
+        /** Renders a single skill node in a skill tree. Props: skill (any), character (Character), treeId (string), allSkills (any[]) */
+        SkillSlot: any;
+
+        // === Assets ===
+        /** Background asset component for rendering images/videos/spine with transitions. Props: asset (Asset) */
+        BackgroundAsset: any;
       };
     };
   }

@@ -5,6 +5,8 @@ import { computed, ComputedRef } from "vue";
 import { gameLogger } from "../utils/logger";
 import { CustomChoiceObject } from "../../schemas/customChoiceSchema";
 import { Skip } from "../../utility/save-system";
+import { PoolDefinitionObject } from "../../schemas/poolDefinitionSchema";
+import { PoolEntryObject } from "../../schemas/poolEntrySchema";
 
 export type ActionObject = {
     action?: Function;
@@ -865,12 +867,459 @@ export class LogicSystem {
     }
 
 
+    // POOL SYSTEM
+    public poolDefinitionsMap = new Map<string, PoolDefinitionObject>();
+    public poolEntriesMap = new Map<string, PoolEntryObject>();
+
+    /**
+     * Convert an array or Map to a Map. Arrays use 'id' or 'uid' as key.
+     */
+    private toMap(data: Map<string, any> | any[]): Map<string, any> {
+        if (!Array.isArray(data)) {
+            return data;
+        }
+        const map = new Map<string, any>();
+        for (const item of data) {
+            const key = item.id || item.uid;
+            if (key) {
+                map.set(key, item);
+            } else {
+                gameLogger.warn('toMap: item missing id/uid property, skipping');
+            }
+        }
+        return map;
+    }
 
 
+    /**
+     * Draw templates from a pool based on weighted random selection.
+     * @param entry Pool entry ID or custom entry object
+     * @param settings Optional draw settings (type, draws, unique)
+     * @returns Array of template IDs drawn from the pool
+     */
+    public drawFromPool(entry: string | PoolEntryObject, settings?: PoolSettings): string[] {
+        // 1. Resolve pool entry
+        const poolEntry = typeof entry === 'string'
+            ? this.poolEntriesMap.get(entry)
+            : entry;
+
+        if (!poolEntry) {
+            gameLogger.error(`Pool entry not found: ${entry}`);
+            return [];
+        }
+
+        // 2. Get pool definition
+        const poolId = poolEntry.pool;
+        if (!poolId) {
+            gameLogger.error(`Pool entry has no pool reference`);
+            return [];
+        }
+        const poolDef = this.poolDefinitionsMap.get(poolId);
+        if (!poolDef) {
+            gameLogger.error(`Pool definition not found: ${poolId}`);
+            return [];
+        }
+
+        // 3. Get source templates - use customData if provided, otherwise game.getData()
+        const sourceId = poolDef.source;
+        if (!sourceId && !settings?.customData) {
+            gameLogger.error(`Pool definition has no source: ${poolId}`);
+            return [];
+        }
+
+        // Get source data
+        let sourceMap: Map<string, any> | undefined;
+        if (settings?.customData) {
+            sourceMap = this.toMap(settings.customData);
+        } else {
+            sourceMap = this.game.getData(sourceId!);
+        }
+
+        if (!sourceMap) {
+            gameLogger.error(`Source data not found: ${sourceId}`);
+            return [];
+        }
+
+        // 4. Settings with defaults
+        const type = settings?.type || 'weight';
+        const draws = settings?.draws || 1;
+        const unique = settings?.unique || false;
+
+        // 5. getData already returns a deep copy, so we can mutate directly
+        const workingSourceMap = sourceMap;
+
+        const result: string[] = [];
+
+        // 6. Perform draws
+        for (let d = 0; d < draws; d++) {
+            if (type === 'weight') {
+                // Weight mode: one entity wins, re-roll if it can't fulfill requirements
+                const excludedEntities = new Set<PoolEntityGroup>();
+                let drawComplete = false;
+
+                while (!drawComplete && excludedEntities.size < (poolEntry.entities?.length || 0)) {
+                    const availableEntities = poolEntry.entities?.filter(e => !excludedEntities.has(e));
+                    const winner = this.weightedRandomSelect(availableEntities);
+
+                    if (!winner) {
+                        // No more entities to try
+                        break;
+                    }
+
+                    const filtered = this.getFilteredTemplates(workingSourceMap, winner);
+                    const count = winner.count || 1;
+
+                    // Check if winner can fulfill the requirement
+                    if (unique && filtered.length < count) {
+                        gameLogger.warn(`Pool entity "${winner.id || 'unnamed'}" cannot provide ${count} unique items (only ${filtered.length} available) - re-rolling`);
+                        excludedEntities.add(winner);
+                        continue;
+                    }
+
+                    if (filtered.length === 0) {
+                        gameLogger.warn(`Pool entity "${winner.id || 'unnamed'}" has no matching items - re-rolling`);
+                        excludedEntities.add(winner);
+                        continue;
+                    }
+
+                    // Draw templates
+                    for (let i = 0; i < count && filtered.length > 0; i++) {
+                        const idx = Math.floor(Math.random() * filtered.length);
+                        const templateId = filtered[idx];
+                        result.push(templateId);
+
+                        if (unique) {
+                            workingSourceMap.delete(templateId);
+                            filtered.splice(idx, 1);
+                        }
+                    }
+
+                    drawComplete = true;
+                }
+            } else {
+                // Chance mode: each entity independently wins or loses (no re-rolling)
+                const winners = this.chanceSelect(poolEntry.entities);
+
+                for (const winner of winners) {
+                    const filtered = this.getFilteredTemplates(workingSourceMap, winner);
+                    const count = winner.count || 1;
+
+                    if (unique && filtered.length < count) {
+                        gameLogger.warn(`Pool entity "${winner.id || 'unnamed'}" cannot provide ${count} unique items (only ${filtered.length} available)`);
+                    }
+
+                    for (let i = 0; i < count && filtered.length > 0; i++) {
+                        const idx = Math.floor(Math.random() * filtered.length);
+                        const templateId = filtered[idx];
+                        result.push(templateId);
+
+                        if (unique) {
+                            workingSourceMap.delete(templateId);
+                            filtered.splice(idx, 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Select one entity based on weighted random selection.
+     */
+    private weightedRandomSelect(entities: PoolEntryObject['entities']): PoolEntityGroup | null {
+        if (!entities || entities.length === 0) return null;
+
+        const totalWeight = entities.reduce((sum, e) => sum + (e.weight || 1), 0);
+        if (totalWeight <= 0) return null;
+
+        let random = Math.random() * totalWeight;
+
+        for (const entity of entities) {
+            random -= entity.weight || 1;
+            if (random <= 0) return entity;
+        }
+
+        return entities[entities.length - 1]; // Fallback
+    }
+
+    /**
+     * Select 0+ entities based on chance (0-100%).
+     */
+    private chanceSelect(entities: PoolEntryObject['entities']): PoolEntityGroup[] {
+        if (!entities) return [];
+        const winners: PoolEntityGroup[] = [];
+
+        for (const entity of entities) {
+            // Use 'chance' field (0-100), default to 50%
+            const chancePercent = entity.chance ?? 50;
+            if (Math.random() * 100 < chancePercent) {
+                winners.push(entity);
+            }
+        }
+
+        return winners;
+    }
+
+    /**
+     * Get templates matching an entity's filters.
+     */
+    private getFilteredTemplates(
+        sourceMap: Map<string, any>,
+        entity: PoolEntityGroup
+    ): string[] {
+        const result: string[] = [];
+
+        for (const [id, template] of sourceMap) {
+            // Check include filters (must match all)
+            if (!this.matchesFilter(template, entity.filters_include, false)) {
+                continue;
+            }
+            // Check exclude filters (must not match any)
+            if (!this.matchesFilter(template, entity.filters_exclude, true)) {
+                continue;
+            }
+            result.push(id);
+        }
+
+        return result;
+    }
+
+    /**
+     * Check if a template matches include/exclude filters.
+     * Filter matching logic:
+     * - ['a','b'] (array): OR logic - any overlap matches
+     * - { $all: ['a','b'] }: AND logic - all values must be present
+     * - { min, max }: Range filter for numeric values
+     * - boolean: Direct equality check
+     * - string: Direct equality check
+     */
+    private matchesFilter(
+        template: any,
+        filters: Record<string, any> | undefined,
+        isExclude: boolean
+    ): boolean {
+        if (!filters) return true;
+
+        for (const fieldPath in filters) {
+            const filterValue = filters[fieldPath];
+            const templateValue = this.getNestedValue(template, fieldPath);
+
+            // Handle range filters (min/max)
+            if (typeof filterValue === 'object' && filterValue !== null && ('min' in filterValue || 'max' in filterValue) && !('$all' in filterValue)) {
+                const numValue = Number(templateValue);
+                // Check if value is within range [min, max]
+                const inRange = (filterValue.min === undefined || numValue >= filterValue.min) &&
+                    (filterValue.max === undefined || numValue <= filterValue.max);
+
+                if (isExclude && inRange) return false;  // Exclude items IN the range
+                if (!isExclude && !inRange) return false; // Include only items IN the range
+            }
+            // Handle $all filter (AND logic) - { $all: ['a', 'b'] }
+            else if (typeof filterValue === 'object' && filterValue !== null && '$all' in filterValue) {
+                const requiredValues = filterValue.$all as any[];
+                if (requiredValues.length === 0) continue;
+
+                const templateArr = Array.isArray(templateValue) ? templateValue : [templateValue];
+                const hasAll = requiredValues.every(v => templateArr.includes(v));
+
+                if (isExclude && hasAll) return false;
+                if (!isExclude && !hasAll) return false;
+            }
+            // Handle array filters (OR logic) - ['a', 'b']
+            else if (Array.isArray(filterValue)) {
+                if (filterValue.length === 0) continue;
+
+                // Normalize template value to array (handles chooseOne → string case)
+                const templateArr = Array.isArray(templateValue) ? templateValue : [templateValue];
+                const hasAny = filterValue.some(v => templateArr.includes(v));
+
+                if (isExclude && hasAny) return false;
+                if (!isExclude && !hasAny) return false;
+            }
+            // Handle boolean
+            else if (typeof filterValue === 'boolean') {
+                if (isExclude && templateValue === filterValue) return false;
+                if (!isExclude && templateValue !== filterValue) return false;
+            }
+            // Handle single value match (string)
+            else {
+                if (isExclude && templateValue === filterValue) return false;
+                if (!isExclude && templateValue !== filterValue) return false;
+            }
+        }
+
+        return true;
+    }
+
+
+    /**
+     * Convert a Record<string, T> to an array of objects with id and value fields.
+     * Useful for preparing data for drawFromCollection.
+     * @param data Record to convert (e.g., { goblins: 50, orcs: 30 })
+     * @param valueField Name for the value field (e.g., 'weight', 'amount', 'chance')
+     * @returns Array of objects with id and value (e.g., [{ id: 'goblins', weight: 50 }, ...])
+     */
+    public toEntries<T>(data: Record<string, T>, valueField: string): { id: string; [key: string]: T | string }[] {
+        return Object.entries(data).map(([id, value]) => ({ id, [valueField]: value }));
+    }
+
+    /**
+     * Draw items from a collection based on random selection.
+     * @param data Collection to draw from (Array, Map, or Record)
+     * @param settings Draw settings (type, count, unique)
+     * @returns Array of drawn items
+     */
+    public drawFromCollection<T>(
+        data: T[] | Map<string, T> | Record<string, T>,
+        settings?: CollectionSettings
+    ): T[] {
+        const type = settings?.type || 'uniform';
+        const count = settings?.count || 1;
+        const unique = settings?.unique ?? false;
+
+        // Convert input to array of [key, value] pairs for uniform processing
+        let entries: [string, T][];
+
+        if (Array.isArray(data)) {
+            entries = data.map((item, idx) => [(item as any).id || (item as any).uid || String(idx), item]);
+        } else if (data instanceof Map) {
+            entries = Array.from(data.entries());
+        } else {
+            entries = Object.entries(data) as [string, T][];
+        }
+
+        if (entries.length === 0) {
+            gameLogger.warn('drawFromCollection: empty collection provided');
+            return [];
+        }
+
+        let resultEntries: [string, T][];
+
+        if (type === 'weight') {
+            resultEntries = this.drawWeighted(entries, count, unique);
+        } else if (type === 'chance') {
+            resultEntries = this.drawChance(entries, count);
+        } else {
+            // uniform
+            resultEntries = this.drawUniform(entries, count, unique);
+        }
+
+        // Always return array of values
+        return resultEntries.map(([, value]) => value);
+    }
+
+    /**
+     * Draw items using weighted random selection. Always returns exactly `count` items.
+     */
+    private drawWeighted(entries: [string, any][], count: number, unique: boolean): [string, any][] {
+        const result: [string, any][] = [];
+        const working = unique ? [...entries] : entries;
+
+        if (unique && working.length < count) {
+            gameLogger.warn(`drawFromCollection: requested ${count} unique items but only ${working.length} available`);
+        }
+
+        for (let i = 0; i < count; i++) {
+            if (working.length === 0) break;
+
+            const totalWeight = working.reduce((sum, [, item]) => sum + (item.weight ?? 1), 0);
+            if (totalWeight <= 0) {
+                gameLogger.warn('drawFromCollection: total weight is 0 or negative');
+                break;
+            }
+
+            let random = Math.random() * totalWeight;
+            let selectedIdx = working.length - 1; // fallback
+
+            for (let j = 0; j < working.length; j++) {
+                const weight = working[j][1].weight ?? 1;
+                random -= weight;
+                if (random <= 0) {
+                    selectedIdx = j;
+                    break;
+                }
+            }
+
+            result.push(working[selectedIdx]);
+
+            if (unique) {
+                working.splice(selectedIdx, 1);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Draw items uniformly at random. Returns exactly `count` items.
+     */
+    private drawUniform(entries: [string, any][], count: number, unique: boolean): [string, any][] {
+        const result: [string, any][] = [];
+        const working = unique ? [...entries] : entries;
+
+        if (unique && working.length < count) {
+            gameLogger.warn(`drawFromCollection: requested ${count} unique items but only ${working.length} available`);
+        }
+
+        for (let i = 0; i < count; i++) {
+            if (working.length === 0) break;
+
+            const idx = Math.floor(Math.random() * working.length);
+            result.push(working[idx]);
+
+            if (unique) {
+                working.splice(idx, 1);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Draw items based on chance field. Each item is rolled `count` times independently.
+     * May return 0 or more than `count` items.
+     */
+    private drawChance(entries: [string, any][], count: number): [string, any][] {
+        const result: [string, any][] = [];
+
+        for (const entry of entries) {
+            const chancePercent = entry[1].chance ?? 50;
+
+            for (let i = 0; i < count; i++) {
+                if (Math.random() * 100 < chancePercent) {
+                    result.push(entry);
+                }
+            }
+        }
+
+        return result;
+    }
 
 }
 
+export type PoolSettings = {
+    type?: 'weight' | 'chance';
+    draws?: number; // how many times to draw from the pool
+    unique?: boolean; // if true, the drawn items will be removed from the pool when drawn
+    customData?: Map<string, any> | any[]; // use runtime data instead of pool's source (array auto-converts using 'id' as key)
+}
 
+export type PoolEntityGroup = {
+    id?: string;
+    weight?: number;
+    chance?: number;
+    count?: number;
+    filters_include?: Record<string, any>;
+    filters_exclude?: Record<string, any>;
+}
+
+export type CollectionSettings = {
+    type?: 'uniform' | 'weight' | 'chance';
+    count?: number; // how many times to draw from the collection
+    unique?: boolean; // if true, the drawn items will be removed from the collection when drawn
+}
 
 
 

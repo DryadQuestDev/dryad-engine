@@ -9,9 +9,10 @@ export enum LogLevel {
   DEBUG = 0,   // Gray - Development/debugging info (should be commented out in production)
   INFO = 1,    // Blue - General informational messages
   SUCCESS = 2, // Green - Successful operations
-  OVERWRITE = 3, // Purple - Important messages
-  WARN = 4,    // Orange - Warnings
+  OVERWRITE = 3, // Brown - Overwrite messages
+  WARN = 4,    // Yellow - Warnings
   ERROR = 5,   // Red - Errors
+  TEMPLATE = 6, // Magenta - Vue template/component errors
 }
 
 class Logger {
@@ -25,6 +26,7 @@ class Logger {
     [LogLevel.OVERWRITE]: '#a66900', // BROWN
     [LogLevel.WARN]: '#a8a300',    // YELLOW
     [LogLevel.ERROR]: '#ef4444',   // Red
+    [LogLevel.TEMPLATE]: '#d946ef', // Magenta
   };
 
   private labels = {
@@ -34,6 +36,7 @@ class Logger {
     [LogLevel.OVERWRITE]: 'OVERWRITE',
     [LogLevel.WARN]: 'WARN',
     [LogLevel.ERROR]: 'ERROR',
+    [LogLevel.TEMPLATE]: 'TEMPLATE',
   };
 
   /**
@@ -234,6 +237,13 @@ class Logger {
    */
   error(message: string, ...args: any[]) {
     this.log(LogLevel.ERROR, message, ...args);
+  }
+
+  /**
+   * Template errors - Vue template/component compilation errors
+   */
+  template(message: string, ...args: any[]) {
+    this.log(LogLevel.TEMPLATE, message, ...args);
   }
 }
 

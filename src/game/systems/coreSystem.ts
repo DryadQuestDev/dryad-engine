@@ -19,6 +19,7 @@ import { DiscoveredAsset } from '../core/asset/discoveredAsset';
 import { AssetObject } from '../../schemas/assetSchema';
 import { InitSystem, CORE_EMITTER_SIGNATURES } from './initSystem';
 import ShortUniqueId from 'short-unique-id';
+import { PropertyObject } from '../../schemas/propertySchema';
 
 export type CustomComponent = {
   id: string;
@@ -64,6 +65,25 @@ export class CoreSystem {
   @Skip()
   public uidGenerator = new ShortUniqueId({ length: 15 });
 
+  @Skip()
+  private imageCache = new Map<string, HTMLImageElement>();
+
+  /**
+   * Keeps an image in browser memory cache by maintaining a reference.
+   * Call this on image @load to prevent browser from evicting the cached image.
+   * Cache is capped at 600 entries; oldest is evicted when full.
+   */
+  public persistImage(src: string): void {
+    if (src && !this.imageCache.has(src)) {
+      if (this.imageCache.size >= 600) {
+        const firstKey = this.imageCache.keys().next().value!;
+        this.imageCache.delete(firstKey);
+      }
+      const img = new Image();
+      img.src = src;
+      this.imageCache.set(src, img);
+    }
+  }
 
   // ============================================
   // COMPUTED PROPERTIES (Created at runtime)
@@ -415,6 +435,9 @@ export class CoreSystem {
 
   @Populate(Property, { mode: 'update' })
   public properties: Ref<Map<string, Property>> = ref(new Map());
+
+  @Skip()
+  public propertiesMap!: Map<string, PropertyObject>;
 
   public getProperty(id: string) {
     return this.properties.value.get(id);
@@ -1095,6 +1118,5 @@ export class CoreSystem {
 
     //console.log('discoveredAssets', this.discoveredAssets);
   }
-
 
 }

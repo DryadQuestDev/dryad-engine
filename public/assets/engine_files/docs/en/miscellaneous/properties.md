@@ -18,24 +18,6 @@ If you add a new property during development and a player loads an old save file
 
 This means you can safely add new properties without breaking existing saves.
 
-### Default Value Behavior
-
-**Important:** Changing the default value of a property that has already been initialized in a save file will **not** update that save. The saved value takes priority.
-
-If you need to force a value change for existing saves, use the `game_initiated` event:
-
-```js
-game.on("game_initiated", () => {
-  // Force update for existing saves if needed
-  if (game.isNewGame === false) {
-    let prop = game.getProperty("my_property");
-    if (prop.currentValue === oldValue) {
-      prop.currentValue = newValue;
-    }
-  }
-});
-```
-
 ---
 
 ## Property Types
@@ -60,6 +42,64 @@ Number properties support additional options:
 - **is_negative** - UI hint that lower is better (e.g., damage taken)
 
 ---
+
+## Constant Properties
+
+Mark a property as **constant** to create immutable game values that:
+
+- **Cannot be modified at runtime** - Attempts to change the value will log a warning and be ignored
+- **Are excluded from save files** - Smaller saves, and players always get the latest values
+- **Can be overridden in exisiting save files by mods** - Perfect for base stats, multipliers, and config values
+
+### Use Cases
+
+- Base damage/health values that mods can tweak
+- Game balance multipliers
+- Configuration constants (e.g., max inventory size)
+- Reference values that should never change during gameplay
+
+### Behavior
+
+```js
+// Attempting to modify a constant property:
+game.getProperty("base_damage").currentValue = 100;
+// Console: "Cannot modify constant property 'base_damage'"
+// Value remains unchanged
+
+// Reading works normally:
+const damage = game.getProperty("base_damage").currentValue; // Works fine
+```
+
+### Checking if Constant
+
+Use the `skipSave` property to check if a property is constant:
+
+```js
+const prop = game.getProperty("base_damage");
+if (prop.skipSave) {
+  console.log("This is a constant property");
+}
+```
+
+---
+
+## Default Value Behavior
+
+**Important:** Changing the default value of a property that has already been initialized in a save file will **not** update that save value UNLESS it is flagged as 'constant'.
+
+If you need to force a value change for non-constant properties in existing saves, use the `game_initiated` event:
+
+```js
+game.on("game_initiated", () => {
+  // Force update for existing saves if needed
+  if (game.isNewGame === false) {
+    let prop = game.getProperty("my_property");
+    if (prop.currentValue === oldValue) {
+      prop.currentValue = newValue;
+    }
+  }
+});
+```
 
 ## Accessing Properties in Dungeons
 
@@ -109,6 +149,7 @@ const reputation = game.getProperty("reputation");
 | `isNegative` | `boolean?` | Whether lower values are better |
 | `defaultValue` | `any` | The initial default value |
 | `canOverflow` | `boolean?` | Whether value can exceed max |
+| `skipSave` | `boolean` | `true` if this is a constant property (readonly) |
 | `currentValue` | `any` | The current value (get/set directly) |
 
 ---

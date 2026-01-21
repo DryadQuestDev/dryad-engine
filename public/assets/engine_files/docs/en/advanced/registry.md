@@ -94,7 +94,7 @@ game.setState("disable_ui", true);                // Lock the UI
 // Register a custom action
 game.registerAction("heal_party", () => {
   for (let char of game.getParty()) {
-    char.setResource("health", char.getStat("health").value);
+    char.setResource("health", char.getStat("health"));
   }
 });
 
@@ -172,7 +172,7 @@ game.registerPlaceholder("player_name", () => {
 ```javascript
 // Register a stat computer
 game.registerStatComputer("strengthBonus", (character) => {
-  const strength = character.getStat("strength").value || 0;
+  const strength = character.getStat("strength") || 0;
   return {
     attack: strength * 2,
     carry_capacity: strength * 10
@@ -184,7 +184,7 @@ game.registerStatComputer("strengthBonus", (character) => {
 
 // Then access the computed stats normally
 let mc = game.getCharacter("mc");
-let attack = mc.getStat("attack").value;  // Includes the strength bonus
+let attack = mc.getStat("attack");  // Includes the strength bonus
 ```
 
 **Reference:** ->characters.characters_computed

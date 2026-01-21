@@ -36,6 +36,8 @@ import { SkillSlotSchema } from "../schemas/skillSlotSchema";
 import { SkillTreeSchema } from "../schemas/skillTreeSchema";
 import { AbilityDefinitionSchema } from "../schemas/abilityDefinitionSchema";
 import { AbilityTemplateSchema } from "../schemas/abilityTemplateSchema";
+import { PoolDefinitionSchema } from "../schemas/poolDefinitionSchema";
+import { PoolEntrySchema } from "../schemas/poolEntrySchema";
 
 export type EditorTab = {
   id: string,
@@ -376,6 +378,27 @@ export const EDITOR_TABS: EditorTab[] = [
         schema: GenericSchema,
       },
       */
+    ],
+  },
+  {
+    id: 'pools',
+    subtabs: [
+      {
+        id: 'pool_definitions',
+        schema: PoolDefinitionSchema,
+        file: 'pool_definitions',
+        title: 'pool_definition',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'pool_entries',
+        schema: PoolEntrySchema,
+        file: 'pool_entries',
+        title: 'pool_entry',
+        isArray: true,
+        requiresMod: true,
+      },
     ],
   },
   {

@@ -6,12 +6,14 @@ import CharacterDoll from './CharacterDoll.vue';
 import ItemSlots from './ItemSlots.vue';
 import { Game } from '../../game';
 import { useCharacterAnimation } from '../../../composables/useCharacterAnimation';
+import gsap from 'gsap';
 
 const props = defineProps<{
   character: Character;
   slot: Partial<SceneSlot>; // Partial because 'char' is not needed when character is provided directly
   showItemSlots?: boolean;
   enableAppear?: boolean; // Enable appear animations for CharacterDoll
+  disableItemInteraction?: boolean; // Disable item click/drag while keeping hover tooltips
 }>();
 
 const game = Game.getInstance();
@@ -51,10 +53,31 @@ const hue = computed(() => props.slot.hue ?? 0);
 
 // Note: Animation properties are now handled by the composable
 
-// Character art positioning (from traits)
-const artDx = computed(() => (props.character.getTrait('art_dx') || 0) + "%");
-const artDy = computed(() => (props.character.getTrait('art_dy') || 0) + "%");
-const artScale = computed(() => props.character.getTrait('art_scale') || 1);
+// Character art positioning (from traits) - animated to prevent jumps
+const animatedArtOffset = ref({
+  dx: props.character.getTrait('art_dx') || 0,
+  dy: props.character.getTrait('art_dy') || 0,
+  scale: props.character.getTrait('art_scale') || 1
+});
+
+// Watch for character changes and animate the art offset
+watch(() => props.character.id, () => {
+  const newDx = props.character.getTrait('art_dx') || 0;
+  const newDy = props.character.getTrait('art_dy') || 0;
+  const newScale = props.character.getTrait('art_scale') || 1;
+
+  gsap.to(animatedArtOffset.value, {
+    dx: newDx,
+    dy: newDy,
+    scale: newScale,
+    duration: 0.3,
+    ease: 'power2.out'
+  });
+});
+
+const artDx = computed(() => animatedArtOffset.value.dx + "%");
+const artDy = computed(() => animatedArtOffset.value.dy + "%");
+const artScale = computed(() => animatedArtOffset.value.scale);
 const finalScale = computed(() => scale.value * artScale.value);
 
 // CSS computed properties
@@ -216,7 +239,7 @@ const onLeave = (_el: Element, done: () => void) => {
           </div>
         </div>
         <div v-if="showItemSlots" class="item-slots-transform-wrapper">
-          <ItemSlots :character="character" />
+          <ItemSlots :character="character" :disabled="props.disableItemInteraction === true" />
         </div>
       </div>
     </div>

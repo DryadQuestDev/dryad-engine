@@ -30,7 +30,7 @@ You ARE permitted to:
 You are NOT permitted to:
 
 1. **Sell the Engine** or any Modifications to the Engine.
-2. **Commercially distribute** the Engine or Modifications, whether as standalone products or bundled with other commercial offerings.
+2. **Commercially distribute** the Engine or Modifications, whether as standalone products or bundled with other commercial offerings not related to game content. Note: commercial distribution of the engine bundled with your games is explicitly permitted.
 3. **Charge fees** for access to the Engine or its Modifications.
 4. **Sublicense** the Engine under different terms that would allow commercial distribution.
 5. **Remove or alter** this license from the Engine or any Modifications you distribute.

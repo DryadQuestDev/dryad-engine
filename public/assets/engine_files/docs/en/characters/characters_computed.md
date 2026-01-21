@@ -57,7 +57,7 @@ All game data is reactive - when the underlying data changes, computed stats aut
 
 Computed stats have two parts:
 
-**1. A stat computer function** (defined in your mod's script)
+**1. A stat computer function** (defined in your game's script)
 
 ```typescript
 game.registerStatComputer("myComputer", (character) => {
@@ -88,7 +88,7 @@ Every point of Endurance gives +10 Stamina:
 
 ```typescript
 game.registerStatComputer("enduranceToStamina", (character) => {
-  const endurance = character.getStat("endurance").value || 0;
+  const endurance = character.getStat("endurance") || 0;
   return {
     stamina: endurance * 10
   };
@@ -137,7 +137,7 @@ Combine character stats with global properties:
 
 ```typescript
 game.registerStatComputer("combatPower", (character) => {
-  const strength = character.getStat("strength").value || 0;
+  const strength = character.getStat("strength") || 0;
   const worldBonus = Number(game.getProperty("combat_bonus")?.currentValue) || 0;
 
   return {
@@ -154,7 +154,7 @@ game.registerStatComputer("combatPower", (character) => {
 
 ```typescript
 game.registerStatComputer("enduranceToStamina", (character) => {
-  const endurance = character.getStat("endurance").value || 0;
+  const endurance = character.getStat("endurance") || 0;
   return {
     stamina: endurance * 10
   };

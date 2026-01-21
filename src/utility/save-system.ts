@@ -76,6 +76,10 @@ function saveAny(value: any): any {
             // // console.log('Saving Ref<Map>: ', unwrappedValue);
             const result: any = {};
             for (const [entryKey, entryValue] of unwrappedValue.entries()) {
+                // Skip entries marked with skipSave (e.g., constant properties)
+                if (entryValue && typeof entryValue === 'object' && entryValue.skipSave === true) {
+                    continue;
+                }
                 result[String(entryKey)] = saveAny(entryValue);
             }
             return result;
@@ -93,6 +97,10 @@ function saveAny(value: any): any {
     if (value instanceof Map) {
         const result: any = {};
         for (const [entryKey, entryValue] of value.entries()) {
+            // Skip entries marked with skipSave (e.g., constant properties)
+            if (entryValue && typeof entryValue === 'object' && entryValue.skipSave === true) {
+                continue;
+            }
             result[String(entryKey)] = saveAny(entryValue);
         }
         return result;

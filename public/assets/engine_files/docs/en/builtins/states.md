@@ -47,6 +47,14 @@ All built-in game states you can read and write using `game.getState()` and `gam
 
 ---
 
+## Character States
+
+| State | Default | Description |
+|-------|---------|-------------|
+| `character_stat_groups` | `null` | Custom stat groups for CharacterSheet/CharacterStats. Array of `{ groupName: string, stats: string[] }` |
+
+---
+
 ## System States
 
 | State | Default | Description |

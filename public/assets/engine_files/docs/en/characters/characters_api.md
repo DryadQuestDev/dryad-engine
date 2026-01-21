@@ -141,6 +141,26 @@ character.addStatus(customStatus);
 
 ---
 
+## ID Methods
+
+### getId()
+
+Get the character's ID.
+
+```js
+const id = character.getId();
+```
+
+### setId(id)
+
+Set the character's ID. Also updates the private inventory ID to match.
+
+```js
+character.setId("new_character_id");
+```
+
+---
+
 ## Trait & Attribute Methods
 
 ### getTrait(key)
@@ -189,10 +209,19 @@ const name = character.getName();
 
 ### getStat(name)
 
-Get a stat's computed value (sum of all status contributions).
+Get a stat's computed value directly as a number. Works reactively in Vue templates and computed properties.
 
 ```js
-const maxHealth = character.getStat("health").value;
+const maxHealth = character.getStat("health");
+```
+
+### getStatRef(name)
+
+Get a stat's reactive ComputedRef. Use when you need the ref itself (e.g., for `watch()` or storing).
+
+```js
+const healthRef = character.getStatRef("health");
+watch(healthRef, (newVal) => console.log("Health changed:", newVal));
 ```
 
 ### getResource(name)
@@ -265,6 +294,24 @@ Get a status by ID.
 ```js
 const status = character.getStatus("blessed");
 ```
+
+### setStatusStacks(statusId, newStacks)
+
+Set a status's stack count with proper resource adjustment for replenishable stats.
+
+```js
+character.setStatusStacks("power_buff", 3);
+```
+
+### addStatusStacks(statusId, amount?)
+
+Add stacks to a status with proper resource adjustment. Returns true if stacks were added successfully.
+
+```js
+character.addStatusStacks("poison", 2);
+```
+
+> **Note:** Use `setStatusStacks()` and `addStatusStacks()` instead of `status.currentStacks` or `status.addStacks()` directly when you need replenishable resources (like health) to adjust with the stat change.
 
 ---
 
@@ -542,9 +589,13 @@ Status effects applied to characters.
 ### Status Methods
 
 ```js
-// Check if stackable
+// Check if stackable and add stacks
 if (status.isStackable()) {
-  status.addStacks(2);
+  // Use character.addStatusStacks() for proper resource adjustment
+  character.addStatusStacks(status.id, 2);
+
+  // Or use status.addStacks() directly if you don't need resource adjustment
+  // status.addStacks(2);
 }
 
 // Add stat modifier

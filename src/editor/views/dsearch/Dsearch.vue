@@ -164,16 +164,16 @@ function updateStringArrayUniqueValues(data: any[]): void {
 function updateCombinedTagFieldsForTemplate(): void {
   const chooseManyMapped = chooseManySchemaFields.value.map(f => ({
           path: f.path,
-    options: f.options?.map(opt => ({
+    options: (f.options?.map(opt => ({
         value: opt.value !== undefined ? opt.value : opt,
         label: opt.label !== undefined ? opt.label : String(opt.value !== undefined ? opt.value : opt),
-    })) ?? [],
+    })) ?? []).sort((a, b) => a.label.localeCompare(b.label)),
     isStringArray: false,
   }));
 
   const stringArrayMapped = stringArraySchemaFields.value.map(f => ({
           path: f.path,
-          options: Array.from(f.uniqueValues ?? []).map(val => ({ value: val, label: String(val) })),
+          options: Array.from(f.uniqueValues ?? []).map(val => ({ value: val, label: String(val) })).sort((a, b) => a.label.localeCompare(b.label)),
     isStringArray: true,
   }));
 

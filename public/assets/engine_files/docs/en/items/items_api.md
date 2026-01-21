@@ -278,8 +278,8 @@ const success = playerInventory.transferTo(chestInventory, sword, 1);
 ### Currency
 
 ```js
-// Get currency amount
-const gold = inventory.getCurrencyAmount("gold");
+// Get item quantity (works for any item, including currencies)
+const gold = inventory.getItemQuantity("gold");
 
 // Get all currencies
 const currencies = inventory.getCurrencies(); // { gold: 150, gems: 20 }
@@ -326,7 +326,7 @@ game.on("item_create", (item) => {
 
 // Before equip (return false to cancel)
 game.on("item_equip_before", (item, character) => {
-  if (character.getStat("strength").value < 10) {
+  if (character.getStat("strength") < 10) {
     return false; // Too weak to equip
   }
 });

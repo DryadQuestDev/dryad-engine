@@ -1,6 +1,6 @@
 /* Base layout for the entire screen */
 .main_screen {
-  --column-width: 350px;
+  --column-width: 300px;
   /* CSS variable for column width */
   display: flex;
   flex-direction: column;

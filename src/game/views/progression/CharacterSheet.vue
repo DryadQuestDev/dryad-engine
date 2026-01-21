@@ -1,173 +1,105 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue';
+import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
-import CharacterDoll from './CharacterDoll.vue';
-import CharacterSlot from './CharacterSlot.vue';
+import CharacterStatuses from './CharacterStatuses.vue';
+import CharacterStats, { type StatGroup } from './CharacterStats.vue';
+import InventoryComponent from './InventoryComponent.vue';
+import { PARTY_INVENTORY_ID } from '../../systems/itemSystem';
 
 const props = defineProps<{
   character: Character;
+  groups?: StatGroup[];
+  hideInventory?: boolean;
 }>();
 
 const game = Game.getInstance();
 
-// Get tabs from unified registry
-const tabs = computed(() => game.coreSystem.getComponentsBySlot('character-tabs'));
-
-// Lifecycle hooks
-onMounted(() => {
-  // If no tab is selected, and there are tabs, select the first one.
-  if (!game.coreSystem.getState('progression_sub_state') && tabs.value.length > 0) {
-    game.coreSystem.setState('progression_sub_state', tabs.value[0].id || null);
-  }
+// Use prop if provided, otherwise read from state (null/undefined means use default)
+const statGroups = computed((): StatGroup[] | undefined => {
+  if (props.groups) return props.groups;
+  const stateGroups = game.coreSystem.getState('character_stat_groups');
+  return Array.isArray(stateGroups) ? stateGroups as StatGroup[] : undefined;
 });
 
-const activeTabPayload = computed(() => {
-  if (game.coreSystem.getState('progression_sub_state')) {
-    return tabs.value.find(tab => tab.id === game.coreSystem.getState('progression_sub_state'));
+const hasVisibleStatuses = computed(() => {
+  if (game.coreSystem.getDebugSetting('show_hidden_stats')) {
+    return props.character.statuses.length > 0;
   }
-  return undefined;
+  return props.character.statuses.some(status => !status.isHidden);
 });
 
-function selectTab(tabId: string) {
-  game.coreSystem.setState('progression_sub_state', tabId);
-}
+const hasStats = computed(() => {
+  return props.character.statIds.size > 0;
+});
 
+const hasStatsOrStatuses = computed(() => hasVisibleStatuses.value || hasStats.value);
 </script>
 
 <template>
+  <div class="character-sheet-container">
+    <!-- Top slot -->
+    <component v-for="cm in game.coreSystem.getComponentsBySlot('character-sheet-top')" :key="cm.id" :is="cm.component"
+      :character="character" v-bind="cm.props" />
 
-
-  <div class="character-sheet-container" v-if="game.getState('selected_character')">
-    <div class="character-doll-wrapper">
-      <CharacterSlot :key="character.id" :character="character" :slot="{ scale: 1 }" :showItemSlots="true" :enableAppear="true" />
-    </div>
-
-    <div class="character-sheet">
-      <div class="character-sheet-content">
-        <div class="tabs">
-          <div class="tab" v-for="tab of tabs" :key="tab.id" @click="selectTab(tab.id)"
-            :class="{ 'active-tab': game.coreSystem.getState('progression_sub_state') === tab.id }">
-            {{ tab.title }}
-          </div>
-        </div>
-        <div class="tab-content" v-if="activeTabPayload">
-          <component :is="activeTabPayload.component" :character="character" v-bind="activeTabPayload.props" />
-        </div>
+    <div class="stats-wrapper" :class="{ 'with-inventory': !hideInventory }" v-if="hasStatsOrStatuses">
+      <div class="statuses-section" v-if="hasVisibleStatuses">
+        <CharacterStatuses :character="character" />
+      </div>
+      <div class="stats-section" v-if="hasStats">
+        <CharacterStats :character="character" :groups="statGroups" />
       </div>
     </div>
+    <div class="inventory-section" v-if="!hideInventory">
+      <InventoryComponent :inventory_id="PARTY_INVENTORY_ID" />
+    </div>
+
+    <!-- Bottom slot -->
+    <component v-for="cm in game.coreSystem.getComponentsBySlot('character-sheet-bottom')" :key="cm.id"
+      :is="cm.component" :character="character" v-bind="cm.props" />
   </div>
 </template>
 
 <style scoped>
 .character-sheet-container {
   display: flex;
-  gap: 1rem;
-  width: 100%;
-  height: 100%;
-}
-
-.character-doll-wrapper {
-  /*width: 600px;*/
-  width: 50vh;
-  flex-shrink: 0;
-  height: 100%;
-  position: relative;
-  display: flex;
-  /*justify-content: center;*/
-  align-items: center;
-  padding-bottom: 4vh;
-}
-
-.character-doll-wrapper :deep(.character-slot) {
-  position: relative;
-  width: auto;
-  height: 100%;
-  aspect-ratio: 1 / 1;
-  left: auto;
-  top: auto;
-}
-
-.character-doll-wrapper :deep(.character-slot-positioner) {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.character-doll-wrapper :deep(.character-slot-rotation-wrapper) {
-  justify-content: flex-start;
-}
-
-
-.character-sheet {
-  flex: 1;
-  min-width: 400px;
-  position: relative;
-  z-index: 20;
-  display: flex;
-  justify-content: left;
-}
-
-.character-sheet-content {
-  /*border: 1px solid #eee;*/
-  padding: 1rem;
-  border-radius: 4px;
-  width: 100%;
-  max-width: 1000px;
-  display: flex;
   flex-direction: column;
   height: 100%;
-}
-
-.character-sheet h1 {
-  margin-top: 0;
-  color: #42b983;
-  /* Vue green */
-}
-
-.tabs {
-  display: flex;
-  border-bottom: 1px solid #444;
-}
-
-.tab {
-  padding: 10px 20px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  border-bottom: none;
-  margin-right: 5px;
-  border-radius: 4px 4px 0 0;
-  background-color: #3a3a3a;
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-.tab:hover {
-  background-color: #4a4a4a;
-}
-
-.active-tab {
-  background-color: #5a5a5a;
-  color: #fff;
-  border-color: #666;
-}
-
-.tab-content {
-  padding: 20px;
-  background-color: #333;
-  border-radius: 0 0 8px 8px;
-  flex: 1;
-  min-height: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  gap: 0.5rem;
 }
 
-/*
-@media (min-width: 1800px) {
-  .character-doll-wrapper {
-    max-width: 1000px;
-     Adjust this value as needed 
-  }
+.stats-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  overflow: hidden;
+  min-height: 65px;
+  gap: 0.5rem;
 }
-*/
+
+.stats-wrapper.with-inventory {
+  max-height: 50%;
+}
+
+.statuses-section {
+  flex: 0 1 auto;
+  max-height: 40%;
+  overflow: hidden;
+  min-height: 65px;
+}
+
+.stats-section {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.inventory-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow: hidden;
+  min-height: 0;
+}
 </style>

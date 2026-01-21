@@ -63,8 +63,7 @@ const showPreview = computed(() => {
 });
 
 const showWebPHeader = computed(() => {
-  return (props.fileType === 'image' || props.fileType === 'asset') &&
-         global.storageService.getName() === 'electron';
+  return (props.fileType === 'image' || props.fileType === 'asset') && global.storageService.supportsImageTools();
 });
 
 // --- Sync Props to Internal State ---
@@ -243,7 +242,7 @@ function formatBytes(bytes: number): string {
 }
 
 async function fetchFileSize(filePath: string): Promise<void> {
-  if (global.storageService.getName() !== 'electron') {
+  if (!global.storageService.supportsImageTools()) {
     return;
   }
 
@@ -362,7 +361,7 @@ watch(internalValue, (newValue) => {
 // Only convert when value matches a file from suggestions (user selected it, not just typed)
 watch(internalValue, async (newPath, oldPath) => {
   if (props.multiple ||
-      global.storageService.getName() !== 'electron' ||
+      !global.storageService.supportsImageTools() ||
       !newPath ||
       typeof newPath !== 'string' ||
       !/\.(png|jpe?g)$/i.test(newPath) ||
@@ -437,7 +436,7 @@ function deleteFileItem(index: number) {
 // WebP auto-conversion for file array
 watch(localFileArray, async (newArray) => {
   if (!props.multiple ||
-      global.storageService.getName() !== 'electron' ||
+      !global.storageService.supportsImageTools() ||
       !editor.webpAutoConvert.value) {
     return;
   }
@@ -533,11 +532,11 @@ watch(localFileArray, async (newArray) => {
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex-grow">
                       <span>{{ slotProps.option }}</span>
-                      <span v-if="global.storageService.getName() === 'electron' && editor.webpAutoConvert.value && /\.(png|jpe?g)$/i.test(slotProps.option) && !slotProps.option.startsWith('assets/engine_assets')"
+                      <span v-if="global.storageService.supportsImageTools() && editor.webpAutoConvert.value && /\.(png|jpe?g)$/i.test(slotProps.option) && !slotProps.option.startsWith('assets/engine_assets')"
                             class="conversion-indicator">
                         → .webp
                       </span>
-                      <span v-if="global.storageService.getName() === 'electron' && slotProps.option.endsWith('.webp')"
+                      <span v-if="global.storageService.supportsImageTools() && slotProps.option.endsWith('.webp')"
                             class="optimized-badge">
                         ✓ Optimized
                       </span>
@@ -658,11 +657,11 @@ watch(localFileArray, async (newArray) => {
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex-grow">
                       <span>{{ slotProps.option }}</span>
-                      <span v-if="global.storageService.getName() === 'electron' && editor.webpAutoConvert.value && /\.(png|jpe?g)$/i.test(slotProps.option) && !slotProps.option.startsWith('assets/engine_assets')"
+                      <span v-if="global.storageService.supportsImageTools() && editor.webpAutoConvert.value && /\.(png|jpe?g)$/i.test(slotProps.option) && !slotProps.option.startsWith('assets/engine_assets')"
                             class="conversion-indicator">
                         → .webp
                       </span>
-                      <span v-if="global.storageService.getName() === 'electron' && slotProps.option.endsWith('.webp')"
+                      <span v-if="global.storageService.supportsImageTools() && slotProps.option.endsWith('.webp')"
                             class="optimized-badge">
                         ✓ Optimized
                       </span>

@@ -56,10 +56,13 @@ const capacityInfo = computed(() => {
   padding: 16px;
   background: #252525;
   border-bottom: 2px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .inventory-header h2 {
-  margin: 0 0 8px 0;
+  margin: 0;
   color: #42b983;
   font-size: 20px;
 }

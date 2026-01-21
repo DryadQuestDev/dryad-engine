@@ -62,9 +62,12 @@ Otherwise, continue with Stage 1 and 2 below.
 
 @en/gdoc/12.png
 
-10. Download the OAuth client by clicking the download icon
+10. After creating, download the OAuth client by clicking 'Download JSON' button.
+@en/gdoc/fix1.png
 
-@en/gdoc/14.png
+Note: The token is available only once during its creation.
+If you forgot to download it, go to [Your Auth Clients](https://console.cloud.google.com/auth/clients), choose your client and add a new Client Secret, then download it.
+@en/gdoc/fix2.png
 
 11. Go to [Auth Audience](https://console.cloud.google.com/auth/audience) and click **Add users**. Add the Google account you use for Google Docs (can be the same email you registered with). Ignore any warnings about the user not being added.
 

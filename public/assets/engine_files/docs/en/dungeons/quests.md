@@ -168,8 +168,9 @@ I rescued the villager!
 ## Viewing Quests
 
 Players can view their quest journal by:
-1. Clicking the quest icon in the UI
-2. Opening the progression panel (left sidebar)
+1. Opening the progression panel (top-left sidebar)
+2. Clicking the quest Tab in the UI
+
 
 The journal shows:
 - Active quests with their current stage text

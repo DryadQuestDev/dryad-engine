@@ -1,5 +1,5 @@
 import { Global } from "../global/global";
-import { DungeonLine } from "../game/types";
+import { DungeonLine } from "../game/systems/dungeonSystem";
 import { DungeonEncounterObject } from "../schemas/dungeonEncounterSchema";
 import { DungeonRoomObject } from "../schemas/dungeonRoomSchema";
 import { Editor } from "../editor/editor";

@@ -34,7 +34,9 @@ export class CharacterSystem {
 
   @Skip()
   public party: ComputedRef<Character[]> = computed(() => {
-    return Array.from(this.partyIds.value).map(id => this.characters.value.get(id)!);
+    return Array.from(this.partyIds.value)
+      .map(id => this.characters.value.get(id))
+      .filter((char): char is Character => char !== undefined);
   });
 
   @Skip()
@@ -119,6 +121,7 @@ export class CharacterSystem {
       obj = found;
     } else {
       obj = template;
+      templateId = obj.id;
     }
 
     // deep clone template to avoid mutating the original object
@@ -127,6 +130,7 @@ export class CharacterSystem {
     let character = reactive(new Character());
     character.id = characterId;
     character.actions = deepClone.actions || {};
+    character.tags = deepClone.tags || [];
 
     let coreStatus = reactive(new Status());
     coreStatus.id = "_core_status";
@@ -282,6 +286,11 @@ export class CharacterSystem {
     }
 
     this.game.trigger('character_join_party', character);
+
+    // if no character is selected, select the new character
+    if (!this.game.getState("selected_character")) {
+      this.game.setState("selected_character", character.id);
+    }
   }
 
   public deleteCharacter(character: Character | string) {

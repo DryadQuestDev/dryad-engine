@@ -1,8 +1,11 @@
 import { Skip, Populate } from '../utility/save-system';
 import { Global } from '../global/global';
+import copy from 'fast-copy';
+import { computed, ComputedRef } from 'vue';
 
-import { DungeonSystem } from './systems/dungeonSystem';
-import { ActionObject, LogicSystem } from './systems/logicSystem';
+import { DungeonSystem, DungeonLine } from './systems/dungeonSystem';
+import { DungeonData } from './core/dungeon/dungeonData';
+import { ActionObject, LogicSystem, PoolSettings, CollectionSettings } from './systems/logicSystem';
 import { CharacterSystem, StatComputerFunction } from './systems/characterSystem';
 import { ItemSystem } from './systems/itemSystem';
 import { CoreSystem, type EmitterMap, type CustomComponent } from './systems/coreSystem';
@@ -12,6 +15,7 @@ import { Inventory } from './core/character/inventory';
 import { Item } from './core/character/item';
 import { Status } from './core/character/status';
 import { Choice } from './core/content/choice';
+import { PoolEntryObject } from '../schemas/poolEntrySchema';
 export class Game {
 
   // ============================================
@@ -132,6 +136,14 @@ export class Game {
     this.coreSystem.setState(key, value);
   }
 
+  /**
+   * Keep an image in browser memory cache to prevent GC eviction.
+   * Call on image @load events.
+   */
+  public persistImage(src: string): void {
+    this.coreSystem.persistImage(src);
+  }
+
   public getDungeonType(): "map" | "screen" | "text" {
     return this.dungeonSystem.currentDungeon.value?.dungeon_type as "map" | "screen" | "text";
   }
@@ -150,6 +162,26 @@ export class Game {
 
   public enter(val: string): void {
     this.dungeonSystem.enter(val);
+  }
+
+  public playScene(sceneId: string | null, dungeonId: string | null = null): void {
+    this.dungeonSystem.playScene(sceneId, dungeonId);
+  }
+
+  public resolveSceneId(value: string): { sceneId: string | null, dungeonId: string | null } {
+    return this.dungeonSystem.resolveSceneId(value);
+  }
+
+  public getDungeonId(dungeonId: string | null = null): string {
+    return this.dungeonSystem.getDungeonId(dungeonId);
+  }
+
+  public getLineByDungeonId(lineId: string, dungeonId: string | null = null): DungeonLine {
+    return this.dungeonSystem.getLineByDungeonId(lineId, dungeonId);
+  }
+
+  public getDungeonDataById(id: string): DungeonData {
+    return this.dungeonSystem.getDungeonDataById(id);
   }
 
   public addAssets(data: string[] | string): void {
@@ -304,16 +336,36 @@ export class Game {
     this.coreSystem.deleteStore(id);
   }
 
+  /**
+   * Get a reactive computed reference to store data.
+   * Use this in Vue components instead of getStore() to maintain reactivity.
+   * @param id - The store ID
+   * @param key - Optional key to get a specific item from the store
+   * @returns A computed ref that reactively tracks the store data
+   * @example
+   * // Get reactive ref to entire store
+   * const runsStore = game.useStore("runs");
+   *
+   * // Get reactive ref to specific item
+   * const run = game.useStore("runs", runUid);
+   */
+  public useStore<T = any>(id: string, key?: string): ComputedRef<T | undefined> {
+    if (key) {
+      return computed(() => this.coreSystem.getStore(id)?.get(key) as T | undefined);
+    }
+    return computed(() => this.coreSystem.getStore(id) as unknown as T | undefined);
+  }
+
   // ============================================
   // PUBLIC API: Data Access
   // ============================================
 
-  public getData(filePath: string): Map<string, any> | undefined {
+  public getData(filePath: string, noCopy?: boolean): Map<string, any> | undefined {
     const data = this.coreSystem.dataRegistry.get(filePath);
     if (!data) {
       throw new Error(`Data does not exist for path: ${filePath}`);
     }
-    return data;
+    return noCopy ? data : copy(data);
   }
 
   public getProperty(id: string) {
@@ -365,11 +417,52 @@ export class Game {
   }
 
   // ============================================
+  // POOL SYSTEM
+  // ============================================
+
+  /**
+   * Draw templates from a pool based on weighted random selection.
+   * @param entry Pool entry ID or custom entry object
+   * @param settings Optional draw settings (type: 'weight'|'chance', draws: number, unique: boolean)
+   * @returns Array of template IDs drawn from the pool
+   */
+  public drawFromPool(entry: string | PoolEntryObject, settings?: PoolSettings): string[] {
+    return this.logicSystem.drawFromPool(entry, settings);
+  }
+
+  /**
+   * Draw items from a collection based on random selection.
+   * @param data Collection to draw from (Array, Map, or Record)
+   * @param settings Draw settings (type: 'uniform'|'weight'|'chance', count, unique)
+   * @returns Array of drawn items
+   */
+  public drawFromCollection<T>(
+    data: T[] | Map<string, T> | Record<string, T>,
+    settings?: CollectionSettings
+  ): T[] {
+    return this.logicSystem.drawFromCollection(data, settings);
+  }
+
+  /**
+   * Convert a Record to an array of objects with id and value fields.
+   * @param data Record to convert (e.g., { goblins: 50, orcs: 30 })
+   * @param valueField Name for the value field (e.g., 'weight', 'amount', 'chance')
+   * @returns Array of objects (e.g., [{ id: 'goblins', weight: 50 }, ...])
+   */
+  public toEntries<T>(data: Record<string, T>, valueField: string): { id: string; [key: string]: T | string }[] {
+    return this.logicSystem.toEntries(data, valueField);
+  }
+
+  // ============================================
   // MISCELLANEOUS
   // ============================================
 
   public showNotification(message: string) {
     Global.getInstance().addNotification(message);
+  }
+
+  public isDevMode(): boolean {
+    return localStorage.getItem('devMode') === 'true';
   }
 
 

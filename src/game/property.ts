@@ -20,6 +20,17 @@ export class Property {
     public defaultValue?: number | string | boolean | any[] | Record<string, any>;
     public canOverflow?: boolean;
 
+    // --- Constant flag (not serialized, set from schema) ---
+    private _isConstant: boolean = false;
+
+    /**
+     * Returns true if this property should be skipped during save.
+     * Used by save-system to exclude constant properties from save files.
+     */
+    public get skipSave(): boolean {
+        return this._isConstant;
+    }
+
     // --- Mutable State Object ---
     public state: StatState = {
         currentValue: undefined,
@@ -87,6 +98,9 @@ export class Property {
         }
         // Use the setter to assign initial value, applying rules
         this.currentValue = initialValue;
+
+        // Set constant flag AFTER initial value (so init assignment isn't blocked)
+        this._isConstant = obj.is_constant ?? false;
     }
 
     // --- Native Getters/Setters (operating on this.state) ---
@@ -96,6 +110,10 @@ export class Property {
     }
 
     public set currentValue(value: any) {
+        if (this._isConstant) {
+            gameLogger.warn(`Cannot modify constant property '${this.id}'`);
+            return;
+        }
         if (this.type === 'number' && typeof value === 'number') {
             let processedValue = this.clampValue(value);
             processedValue = this.applyPrecision(processedValue);
@@ -125,6 +143,10 @@ export class Property {
     }
 
     public setMinValue(value: number | undefined): void {
+        if (this._isConstant) {
+            gameLogger.warn(`Cannot modify constant property '${this.id}'`);
+            return;
+        }
         if (this.type !== 'number') {
             gameLogger.error(`Cannot set minValue: Stat ${this.id} is not of type number.`);
             return;
@@ -146,6 +168,10 @@ export class Property {
     }
 
     public setMaxValue(value: number | undefined): void {
+        if (this._isConstant) {
+            gameLogger.warn(`Cannot modify constant property '${this.id}'`);
+            return;
+        }
         if (this.type !== 'number') {
             gameLogger.error(`Cannot set maxValue: Stat ${this.id} is not of type number.`);
             return;

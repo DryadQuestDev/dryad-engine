@@ -11,6 +11,7 @@ import { IndexedDbSaveService } from '../services/indexeddb-save.service';
 
 import { Property } from '../game/property';
 import { Ref, ref, watch } from 'vue';
+import { createValidatingDefineComponent } from './templateValidation';
 import { useLocalStorage, useStorage } from '@vueuse/core';
 import { SettingsObject } from '../schemas/settingsSchema';
 import { MenuOptions } from './menuOptions';
@@ -18,7 +19,7 @@ import Editor from 'primevue/editor';
 
 import { Editor as EngineEditor } from '../editor/editor';
 import { DungeonData } from '../game/core/dungeon/dungeonData';
-import { DungeonLine } from '../game/types';
+import { DungeonLine } from '../game/systems/dungeonSystem';
 import { DebugSettings } from '../game/data/debugSettings';
 import { Character } from '../game/core/character/character';
 import { PluginObject } from '../schemas/pluginShema';
@@ -42,6 +43,24 @@ import CharacterFace from '../game/views/CharacterFace.vue';
 import CharacterDoll from '../game/views/progression/CharacterDoll.vue';
 import BackgroundAsset from '../game/views/BackgroundAsset.vue';
 import CustomComponentContainer from '../game/views/CustomComponentContainer.vue';
+
+// Progression components
+import CharacterSheet from '../game/views/progression/CharacterSheet.vue';
+import CharacterStats from '../game/views/progression/CharacterStats.vue';
+import CharacterStatuses from '../game/views/progression/CharacterStatuses.vue';
+import CharacterSlot from '../game/views/progression/CharacterSlot.vue';
+import StatEntity from '../game/views/progression/StatEntity.vue';
+import ProgressBar from '../game/views/progression/ProgressBar.vue';
+import InventoryComponent from '../game/views/progression/InventoryComponent.vue';
+import InventoryHeader from '../game/views/progression/InventoryHeader.vue';
+import ItemGrid from '../game/views/progression/ItemGrid.vue';
+import ItemSlot from '../game/views/progression/ItemSlot.vue';
+import ItemSlots from '../game/views/progression/ItemSlots.vue';
+import ItemCard from '../game/views/progression/ItemCard.vue';
+import ItemChoices from '../game/views/progression/ItemChoices.vue';
+import SkillTree from '../game/views/progression/SkillTree.vue';
+import SkillSlot from '../game/views/progression/SkillSlot.vue';
+import CharacterViewer from '../game/views/progression/CharacterViewer.vue';
 
 // Define the notification item structure
 interface NotificationItem {
@@ -452,6 +471,9 @@ export class Global {
     // load object maps for custom choices
     game.logicSystem.customChoiceMap = await this.fetchMapValues(gameId, `custom_choices`, modsIds);
 
+    // load object maps for properties(static DATA ONLY)
+    game.coreSystem.propertiesMap = await this.fetchMapValues(gameId, `properties`, modsIds);
+
     // load object maps for character system
     game.characterSystem.statsMap = await this.fetchMapValues(gameId, `character_stats`, modsIds, 'order');
     game.characterSystem.statsVisibleMap = new Map(Array.from(game.characterSystem.statsMap.entries()).filter(([_, stat]) => !stat.is_hidden));
@@ -496,6 +518,9 @@ export class Global {
     game.coreSystem.musicMap = await this.fetchMapValues(gameId, `music`, modsIds);
     game.coreSystem.soundsMap = await this.fetchMapValues(gameId, `sounds`, modsIds);
 
+    // load object maps for pool system
+    game.logicSystem.poolDefinitionsMap = await this.fetchMapValues(gameId, `pool_definitions`, modsIds);
+    game.logicSystem.poolEntriesMap = await this.fetchMapValues(gameId, `pool_entries`, modsIds);
 
     // set debug settings
     game.coreSystem.debugSettings.value = this.optionsToObject(DebugSettings);
@@ -511,7 +536,7 @@ export class Global {
     // ============================================
 
     // Register properties (loaded as array, converted to Map with Property instances)
-    game.coreSystem.dataRegistry.set('properties', game.coreSystem.properties.value);
+    // game.coreSystem.dataRegistry.set('properties', game.coreSystem.properties.value);
 
     // Register statsVisibleMap (derived from statsMap)
     game.coreSystem.dataRegistry.set('character_stats_visible', game.characterSystem.statsVisibleMap);
@@ -693,7 +718,12 @@ export class Global {
               let schemaData: any;
 
               if (tab.isArray) {
-                schemaData = await this.loadAndMergeArrayFile<any>(gameId, pluginDataPath, modsIds);
+                const arrayData = await this.loadAndMergeArrayFile<any>(gameId, pluginDataPath, modsIds);
+                // Convert array to Map using id as key (consistent with other data types)
+                schemaData = new Map<string, any>();
+                for (const item of arrayData) {
+                  schemaData.set(item.id || item.uid, item);
+                }
               } else {
                 schemaData = await this.loadAndMergeSingleFile<any>(gameId, pluginDataPath, modsIds);
               }
@@ -735,11 +765,17 @@ export class Global {
     let gameId = game.coreSystem.gameId;
     let modsIds = modList.map(mod => mod.id);
 
+    // Create wrapped Vue with validating defineComponent
+    const wrappedVue = {
+      ...Vue,
+      defineComponent: createValidatingDefineComponent(),
+    };
+
     // expose game to global
     (window as any).engine = {
       game: this.game,
-      // expose vue to global
-      vue: Vue,
+      // expose vue to global (with validation wrapper)
+      vue: wrappedVue,
       primeVue: PrimeVue,
       vueUse: VueUse,
       floatingUi: FloatingUi,
@@ -751,6 +787,23 @@ export class Global {
         CharacterDoll,
         BackgroundAsset,
         CustomComponentContainer,
+        // Progression components
+        CharacterSheet,
+        CharacterStats,
+        CharacterStatuses,
+        CharacterSlot,
+        CharacterViewer,
+        StatEntity,
+        ProgressBar,
+        InventoryComponent,
+        InventoryHeader,
+        ItemGrid,
+        ItemSlot,
+        ItemSlots,
+        ItemCard,
+        ItemChoices,
+        SkillTree,
+        SkillSlot,
       }
     };
 

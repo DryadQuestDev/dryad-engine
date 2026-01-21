@@ -46,7 +46,7 @@ const shouldShowDebugPanel = computed(() => {
     <div class="is_loading" v-if="game.coreSystem.stateLoading.value">
       Loading...
     </div>
-    <div class="game-body" v-else>
+    <div class="game-body dark-scrollbar" v-else>
 
 
       <div class="game-body-content">
@@ -229,7 +229,7 @@ const shouldShowDebugPanel = computed(() => {
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 500;
+  z-index: 1000;
 }
 
 .no-game-state {

@@ -11,9 +11,8 @@ import { computed, reactive } from 'vue';
 import ExplorationComponent from '../views/states/exploration/Exploration.vue';
 import BattleComponent from '../views/states/battle/Battle.vue';
 import QuestsTab from '../views/progression/QuestsTab.vue';
+import CharacterTab from '../views/progression/CharacterTab.vue';
 import CharacterSheet from '../views/progression/CharacterSheet.vue';
-import CharacterStats from '../views/progression/CharacterStats.vue';
-import InventoryComponent from '../views/progression/InventoryComponent.vue';
 import InventoryHeader from '../views/progression/InventoryHeader.vue';
 import GalleryTab from '../views/progression/GalleryTab.vue';
 import SkillTree from '../views/progression/SkillTree.vue';
@@ -55,8 +54,8 @@ export const CORE_EMITTER_SIGNATURES = {
     "state_change": (stateId: string, newValue: any, oldValue: any): boolean | void => { },
     "dungeon_create": (dungeon: Dungeon): boolean | void => { }, // will be triggered when a dungeon is created, including on loading a save file(because dungeons are not serialized).
     "dungeon_enter": (dungeonId: string, roomId: string): boolean | void => { },
-    "room_enter_before": (roomId: string): boolean | void => { },
-    "room_enter_after": (roomId: string): boolean | void => { },
+    "room_enter_before": (roomId: string, dungeonId: string): boolean | void => { },
+    "room_enter_after": (roomId: string, dungeonId: string): boolean | void => { },
     "scene_play_before": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
     "scene_play_after": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
     "event_end": (): boolean | void => { },
@@ -204,6 +203,7 @@ export class InitSystem {
         this.game.registerState('replay_mode_unlock_choices', false);
 
         this.game.registerState('max_log', 40);
+        this.game.registerState('character_stat_groups', null);
     }
 
     // ============================================
@@ -287,7 +287,7 @@ export class InitSystem {
             id: 'character',
             slot: 'progression-tabs',
             title: 'Characters',
-            component: CharacterSheet
+            component: CharacterTab
         });
 
         this.game.coreSystem.addComponent({
@@ -303,10 +303,10 @@ export class InitSystem {
      */
     private registerCharacterTabComponents(): void {
         this.game.coreSystem.addComponent({
-            id: 'stats',
+            id: 'character-sheet',
             slot: 'character-tabs',
             title: 'Character Sheet',
-            component: CharacterStats
+            component: CharacterSheet
         });
 
         this.game.coreSystem.addComponent({
@@ -315,16 +315,6 @@ export class InitSystem {
             title: 'Skills',
             component: SkillTree,
             order: 3
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'inventory',
-            slot: 'character-tabs',
-            title: 'Inventory',
-            component: InventoryComponent,
-            props: {
-                inventory_id: PARTY_INVENTORY_ID
-            }
         });
 
         this.game.coreSystem.addComponent({
@@ -593,7 +583,7 @@ export class InitSystem {
                         return character.getAttribute(key);
 
                     case 'stat': {
-                        return character.getStat(key).value;
+                        return character.getStat(key);
                     }
 
                     case 'resource':
@@ -1615,7 +1605,7 @@ export class InitSystem {
     private registerStatComputers(): void {
         /*
         this.game.characterSystem.registerStatComputer("armorToPowerComputer", (char: Character) => {
-            const armorValue = char.getStat("armor").value || 0;
+            const armorValue = char.getStat("armor") || 0;
             const lewdness = Number(this.game.getProperty("lewds")?.currentValue) || 0
             return {
                 power: armorValue * 2,

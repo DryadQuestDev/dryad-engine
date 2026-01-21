@@ -12,6 +12,7 @@ const COMPONENT_ID = 'item-grid';
 // Props
 const props = defineProps<{
   items: (Item | null)[];  // Array of items to display (null = empty slot)
+  disabled?: boolean;      // Disable item choices (still shows item card on hover)
 }>();
 
 // Filter out null values for popup composable (it only needs actual items)
@@ -44,8 +45,7 @@ function handleDragStart(event: DragEvent, item: Item) {
   <div :id="COMPONENT_ID" class="item-grid">
     <!-- Render each item using ItemSlot component, or empty slot for null -->
     <template v-for="(item, index) in items" :key="item?.uid || `empty-${index}`">
-      <ItemSlot v-if="item" :item="item" @dragstart="handleDragStart"
-        @hover="handleItemHover" />
+      <ItemSlot v-if="item" :item="item" @dragstart="handleDragStart" @hover="handleItemHover" />
       <div v-else class="empty-slot"></div>
     </template>
 
@@ -55,8 +55,8 @@ function handleDragStart(event: DragEvent, item: Item) {
         ...floatingStyles,
         willChange: 'transform'
       }" @mouseenter="handlePopupEnter" @mouseleave="handlePopupLeave">
-        <!-- ItemChoices at the top (only if there are choices) -->
-        <div v-if="hasChoices" class="item-choices-wrapper">
+        <!-- ItemChoices at the top (only if there are choices and not disabled) -->
+        <div v-if="hasChoices && props.disabled !== true" class="item-choices-wrapper">
           <ItemChoices :item="displayedItem!" />
         </div>
 

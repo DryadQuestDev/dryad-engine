@@ -40,7 +40,6 @@ const existingTokenNameInput = ref('');
 // const fetchedDocumentContent = ref<any | null>(null);
 
 // --- Computed Properties ---
-const isElectronEnvironment = computed(() => global.storageService.getName() === 'electron');
 
 // To refresh the list of OAuth apps for selection
 const availableOAuthApps = computed(() => documentManager.oauthAppConfigs);
@@ -137,7 +136,7 @@ async function startNewTokenAuth() {
     documentManager.error.value = "Please select an OAuth App configuration to use.";
     return;
   }
-  documentManager.selectOAuthApp(selectedOAuthAppIdForNewToken.value); 
+  documentManager.selectOAuthApp(selectedOAuthAppIdForNewToken.value);
   await documentManager.startAuthentication(newTokenNameInput.value.trim());
   if (documentManager.successMessage.value && !documentManager.isOAuthServerWaitingForCallback.value) {
       newTokenNameInput.value = ''; 
@@ -223,7 +222,7 @@ async function fetchDoc() {
     documentManager.error.value = "gdoc_id field is empty";
     return;
   }
-  if (global.storageService.getName() === "electron" && !selectedUserTokenIdForImport.value) {
+  if (global.storageService.supportsGoogleAuth() && !selectedUserTokenIdForImport.value) {
     documentManager.error.value = "Please select a User Token to use for fetching (from dropdown under 'User Tokens' or by activating one).";
     return;
   }
@@ -352,11 +351,20 @@ function copyToClipboard(text: string) {
               :icon="documentManager.isOAuthServerWaitingForCallback.value ? 'pi pi-times-circle' : 'pi pi-google'"
               :severity="documentManager.isOAuthServerWaitingForCallback.value ? 'warn' : 'primary'"
             />
-            <p class="small-text">
-              {{ documentManager.isOAuthServerWaitingForCallback.value 
-                ? 'Authentication in progress. Click abort to stop and cancel.' 
+            <p class="small-text" v-if="!documentManager.isOAuthServerWaitingForCallback.value">
+              {{ documentManager.isLocalhost.value
+                ? 'Click to start authentication. A link will appear to complete the process.'
                 : 'This will open a Google authentication window.' }}
             </p>
+            <p class="small-text" v-if="documentManager.isOAuthServerWaitingForCallback.value && !documentManager.pendingAuthUrl.value">
+              Authentication in progress. Click abort to stop and cancel.
+            </p>
+            <div v-if="documentManager.pendingAuthUrl.value" class="auth-link-inline" style="margin-top: 8px;">
+              <a :href="documentManager.pendingAuthUrl.value" target="_blank" rel="noopener noreferrer" class="auth-link">
+                Click here to authenticate with Google →
+              </a>
+              <p class="small-text" style="margin-top: 4px;">After authenticating, return here. Click abort to cancel.</p>
+            </div>
           </div>
         </div>
 
@@ -483,7 +491,7 @@ function copyToClipboard(text: string) {
 
       <div class="fetch-document-section">
 
-          <div v-if="global.storageService.getName() === 'electron' && !selectedUserTokenIdForImport" class="warn-message">
+          <div v-if="global.storageService.supportsGoogleAuth() && !selectedUserTokenIdForImport" class="warn-message">
             Please select an active User Token from the "User Tokens" tab (via dropdown or by activating one) to use for fetching.
           </div>
           <template v-else>
@@ -747,6 +755,25 @@ textarea, input[type="text"], select {
     padding-top: 1.5rem;
 }
 
+/* Auth link styling for localhost OAuth flow */
+.auth-link-inline {
+    background: rgba(79, 195, 247, 0.15);
+    border: 1px solid rgba(79, 195, 247, 0.4);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.auth-link {
+    color: #4fc3f7;
+    font-size: 1.1em;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.auth-link:hover {
+    color: #81d4fa;
+    text-decoration: underline;
+}
 
 
 </style>

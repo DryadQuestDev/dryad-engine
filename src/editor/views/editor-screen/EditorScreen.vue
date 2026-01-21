@@ -216,8 +216,8 @@ function openLoadGamePopup() {
           v-tooltip.bottom="'Configure which mods to load during playtest'" class="playtest-mods-button" text />
 
         <!-- Playtest Button -->
-        <Button icon="pi pi-play" label="Playtest" @click="startPlaytest" :disabled="!editor.selectedGame"
-          v-tooltip.bottom="'Start playtesting with dev mode (Ctrl/Cmd+P)'" class="playtest-button" />
+        <Button class="playtest-button" icon="pi pi-play" label="Playtest" @click="startPlaytest"
+          :disabled="!editor.selectedGame" v-tooltip.bottom="'Start playtesting with dev mode (Ctrl/Cmd+P)'" />
 
         <!-- Load Game Button -->
         <Button icon="pi pi-file-arrow-up" @click="openLoadGamePopup" :disabled="!editor.selectedGame"

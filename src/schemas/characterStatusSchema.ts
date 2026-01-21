@@ -34,6 +34,7 @@ export const CharacterStatusSchema = {
     // TODO
     //expiration_trigger: { type: 'chooseOne', options: ['none', 'exploration', 'combat'] },
     duration: { type: 'number', show: { expiration_trigger: ['exploration', 'combat'] }, tooltip: 'How long the status lasts (in turns or time units).' },
+    image: { type: 'file', fileType: 'image', tooltip: 'Image to display for the status effect.' },
     ...BaseStatusSchema,
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
 } as const satisfies Schema;

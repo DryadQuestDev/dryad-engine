@@ -155,6 +155,7 @@ function isEditingArray(propertyId: string): boolean {
             <span class="property-type" :style="{ backgroundColor: getTypeColor(property.type) }">
               {{ property.type }}
             </span>
+            <span v-if="property.skipSave" class="property-const-tag">const</span>
             <span class="property-value-preview">
               = {{ property.currentValue }}
             </span>
@@ -175,9 +176,10 @@ function isEditingArray(propertyId: string): boolean {
                   :maxFractionDigits="property.precision ?? 2"
                   showButtons
                   class="w-full"
+                  :disabled="property.skipSave"
                 />
               </div>
-              <div class="property-field-row">
+              <div v-if="!property.skipSave" class="property-field-row">
                 <div class="property-field">
                   <label>Min Value</label>
                   <InputNumber
@@ -212,6 +214,7 @@ function isEditingArray(propertyId: string): boolean {
                   :modelValue="property.currentValue as string"
                   @update:modelValue="updateStringValue(id, $event)"
                   class="w-full"
+                  :disabled="property.skipSave"
                 />
               </div>
             </template>
@@ -224,6 +227,7 @@ function isEditingArray(propertyId: string): boolean {
                   @update:modelValue="updateBooleanValue(id, $event)"
                   :binary="true"
                   :inputId="'prop-' + id"
+                  :disabled="property.skipSave"
                 />
                 <label :for="'prop-' + id">{{ property.currentValue ? 'True' : 'False' }}</label>
               </div>
@@ -235,6 +239,7 @@ function isEditingArray(propertyId: string): boolean {
                 <label>Current Value</label>
                 <pre class="array-preview">{{ JSON.stringify(property.currentValue, null, 2) }}</pre>
                 <Button
+                  v-if="!property.skipSave"
                   label="Edit"
                   icon="pi pi-pencil"
                   size="small"
@@ -264,6 +269,7 @@ function isEditingArray(propertyId: string): boolean {
                 <label>Current Value</label>
                 <pre class="array-preview">{{ JSON.stringify(property.currentValue, null, 2) }}</pre>
                 <Button
+                  v-if="!property.skipSave"
                   label="Edit"
                   icon="pi pi-pencil"
                   size="small"
@@ -293,7 +299,7 @@ function isEditingArray(propertyId: string): boolean {
                 Default: {{ property.defaultValue }}
               </span>
               <Button
-                v-if="property.defaultValue !== undefined"
+                v-if="property.defaultValue !== undefined && !property.skipSave"
                 label="Reset to Default"
                 icon="pi pi-refresh"
                 size="small"
@@ -335,6 +341,16 @@ function isEditingArray(propertyId: string): boolean {
   border-radius: 4px;
   color: white;
   font-weight: 500;
+}
+
+.property-const-tag {
+  font-size: 0.75em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background-color: #607D8B;
+  color: white;
+  font-weight: 500;
+  font-style: italic;
 }
 
 .property-value-preview {

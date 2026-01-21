@@ -1,3 +1,9 @@
+.dbookmarks {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
 .buttons_container {
     margin-top: 20px;
 }
@@ -8,9 +14,10 @@
 }
 
 .bookmark_list {
+    flex: 1;
+    min-height: 0; /* Important for flex overflow */
     margin-top: 15px;
     overflow-y: auto;
-    /* Add scroll if list is long */
     border-top: 1px solid var(--surface-d);
 }
 

@@ -1,6 +1,6 @@
 # Dryad Engine
 
-A Vue-based game engine for creating UI-heavy games like visual novels, dating sims, and RPGs with complex interfaces.
+A Vue-based game engine for creating UI-heavy games like visual novels, dating sims, dungeon crawlers, and RPGs with complex interfaces.
 
 ## Why Dryad Engine?
 
@@ -26,16 +26,40 @@ A Vue-based game engine for creating UI-heavy games like visual novels, dating s
 
 ## Quick Start
 
+### 1. Install
+
 ```bash
 git clone https://github.com/DryadQuestDev/dryad-engine.git
 cd dryad-engine
 npm install
+```
+
+### 2. Running Dev
+
+Start the development server and Vite(Engine) in separate terminals:
+
+```bash
+# Terminal 1: Start the data API server
+npm run dev-server
+
+# Terminal 2: Start Vite dev server
+npm run start
+
+# Alternative: Use start2 to disable file watching (prevents reload during asset management)
+npm run start2
+```
+
+Open `http://localhost:4200` in your browser.
+
+### 3. Building Electron
+
+```bash
 ./build.sh
 
-# Linux
+# Output Linux
 ./production/dryad-engine-linux/dryad-engine
 
-# Windows
+# Output Windows
 ./production/dryad-engine-windows/dryad-engine.exe
 ```
 

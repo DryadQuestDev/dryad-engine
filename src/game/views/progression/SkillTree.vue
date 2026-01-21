@@ -265,7 +265,7 @@ function getFormattedPrice(skill: any) {
 
   return Object.entries(skill.price).map(([currencyId, amount]) => {
     const template = game.itemSystem.itemTemplatesMap.get(currencyId);
-    const availableAmount = inventory?.getCurrencyAmount(currencyId) || 0;
+    const availableAmount = inventory?.getItemQuantity(currencyId) || 0;
 
     return {
       id: currencyId,

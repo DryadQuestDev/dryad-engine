@@ -6,6 +6,7 @@ export class Status {
     public id: string = "";
     public maxStacks: number = 1; // -1 for unlimited
     public currentStacks: number = 1;
+    public image: string = "";
 
     // todo: implement
     public isHidden: boolean = false;
@@ -32,9 +33,10 @@ export class Status {
         this.stats = obj.stats || {};
         this.abilityModifiers = obj.ability_modifiers || [];
 
-        // If CharacterStatusObject is passed, also set max_stacks
+        // If CharacterStatusObject is passed, also set status values
         if ('max_stacks' in obj && obj.max_stacks !== undefined) {
             this.maxStacks = obj.max_stacks;
+            this.image = obj.image || "";
         }
 
         // set computed stats

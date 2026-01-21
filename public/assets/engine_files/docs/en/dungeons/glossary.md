@@ -5,11 +5,12 @@ You’ll usually write it in **Google Docs** or directly in the editor’s `dung
 
 At a high level, you use special markers to tell the engine what each piece of text is:
 
-- `^room_id` – start content for a **room**.  
-- `@description` – the **description encounter** for that room.  
-- `@some_encounter` – a specific **encounter** in that room.  
-- `!` and `~` – **choices** and branching logic.  
+- `^room_id` – start content for a **room**.
+- `@description` – the **description encounter** for that room.
+- `@some_encounter` – a specific **encounter** in that room.
+- `!` and `~` – **choices** and branching logic.
 - `#` – **events** that can be triggered manually or automatically when conditions are met.
+- `character_id:` – prefix dialogue with a character ID to set the **speaker**.
 
 The engine parses this text into structured data and uses it to drive:
 
@@ -247,3 +248,27 @@ fi{}
 ```
 
 Conditions are what make your dungeons **reactive** – they look at inventory, party, or any custom logic and decide what the player can see or do.
+
+---
+
+### Talking Characters: Speaker Attribution
+
+When writing dialogue, you can prefix a line with a **character ID** followed by a colon to indicate who is speaking:
+
+```text
+riko: Hey there! I'm Riko. Welcome to this tutorial!
+
+mc: Nice to meet you.
+```
+
+The engine automatically:
+
+1. Extracts the character ID (e.g., `riko` or `mc`) from the prefix.
+2. Sets the current speaker, so the UI can display their name, portrait, and dialogue box styling.
+3. Returns just the dialogue text (everything after the colon) for display.
+
+**Important:** The character ID must match a **live character instance** – meaning the character must be defined in the editor and exist in the game's character system. If the ID doesn't match any registered character, the engine won't know which portrait or name to display.
+
+To create and configure characters, see ->characters.characters_overview.
+
+To see a list of all registered characters during development, use ->advanced.debugging – the debug panel shows which characters are currently loaded.

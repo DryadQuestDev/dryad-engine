@@ -94,12 +94,32 @@ This gives you content for **two rooms**: one with ID `1` and one with ID `2`.
 
 @en/rooms.png
 
+#### 4.4 Make Sure Everything Is in Sync
+
+After writing dungeon content, you should verify that your **rooms** and **encounters** match what's defined in the game files.
+
+1. In the editor, open your dungeon Config and click **"Synchronize Content Document"**.
+2. The analyser will compare your content document against the game data and report:
+   - **Unimplemented rooms** – rooms referenced in content but not created yet.
+   - **Redundant rooms** – rooms in game data that no longer exist in content.
+   - **Missing encounters** – encounters referenced in content but not created yet.
+   - **Redundant encounters** – encounters in game data that no longer exist in content.
+
+3. Follow the prompts to create missing items or delete redundant ones.
+4. When everything matches, you'll see **"Everything is in sync!"**
+
+@en/sync.png
+
+This step is especially useful after editing your Google Doc or adding new rooms and encounters – it catches mismatches before they cause runtime errors.
+
+---
+
 At this point you have:
 
-- A new game  
-- A starting dungeon with two rooms (`1` and `2`)  
-- Content describing what happens when you enter each room  
+- A new game
+- A starting dungeon with two rooms (`1` and `2`)
+- Content describing what happens when you enter each room
 
-Now you’re ready to **test your game** – press the **Playtest** button in the editor and walk through your tiny dungeon.
+Now you're ready to **test your game** – press the **Playtest** button in the editor and walk through your tiny dungeon.
 
 

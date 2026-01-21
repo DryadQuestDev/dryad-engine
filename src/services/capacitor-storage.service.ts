@@ -11,6 +11,14 @@ export class CapacitorStorageService implements StorageService {
         return 'capacitor';
     }
 
+    supportsImageTools(): boolean {
+        return false;
+    }
+
+    supportsGoogleAuth(): boolean {
+        return false;
+    }
+
     async readJson(filePath: string): Promise<any> {
         throw new Error('CapacitorStorageService.readJson() is not implemented yet');
     }

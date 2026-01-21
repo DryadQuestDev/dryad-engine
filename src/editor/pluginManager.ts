@@ -5,6 +5,7 @@ import { Ref, ref } from "vue";
 import { ManifestObject } from "../schemas/manifestSchema";
 import { Editor } from "./editor";
 import { PluginObject } from "../schemas/pluginShema";
+import { jsonrepair } from "jsonrepair";
 
 
 export class PluginManager {
@@ -168,6 +169,68 @@ export class PluginManager {
 
     }
 
+    /**
+     * Parses JSON string properties that should be objects (fromFileTypeAnd, fromFileTypeOr).
+     * These are stored as textarea fields in plugin schemas but need to be objects for filtering.
+     * Uses jsonrepair for more robust parsing of potentially malformed JSON.
+     */
+    private parseJsonSchemaProperties(schemaDef: any): void {
+        if (schemaDef.fromFileTypeAnd && typeof schemaDef.fromFileTypeAnd === 'string') {
+            try {
+                schemaDef.fromFileTypeAnd = JSON.parse(jsonrepair(schemaDef.fromFileTypeAnd));
+            } catch (e) {
+                console.warn(`[PluginManager] Failed to parse fromFileTypeAnd: ${schemaDef.fromFileTypeAnd}`);
+            }
+        }
+        if (schemaDef.fromFileTypeOr && typeof schemaDef.fromFileTypeOr === 'string') {
+            try {
+                schemaDef.fromFileTypeOr = JSON.parse(jsonrepair(schemaDef.fromFileTypeOr));
+            } catch (e) {
+                console.warn(`[PluginManager] Failed to parse fromFileTypeOr: ${schemaDef.fromFileTypeOr}`);
+            }
+        }
+    }
+
+    /**
+     * Recursively converts schema arrays (with propertyId) to object format.
+     * Handles nested 'objects' properties inside schema[] fields.
+     */
+    private convertSchemaArrayToObject(schema: any): Schema {
+        if (!schema || typeof schema !== 'object') return schema;
+
+        // If it's an array with propertyId, convert to object
+        if (Array.isArray(schema)) {
+            const result: Schema = {};
+            schema.forEach((prop: any) => {
+                if (prop.propertyId || prop.id) {
+                    const propertyId = prop.propertyId || prop.id;
+                    const { propertyId: _pid, id: _id, uid: _uid, ...schemaDef } = prop;
+                    // Recursively convert nested objects
+                    if (schemaDef.objects) {
+                        schemaDef.objects = this.convertSchemaArrayToObject(schemaDef.objects);
+                    }
+                    // Parse JSON string properties
+                    this.parseJsonSchemaProperties(schemaDef);
+                    result[propertyId] = schemaDef;
+                }
+            });
+            return result;
+        }
+
+        // If it's an object, check each property for nested objects
+        const result: Schema = {};
+        for (const [key, value] of Object.entries(schema)) {
+            const schemaDef = { ...(value as any) };
+            if (schemaDef.objects) {
+                schemaDef.objects = this.convertSchemaArrayToObject(schemaDef.objects);
+            }
+            // Parse JSON string properties
+            this.parseJsonSchemaProperties(schemaDef);
+            result[key] = schemaDef;
+        }
+        return result;
+    }
+
     private async initPluginTabs(): Promise<void> {
 
         this.pluginTabs.value = [];
@@ -182,20 +245,8 @@ export class PluginManager {
             let subtabs: any[] = [];
             plugin.tabs.forEach(tab => {
                 // Convert schema from array format back to object format for runtime use
-                let baseSchema: Schema = {};
-                if (tab.schema && Array.isArray(tab.schema)) {
-                    // Schema is in array format, convert to object
-                    tab.schema.forEach((prop: any) => {
-                        if (prop.propertyId || prop.id) {
-                            const propertyId = prop.propertyId || prop.id;
-                            const { propertyId: _pid, id: _id, uid: _uid, ...schemaDef } = prop;
-                            baseSchema[propertyId] = schemaDef;
-                        }
-                    });
-                } else if (tab.schema && typeof tab.schema === 'object') {
-                    // Already in object format
-                    baseSchema = tab.schema as Schema;
-                }
+                // This recursively handles nested 'objects' inside schema[] fields
+                let baseSchema: Schema = this.convertSchemaArrayToObject(tab.schema);
 
                 let schema: Schema;
                 if (tab.isArray) {

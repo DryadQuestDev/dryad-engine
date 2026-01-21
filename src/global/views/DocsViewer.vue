@@ -36,16 +36,17 @@ function normalizeForSearch(text: string): string {
 // Hardcoded documentation tree structure (for ordering)
 const DOCS_TREE: Record<string, string[]> = {
   'introduction': ['overview', 'getting_started', 'creating_new_game'],
-  'dungeons': ['what_is_dungeon', 'dungeon_template', 'google_docs_integration', 'quests', 'glossary'],
+  'dungeons': ['what_is_dungeon', 'dungeon_template', 'google_docs_integration', 'quests', 'glossary', 'dungeons_api'],
   'characters': ['characters_overview', 'actor_slots', 'skills', 'characters_computed', 'abilities', 'characters_api'],
   'items': ['items_overview', 'exchange', 'apply', 'items_api'],
   'resources': ['audio', 'assets', 'galleries', 'file_browser'],
-  'miscellaneous': ['properties', 'store', 'data'],
+  'miscellaneous': ['properties', 'store', 'data', 'random_pools'],
   'advanced': ['set_up_coding', 'vue', '3rd_party', 'registry', 'debugging', 'plugins', 'releasing_game'],
   'builtins': ['actions', 'placeholders', 'conditions', 'game_events', 'states', 'components_export', 'component_slots'],
 };
 
 const CHANGELOG_TREE: Record<string, string[]> = {
+  '0.3': ['0.3.0'],
   '0.2': ['0.2.0'],
 };
 
@@ -407,6 +408,9 @@ function processCustomSyntax() {
 
   let node: Text | null;
   while ((node = walker.nextNode() as Text | null)) {
+    // Skip text inside code blocks (inline code or pre blocks)
+    if (node.parentElement?.closest('code, pre')) continue;
+
     const text = node.textContent || '';
     const matches = [...text.matchAll(combinedPattern)];
     if (matches.length > 0) {
@@ -736,7 +740,7 @@ onUnmounted(() => {
             <div v-if="showSearchResults" class="search-results-dropdown">
               <div class="search-results-header">
                 <span class="results-count">{{ searchResults.length }} result{{ searchResults.length !== 1 ? 's' : ''
-                  }}</span>
+                }}</span>
               </div>
 
               <div v-if="isSearching" class="search-loading">

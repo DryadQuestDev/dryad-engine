@@ -20,7 +20,19 @@ import { watchDebounced } from '@vueuse/core';
 import TriStateSwitch from './TriStateSwitch.vue';
 import FileInput from './FileInput.vue';
 import RangeInput from './RangeInput.vue';
+import StringArrayInput from './StringArrayInput.vue';
 import { preserveScroll } from './preserveScrollDirective';
+import { useGeneratedFields } from './useGeneratedFields';
+import Quill from 'quill';
+
+// Override Quill's Image blot to accept relative paths without URL sanitization
+const ImageBlot = Quill.import('formats/image') as any;
+class CustomImage extends ImageBlot {
+  static sanitize(url: string) {
+    return url; // Accept all URLs without sanitization
+  }
+}
+Quill.register(CustomImage, true);
 
 // Get editor instance
 const editor = AppEditor.getInstance();
@@ -304,78 +316,7 @@ function onEditorInit({ instance }: { instance: any }) { // PrimeVue passes 'ins
   });
 }
 
-// --- String Array Logic ---
-const listContainer = ref<HTMLElement | null>(null);
-const localStringArray = ref<string[]>([]);
-
-// Sync prop changes to local state
-watch(() => props.modelValue, (newVal) => {
-  if (props.baseFieldSchema.type === 'string[]') {
-    if (Array.isArray(newVal)) {
-      // Ensure at least one empty string if array is empty or has no empty string at the end
-      const needsEmptyField = newVal.length === 0 || newVal[newVal.length - 1] !== '';
-      const newState = needsEmptyField ? [...newVal, ''] : [...newVal];
-
-      // Only update if different from current local state
-      if (JSON.stringify(newState) !== JSON.stringify(localStringArray.value)) {
-        localStringArray.value = newState;
-      }
-    } else if (!Array.isArray(newVal)) {
-      localStringArray.value = ['']; // Initialize if not an array
-    }
-  }
-}, { immediate: true, deep: true });
-
-// Watch local state for changes (user input, sorting, deletion) and auto-add/emit
-watch(localStringArray, (newList, oldList) => {
-  if (props.baseFieldSchema.type === 'string[]') {
-    // Auto-add new field if the last one is filled
-    if (newList.length > 0 && newList[newList.length - 1] !== '') {
-      localStringArray.value.push(''); // Add new empty field
-    }
-    // Remove duplicate empty field at the end (can happen during manipulation)
-    else if (newList.length > 1 && newList[newList.length - 1] === '' && newList[newList.length - 2] === '') {
-      localStringArray.value.pop();
-      // Exit early to prevent immediate re-emission if pop was the only change
-      return;
-    }
-
-    // Emit changes back to parent, but ALWAYS filter out the trailing empty string
-    // This ensures the emitted value matches what gets saved to the file
-    const listToEmit = [...localStringArray.value];
-    const listWithoutTrailingEmpty = listToEmit.length > 0 && listToEmit[listToEmit.length - 1] === ''
-      ? listToEmit.slice(0, -1)
-      : listToEmit;
-
-    // Emit only if the array content has actually changed from the prop
-    const currentPropValue = Array.isArray(props.modelValue) ? props.modelValue : [];
-    if (JSON.stringify(listWithoutTrailingEmpty) !== JSON.stringify(currentPropValue)) {
-      emit('update:modelValue', listWithoutTrailingEmpty);
-    }
-  }
-}, { deep: true });
-
-// Setup sorting
-useSortable(listContainer, localStringArray, {
-  handle: '.drag-handle',
-  animation: 150,
-  filter: '.non-draggable-empty', // Ignore drag attempts on elements with this class
-  preventOnFilter: false, // Allow default actions (like focus/click) on filtered items
-  // onUpdate is handled by the watcher on localStringArray
-});
-
-function deleteStringItem(index: number) {
-  // Prevent deleting the last empty item
-  if (localStringArray.value.length === 1 && localStringArray.value[0] === '') return;
-
-  localStringArray.value.splice(index, 1);
-
-  // Ensure there's always at least one (potentially empty) field
-  if (localStringArray.value.length === 0) {
-    localStringArray.value.push('');
-  }
-}
-// --- End String Array Logic ---
+// String Array Logic is now handled by StringArrayInput.vue component
 
 // --- Number Array Logic ---
 const numberListContainer = ref<HTMLElement | null>(null);
@@ -465,6 +406,12 @@ watch(() => props.modelValue, (newVal) => {
     if (Array.isArray(newVal)) {
       // Ensure only actual objects are in the array initially
       const validObjects = newVal.filter(item => item !== null && typeof item === 'object');
+      // Ensure all items have a uid for proper Vue key tracking
+      validObjects.forEach(item => {
+        if (!item.uid) {
+          item.uid = editor.createUid();
+        }
+      });
       // Update only if different from current local state
       if (JSON.stringify(validObjects) !== JSON.stringify(localSchemaArray.value)) {
         localSchemaArray.value = validObjects;
@@ -491,8 +438,7 @@ watch(localSchemaArray, (newList, oldList) => {
 
 // Add a new empty object item
 function addSchemaItem() {
-  localSchemaArray.value.unshift({ uid: editor.createUid() });
-
+  localSchemaArray.value.push({ uid: editor.createUid() });
   // The watcher will emit the update
 }
 
@@ -500,7 +446,6 @@ function addSchemaItem() {
 useSortable(schemaListContainer, localSchemaArray, {
   handle: '.drag-handle',
   animation: 150,
-  // No filtering needed for empty items here
 });
 
 function deleteSchemaItem(index: number) {
@@ -545,33 +490,73 @@ const isVisible = computed(() => {
   return true;
 });
 
+// --- Dynamic Filter Schema for build_filters logic ---
+// When pool field has logic: 'build_filters', generate dynamic schema for filters_include/filters_exclude
+const buildFiltersConfig = computed(() => {
+  if (!props.rootSchema?.pool) return null;
+  const poolSchema = props.rootSchema.pool as Schemable;
+  if (poolSchema.logic !== 'build_filters') return null;
+
+  // Return config for useGeneratedFields
+  return {
+    refField: 'pool',
+    refFile: 'pool_definitions',
+    sourceField: 'source',
+    fieldsPath: 'filter_fields'
+  };
+});
+
+// Use itemData (top-level item) instead of formData for pool lookup
+// This ensures nested entities[] items can still find the pool reference
+const itemDataRef = computed(() => props.itemData);
+const { dynamicFilterSchema, isLoading: isLoadingDynamicSchema } = useGeneratedFields(buildFiltersConfig, itemDataRef);
+
 // Computing the effective schema to be used for rendering this field
 const effectiveFieldSchema = computed<Schemable | null>(() => {
-  // ---- START DEBUG LOG ----
-  if (props.fieldKey === 'images') {
-    // console.log(`[FormFieldRenderer for "images"] effectiveFieldSchema re-evaluating. Current itemData.attributes:`, JSON.parse(JSON.stringify(props.itemData?.attributes || [])));
-  }
-  // ---- END DEBUG LOG ----
-
   const base = props.baseFieldSchema;
   if (!base) return null;
 
-  // MODIFIED CONDITION: Use the new ref for images field
+  // Handle build_filters logic for filters_include field
+  if (
+    props.fieldKey === 'filters_include' &&
+    props.rootSchema?.pool &&
+    (props.rootSchema.pool as Schemable).logic === 'build_filters' &&
+    dynamicFilterSchema.value
+  ) {
+    return {
+      ...base,
+      objects: dynamicFilterSchema.value
+    };
+  }
+
+  // Handle build_filters logic for filters_exclude field
+  if (
+    props.fieldKey === 'filters_exclude' &&
+    props.rootSchema?.pool &&
+    (props.rootSchema.pool as Schemable).logic === 'build_filters' &&
+    dynamicFilterSchema.value
+  ) {
+    return {
+      ...base,
+      objects: dynamicFilterSchema.value
+    };
+  }
+
+  // Handle build_images logic for images field
   if (
     props.fieldKey === 'images' &&
-    props.rootSchema && // Keep rootSchema check for context
+    props.rootSchema &&
     props.rootSchema.attributes &&
     (props.rootSchema.attributes as Schemable).logic === 'build_images' &&
-    dynamicImageSchemaObjects.value // Check the ref here
+    dynamicImageSchemaObjects.value
   ) {
-    console.log(`[effectiveFieldSchema for "images"] Using dynamicImageSchemaObjects:`, JSON.parse(JSON.stringify(dynamicImageSchemaObjects.value)));
     return {
       ...base,
       objects: dynamicImageSchemaObjects.value
     };
   }
 
-  // Use the new ref for masks field (parallel to images)
+  // Handle build_images logic for masks field
   if (
     props.fieldKey === 'masks' &&
     props.rootSchema &&
@@ -585,7 +570,7 @@ const effectiveFieldSchema = computed<Schemable | null>(() => {
     };
   }
 
-  // Fallback for non-image/masks fields or if dynamic objects aren't generated/applicable
+  // Fallback for non-dynamic fields
   return base;
 });
 
@@ -601,6 +586,8 @@ const objectsSchema = computed(() => effectiveFieldSchema.value?.objects || {});
 //const isRequired = computed(() => effectiveFieldSchema.value?.required || false);
 //const componentType = computed(() => (effectiveFieldSchema.value as any)?.component);
 const stepValue = computed(() => effectiveFieldSchema.value?.step || 1);
+const minValue = computed(() => effectiveFieldSchema.value?.min);
+const maxValue = computed(() => effectiveFieldSchema.value?.max);
 
 // Watch for visibility changes and delete the field from formData when it becomes hidden
 watch(isVisible, (visible) => {
@@ -746,7 +733,7 @@ onMounted(() => {
     <div v-else-if="fieldType === 'number'" class="field-container">
       <FloatLabel variant="on" class="p-float-label-variant-on input-wrapper">
 
-        <InputNumber v-model="internalValue" :step="stepValue" showButtons class="w-full" mode="decimal"
+        <InputNumber v-model="internalValue" :step="stepValue" :min="minValue" :max="maxValue" showButtons class="w-full" mode="decimal"
           :maxFractionDigits="2" v-tooltip.left="tooltip" @input="(event) => internalValue = event.value" />
         <label :for="fieldId">{{ label }}</label>
       </FloatLabel>
@@ -861,24 +848,16 @@ onMounted(() => {
 
     <!-- String Array -->
     <div v-else-if="fieldType === 'string[]'" class="field-container string-array-field">
-
       <div v-tooltip.left="tooltip" class="input-wrapper">
-        <label class="block mb-2 font-medium">{{ label }}</label>
-        <div ref="listContainer" class="space-y-2">
-          <div v-for="(item, index) in localStringArray" :key="index" class="flex items-center gap-2 string-array-item"
-            :class="{ 'non-draggable-empty': index === localStringArray.length - 1 && item === '' }">
-            <Button icon="pi pi-bars" text rounded class="drag-handle cursor-move p-button-sm"
-              aria-label="Drag to reorder" />
-            <InputText :model-value="localStringArray[index]"
-              @update:model-value="val => localStringArray[index] = val ?? ''" class="flex-grow" />
-            <Button icon="pi pi-trash" severity="danger" class="p-button-sm" aria-label="Remove Item"
-              @click="deleteStringItem(index)"
-              :disabled="localStringArray.length === 1 && localStringArray[0] === ''" />
-          </div>
-        </div>
+        <StringArrayInput
+          :model-value="internalValue"
+          @update:model-value="val => internalValue = val"
+          :label="label"
+          :tooltip="tooltip"
+          :allow-and-mode="effectiveFieldSchema?.allowAndMode"
+        />
       </div>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
-
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
       </div>
     </div>
@@ -965,16 +944,11 @@ onMounted(() => {
 
         <div v-tooltip.left="tooltip" class="nested_top_wrapper">
           <label class="block mb-2 font-medium">{{ label }}</label>
-
-          <!-- Add Item Button -->
-          <div class="mb-3">
-            <Button label="Add" icon="pi pi-plus" @click="addSchemaItem" size="small" />
-          </div>
         </div>
 
         <!-- List Container -->
         <div ref="schemaListContainer" class="space-y-4">
-          <div v-for="(item, index) in localSchemaArray" :key="index"
+          <div v-for="(item, index) in localSchemaArray" :key="item.uid"
             class="flex items-start gap-2 schema-array-item relative p-3 border-round border-1 border-surface-200">
             <!-- Drag Handle (Positioned Top-Left for block element) -->
             <Button icon="pi pi-bars" text rounded
@@ -991,11 +965,22 @@ onMounted(() => {
               aria-label="Remove Item" @click="deleteSchemaItem(index)" />
           </div>
         </div>
+
+        <!-- Add Item Button -->
+        <div class="mt-3">
+          <Button label="Add" icon="pi pi-plus" @click="addSchemaItem" size="small" />
+        </div>
       </div>
     </div>
 
-    <!-- Add other types here using v-else-if -->
-    <!-- e.g., <Checkbox v-else-if="fieldType === 'boolean'" ... /> -->
+    <!-- Incorrect Field (for non-existent filter field paths) -->
+    <div v-else-if="fieldType === 'incorrect'" class="field-container incorrect-field">
+      <div class="incorrect-field-warning">
+        <i class="pi pi-exclamation-triangle"></i>
+        <span class="incorrect-field-label">{{ label }}</span>
+        <span class="incorrect-field-message">{{ tooltip }}</span>
+      </div>
+    </div>
 
     <div v-else class="unsupported-field">
       Unsupported type: {{ fieldType }} for field {{ fieldKey }}
@@ -1216,5 +1201,32 @@ onMounted(() => {
 
 .justify-between {
   justify-content: space-between;
+}
+
+/* Incorrect Field Warning Styles */
+.incorrect-field-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--p-yellow-50);
+  border: 1px solid var(--p-yellow-300);
+  border-radius: var(--p-border-radius);
+  color: var(--p-yellow-700);
+  font-size: 0.875rem;
+}
+
+.incorrect-field-warning i {
+  color: var(--p-yellow-600);
+  font-size: 1rem;
+}
+
+.incorrect-field-label {
+  font-weight: 500;
+  font-family: var(--font-family-mono);
+}
+
+.incorrect-field-message {
+  color: var(--p-yellow-600);
 }
 </style>

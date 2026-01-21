@@ -4,6 +4,9 @@ import { DungeonConfigObject } from "../schemas/dungeonConfigSchema";
 export interface StorageService {
     getName(): string;
 
+    // --- Capability Checks ---
+    supportsImageTools(): boolean;
+    supportsGoogleAuth(): boolean;
 
     // --- File System Methods ---
     readJson(filePath: string): Promise<any>;

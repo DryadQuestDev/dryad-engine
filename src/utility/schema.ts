@@ -2,13 +2,14 @@
  * Represents the definition for a single field within a schema.
  */
 export interface Schemable {
-  type: 'uid' | 'string' | 'number' | 'boolean' | 'textarea' | 'htmlarea' | 'chooseOne' | 'chooseMany' | 'string[]' | 'number[]' | 'file' | 'file[]' | 'schema' | 'schema[]' | 'color' | 'range';
+  type: 'uid' | 'string' | 'number' | 'boolean' | 'textarea' | 'htmlarea' | 'chooseOne' | 'chooseMany' | 'string[]' | 'number[]' | 'file' | 'file[]' | 'schema' | 'schema[]' | 'color' | 'range' | 'incorrect';
   label?: string;
   tooltip?: string;
   options?: any[];
   optionLabel?: string; // Property name to use as label when options are objects (e.g., 'name' or 'label')
   optionValue?: string; // Property name to use as value when options are objects (e.g., 'id' or 'value')
   fromFile?: string;
+  fromLogic?: string; // special logic for populating options dynamically (e.g., 'available_sources')
   isFromPlugins?: boolean; // if true, the field's values are loaded from plugin folders
   logic?: string; //special logic for the field
   // 'chooseOne' refers to 'values' field in the file
@@ -19,11 +20,13 @@ export interface Schemable {
   required?: boolean;
   fileType?: string;
   step?: number; // for number fields
+  min?: number; // minimum value for number fields
+  max?: number; // maximum value for number fields
   show?: {
     [key: string]: any[];
   }
   objects?: Schema; // Optional: Holds the nested schema definition when type is 'schema'
-  // Add other potential constraints like min, max, pattern etc. if needed
+  allowAndMode?: boolean; // Show AND/OR toggle for string[] fields (used in filter fields)
 }
 
 export type Schema = Record<string, Schemable>;
@@ -45,7 +48,7 @@ type MappedBaseType<T extends Schema> = {
   T[K]['type'] extends 'boolean' ? boolean :
   T[K]['type'] extends 'string[]' | 'file[]' | 'chooseMany' ? string[] :
   T[K]['type'] extends 'number[]' ? number[] :
-  T[K]['type'] extends 'range' ? [number, number] : // Handle 'range' type as tuple
+  T[K]['type'] extends 'range' ? { min?: number; max?: number } : // Handle 'range' type as object
   T[K]['type'] extends 'schema' ? SchemaToType<NonNullable<T[K]['objects']>> : // Handle 'schema' type
   T[K]['type'] extends 'schema[]' ? SchemaToType<NonNullable<T[K]['objects']>>[] : // Handle 'schema[]' type
   never;

@@ -187,23 +187,23 @@ p {
   color: #8fcdff;
 }
 
-/* Custom Scrollbar Styles for Game Body */
-.game-body ::-webkit-scrollbar {
+/* Dark Scrollbar Styles (reusable) */
+.dark-scrollbar ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-.game-body ::-webkit-scrollbar-track {
+.dark-scrollbar ::-webkit-scrollbar-track {
   background: #1a1a1a;
 }
 
-.game-body ::-webkit-scrollbar-thumb {
+.dark-scrollbar ::-webkit-scrollbar-thumb {
   background: #444;
   border-radius: 4px;
   transition: background 0.2s;
 }
 
-.game-body ::-webkit-scrollbar-thumb:hover {
+.dark-scrollbar ::-webkit-scrollbar-thumb:hover {
   background: #555;
 }
 

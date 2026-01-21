@@ -104,7 +104,7 @@ EOF
 
 echo "Type definitions copied!"
 
-# Step 3: Build the Angular/Vue app
+# Step 3: Build the app
 echo "Building the application..."
 npm run build
 

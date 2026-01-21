@@ -2,7 +2,7 @@ import { Dungeon } from "./dungeon";
 import { gameLogger } from "../../utils/logger";
 import { Global } from "../../../global/global";
 import { Game } from "../../../game/game";
-import { DungeonLine } from "../../types";
+import { DungeonLine } from "../../systems/dungeonSystem";
 import { DungeonRoom } from "./dungeonRoom";
 import { DungeonEncounter } from "./dungeonEncounter";
 import { DungeonRoomObject } from "../../../schemas/dungeonRoomSchema";

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, inject } from 'vue';
 import { Item } from '../../core/character/item';
+import { Game } from '../../game';
 import { STICKY_ITEM_UID_KEY, HOVER_ITEM_UID_KEY } from './useItemPopup';
 import type { Ref } from 'vue';
 
+const game = Game.getInstance();
+
 const props = defineProps<{
   item: Item;
+  disabled?: boolean; // Disable click/drag while keeping hover tooltips
 }>();
 
 const emit = defineEmits<{
@@ -95,6 +99,9 @@ function handleMouseLeave() {
 }
 
 function handleClick() {
+  // Guard: disabled items can't be clicked
+  if (props.disabled) return;
+
   // If this item is already sticky, remove sticky state
   if (isSticky.value) {
     stickyItemUid.value = null;
@@ -112,6 +119,11 @@ function handleClick() {
 }
 
 function handleDragStart(event: DragEvent) {
+  // Guard: disabled items can't be dragged
+  if (props.disabled) {
+    event.preventDefault();
+    return;
+  }
   emit('dragstart', event, props.item);
 }
 </script>
@@ -121,10 +133,11 @@ function handleDragStart(event: DragEvent) {
     <div ref="itemSlotRef" class="item-slot" :class="{
       'equipped': item.isEquipped,
       'sticky': isSticky,
-      'just-unstickied': wasJustUnstickied
-    }" draggable="true" @click="handleClick" @dragstart="handleDragStart" @mouseenter="handleMouseEnter"
+      'just-unstickied': wasJustUnstickied,
+      'disabled': disabled
+    }" :draggable="!disabled" @click="handleClick" @dragstart="handleDragStart" @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave">
-      <img v-if="icon" :src="icon" :alt="name" class="item-icon" />
+      <img v-if="icon" :src="icon" :alt="name" class="item-icon" @load="game.persistImage(icon)" />
 
       <!-- Durability indicator on the left side -->
       <span v-if="durability !== null" class="item-durability">
@@ -168,6 +181,10 @@ function handleDragStart(event: DragEvent) {
 .item-slot:hover {
   border-color: #666;
   background: #333;
+}
+
+.item-slot.disabled {
+  cursor: default;
 }
 
 .item-icon {

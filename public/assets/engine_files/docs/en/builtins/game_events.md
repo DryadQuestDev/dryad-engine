@@ -99,7 +99,7 @@ Triggered when entering a dungeon.
 game.on("dungeon_enter", (dungeonId, roomId) => {
   let visits = game.getFlag(dungeonId + ".visits") || 0;
   game.setFlag(dungeonId + ".visits", visits + 1);
-  game.addFlash("Entered " + dungeonId);
+  game.showNotification("Entered " + dungeonId);
 });
 ```
 
@@ -107,16 +107,20 @@ game.on("dungeon_enter", (dungeonId, roomId) => {
 
 Triggered before entering a room. Return `false` to abort entering the room.
 
+**Parameters:**
+- `roomId` - The ID of the room being entered
+- `dungeonId` - The ID of the dungeon containing the room
+
 **Use cases:**
 - Block access to locked rooms
 - Check for required items or keys
 - Implement level requirements
 
 ```js
-game.on("room_enter_before", (roomId) => {
+game.on("room_enter_before", (roomId, dungeonId) => {
   let isLocked = game.getFlag(roomId + "_locked");
   if (isLocked) {
-    game.addFlash("This room is locked!");
+    game.showNotification("This room is locked!");
     return false;
   }
 });
@@ -126,13 +130,17 @@ game.on("room_enter_before", (roomId) => {
 
 Triggered after entering a room.
 
+**Parameters:**
+- `roomId` - The ID of the room that was entered
+- `dungeonId` - The ID of the dungeon containing the room
+
 **Use cases:**
 - Track visited rooms
 - Trigger room-specific events
 - Update minimap state
 
 ```js
-game.on("room_enter_after", (roomId) => {
+game.on("room_enter_after", (roomId, dungeonId) => {
   game.setFlag("last_room", roomId);
 });
 ```
@@ -213,7 +221,7 @@ Triggered when a character's resource changes.
 
 ```js
 game.on("character_resource_change", (char, stat, old, val) => {
-  if (val <= 0) game.addFlash(char.getName() + " fainted!");
+  if (val <= 0) game.showNotification(char.getName() + " fainted!");
 });
 ```
 
@@ -243,7 +251,7 @@ Triggered when a character joins the party.
 
 ```js
 game.on("character_join_party", (char) => {
-  game.addFlash(char.getName() + " joined!");
+  game.showNotification(char.getName() + " joined!");
 });
 ```
 
@@ -258,7 +266,7 @@ Triggered when a character leaves the party.
 
 ```js
 game.on("character_leave_party", (char) => {
-  game.addFlash(char.getName() + " left");
+  game.showNotification(char.getName() + " left");
 });
 ```
 
@@ -336,7 +344,7 @@ Triggered before equipping. Return `false` to cancel.
 ```js
 game.on("item_equip_before", (item, char) => {
   if (item.hasTag("cursed")) {
-    game.addFlash("Cursed!");
+    game.showNotification("Cursed!");
     return false;
   }
 });
@@ -353,7 +361,7 @@ Triggered after equipping.
 
 ```js
 game.on("item_equip_after", (item, char) => {
-  game.addFlash(char.getName() + " equipped " + item.getName());
+  game.showNotification(char.getName() + " equipped " + item.getName());
 });
 ```
 
@@ -407,7 +415,7 @@ Triggered when an inventory is opened.
 
 ```js
 game.on("inventory_open", (inv) => {
-  game.addSound("bag_open");
+  game.playSounds("bag_open");
 });
 ```
 
@@ -422,7 +430,7 @@ Triggered when an inventory is closed.
 
 ```js
 game.on("inventory_close", (inv) => {
-  game.addSound("bag_close");
+  game.playSounds("bag_close");
 });
 ```
 
@@ -440,11 +448,11 @@ Triggered when the apply/craft button is clicked in an inventory. Return `false`
 game.on("inventory_apply", (inv) => {
   let mc = game.getCharacter("mc");
   if (mc.getResource("energy") < 10) {
-    game.addFlash("Not enough energy to craft!");
+    game.showNotification("Not enough energy to craft!");
     return false;
   }
   mc.addResource("energy", -10);
-  game.addSound("craft_anvil");
+  game.playSounds("craft_anvil");
 });
 ```
 
@@ -510,7 +518,7 @@ Triggered when a recipe is learned.
 
 ```js
 game.on("recipe_learned", (id) => {
-  game.addFlash("Learned recipe: " + id);
+  game.showNotification("Learned recipe: " + id);
 });
 ```
 
@@ -525,7 +533,7 @@ Triggered when a skill is learned.
 
 ```js
 game.on("skill_learned", (tree, skill, lvl) => {
-  game.addFlash("Skill unlocked!");
+  game.showNotification("Skill unlocked!");
 });
 ```
 

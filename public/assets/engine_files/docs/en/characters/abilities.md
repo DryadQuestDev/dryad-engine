@@ -12,7 +12,7 @@ Abilities are **structured data** - the engine provides the data layer, but not 
 - Access merged ability data from your code
 
 **What you provide:**
-- The UI (battle screen, anility menu, cooldown display)
+- The UI (battle screen, ability menu, cooldown display)
 - The game logic (what happens when an ability is used)
 
 ---

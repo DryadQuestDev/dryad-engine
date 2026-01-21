@@ -20,12 +20,12 @@ export const PluginSchema = {
                 type: 'schema[]', tooltip: 'Schema definition for tab fields', objects: {
                     uid: { type: 'uid', required: true },
                     propertyId: { type: 'string', tooltip: 'Property name in the data object' },
-                    label: { type: 'string', tooltip: 'Display label for the field' },
-                    tooltip: { type: 'string', tooltip: 'Help text shown on hover' },
+                    tooltip: { type: 'textarea', tooltip: 'Help text shown on hover' },
                     type: {
                         type: 'chooseOne', tooltip: 'Field type', options: [
                             'string',
                             'number',
+                            'range',
                             'boolean',
                             'textarea',
                             'htmlarea',
@@ -56,18 +56,18 @@ export const PluginSchema = {
                     fromFileTypeAnd: { type: 'textarea', tooltip: 'Filter options where ALL key-value pairs match (JSON object format, e.g., {"is_currency": true, "rarity": "rare"})', show: { type: ['chooseOne', 'chooseMany'] } },
                     fromFileTypeOr: { type: 'textarea', tooltip: 'Filter options where AT LEAST ONE key-value pair matches (JSON object format, e.g., {"type": "weapon", "type": "armor"})', show: { type: ['chooseOne', 'chooseMany'] } },
                     defaultValue: { type: 'string', tooltip: 'Default value for new items' },
-                    fileType: { type: 'chooseOne', tooltip: 'Allowed file type', options: ['image', 'video', 'audio', 'css', 'js'], show: { type: ['file', 'file[]'] } },
+                    fileType: { type: 'chooseOne', tooltip: 'Allowed file type', options: ['image', 'video', 'audio', 'asset', 'css', 'js'], show: { type: ['file', 'file[]'] } },
                     step: { type: 'number', tooltip: 'Step increment for number input', show: { type: ['number'] } },
                     objects: {
                         type: 'schema[]', tooltip: 'Nested schema for complex object fields', show: { type: ['schema', 'schema[]'] }, objects: {
                             uid: { type: 'uid', required: true },
                             propertyId: { type: 'string', tooltip: 'Property name in the nested object' },
-                            label: { type: 'string', tooltip: 'Display label for the nested field' },
-                            tooltip: { type: 'string', tooltip: 'Help text shown on hover' },
+                            tooltip: { type: 'textarea', tooltip: 'Help text shown on hover' },
                             type: {
                                 type: 'chooseOne', tooltip: 'Field type', options: [
                                     'string',
                                     'number',
+                                    'range',
                                     'boolean',
                                     'textarea',
                                     'htmlarea',
@@ -96,7 +96,7 @@ export const PluginSchema = {
                             fromFileTypeAnd: { type: 'textarea', tooltip: 'Filter options where ALL key-value pairs match (JSON object format, e.g., {"is_currency": true, "rarity": "rare"})', show: { type: ['chooseOne', 'chooseMany'] } },
                             fromFileTypeOr: { type: 'textarea', tooltip: 'Filter options where AT LEAST ONE key-value pair matches (JSON object format, e.g., {"type": "weapon", "type": "armor"})', show: { type: ['chooseOne', 'chooseMany'] } },
                             defaultValue: { type: 'string', tooltip: 'Default value for new items' },
-                            fileType: { type: 'chooseOne', tooltip: 'Allowed file type', options: ['image', 'video', 'audio', 'css', 'js'], show: { type: ['file', 'file[]'] } },
+                            fileType: { type: 'chooseOne', tooltip: 'Allowed file type', options: ['image', 'video', 'audio', 'asset', 'css', 'js'], show: { type: ['file', 'file[]'] } },
                             step: { type: 'number', tooltip: 'Step increment for number input', show: { type: ['number'] } },
                         }
                     },
@@ -105,7 +105,7 @@ export const PluginSchema = {
         }
     },
     data: {
-        type: 'schema[]', tooltip: 'Additional data files to inject into the mod', objects: {
+        type: 'schema[]', tooltip: 'Additional data files to inject into the game', objects: {
             uid: { type: 'uid', required: true },
             fileName: { type: 'string', tooltip: 'Target file path (e.g., "character_traits")' },
             fileData: { type: 'textarea', tooltip: 'JSON data to inject (must be valid JSON array)' },

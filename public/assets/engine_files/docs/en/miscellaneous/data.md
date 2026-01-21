@@ -1,21 +1,32 @@
 # Data
 
-The `game.getData()` method provides **read-only access** to the raw data defined in the engine editor. Use it when you need to reference editor-defined data for custom logic.
+The `game.getData()` method provides access to the raw data defined in the engine editor. Use it when you need to reference editor-defined data for custom logic.
 
-**Important:** This data is static and should **never be mutated**. It reflects the JSON files created during development, not runtime state.
+**Note:** By default, returns a deep copy of the data. You can safely modify the returned data without affecting the source.
 
 ---
 
 ## API Reference
 
-### getData(path)
+### getData(path, original?)
 
 Returns a `Map` of data indexed by ID.
 
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `string` | Data path to fetch |
+| `original` | `boolean` | If `true`, returns the original data without copying (faster, but do not mutate!) |
+
 ```js
+// Default: returns a deep copy (safe to modify)
 const stats = game.getData("character_stats");
 const healthStat = stats.get("health");
+
+// With original=true: returns original data (faster, read-only)
+const templates = game.getData("character_templates", true);
 ```
+
+**Performance tip:** Pass `true` as the second parameter when you only need to read data and won't modify it. This skips the deep copy and improves performance.
 
 ---
 
@@ -62,6 +73,13 @@ const healthStat = stats.get("health");
 | `dungeons/{id}/content_parsed` | Parsed dungeon content (lines) |
 | `dungeons/{id}/rooms` | Room definitions |
 | `dungeons/{id}/encounters` | Encounter definitions |
+
+### Pools
+
+| Path | Description |
+|------|-------------|
+| `pool_definitions` | Pool definition data (source, filter fields) |
+| `pool_entries` | Pool entry data (weights, filters) |
 
 ### Other
 

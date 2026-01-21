@@ -3,7 +3,14 @@ import gsap from 'gsap';
 
 import { DungeonData } from "../core/dungeon/dungeonData";
 import { Skip } from "../../utility/save-system";
-import { ChoiceType, DungeonLine } from "../types";
+export type DungeonLine = {
+  id: string;
+  val: string;
+  params?: Record<string, any>;
+  anchor?: string;
+}
+
+export type ChoiceType = 'encounter' | 'text' | 'scene';
 import { Dungeon } from "../core/dungeon/dungeon";
 import { Populate } from "../../utility/save-system";
 import { Observable, Subscription } from 'rxjs';
@@ -553,7 +560,7 @@ export class DungeonSystem {
     //console.warn("setting isRootScene to false", this.isRootScene.value);
 
     // execute actions
-    this.game.logicSystem.resolveActions(actions);
+    this.game.logicSystem.resolveActions(actions, true);
 
     this.cachedText.value = output;
 
@@ -583,7 +590,12 @@ export class DungeonSystem {
       this.usedDungeonData.value.addVisitedEvent(sceneId);
     }
 
+    // force overlay-navigation overlay to be shown to show dialogue box
+    this.game.coreSystem.setState('overlay_state', 'overlay-navigation');
+
     this.game.trigger('scene_play_after', sceneId, dungeonUsedId, isRootScene);
+
+
 
     // add log for the scene
     this.addLog(output, false);
@@ -1531,7 +1543,7 @@ export class DungeonSystem {
       this.game.logicSystem.resolveActions(room.actions.room_enter_before);
     }
 
-    let proceed = this.game.trigger('room_enter_before', roomId);
+    let proceed = this.game.trigger('room_enter_before', roomId, dungeon.id);
     if (!proceed) {
       return false;
     }
@@ -1555,7 +1567,7 @@ export class DungeonSystem {
     if (room.actions?.room_enter_after) {
       this.game.logicSystem.resolveActions(room.actions.room_enter_after);
     }
-    this.game.trigger('room_enter_after', roomId);
+    this.game.trigger('room_enter_after', roomId, dungeon.id);
     gameLogger.info(`Room ${roomId} entered`);
 
     this.triggerEvent();

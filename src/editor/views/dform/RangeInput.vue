@@ -2,8 +2,15 @@
 import { computed } from 'vue';
 import InputNumber, { type InputNumberInputEvent } from 'primevue/inputnumber';
 
+// Range value uses object format { min?: number, max?: number }
+// This avoids issues with null values being stripped from arrays
+export interface RangeValue {
+  min?: number;
+  max?: number;
+}
+
 const props = defineProps<{
-  modelValue?: [number | null, number | null] | null;
+  modelValue?: RangeValue | null;
   step?: number;
 }>();
 
@@ -11,17 +18,29 @@ const step = computed(() => props.step ?? 1);
 
 const emit = defineEmits(['update:modelValue']);
 
-const minValue = computed(() => props.modelValue?.[0] ?? null);
-const maxValue = computed(() => props.modelValue?.[1] ?? null);
+const minValue = computed(() => props.modelValue?.min ?? null);
+const maxValue = computed(() => props.modelValue?.max ?? null);
+
+// Emit object with only defined values, or null if both are unset
+function emitRange(min: number | null, max: number | null) {
+  if (min === null && max === null) {
+    emit('update:modelValue', null);
+  } else {
+    const value: RangeValue = {};
+    if (min !== null) value.min = min;
+    if (max !== null) value.max = max;
+    emit('update:modelValue', value);
+  }
+}
 
 function onMinInput(event: InputNumberInputEvent) {
   const val = typeof event.value === 'number' ? event.value : null;
-  emit('update:modelValue', [val, maxValue.value]);
+  emitRange(val, maxValue.value);
 }
 
 function onMaxInput(event: InputNumberInputEvent) {
   const val = typeof event.value === 'number' ? event.value : null;
-  emit('update:modelValue', [minValue.value, val]);
+  emitRange(minValue.value, val);
 }
 
 function onMinBlur() {
@@ -29,7 +48,7 @@ function onMinBlur() {
   const max = maxValue.value;
   // Clamp min to not exceed max
   if (max !== null && min !== null && min > max) {
-    emit('update:modelValue', [max, max]);
+    emitRange(max, max);
   }
 }
 
@@ -38,7 +57,7 @@ function onMaxBlur() {
   const max = maxValue.value;
   // Clamp max to not be less than min
   if (min !== null && max !== null && max < min) {
-    emit('update:modelValue', [min, min]);
+    emitRange(min, min);
   }
 }
 </script>

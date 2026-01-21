@@ -11,6 +11,27 @@ export class LocalhostStorageService implements StorageService {
         return 'localhost';
     }
 
+    supportsImageTools(): boolean {
+        return true;
+    }
+
+    supportsGoogleAuth(): boolean {
+        return true;
+    }
+
+    async openExternalUrl(url: string): Promise<{ success: boolean; error?: string }> {
+        try {
+            const newWindow = window.open(url, '_blank');
+            if (newWindow) {
+                return { success: true };
+            } else {
+                return { success: false, error: 'Popup blocked. Please allow popups for this site.' };
+            }
+        } catch (e) {
+            return { success: false, error: (e as Error).message };
+        }
+    }
+
     async readJson(filePath: string): Promise<any> {
         const url = `${this.baseUrl}/engine/read?path=${encodeURIComponent(filePath)}`;
         try {
@@ -227,15 +248,51 @@ export class LocalhostStorageService implements StorageService {
     // --- Google API Methods ---       
 
     async startGoogleAuth(clientSecretJsonContent: object): Promise<{ authUrl?: string; error?: string }> {
-        throw new Error('LocalhostStorageService.startGoogleAuth() is not implemented yet');
+        const url = `${this.baseUrl}/engine/google-auth-start`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientSecret: clientSecretJsonContent })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error starting Google auth via ${url}:`, error);
+            return { error: (error as Error).message };
+        }
     }
 
     async exchangeGoogleAuthCode(authorizationCode: string): Promise<{ tokens?: any; profile?: any; error?: string }> {
-        throw new Error('LocalhostStorageService.exchangeGoogleAuthCode() is not implemented yet');
+        const url = `${this.baseUrl}/engine/google-auth-token`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: authorizationCode })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error exchanging Google auth code via ${url}:`, error);
+            return { error: (error as Error).message };
+        }
     }
 
     async refreshGoogleAuthToken(refreshToken: string, clientSecretJsonContent: object): Promise<{ tokens?: any; error?: string }> {
-        throw new Error('LocalhostStorageService.refreshGoogleAuthToken() is not implemented yet');
+        const url = `${this.baseUrl}/engine/google-auth-refresh-token`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken, clientSecret: clientSecretJsonContent })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error refreshing Google auth token via ${url}:`, error);
+            return { error: (error as Error).message };
+        }
     }
 
     async getGoogleDocument(accessToken: string, documentId: string): Promise<{ document?: any; error?: string }> {
@@ -257,33 +314,129 @@ export class LocalhostStorageService implements StorageService {
     }
 
     listenForGoogleAuthCallback(callback: (data: { code?: string; error?: string }) => void): (() => void) | undefined {
-        throw new Error('LocalhostStorageService.listenForGoogleAuthCallback() is not implemented yet');
+        // In localhost mode, we poll the server for the auth callback result
+        let polling = true;
+        const pollInterval = setInterval(async () => {
+            if (!polling) return;
+            try {
+                const response = await fetch(`${this.baseUrl}/engine/wait-for-auth-callback`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.code || result.error) {
+                        polling = false;
+                        clearInterval(pollInterval);
+                        callback(result);
+                    }
+                }
+            } catch (error) {
+                // Ignore polling errors, keep trying
+            }
+        }, 1000);
+
+        // Return cleanup function
+        return () => {
+            polling = false;
+            clearInterval(pollInterval);
+        };
     }
 
     async startOAuthServer(): Promise<{ success: boolean, error?: string, code?: string, message?: string }> {
-        throw new Error('LocalhostStorageService.startOAuthServer() is not implemented yet');
+        const url = `${this.baseUrl}/engine/start-oauth-server`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error starting OAuth server via ${url}:`, error);
+            return { success: false, error: (error as Error).message };
+        }
     }
 
     async stopOAuthServer(): Promise<{ success: boolean, message?: string, error?: string }> {
-        throw new Error('LocalhostStorageService.stopOAuthServer() is not implemented yet');
+        const url = `${this.baseUrl}/engine/stop-oauth-server`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error stopping OAuth server via ${url}:`, error);
+            return { success: false, error: (error as Error).message };
+        }
     }
     // --- End Google API Methods ---
 
     // --- WebP Conversion Methods ---
     async getFileSize(path: string): Promise<number> {
-        throw new Error('LocalhostStorageService.getFileSize() is not implemented - WebP conversion only available in Electron');
+        const url = `${this.baseUrl}/engine/get-file-size?path=${encodeURIComponent(path)}`;
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const result = await response.json();
+            return result.size || 0;
+        } catch (error) {
+            console.error(`Error getting file size via ${url}:`, error);
+            return 0;
+        }
     }
 
     async convertToWebP(options: { pngPath: string; quality: number; lossless: boolean }): Promise<{ webpPath: string; originalSize: number; newSize: number }> {
-        throw new Error('LocalhostStorageService.convertToWebP() is not implemented - WebP conversion only available in Electron');
+        const url = `${this.baseUrl}/engine/convert-to-webp`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(options)
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error converting to WebP via ${url}:`, error);
+            throw error;
+        }
     }
 
     async backupOriginalFile(path: string): Promise<{ success: boolean; backupPath: string }> {
-        throw new Error('LocalhostStorageService.backupOriginalFile() is not implemented - WebP conversion only available in Electron');
+        const url = `${this.baseUrl}/engine/backup-original-file`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error backing up file via ${url}:`, error);
+            return { success: false, backupPath: '' };
+        }
     }
 
     async restoreFromBackup(path: string): Promise<{ success: boolean }> {
-        throw new Error('LocalhostStorageService.restoreFromBackup() is not implemented - WebP conversion only available in Electron');
+        const url = `${this.baseUrl}/engine/restore-from-backup`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path })
+            });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error(`Error restoring from backup via ${url}:`, error);
+            return { success: false };
+        }
     }
     // --- End WebP Conversion Methods ---
 
@@ -364,7 +517,19 @@ export class LocalhostStorageService implements StorageService {
         total?: number;
         error?: string;
     }> {
-        console.warn('LocalhostStorageService.searchDocs() is not fully supported - Search only available in Electron');
-        return { results: [], total: 0, error: 'Search not supported in localhost mode' };
+        const url = `${this.baseUrl}/engine/search-docs?query=${encodeURIComponent(query)}&language=${encodeURIComponent(language)}&basePath=${encodeURIComponent(basePath)}`;
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`Error searching docs via ${url}:`, error);
+            return { results: [], total: 0, error: (error as Error).message };
+        }
     }
 } 

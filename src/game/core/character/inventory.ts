@@ -641,15 +641,15 @@ export class Inventory {
 
 
     /**
-     * Get the total amount of a specific currency in this inventory
-     * @param currencyId The currency item template ID
-     * @returns Total quantity of unequipped currency items
+     * Get the total quantity of a specific item in this inventory
+     * @param itemId The item template ID
+     * @returns Total quantity of unequipped items with this ID
      */
-    public getCurrencyAmount(currencyId: string): number {
-        const currencyItems = this.items.filter(
-            i => i.id === currencyId && !i.isEquipped
+    public getItemQuantity(itemId: string): number {
+        const items = this.items.filter(
+            i => i.id === itemId && !i.isEquipped
         );
-        return currencyItems.reduce((sum, curr) => sum + curr.quantity, 0);
+        return items.reduce((sum, item) => sum + item.quantity, 0);
     }
 
     /**
@@ -664,7 +664,7 @@ export class Inventory {
 
         // Check each currency requirement
         for (const [currencyId, requiredAmount] of Object.entries(price)) {
-            const totalAmount = this.getCurrencyAmount(currencyId);
+            const totalAmount = this.getItemQuantity(currencyId);
 
             if (totalAmount < requiredAmount) {
                 return false;
@@ -685,7 +685,7 @@ export class Inventory {
 
         // First, check if we can afford it
         for (const [currencyId, requiredAmount] of Object.entries(price)) {
-            const totalAmount = this.getCurrencyAmount(currencyId);
+            const totalAmount = this.getItemQuantity(currencyId);
 
             if (totalAmount < requiredAmount) {
                 // Get currency name from template

@@ -50,6 +50,6 @@ While the editor can take you very far on its own, there are a few optional “e
 
 Most devs will:
 
-- Do **structure and systems** work in the **Editor**,  
+- Do **structure and systems** work in the **Game Editor**,  
 - Do **writing** in **Google Docs**,  
-- And only touch the **code editor** when there's no plugins for it and they want to add a truly unique mechanic.
+- And only touch the **code editor** like VS Code when there's no plugins for it and they want to add a truly unique mechanic.

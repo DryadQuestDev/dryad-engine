@@ -50,13 +50,25 @@ You can add custom debug buttons that appear in the Debug Panel. These are usefu
 
 Add custom debug buttons in the Engine Editor:
 1. Go to **General → Custom Choices**
-2. Create choices with the `debug` tag
+2. Create choices with the `debug` group
 3. These appear as buttons in the Debug Panel during playtest
 
 Example uses:
 - "Give 1000 Gold" - quickly test shop purchases
 - "Max All Stats" - test endgame content
 - "Trigger Boss Fight" - skip to specific encounters
+
+---
+
+## Checking Dev Mode in Scripts
+
+You can check if dev mode is enabled using `game.isDevMode()`:
+
+```javascript
+if (game.isDevMode()) {
+  console.log('Debug info:', someData);
+}
+```
 
 ---
 

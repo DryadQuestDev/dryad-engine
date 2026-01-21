@@ -35,7 +35,38 @@ export type ImageLayerMeta = {
 
 export class Character {
   public id: string;
+
+  getId(): string {
+    return this.id;
+  }
+
+  setId(id: string): void {
+    const oldId = this.id;
+    this.id = id;
+
+    // Update partyIds if this character is in the party
+    const game = Game.getInstance();
+    if (game.characterSystem.partyIds.value.has(oldId)) {
+      game.characterSystem.partyIds.value.delete(oldId);
+      game.characterSystem.partyIds.value.add(id);
+    }
+
+    // Update characters map
+    if (game.characterSystem.characters.value.has(oldId)) {
+      game.characterSystem.characters.value.delete(oldId);
+      game.characterSystem.characters.value.set(id, this);
+    }
+
+    let inv = this.getPrivateInventory();
+    if (inv) {
+      inv.id = "_character_" + id;
+    }
+  }
+
+
   public templateId: string = "";
+
+  public tags: string[] = [];
 
   public actions: any = {};
 
@@ -93,7 +124,7 @@ export class Character {
           const statusId = this.getSkillStatusId(skillTreeId, id);
           const existingStatus = this.statuses.find(s => s.id === statusId);
           if (existingStatus) {
-            existingStatus.currentStacks = newLevel;
+            this.setStatusStacks(statusId, newLevel);
           }
         }
 
@@ -322,6 +353,7 @@ export class Character {
   public skinLayers: Set<string> = new Set();
 
   public abilities: Set<string> = new Set();
+  public statIds: Set<string> = new Set();
   public abilityModifiers: Record<string, any> = {};
 
   @Skip()
@@ -417,6 +449,7 @@ export class Character {
     const newAttributes: Record<string, string> = {};
     const newSkinLayers = new Set<string>();
     const newAbilities = new Set<string>();
+    const newStatIds = new Set<string>();
 
     for (const status of this.statuses) {
       // Properties: latest status overwrites
@@ -440,6 +473,13 @@ export class Character {
       if (status.abilities) {
         for (const ability of status.abilities) {
           newAbilities.add(ability);
+        }
+      }
+
+      // Stats: accumulate stat IDs for O(1) hasStat() lookup
+      if (status.stats) {
+        for (const statId in status.stats) {
+          newStatIds.add(statId);
         }
       }
     }
@@ -471,6 +511,7 @@ export class Character {
     this.attributes = newAttributes;
     this.skinLayers = newSkinLayers;
     this.abilities = newAbilities;
+    this.statIds = newStatIds;
     this.abilityModifiers = mergedAbilityModifiers;
 
     // Initialize skinLayerStyles for new skin layers
@@ -656,7 +697,7 @@ export class Character {
     let coreStatus = this.getCoreStatus();
 
     // Capture all replenishable stat values before any changes (for computed stats)
-    const oldReplenishableValues = this.captureReplenishableStatValues();
+    const oldReplenishableValues = this.captureResourceStatValues();
 
     if (data.stats) {
       for (let [key, value] of Object.entries(data.stats)) {
@@ -672,7 +713,7 @@ export class Character {
       }
 
       // After all stat changes, adjust all replenishable resources (handles computed stats)
-      this.adjustAllReplenishableResources(oldReplenishableValues, false);
+      this.adjustAllResources(oldReplenishableValues, false);
     }
 
     if (data.traits) {
@@ -797,9 +838,8 @@ export class Character {
       // If it exists and is stackable, try to add stacks
       if (existingStatus.isStackable() && status.isStackable()) {
         const stacksToAdd = status.currentStacks;
-        const success = existingStatus.addStacks(stacksToAdd);
+        const success = this.addStatusStacks(existingStatus.id, stacksToAdd);
         gameLogger.info(`Added ${stacksToAdd} stacks to status "${status.id}". New count: ${existingStatus.currentStacks}`);
-        this.reevaluate();
         return;
       }
 
@@ -811,7 +851,7 @@ export class Character {
     }
 
     // Capture all replenishable stat values before adding status (for computed stats)
-    const oldReplenishableValues = this.captureReplenishableStatValues();
+    const oldReplenishableValues = this.captureResourceStatValues();
 
     // Add as a new status
     this.statuses.push(status);
@@ -819,7 +859,7 @@ export class Character {
     this._updateAndSetResources(status);
 
     // Adjust all replenishable resources (handles both direct and computed stats)
-    this.adjustAllReplenishableResources(oldReplenishableValues, true);
+    this.adjustAllResources(oldReplenishableValues, true);
   }
 
 
@@ -831,7 +871,7 @@ export class Character {
     }
 
     // Capture all replenishable stat values before removing status (for computed stats)
-    const oldReplenishableValues = this.captureReplenishableStatValues();
+    const oldReplenishableValues = this.captureResourceStatValues();
 
     this.statuses = this.statuses.filter(status => status !== statusToRemove);
 
@@ -840,24 +880,55 @@ export class Character {
       this.reevaluate();
 
       // Adjust all replenishable resources (handles both direct and computed stats)
-      this.adjustAllReplenishableResources(oldReplenishableValues, true);
+      this.adjustAllResources(oldReplenishableValues, true);
     }
   }
 
+  /**
+   * Set status stacks with proper resource adjustment for replenishable stats
+   */
+  public setStatusStacks(statusId: string, newStacks: number): void {
+    const status = this.statuses.find(s => s.id === statusId);
+    if (!status) {
+      throw new Error(`Status "${statusId}" not found on character "${this.id}"`);
+    }
+    if (status.currentStacks === newStacks) return;
+
+    const oldValues = this.captureResourceStatValues();
+    status.currentStacks = newStacks;
+    this.reevaluate();
+    this.adjustAllResources(oldValues, true);
+  }
+
+  /**
+   * Add stacks to status with proper resource adjustment for replenishable stats
+   */
+  public addStatusStacks(statusId: string, amount: number = 1): boolean {
+    const status = this.statuses.find(s => s.id === statusId);
+    if (!status) {
+      throw new Error(`Status "${statusId}" not found on character "${this.id}"`);
+    }
+
+    const oldValues = this.captureResourceStatValues();
+    const success = status.addStacks(amount);
+    this.reevaluate();
+    this.adjustAllResources(oldValues, true);
+    return success;
+  }
 
 
   /**
-   * Captures current values of all replenishable resource stats.
+   * Captures current max values of all resource stats.
    * Used to detect changes in computed stats.
-   * @returns Record of stat names to their current values
+   * @returns Record of stat names to their current max values
    */
-  private captureReplenishableStatValues(): Record<string, number> {
+  private captureResourceStatValues(): Record<string, number> {
     const values: Record<string, number> = {};
     const statsMap = Game.getInstance().characterSystem.statsMap;
 
     for (const [statName, stat] of statsMap) {
-      if (stat.is_resource && stat.is_replenishable) {
-        values[statName] = this.getStat(statName).value;
+      if (stat.is_resource) {
+        values[statName] = this.getStatRef(statName).value;
       }
     }
 
@@ -870,15 +941,17 @@ export class Character {
    * @param oldValues Previous stat values
    * @param fromStatusChange If true, applies is_safe_removal logic
    */
-  private adjustAllReplenishableResources(oldValues: Record<string, number>, fromStatusChange: boolean = false): void {
+  private adjustAllResources(oldValues: Record<string, number>, fromStatusChange: boolean = false): void {
     for (const statName in oldValues) {
-      const newValue = this.getStat(statName).value;
+      const newValue = this.getStatRef(statName).value;
       this.adjustResourceForStatChange(statName, oldValues[statName], newValue, fromStatusChange);
     }
   }
 
   /**
-   * Adjusts a replenishable resource when its max stat value changes
+   * Adjusts a resource when its max stat value changes.
+   * For replenishable resources: adjusts current value by the delta.
+   * For all resources: clamps to new max if can_overflow is false.
    * @param statName The stat/resource name
    * @param oldStatValue The old max stat value
    * @param newStatValue The new max stat value
@@ -886,24 +959,36 @@ export class Character {
    */
   private adjustResourceForStatChange(statName: string, oldStatValue: number, newStatValue: number, fromStatusChange: boolean = false): void {
     const stat = Game.getInstance().characterSystem.statsMap.get(statName);
-    if (!stat || !stat.is_resource || !stat.is_replenishable) {
+    if (!stat || !stat.is_resource) {
       return;
     }
 
-    const delta = newStatValue - oldStatValue;
-    if (delta !== 0) {
-      const currentResource = this.getResource(statName);
-      const newResourceValue = currentResource + delta;
+    const currentResource = this.getResource(statName);
+    let newResourceValue = currentResource;
 
-      // Apply safe removal floor (1) if this is from a status change and stat has is_safe_removal
-      const minFloor = (fromStatusChange && stat.is_safe_removal) ? 1 : 0;
-      const clampedValue = Math.max(minFloor, newResourceValue);
+    // For replenishable resources, adjust by delta
+    if (stat.is_replenishable) {
+      const delta = newStatValue - oldStatValue;
+      if (delta !== 0) {
+        newResourceValue = currentResource + delta;
 
-      this.setResource(statName, clampedValue);
+        // Apply safe removal floor (1) if this is from a status change and stat has is_safe_removal
+        const minFloor = (fromStatusChange && stat.is_safe_removal) ? 1 : 0;
+        newResourceValue = Math.max(minFloor, newResourceValue);
+      }
+    }
+
+    // For all resources: clamp to new max if can_overflow is false
+    if (!stat.can_overflow && newResourceValue > newStatValue) {
+      newResourceValue = newStatValue;
+    }
+
+    // Only update if value changed
+    if (newResourceValue !== currentResource) {
+      this.setResource(statName, newResourceValue);
     }
   }
 
-  // TODO: implement can_overflow
   private _updateAndSetResources(status: Status): void {
     for (let stat in status?.stats) {
       let mappedStat = Game.getInstance().characterSystem.statsMap.get(stat);
@@ -947,7 +1032,7 @@ export class Character {
       throw new Error(`Stat ${name} is not a resource`);
     }
     const currentVal = this.getResource(name);
-    const maxVal = this.getStat(name).value;
+    const maxVal = this.getStatRef(name).value;
     if (maxVal) {
       return currentVal / maxVal;
     }
@@ -1000,7 +1085,7 @@ export class Character {
   }
   private clampValue(name: string, value: number, stat: EntityStatObject): number {
     const minVal = 0;
-    const maxVal = this.getStat(name).value;
+    const maxVal = this.getStatRef(name).value;
     const canOvflw = stat.can_overflow;
     let clampedValue = value;
 
@@ -1022,7 +1107,40 @@ export class Character {
 
 
 
-  public getStat(name: string): ComputedRef<number> {
+  /**
+   * Check if character has a stat defined in any of their statuses.
+   * Uses cached statIds set for O(1) lookup (populated during reevaluate).
+   * @param statId - The stat ID to check
+   * @returns True if the character has this stat
+   */
+  public hasStat(statId: string): boolean {
+    return this.statIds.has(statId);
+  }
+
+  /**
+   * Get a stat's computed value directly as a number.
+   * Works reactively in Vue templates and computed properties.
+   * @param name - The stat name
+   * @returns The stat value as a number
+   * @throws Error if stat doesn't exist in schema
+   * @example
+   * const maxHealth = character.getStat('health');
+   */
+  public getStat(name: string): number {
+    return this.getStatRef(name).value;
+  }
+
+  /**
+   * Get a stat's reactive ComputedRef.
+   * Use when you need the ref itself (e.g., for watch() or storing).
+   * @param name - The stat name
+   * @returns ComputedRef that updates when stat changes
+   * @throws Error if stat doesn't exist in schema
+   * @example
+   * const healthRef = character.getStatRef('health');
+   * watch(healthRef, (newVal) => console.log('Health changed:', newVal));
+   */
+  public getStatRef(name: string): ComputedRef<number> {
     let stat = Game.getInstance().characterSystem.statsMap.get(name);
     if (!stat) {
       throw new Error(`Stat "${name}" does not exist in characterStatsMap.`);

@@ -23,6 +23,14 @@ export class ElectronStorageService implements StorageService {
         return 'electron';
     }
 
+    supportsImageTools(): boolean {
+        return true;
+    }
+
+    supportsGoogleAuth(): boolean {
+        return true;
+    }
+
     private async invokeElectron(channel: string, ...args: any[]): Promise<any> {
         if (!window.electron) {
             throw new Error('Electron context not available.');
