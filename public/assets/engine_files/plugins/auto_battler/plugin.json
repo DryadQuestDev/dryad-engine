@@ -1,0 +1,1275 @@
+{
+  "id": "auto_battler",
+  "name": "Auto Battler",
+  "description": "Auto Battle Grid System",
+  "author": "Nekon",
+  "version": "1.0.0",
+  "order": -10,
+  "asset_folders": [
+
+  ],
+  "scripts": [
+    "main.mjs"
+  ],
+  "tabs": [
+    {
+      "uid": "6meGu3HUucPO",
+      "id": "battle_config",
+      "name": "Config",
+      "schema": {
+        "rows_size": {
+          "type": "number",
+          "tooltip": "The breadth of the battlefield, how many character can fit in a single column."
+        },
+        "columns_size": {
+          "tooltip": "The depth of the battlefield(mostly used for ranged attacks).",
+          "type": "number"
+        },
+        "formation_stat_tags": {
+          "type": "string[]",
+          "tooltip": "Stat tags to display in the formation panel (e.g. battle). Each tag is looked up via locale for the group display name."
+        },
+        "turn_speed": {
+          "type": "number",
+          "tooltip": "Virtual turn clock speed. Controls how fast rounds pass for cooldown/status ticking. Higher = faster rounds. Default: 50."
+        },
+        "mult_floor": {
+          "type": "number",
+          "tooltip": "Min multiplier floor for % modifiers (damage_dealt_mult, speed_mult). Default: 0.1 (10%)."
+        },
+        "starting_leader_id": {
+          "type": "string",
+          "tooltip": "Character ID to use as leader at game start. Their leadership stat defines the formation budget."
+        },
+        "retreat": {
+          "type": "chooseOne",
+          "options": ["enabled", "disabled"],
+          "tooltip": "Default retreat behavior for battles. Can be overridden per battle via noRetreat param. Default: enabled."
+        }
+      }
+    },
+    {
+      "id": "token_definitions",
+      "name": "Token Definitions",
+      "isArray": true,
+      "schema": {
+        "id": {
+          "type": "string",
+          "required": true,
+          "tooltip": "Unique token identifier (e.g. 'burn', 'shield', 'berserker')"
+        },
+        "source": {
+          "type": "chooseOne",
+          "fromFile": "character_stats",
+          "tooltip": "Character stat that sets initial stacks at battle start. Empty = starts at 0."
+        },
+        "name": {
+          "type": "string",
+          "required": true,
+          "tooltip": "Display name shown in UI"
+        },
+        "description": {
+          "type": "htmlarea",
+          "tooltip": "Description shown on hover in character viewer"
+        },
+        "icon": {
+          "type": "file",
+          "fileType": "image",
+          "tooltip": "Icon displayed on character"
+        },
+        "color": {
+          "type": "color",
+          "tooltip": "Color for floating combat text (hex). Overrides default purple."
+        },
+        "max_stacks": {
+          "type": "number",
+          "defaultValue": 0,
+          "tooltip": "Maximum stacks allowed. 0 = unlimited."
+        },
+        "polarity": {
+          "type": "chooseOne",
+          "options": [
+            "positive",
+            "negative",
+            "neutral"
+          ],
+          "defaultValue": "neutral",
+          "tooltip": "positive = buff (cleansable by enemies), negative = debuff (cleansable by allies), neutral = non-cleansable"
+        },
+        "power_scaling": {
+          "type": "boolean",
+          "tooltip": "When true, applied stacks scale with caster power: stacks = round(power × aspectStacks / 100). Use for damage/healing tokens (shield, DoT, HoT). Leave false for gating tokens (preparation, combo)."
+        },
+        "effects": {
+          "type": "schema[]",
+          "tooltip": "Composable effects that define token behavior",
+          "objects": {
+            "type": {
+              "type": "chooseOne",
+              "required": true,
+              "options": [
+                "dot",
+                "hot",
+                "absorb",
+                "death_defiance",
+                "stun"
+              ],
+              "tooltip": "Effect type from the token effect vocabulary"
+            },
+            "value": {
+              "type": "number",
+              "defaultValue": 0,
+              "tooltip": "Effect value per stack. Meaning depends on type."
+            },
+            "damage_type": {
+              "type": "chooseOne",
+              "options": [
+                "physical",
+                "fire",
+                "water",
+                "air",
+                "earth",
+                "arcane",
+                "poison",
+                "light",
+                "dark",
+                "absolute"
+              ],
+              "show": {
+                "type": [
+                  "dot"
+                ]
+              },
+              "tooltip": "Damage type for DoT effects."
+            }
+          }
+        }
+      },
+      "uid": "2EJLZkokZopi"
+    },
+    {
+      "uid": "aCstTabAB01",
+      "id": "autocast_definitions",
+      "name": "Autocast",
+      "isArray": true,
+      "schema": {
+        "name": {
+          "type": "string",
+          "tooltip": "Display name for this autocast"
+        },
+        "source": {
+          "type": "chooseOne",
+          "fromFile": "character_stats",
+          "tooltip": "Character stat that activates this autocast. Creature must have this stat > 0."
+        },
+        "stat_is_chance": {
+          "type": "boolean",
+          "tooltip": "If true, the source stat's value is used as trigger chance %. If false, autocast always triggers when stat > 0."
+        },
+        "trigger": {
+          "type": "chooseOne",
+          "options": [
+            "battle_start",
+            "turn_start",
+            "on_attack",
+            "on_kill",
+            "on_damage_taken"
+          ],
+          "tooltip": "When this autocast fires."
+        },
+        "target": {
+          "type": "chooseOne",
+          "options": [
+            "self",
+            "all_allies",
+            "random_ally",
+            "lowest_hp_ally",
+            "all_enemies",
+            "random_enemy",
+            "attacker",
+            "attacker_target"
+          ],
+          "tooltip": "Who the autocast ability targets."
+        },
+        "ability": {
+          "type": "schema[]",
+          "tooltip": "Pool of abilities. One picked per trigger using weights. Single entry = always that one.",
+          "objects": {
+            "id": {
+              "type": "chooseOne",
+              "fromFile": "ability_templates",
+              "fromFileTypeAnd": "{ \"meta.is_autocast\": true }",
+              "tooltip": "Autocast ability template to cast."
+            },
+            "weight": {
+              "type": "number",
+              "tooltip": "Relative weight for random selection. Higher = more likely. Default: 1."
+            }
+          }
+        }
+      }
+    }
+  ],
+  "data": {
+    "ability_definitions": [
+      {
+        "id": "is_autocast",
+        "role": "meta",
+        "type": "boolean",
+        "description": "Mark this ability as autocast-only. Autocast definitions can only reference abilities with this flag."
+      },
+      {
+        "id": "target",
+        "role": "meta",
+        "type": "chooseMany",
+        "options": [
+          "self",
+          "enemy",
+          "ally",
+          "tile_ally",
+          "tile_enemy"
+        ],
+        "description": "What this ability can target (array). Tile targets allow summoning/positioning."
+      },
+      {
+        "id": "area_shape",
+        "role": "meta",
+        "type": "chooseOne",
+        "options": [
+          "single",
+          "row",
+          "column",
+          "cross",
+          "blast",
+          "chain",
+          "all"
+        ],
+        "description": "AoE spread pattern. 'chain' seeks closest enemy to previous target. 'all' depends on the ability's target(all allies or all enemies)."
+      },
+      {
+        "id": "preparation",
+        "role": "meta",
+        "type": "boolean",
+        "ingame_description": "Requires Preparation",
+        "description": "Whole ability requires 1 Preparation stack on caster. Consumed on cast. Not usable without stacks."
+      },
+      {
+        "id": "caster_min_health",
+        "role": "meta",
+        "type": "number",
+        "ingame_description": "Requires below [v]% HP",
+        "description": "Caster must have LESS than X% HP (0-100) for ability to be usable. Desperation/berserk abilities use this."
+      },
+      {
+        "id": "caster_max_health",
+        "role": "meta",
+        "type": "number",
+        "ingame_description": "Requires above [v]% HP",
+        "description": "Caster must have MORE than X% HP (0-100) for ability to be usable. Full-health-only abilities use this."
+      },
+      {
+        "id": "target_min_health",
+        "role": "meta",
+        "type": "number",
+        "ingame_description": "Target below [v]% HP",
+        "description": "Target must have LESS than X% HP (0-100) for ability to be usable. Execute abilities use this."
+      },
+      {
+        "id": "target_max_health",
+        "role": "meta",
+        "type": "number",
+        "ingame_description": "Target above [v]% HP",
+        "description": "Target must have MORE than X% HP (0-100) for ability to be usable."
+      },
+      {
+        "id": "base_weight",
+        "role": "meta",
+        "type": "number",
+        "description": "AI priority weight. Higher values = AI prefers this ability. Base weight before situational modifiers."
+      },
+      {
+        "id": "charges",
+        "role": "meta",
+        "type": "number",
+        "ingame_description": "Charges: [v]",
+        "description": "Max charges available. 0 = unlimited (cooldown only). Charges reset between battles."
+      },
+      {
+        "id": "cd_on_battle_start",
+        "role": "meta",
+        "type": "number",
+        "ingame_description": "Starts on cooldown: [v]",
+        "description": "Initial cooldown applied at battle start. Useful for ultimate abilities that can't be used immediately."
+      },
+      {
+        "id": "chance",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "[v]% chance for the effect to take effect.",
+        "description": "Probability (0-1) for the entire effect to occur. Undefined = 1.0 (always happens)."
+      },
+      {
+        "id": "damage",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Deal [v]% [damage_type] damage",
+        "description": "Damage as % of caster's power (base-100: 120 = 120%)"
+      },
+      {
+        "id": "damage_type",
+        "role": "aspect",
+        "type": "chooseOne",
+        "options": [
+          "physical",
+          "fire",
+          "water",
+          "air",
+          "earth",
+          "arcane",
+          "poison",
+          "light",
+          "dark",
+          "absolute"
+        ],
+        "description": "Damage type. 'absolute' ignores resistances."
+      },
+      {
+        "id": "healing",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Heal [v]% HP",
+        "description": "Healing as % of caster's power (base-100: 100 = 100%)"
+      },
+      {
+        "id": "lifesteal",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Steal [v]% of damage dealt as HP",
+        "description": "Heals caster for this % of damage dealt (after defenses). 50 = heal for half the damage."
+      },
+      {
+        "id": "token_apply",
+        "role": "aspect",
+        "type": "chooseOne",
+        "fromFile": "plugins_data/auto_battler/token_definitions",
+        "ingame_description": "Apply [token_stacks] [v]",
+        "ingame_description_ref": "name",
+        "description": "Token to apply to target(s). Stacks set by token_stacks. Most tokens scale with caster power (stacks = power × token_stacks / 100)."
+      },
+      {
+        "id": "token_stacks",
+        "role": "aspect",
+        "type": "number",
+        "description": "Stacks per turn. For power-scaled tokens: actual = power × value / 100. Total damage = stacks × duration (e.g. 30 stacks × 3 turns = 90 total, comparable to 90% direct damage). For gating tokens (preparation, stun): literal stacks. Default: 1."
+      },
+      {
+        "id": "token_duration",
+        "role": "aspect",
+        "type": "number",
+        "description": "Duration in turns. Total value = token_stacks × duration (e.g. 30 × 3 = 90 total). Omit for permanent tokens (shield, preparation)."
+      },
+      {
+        "id": "token_apply_self",
+        "role": "aspect",
+        "type": "chooseOne",
+        "fromFile": "plugins_data/auto_battler/token_definitions",
+        "ingame_description": "Apply [token_stacks_self] [v] to self",
+        "ingame_description_ref": "name",
+        "description": "Token to apply to caster. Stacks set by token_stacks_self. Most tokens scale with caster power (stacks = power × token_stacks_self / 100)."
+      },
+      {
+        "id": "token_stacks_self",
+        "role": "aspect",
+        "type": "number",
+        "description": "Stacks per turn to self. For power-scaled tokens: actual = power × value / 100. Total value = stacks × duration (e.g. 30 × 3 = 90 total). For gating tokens (preparation, stun): literal stacks. Default: 1."
+      },
+      {
+        "id": "token_duration_self",
+        "role": "aspect",
+        "type": "number",
+        "description": "Duration in turns. Total value = token_stacks_self × duration (e.g. 30 × 3 = 90 total). Omit for permanent tokens."
+      },
+      {
+        "id": "status_apply",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Apply [v]",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to apply to target(s)"
+      },
+      {
+        "id": "status_apply_self",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Apply [v] to self",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to apply to caster (self). Allows abilities to buff/debuff caster when targeting others."
+      },
+      {
+        "id": "status_remove",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Remove [v]",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to remove/cleanse from target"
+      },
+      {
+        "id": "cooldown_change",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Modify cooldowns by [v]",
+        "description": "Modify ability cooldowns (signed value). Positive = increase cooldown, negative = reduce/refresh cooldowns."
+      },
+      {
+        "id": "charges_change",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Modify charges by [v]",
+        "description": "Modify ability charges (signed value). Positive = add charges, negative = reduce charges. Affects abilities with charges defined."
+      },
+      {
+        "id": "movement_x",
+        "role": "aspect",
+        "type": "number",
+        "description": "Columns to move (+toward frontline, -away)"
+      },
+      {
+        "id": "movement_y",
+        "role": "aspect",
+        "type": "number",
+        "description": "Rows to move (+down, -up)"
+      },
+      {
+        "id": "movement_target",
+        "role": "aspect",
+        "type": "chooseOne",
+        "options": [
+          "self",
+          "target",
+          "all_targets"
+        ],
+        "ingame_description": "Move [v] by [movement_x]/[movement_y]",
+        "description": "Who moves: caster, target, or all AoE targets"
+      },
+      {
+        "id": "summon",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_templates",
+        "ingame_description": "Summon [summon_count]x [v]",
+        "ingame_description_ref": "traits.name",
+        "description": "Character templates to summon on targeted tile"
+      },
+      {
+        "id": "summon_count",
+        "role": "aspect",
+        "type": "number",
+        "description": "Units to summon per template"
+      },
+      {
+        "id": "relocate_self",
+        "role": "aspect",
+        "type": "boolean",
+        "ingame_description": "Move to target tile",
+        "description": "Caster teleports to the targeted tile. Use with target: tile_ally or tile_enemy."
+      },
+      {
+        "id": "range",
+        "role": "meta",
+        "type": "number",
+        "ingame_description": "Range: [v]",
+        "description": "Max tiles away to hit. Smart counting: rows with no enemies don't count."
+      },
+      {
+        "id": "area_size",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Area: [v]",
+        "description": "AoE radius/length. For 'chain', defines max targets."
+      },
+      {
+        "id": "combo",
+        "role": "aspect",
+        "type": "boolean",
+        "ingame_description": "Requires Combo",
+        "description": "Requires 1 Combo stack per target. Consumed per target hit."
+      },
+      {
+        "id": "cleanse",
+        "role": "aspect",
+        "type": "boolean",
+        "ingame_description": "Cleanse",
+        "description": "Remove cleansable tokens. Ally: remove negative. Enemy: remove positive."
+      },
+      {
+        "id": "range_change",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Range [v]",
+        "description": "Additive change to ability range. Summed from all effects and added to meta.range."
+      }
+    ],
+    "locale": [
+      {
+        "id": "physical",
+        "val": "<span class=\"physical\">Physical</span>"
+      },
+      {
+        "id": "fire",
+        "val": "<span class=\"fire\">Fire</span>"
+      },
+      {
+        "id": "water",
+        "val": "<span class=\"water\">Water</span>"
+      },
+      {
+        "id": "air",
+        "val": "<span class=\"air\">Air</span>"
+      },
+      {
+        "id": "earth",
+        "val": "<span class=\"earth\">Earth</span>"
+      },
+      {
+        "id": "arcane",
+        "val": "<span class=\"arcane\">Arcane</span>"
+      },
+      {
+        "id": "poison",
+        "val": "<span class=\"poison\">Poison</span>"
+      },
+      {
+        "id": "light",
+        "val": "<span class=\"light\">Light</span>"
+      },
+      {
+        "id": "dark",
+        "val": "<span class=\"dark\">Dark</span>"
+      },
+      {
+        "id": "absolute",
+        "val": "<span class=\"absolute\">Absolute</span>"
+      },
+      {
+        "id": "self",
+        "val": "Self"
+      },
+      {
+        "id": "target",
+        "val": "Target"
+      },
+      {
+        "id": "all_targets",
+        "val": "All Targets"
+      },
+      {
+        "id": "enemy",
+        "val": "Enemy"
+      },
+      {
+        "id": "ally",
+        "val": "Ally"
+      },
+      {
+        "id": "tile_ally",
+        "val": "Tile (Ally)"
+      },
+      {
+        "id": "tile_enemy",
+        "val": "Tile (Enemy)"
+      },
+      {
+        "id": "single",
+        "val": "Single"
+      },
+      {
+        "id": "row",
+        "val": "Row"
+      },
+      {
+        "id": "column",
+        "val": "Column"
+      },
+      {
+        "id": "cross",
+        "val": "Cross"
+      },
+      {
+        "id": "blast",
+        "val": "Blast"
+      },
+      {
+        "id": "chain",
+        "val": "Chain"
+      },
+      {
+        "id": "all",
+        "val": "All"
+      },
+      {
+        "id": "log_damage",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|amount| |type|</b> damage"
+      },
+      {
+        "id": "log_damage_mitigated",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|raw| - |mitigated| = |amount| |type|</b> damage"
+      },
+      {
+        "id": "log_damage_absorbed",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|amount| |type|</b> damage (|absorbed| absorbed)"
+      },
+      {
+        "id": "log_damage_mitigated_absorbed",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|raw| - |mitigated| = |amount| |type|</b> damage (|absorbed| absorbed)"
+      },
+      {
+        "id": "log_heal",
+        "val": "<b>|name|</b> heals for <b class=\"heal\">|amount|</b>"
+      },
+      {
+        "id": "log_heal_modified",
+        "val": "<b>|name|</b> heals for <b class=\"heal\">|raw| |sign| |diff| = |amount|</b>"
+      },
+      {
+        "id": "log_token_apply",
+        "val": "<b>|name|</b> gains <b class=\"token\">|stacks|x |tokenName|</b>"
+      },
+      {
+        "id": "log_token_dot",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|amount| |damageType|</b> damage from <b>|tokenName|</b>"
+      },
+      {
+        "id": "log_token_dot_modified",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|raw| |sign| |diff| = |amount| |damageType|</b> damage from <b>|tokenName|</b>"
+      },
+      {
+        "id": "log_token_hot",
+        "val": "<b>|name|</b> heals <b class=\"heal\">|amount|</b> from <b>|tokenName|</b>"
+      },
+      {
+        "id": "log_token_hot_modified",
+        "val": "<b>|name|</b> heals <b class=\"heal\">|raw| |sign| |diff| = |amount|</b> from <b>|tokenName|</b>"
+      },
+      {
+        "id": "log_death_defiance",
+        "val": "<b>|name|</b> <b class=\"defiance\">defies death!</b>"
+      },
+      {
+        "id": "log_cleanse",
+        "val": "<b>|name|</b> <b class=\"cleanse\">cleanses</b> tokens"
+      },
+      {
+        "id": "log_status_apply",
+        "val": "<b>|name|</b> gains <b class=\"status\">|statusName|</b>"
+      },
+      {
+        "id": "log_steal",
+        "val": "<b>|name|</b> steals <b class=\"steal\">|amount|</b> HP"
+      },
+      {
+        "id": "log_thorns",
+        "val": "<b>|name|</b> takes <b class=\"physical\">|amount|</b> thorns damage"
+      },
+      {
+        "id": "log_move",
+        "val": "Moves to new position"
+      },
+      {
+        "id": "log_defeat_suffix",
+        "val": " — <b class=\"defeat\">defeated!</b>"
+      },
+      {
+        "id": "log_no_action",
+        "val": "No action."
+      },
+      {
+        "id": "log_turn",
+        "val": "Turn |turn|"
+      },
+      {
+        "id": "log_victory",
+        "val": "VICTORY"
+      },
+      {
+        "id": "log_defeat",
+        "val": "DEFEAT"
+      },
+      {
+        "id": "log_retreat",
+        "val": "<b>|name|</b> <b class=\"retreat\">retreats!</b>"
+      },
+      {
+        "id": "log_retreat_result",
+        "val": "RETREAT"
+      },
+      {
+        "id": "leadership_budget",
+        "val": "Leadership"
+      },
+      {
+        "id": "leadership_overflow",
+        "val": "Formation exceeds leadership budget"
+      },
+      {
+        "id": "formation",
+        "val": "Formation"
+      },
+      {
+        "id": "formation_tab_title",
+        "val": "Formation"
+      },
+      {
+        "id": "formation_title",
+        "val": "Party Formation"
+      },
+      {
+        "id": "formation_hint",
+        "val": "Select a character, then click an empty cell to place them"
+      },
+      {
+        "id": "formation_all_assigned",
+        "val": "All party members assigned"
+      },
+      {
+        "id": "formation_remove_btn",
+        "val": "Remove from Formation"
+      },
+      {
+        "id": "battle_pause_tooltip",
+        "val": "Space"
+      },
+      {
+        "id": "battle_retreat",
+        "val": "Retreat"
+      },
+      {
+        "id": "battle_retreating",
+        "val": "Retreating..."
+      },
+      {
+        "id": "battle_result_victory",
+        "val": "VICTORY"
+      },
+      {
+        "id": "battle_result_retreat",
+        "val": "RETREAT"
+      },
+      {
+        "id": "battle_result_defeat",
+        "val": "DEFEAT"
+      },
+      {
+        "id": "battle_turns",
+        "val": "Turns:"
+      },
+      {
+        "id": "battle_lost",
+        "val": "Lost:"
+      },
+      {
+        "id": "battle_defeated",
+        "val": "Defeated:"
+      },
+      {
+        "id": "battle_retreated",
+        "val": "Retreated:"
+      },
+      {
+        "id": "battle_continue",
+        "val": "Continue"
+      },
+      {
+        "id": "battle_no_active",
+        "val": "No active battle."
+      },
+      {
+        "id": "battle_log_header",
+        "val": "Battle Log"
+      },
+      {
+        "id": "stat_speed_short",
+        "val": "SPD"
+      }
+    ],
+    "ability_templates": [
+      {
+        "uid": "AbMove",
+        "id": "ab_move",
+        "meta": {
+          "name": "Move",
+          "icon": "assets/engine_assets/plugins/auto_battler/move.png",
+          "is_hidden": true,
+          "target": [
+            "tile_ally"
+          ],
+          "area_shape": "single",
+          "base_weight": 1
+        },
+        "effects": [
+          {
+            "uid": "EfRelocate",
+            "id": "relocate",
+            "name": "Relocate",
+            "aspects": {
+              "relocate_self": true
+            }
+          }
+        ]
+      },
+      {
+        "uid": "AbFocusMark",
+        "id": "focus_mark_cast",
+        "meta": {
+          "is_autocast": true,
+          "name": "Focus Mark",
+          "target": [
+            "enemy"
+          ],
+          "area_shape": "single"
+        },
+        "effects": [
+          {
+            "uid": "EfFocusMark",
+            "id": "mark",
+            "name": "Mark",
+            "aspects": {
+              "token_apply": "focus_mark",
+              "token_stacks": 1
+            }
+          }
+        ]
+      }
+    ],
+    "character_traits": [],
+    "plugins_data/auto_battler/token_definitions": [
+      {
+        "id": "shield",
+        "name": "Shield",
+        "description": "Absorbs incoming damage. Each stack absorbs 1 point of non-absolute damage.",
+        "icon": "assets/engine_assets/plugins/auto_battler/shield.svg",
+        "color": "a78bfa",
+        "max_stacks": 0,
+        "polarity": "neutral",
+        "power_scaling": true,
+        "source": "shield",
+        "effects": [
+          {
+            "type": "absorb",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "preparation",
+        "name": "Preparation",
+        "description": "Required to use preparation abilities. Consumed on use.",
+        "icon": "assets/engine_assets/plugins/auto_battler/preparation.svg",
+        "color": "a78bfa",
+        "max_stacks": 1,
+        "polarity": "neutral",
+        "source": "preparation",
+        "effects": []
+      },
+      {
+        "id": "combo",
+        "name": "Combo",
+        "description": "Required to use combo abilities. Consumed on use.",
+        "icon": "assets/engine_assets/plugins/auto_battler/combo.svg",
+        "color": "a78bfa",
+        "max_stacks": 1,
+        "polarity": "neutral",
+        "effects": []
+      },
+      {
+        "id": "burn",
+        "name": "Burn",
+        "description": "Deals fire damage per stack each turn.",
+        "icon": "assets/engine_assets/plugins/auto_battler/burn.svg",
+        "color": "ff6b35",
+        "max_stacks": 0,
+        "polarity": "negative",
+        "power_scaling": true,
+        "effects": [
+          {
+            "type": "dot",
+            "value": 1,
+            "damage_type": "fire"
+          }
+        ]
+      },
+      {
+        "id": "poison",
+        "name": "Poison",
+        "description": "Deals poison damage per stack each turn.",
+        "icon": "assets/engine_assets/plugins/auto_battler/poison.svg",
+        "color": "66bb6a",
+        "max_stacks": 0,
+        "polarity": "negative",
+        "power_scaling": true,
+        "effects": [
+          {
+            "type": "dot",
+            "value": 1,
+            "damage_type": "poison"
+          }
+        ]
+      },
+      {
+        "id": "bleed",
+        "name": "Bleed",
+        "description": "Deals absolute damage per stack each turn. Ignores defenses.",
+        "icon": "assets/engine_assets/plugins/auto_battler/bleed.svg",
+        "color": "ef4444",
+        "max_stacks": 0,
+        "polarity": "negative",
+        "power_scaling": true,
+        "effects": [
+          {
+            "type": "dot",
+            "value": 1,
+            "damage_type": "absolute"
+          }
+        ]
+      },
+      {
+        "id": "regen",
+        "name": "Regeneration",
+        "description": "Heals per stack each turn.",
+        "icon": "assets/engine_assets/plugins/auto_battler/regen.svg",
+        "color": "42b983",
+        "max_stacks": 0,
+        "polarity": "positive",
+        "power_scaling": true,
+        "effects": [
+          {
+            "type": "hot",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "stun",
+        "name": "Stun",
+        "description": "Prevents acting. Speed is reduced to 0.",
+        "icon": "assets/engine_assets/plugins/auto_battler/stun.svg",
+        "color": "fff59d",
+        "max_stacks": 5,
+        "polarity": "negative",
+        "effects": [
+          {
+            "type": "stun",
+            "value": 0
+          }
+        ]
+      },
+      {
+        "id": "death_defiance",
+        "name": "Death Defiance",
+        "description": "Survives lethal damage once per stack, returning to 1 HP.",
+        "icon": "assets/engine_assets/plugins/auto_battler/death_defiance.svg",
+        "color": "fff59d",
+        "max_stacks": 3,
+        "polarity": "positive",
+        "effects": [
+          {
+            "type": "death_defiance",
+            "value": 0
+          }
+        ]
+      },
+      {
+        "id": "focus_mark",
+        "name": "Focus Mark",
+        "description": "Marks a target. Attackers with Focus Fire deal bonus damage per mark they own.",
+        "icon": "assets/engine_assets/plugins/auto_battler/focus_mark.svg",
+        "color": "a78bfa",
+        "max_stacks": 0,
+        "polarity": "neutral",
+        "power_scaling": false,
+        "effects": []
+      }
+    ],
+    "character_stats": [
+      {
+        "id": "health",
+        "name": "Health",
+        "tags": [
+          "battle"
+        ],
+        "is_resource": true,
+        "is_replenishable": true,
+        "is_safe_removal": true,
+        "order": -95,
+        "color": "c0392b",
+        "ingame_description": "Hit points. When health reaches 0, the character is defeated."
+      },
+      {
+        "id": "power",
+        "name": "Power",
+        "tags": [
+          "battle"
+        ],
+        "order": -100,
+        "ingame_description": "Base damage multiplier for physical abilities."
+      },
+      {
+        "id": "sorcery",
+        "name": "Sorcery",
+        "tags": [
+          "battle"
+        ],
+        "order": -99,
+        "ingame_description": "Base damage multiplier for elemental abilities and healing."
+      },
+      {
+        "id": "armor",
+        "name": "Armor",
+        "tags": [
+          "battle"
+        ],
+        "order": -56,
+        "ingame_description": "Flat reduction to physical damage received."
+      },
+      {
+        "id": "speed",
+        "name": "Speed",
+        "tags": [
+          "battle"
+        ],
+        "order": -98,
+        "ingame_description": "Determines how often the character can act."
+      },
+      {
+        "id": "speed_mult",
+        "name": "Speed %",
+        "tags": [
+          "battle"
+        ],
+        "order": -97,
+        "ingame_description": "Additive % modifier to action speed."
+      },
+      {
+        "id": "heal_amplification",
+        "name": "Heal Amp",
+        "tags": [
+          "battle"
+        ],
+        "order": -35,
+        "ingame_description": "Multiplier for healing effects cast by this character."
+      },
+      {
+        "id": "heal_received_mult",
+        "name": "Heal Received %",
+        "tags": [
+          "battle"
+        ],
+        "order": -34,
+        "ingame_description": "Additive % modifier to all incoming healing. Positive = receive more."
+      },
+      {
+        "id": "resist_fire",
+        "name": "Fire Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces fire damage received (%)."
+      },
+      {
+        "id": "resist_water",
+        "name": "Water Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces water damage received (%)."
+      },
+      {
+        "id": "resist_air",
+        "name": "Air Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces air damage received (%)."
+      },
+      {
+        "id": "resist_earth",
+        "name": "Earth Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces earth damage received (%)."
+      },
+      {
+        "id": "resist_arcane",
+        "name": "Arcane Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces arcane damage received (%)."
+      },
+      {
+        "id": "resist_poison",
+        "name": "Poison Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces poison damage received (%)."
+      },
+      {
+        "id": "resist_light",
+        "name": "Light Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces light damage received (%)."
+      },
+      {
+        "id": "resist_dark",
+        "name": "Dark Resist",
+        "tags": [
+          "battle"
+        ],
+        "order": -50,
+        "ingame_description": "Reduces dark damage received (%)."
+      },
+      {
+        "id": "shield",
+        "name": "Shield",
+        "tags": [
+          "battle"
+        ],
+        "order": -58,
+        "ingame_description": "Starting shield at battle start. Each stack absorbs 1 damage."
+      },
+      {
+        "id": "preparation",
+        "name": "Preparation",
+        "tags": [
+          "battle"
+        ],
+        "order": -24,
+        "ingame_description": "Starting preparation stacks at battle start."
+      },
+      {
+        "id": "damage_dealt_mult",
+        "name": "Dmg Dealt %",
+        "tags": [
+          "battle"
+        ],
+        "order": -45,
+        "ingame_description": "Additive % modifier to all outgoing damage."
+      },
+      {
+        "id": "damage_taken_mult",
+        "name": "Dmg Taken %",
+        "tags": [
+          "battle"
+        ],
+        "order": -44,
+        "ingame_description": "Additive % modifier to all incoming damage. Positive = take more."
+      },
+      {
+        "id": "damage_per_missing_health",
+        "name": "Dmg/Missing HP",
+        "tags": [
+          "battle"
+        ],
+        "order": -43,
+        "ingame_description": "% damage bonus scaled by fraction of missing HP."
+      },
+      {
+        "id": "damage_per_ally",
+        "name": "Dmg/Ally",
+        "tags": [
+          "battle"
+        ],
+        "order": -42,
+        "ingame_description": "% damage bonus per alive ally."
+      },
+      {
+        "id": "damage_per_neighbor",
+        "name": "Dmg/Neighbor",
+        "tags": [
+          "battle"
+        ],
+        "order": -41,
+        "ingame_description": "% damage bonus per neighboring ally on the grid."
+      },
+      {
+        "id": "thorns",
+        "name": "Thorns",
+        "tags": [
+          "battle"
+        ],
+        "order": -40,
+        "ingame_description": "% of received damage reflected back to attacker."
+      },
+      {
+        "id": "crit_chance",
+        "name": "Crit Chance",
+        "tags": [
+          "battle"
+        ],
+        "order": -63,
+        "ingame_description": "Chance to critically hit (0-100%)."
+      },
+      {
+        "id": "crit_multi",
+        "name": "Crit Multi",
+        "tags": [
+          "battle"
+        ],
+        "order": -62,
+        "ingame_description": "Extra damage on critical hit (%). 50 = 1.5x damage."
+      },
+      {
+        "id": "dodge",
+        "name": "Dodge",
+        "tags": [
+          "battle"
+        ],
+        "order": -61,
+        "ingame_description": "Chance to avoid incoming damage entirely (0-100%)."
+      },
+      {
+        "id": "leadership",
+        "name": "Leadership",
+        "tags": [
+          "formation",
+          "battle"
+        ],
+        "order": -102,
+        "ingame_description": "Formation budget when this character is the leader."
+      },
+      {
+        "id": "leadership_cost",
+        "name": "Leadership Cost",
+        "tags": [
+          "formation",
+          "battle"
+        ],
+        "order": -101,
+        "ingame_description": "How much of the leader's budget this character consumes in formation."
+      },
+      {
+        "id": "focus_fire",
+        "name": "Focus Fire",
+        "tags": [
+          "autocast"
+        ],
+        "order": -5,
+        "description": "On attack, apply focus_mark token on target (source-tracked). Damage formula adds stat value % per own mark on target.",
+        "ingame_description": "Marks target on attack. Each mark increases damage from this attacker by this stat's value %."
+      }
+    ]
+  }
+}

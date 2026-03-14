@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PropType, computed, ref, watch, onMounted } from 'vue';
+import { PropType, computed, ref, watch } from 'vue';
 import { Schemable, Schema } from '../../../utility/schema';
 import InputText from 'primevue/inputtext';
 import InputNumber from 'primevue/inputnumber';
@@ -10,13 +10,14 @@ import Editor from 'primevue/editor';
 import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
 import Button from 'primevue/button';
+import Checkbox from 'primevue/checkbox';
 import ColorPicker from 'primevue/colorpicker';
 import Dialog from 'primevue/dialog';
 import { useSortable } from '@vueuse/integrations/useSortable'
 import { Editor as AppEditor } from '../../../editor/editor'; // Adjust the relative path based on your project structure
 import { Global } from '../../../global/global';
 import NestedSchemaRenderer from './NestedSchemaRenderer.vue';
-import { watchDebounced } from '@vueuse/core';
+import { watchDebounced, useStorage } from '@vueuse/core';
 import TriStateSwitch from './TriStateSwitch.vue';
 import FileInput from './FileInput.vue';
 import RangeInput from './RangeInput.vue';
@@ -37,6 +38,11 @@ Quill.register(CustomImage, true);
 // Get editor instance
 const editor = AppEditor.getInstance();
 const global = Global.getInstance();
+const dformSettings = useStorage('dform-settings', { itemsPerPage: 20, hideEmptySchemaFields: false });
+const hideEmptySchemaFields = computed({
+  get: () => dformSettings.value.hideEmptySchemaFields,
+  set: (val: boolean) => { dformSettings.value.hideEmptySchemaFields = val; }
+});
 
 // Register custom directive
 const vPreserveScroll = preserveScroll;
@@ -78,6 +84,7 @@ const props = defineProps({
   itemData: { type: Object, required: true },
   rootSchema: { type: Object as () => Schema, required: true },
   fieldId: { type: String, required: true },
+  toggleIdPrefix: { type: String, default: '' },
   isCore: { type: Boolean, default: false },
   parentIsArray: { type: Boolean, default: false },
   labelContext: {
@@ -95,100 +102,108 @@ const props = defineProps({
   formData: {
     type: Object as PropType<Record<string, any> | null>,
     default: null
+  },
+  forceActive: {
+    type: Boolean,
+    default: false
   }
 });
+
+// Only render nested schemas for items in activeItemUids (or forced active for new item / single object)
+const isActiveItem = computed(() => props.forceActive || editor.activeItemUids.value.has(props.itemData?.uid));
 
 // NOW DEFINE THE WATCHER AND OTHER LOGIC THAT USES PROPS
 const dynamicImageSchemaObjects = ref<Record<string, Schemable> | null>(null);
 const dynamicMaskSchemaObjects = ref<Record<string, Schemable> | null>(null);
 
 // Watcher for itemData to update dynamicImageSchemaObjects and dynamicMaskSchemaObjects
-watch(() => props.itemData, (newItemData, oldItemData) => { // Watch props.itemData directly
-  // Current props.fieldKey and props.rootSchema will be used from the component's scope
-  if (
-    (props.fieldKey === 'images' || props.fieldKey === 'masks') &&
-    typeof props.rootSchema === 'object' && props.rootSchema && props.rootSchema.attributes &&
-    (props.rootSchema.attributes as Schemable).logic === 'build_images' &&
-    typeof newItemData === 'object' && newItemData
-  ) {
-    // Merge attributes from _core and mod to account for all images
-    let selectedAttributes: string[] = [];
+// Only register deep watcher for fields that use build_images logic
+if (props.fieldKey === 'images' || props.fieldKey === 'masks') {
+  watch(() => props.itemData, (newItemData, oldItemData) => {
+    if (
+      typeof props.rootSchema === 'object' && props.rootSchema && props.rootSchema.attributes &&
+      (props.rootSchema.attributes as Schemable).logic === 'build_images' &&
+      typeof newItemData === 'object' && newItemData
+    ) {
+      // Merge attributes from _core and mod to account for all images
+      let selectedAttributes: string[] = [];
 
-    // Start with mod's attributes if they exist
-    if (newItemData.attributes && Array.isArray(newItemData.attributes)) {
-      selectedAttributes = [...newItemData.attributes];
-    }
-
-    // If _core has attributes, use them as the base (prepend)
-    if (props.parentCoreDataItem &&
-      props.parentCoreDataItem.attributes &&
-      Array.isArray(props.parentCoreDataItem.attributes)) {
-      // Prepend _core attributes to preserve order (_core first, then mod)
-      selectedAttributes = [
-        ...props.parentCoreDataItem.attributes,
-        ...selectedAttributes
-      ];
-    }
-
-    const newDynamicImageObjects: Record<string, Schemable> = {};
-    const newDynamicMaskObjects: Record<string, Schemable> = {};
-    let attributesObjects = editor.skinAttributes.value;
-    //console.warn("attributesObjects:", attributesObjects);
-    if (selectedAttributes.length > 0 && attributesObjects && attributesObjects.length > 0) {
-      let valuesCollection: any[] = [];
-
-      selectedAttributes.forEach(attrId => {
-        // console.warn("attrId:", attrId);
-        let values = attributesObjects.find((attr: { id: string }) => attr.id === attrId)?.values;
-        if (values && Array.isArray(values)) {
-          valuesCollection.push(values);
-        } else {
-          console.warn(`[FormFieldRenderer] Attribute '${attrId}' not found in attributesObjects or has no values array`);
-        }
-      });
-      //console.error("valuesCollection:", valuesCollection);
-
-      const ids = valuesCollection.reduce(
-        (acc: any, curr: any) =>
-          acc.flatMap((prefix: any) =>
-            curr.map((word: any) => (prefix ? `${prefix}_${word}` : word))
-          ),
-        ['']                // start with an empty prefix
-      );
-
-      for (let id of ids) {
-        let idFinal = props.itemData.id + "_" + id;
-        // Build image schema
-        newDynamicImageObjects[idFinal] = {
-          type: 'file',
-          fileType: 'image',
-        };
-        // Build mask schema (polygon strings)
-        newDynamicMaskObjects[idFinal] = {
-          type: 'string',
-        };
+      // Start with mod's attributes if they exist
+      if (newItemData.attributes && Array.isArray(newItemData.attributes)) {
+        selectedAttributes = [...newItemData.attributes];
       }
 
+      // If _core has attributes, use them as the base (prepend)
+      if (props.parentCoreDataItem &&
+        props.parentCoreDataItem.attributes &&
+        Array.isArray(props.parentCoreDataItem.attributes)) {
+        // Prepend _core attributes to preserve order (_core first, then mod)
+        selectedAttributes = [
+          ...props.parentCoreDataItem.attributes,
+          ...selectedAttributes
+        ];
+      }
 
+      const newDynamicImageObjects: Record<string, Schemable> = {};
+      const newDynamicMaskObjects: Record<string, Schemable> = {};
+      let attributesObjects = editor.skinAttributes.value;
+      //console.warn("attributesObjects:", attributesObjects);
+      if (selectedAttributes.length > 0 && attributesObjects && attributesObjects.length > 0) {
+        let valuesCollection: any[] = [];
+
+        selectedAttributes.forEach(attrId => {
+          // console.warn("attrId:", attrId);
+          let values = attributesObjects.find((attr: { id: string }) => attr.id === attrId)?.values;
+          if (values && Array.isArray(values)) {
+            valuesCollection.push(values);
+          } else {
+            console.warn(`[FormFieldRenderer] Attribute '${attrId}' not found in attributesObjects or has no values array`);
+          }
+        });
+        //console.error("valuesCollection:", valuesCollection);
+
+        const ids = valuesCollection.reduce(
+          (acc: any, curr: any) =>
+            acc.flatMap((prefix: any) =>
+              curr.map((word: any) => (prefix ? `${prefix}_${word}` : word))
+            ),
+          ['']                // start with an empty prefix
+        );
+
+        for (let id of ids) {
+          let idFinal = props.itemData.id + "_" + id;
+          // Build image schema
+          newDynamicImageObjects[idFinal] = {
+            type: 'file',
+            fileType: 'image',
+          };
+          // Build mask schema (polygon strings)
+          newDynamicMaskObjects[idFinal] = {
+            type: 'string',
+          };
+        }
+
+
+      }
+      if (JSON.stringify(dynamicImageSchemaObjects.value) !== JSON.stringify(newDynamicImageObjects)) {
+        dynamicImageSchemaObjects.value = newDynamicImageObjects;
+      }
+      if (JSON.stringify(dynamicMaskSchemaObjects.value) !== JSON.stringify(newDynamicMaskObjects)) {
+        dynamicMaskSchemaObjects.value = newDynamicMaskObjects;
+      }
+    } else if (props.fieldKey === 'images') {
+      // This condition means fieldKey is 'images' but other conditions for building dynamic schema failed
+      if (dynamicImageSchemaObjects.value !== null) {
+        dynamicImageSchemaObjects.value = null;
+      }
+    } else if (props.fieldKey === 'masks') {
+      // This condition means fieldKey is 'masks' but other conditions for building dynamic schema failed
+      if (dynamicMaskSchemaObjects.value !== null) {
+        dynamicMaskSchemaObjects.value = null;
+      }
     }
-    if (JSON.stringify(dynamicImageSchemaObjects.value) !== JSON.stringify(newDynamicImageObjects)) {
-      dynamicImageSchemaObjects.value = newDynamicImageObjects;
-    }
-    if (JSON.stringify(dynamicMaskSchemaObjects.value) !== JSON.stringify(newDynamicMaskObjects)) {
-      dynamicMaskSchemaObjects.value = newDynamicMaskObjects;
-    }
-  } else if (props.fieldKey === 'images') {
-    // This condition means fieldKey is 'images' but other conditions for building dynamic schema failed
-    if (dynamicImageSchemaObjects.value !== null) {
-      dynamicImageSchemaObjects.value = null;
-    }
-  } else if (props.fieldKey === 'masks') {
-    // This condition means fieldKey is 'masks' but other conditions for building dynamic schema failed
-    if (dynamicMaskSchemaObjects.value !== null) {
-      dynamicMaskSchemaObjects.value = null;
-    }
-  }
-}, { deep: true, immediate: true });
+  }, { deep: true, immediate: true });
+} // end guard: fieldKey === 'images' || 'masks'
 
 const emit = defineEmits(['update:modelValue', 'validate']);
 
@@ -228,30 +243,25 @@ const fieldId = computed(() => {
 })
 
 
-// --- State for Schema Switch ---
-const isNestedSchemaEnabled = ref(false);
-
-// Watch modelValue to set initial switch state
-watch(() => props.modelValue, (newVal) => {
-  if (props.baseFieldSchema.type === 'schema') {
-    isNestedSchemaEnabled.value = newVal != null && typeof newVal === 'object';
-  }
-}, { immediate: true });
-
-// Watch switch state to create/null the object
-watch(isNestedSchemaEnabled, (enabled) => {
-  if (props.baseFieldSchema.type === 'schema') {
-    const currentValue = props.modelValue;
-    if (enabled && (currentValue === null || typeof currentValue !== 'object')) {
-      // console.log('Enabling nested schema, creating empty object');
-      emit('update:modelValue', {}); // Create empty object
-    } else if (!enabled && currentValue !== null) {
-      // console.log('Disabling nested schema, setting to null');
-      emit('update:modelValue', null); // Set to null
-    }
-  }
-});
-// --- End State for Schema Switch ---
+// --- State for Schema Visibility (non-destructive, persisted per tab+field) ---
+// Array of collapsed field keys — absence means visible (uncollapsed)
+const dformToggles = useStorage('dform-toggles', [] as string[]);
+// Guard: useStorage may deserialize a non-array from corrupted localStorage
+const getToggles = (): string[] => Array.isArray(dformToggles.value) ? dformToggles.value : [];
+const toggleKey = `${editor.secondaryTab}-${props.toggleIdPrefix || props.fieldId}`;
+const isNestedSchemaVisible = (props.baseFieldSchema.type === 'schema' || props.baseFieldSchema.type === 'schema[]')
+  ? computed({
+      get: () => !getToggles().includes(toggleKey),
+      set: (val: boolean) => {
+        if (val) {
+          dformToggles.value = getToggles().filter(k => k !== toggleKey);
+        } else {
+          if (!getToggles().includes(toggleKey)) { dformToggles.value = [...getToggles(), toggleKey]; }
+        }
+      }
+    })
+  : ref(false);
+// --- End State for Schema Visibility ---
 
 // HTML mode state for Quill Editor
 const isHtmlMode = ref(false);
@@ -285,12 +295,14 @@ function toggleHtmlMode() {
   }
 }
 
-// Watch for changes in HTML mode textarea
-watch(htmlContent, (newHtml) => {
-  if (isHtmlMode.value) {
-    internalValue.value = newHtml;
-  }
-});
+// Watch for changes in HTML mode textarea (only for htmlarea fields)
+if (props.baseFieldSchema.type === 'htmlarea') {
+  watch(htmlContent, (newHtml) => {
+    if (isHtmlMode.value) {
+      internalValue.value = newHtml;
+    }
+  });
+}
 
 // Clean HTML content by replacing consecutive &nbsp; with regular spaces
 function cleanHtmlContent(html: string): string {
@@ -320,137 +332,97 @@ function onEditorInit({ instance }: { instance: any }) { // PrimeVue passes 'ins
 
 // --- Number Array Logic ---
 const numberListContainer = ref<HTMLElement | null>(null);
-const localNumberArray = ref<(number | null)[]>([]); // Use number | null
+const localNumberArray = ref<(number | null)[]>([]);
 
-// Sync prop changes to local number state
-watch(() => props.modelValue, (newVal) => {
-  if (props.baseFieldSchema.type === 'number[]') {
+function deleteNumberItem(index: number) {
+  if (localNumberArray.value.length === 1 && localNumberArray.value[0] === null) return;
+  localNumberArray.value.splice(index, 1);
+  if (localNumberArray.value.length === 0) {
+    localNumberArray.value.push(null);
+  }
+}
+
+if (props.baseFieldSchema.type === 'number[]') {
+  watch(() => props.modelValue, (newVal) => {
     if (Array.isArray(newVal)) {
-      // Filter out non-numbers just in case, though ideally prop type should be correct
       const numbersOnly = newVal.filter(v => typeof v === 'number');
-
-      // Ensure at least one null placeholder if array is empty or last item is not null
       const needsNullField = numbersOnly.length === 0 || numbersOnly[numbersOnly.length - 1] !== null;
       const newState: (number | null)[] = needsNullField ? [...numbersOnly, null] : [...numbersOnly];
-
-      // Update only if structurally different from current local state
       if (JSON.stringify(newState) !== JSON.stringify(localNumberArray.value)) {
         localNumberArray.value = newState;
       }
     } else {
-      // Initialize if not an array
       if (localNumberArray.value.length === 0 || localNumberArray.value[0] !== null) {
         localNumberArray.value = [null];
       }
     }
-  }
-}, { immediate: true, deep: true });
+  }, { immediate: true, deep: true });
 
-// Watch local number state for changes (user input, sorting, deletion) and auto-add/emit
-watch(localNumberArray, (newList) => {
-  if (props.baseFieldSchema.type === 'number[]') {
-    // Auto-add new null field if the last one is filled (not null)
+  watch(localNumberArray, (newList) => {
     if (newList.length > 0 && newList[newList.length - 1] !== null) {
       localNumberArray.value.push(null);
-    }
-    // Remove duplicate null field at the end
-    else if (newList.length > 1 && newList[newList.length - 1] === null && newList[newList.length - 2] === null) {
+    } else if (newList.length > 1 && newList[newList.length - 1] === null && newList[newList.length - 2] === null) {
       localNumberArray.value.pop();
-      // Don't emit immediately after pop, wait for next tick or explicit change
       return;
     }
-
-    // Emit changes back to parent, but ALWAYS filter out the trailing null
-    // This ensures the emitted value matches what gets saved to the file
     const listToEmit = [...localNumberArray.value];
     const listWithoutTrailingNull = listToEmit.length > 0 && listToEmit[listToEmit.length - 1] === null
-      ? listToEmit.slice(0, -1)
-      : listToEmit;
-
-    // Emit only if the array content has actually changed from the prop
+      ? listToEmit.slice(0, -1) : listToEmit;
     const currentPropValue = Array.isArray(props.modelValue) ? props.modelValue : [];
     if (JSON.stringify(listWithoutTrailingNull) !== JSON.stringify(currentPropValue)) {
       emit('update:modelValue', listWithoutTrailingNull);
     }
-  }
-}, { deep: true });
+  }, { deep: true });
 
-// Setup sorting for numbers
-useSortable(numberListContainer, localNumberArray, {
-  handle: '.drag-handle',
-  animation: 150,
-  filter: '.non-draggable-empty', // Ignore drag attempts on null items
-  preventOnFilter: false, // Allow focus/click
-});
-
-function deleteNumberItem(index: number) {
-  // Prevent deleting the last null item
-  if (localNumberArray.value.length === 1 && localNumberArray.value[0] === null) return;
-
-  localNumberArray.value.splice(index, 1);
-
-  // Ensure there's always at least one (potentially null) field
-  if (localNumberArray.value.length === 0) {
-    localNumberArray.value.push(null);
-  }
+  useSortable(numberListContainer, localNumberArray, {
+    handle: '.drag-handle', animation: 150,
+    filter: '.non-draggable-empty', preventOnFilter: false,
+  });
 }
 // --- End Number Array Logic ---
 
 // --- Schema Array Logic ---
 const schemaListContainer = ref<HTMLElement | null>(null);
-const localSchemaArray = ref<Record<string, any>[]>([]); // Array of objects
+const localSchemaArray = ref<Record<string, any>[]>([]);
 
-// Sync prop changes to local schema array state
-watch(() => props.modelValue, (newVal) => {
-  if (props.baseFieldSchema.type === 'schema[]') {
+function addSchemaItem() {
+  localSchemaArray.value.push({ uid: editor.createUid() });
+}
+
+function deleteSchemaItem(index: number) {
+  localSchemaArray.value.splice(index, 1);
+}
+
+if (props.baseFieldSchema.type === 'schema[]') {
+  watch(() => props.modelValue, (newVal) => {
     if (Array.isArray(newVal)) {
-      // Ensure only actual objects are in the array initially
       const validObjects = newVal.filter(item => item !== null && typeof item === 'object');
-      // Ensure all items have a uid for proper Vue key tracking
       validObjects.forEach(item => {
-        if (!item.uid) {
-          item.uid = editor.createUid();
-        }
+        if (!item.uid) { item.uid = editor.createUid(); }
       });
-      // Update only if different from current local state
       if (JSON.stringify(validObjects) !== JSON.stringify(localSchemaArray.value)) {
         localSchemaArray.value = validObjects;
       }
     } else {
-      // If prop is not an array, initialize local state as empty
-      if (localSchemaArray.value.length > 0) {
-        localSchemaArray.value = [];
-      }
+      if (localSchemaArray.value.length > 0) { localSchemaArray.value = []; }
     }
-  }
-}, { immediate: true, deep: true });
+  }, { immediate: true, deep: true });
 
-// Watch local schema array for deep changes (add, delete, reorder, internal modification)
-watch(localSchemaArray, (newList, oldList) => {
-  if (props.baseFieldSchema.type === 'schema[]') {
-    // Emit changes back to parent if the array structure or content differs from the prop
-    // Use deep comparison to detect internal object changes
+  watch(localSchemaArray, (newList) => {
     if (JSON.stringify(newList) !== JSON.stringify(props.modelValue || [])) {
       emit('update:modelValue', newList);
     }
-  }
-}, { deep: true });
+  }, { deep: true });
 
-// Add a new empty object item
-function addSchemaItem() {
-  localSchemaArray.value.push({ uid: editor.createUid() });
-  // The watcher will emit the update
-}
+  const { start: startSortable, stop: stopSortable } = useSortable(schemaListContainer, localSchemaArray, {
+    handle: '.drag-handle', animation: 150,
+  });
 
-// Setup sorting for schema array
-useSortable(schemaListContainer, localSchemaArray, {
-  handle: '.drag-handle',
-  animation: 150,
-});
-
-function deleteSchemaItem(index: number) {
-  localSchemaArray.value.splice(index, 1);
-  // The watcher will emit the update
+  // Re-initialize when container appears/reappears in DOM (after v-if activation)
+  watch(schemaListContainer, (el, oldEl) => {
+    if (!el && oldEl) stopSortable();
+    if (el) startSortable();
+  });
 }
 // --- End Schema Array Logic ---
 
@@ -493,6 +465,7 @@ const isVisible = computed(() => {
 // --- Dynamic Filter Schema for build_filters logic ---
 // When pool field has logic: 'build_filters', generate dynamic schema for filters_include/filters_exclude
 const buildFiltersConfig = computed(() => {
+  if (props.fieldKey !== 'filters_include' && props.fieldKey !== 'filters_exclude') return null;
   if (!props.rootSchema?.pool) return null;
   const poolSchema = props.rootSchema.pool as Schemable;
   if (poolSchema.logic !== 'build_filters') return null;
@@ -704,9 +677,7 @@ watchDebounced(internalValue, (newValue, oldValue) => {
   }
 }, { deep: true, debounce: 300 });
 
-onMounted(() => {
 
-});
 </script>
 
 <template>
@@ -733,8 +704,9 @@ onMounted(() => {
     <div v-else-if="fieldType === 'number'" class="field-container">
       <FloatLabel variant="on" class="p-float-label-variant-on input-wrapper">
 
-        <InputNumber v-model="internalValue" :step="stepValue" :min="minValue" :max="maxValue" showButtons class="w-full" mode="decimal"
-          :maxFractionDigits="2" v-tooltip.left="tooltip" @input="(event) => internalValue = event.value" />
+        <InputNumber v-model="internalValue" :step="stepValue" :min="minValue" :max="maxValue" showButtons
+          class="w-full" mode="decimal" :maxFractionDigits="2" v-tooltip.left="tooltip"
+          @input="(event) => internalValue = event.value" />
         <label :for="fieldId">{{ label }}</label>
       </FloatLabel>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
@@ -849,13 +821,8 @@ onMounted(() => {
     <!-- String Array -->
     <div v-else-if="fieldType === 'string[]'" class="field-container string-array-field">
       <div v-tooltip.left="tooltip" class="input-wrapper">
-        <StringArrayInput
-          :model-value="internalValue"
-          @update:model-value="val => internalValue = val"
-          :label="label"
-          :tooltip="tooltip"
-          :allow-and-mode="effectiveFieldSchema?.allowAndMode"
-        />
+        <StringArrayInput :model-value="internalValue" @update:model-value="val => internalValue = val" :label="label"
+          :tooltip="tooltip" :allow-and-mode="effectiveFieldSchema?.allowAndMode" />
       </div>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
@@ -916,25 +883,26 @@ onMounted(() => {
       <div class="input-wrapper">
 
         <div v-tooltip.left="tooltip" class="schema-header">
-          <ToggleSwitch v-model="isNestedSchemaEnabled" :inputId="fieldId + '-switch'" />
+          <ToggleSwitch v-model="isNestedSchemaVisible" :inputId="fieldId + '-switch'" class="schema-toggle" />
           <label>{{ label }}</label>
-          <InputText v-if="isNestedSchemaEnabled"
-            :modelValue="editor.schemaKeyFilters.value[fieldKey] ?? ''"
-            @update:modelValue="val => editor.schemaKeyFilters.value[fieldKey] = val ?? ''"
-            placeholder="Filter keys..."
-            size="small"
-            class="schema-key-filter-input" />
-          <Button v-if="isNestedSchemaEnabled && editor.schemaKeyFilters.value[fieldKey]"
-            icon="pi pi-times"
-            size="small"
-            severity="secondary"
-            text
-            @click="editor.schemaKeyFilters.value[fieldKey] = ''" />
+          <InputText v-if="isNestedSchemaVisible" :modelValue="editor.schemaKeyFilters.value[fieldKey] ?? ''"
+            @update:modelValue="val => editor.schemaKeyFilters.value[fieldKey] = val ?? ''" placeholder="Filter keys..."
+            size="small" class="schema-key-filter-input" />
+          <Button v-if="isNestedSchemaVisible && editor.schemaKeyFilters.value[fieldKey]" icon="pi pi-times"
+            size="small" severity="secondary" text @click="editor.schemaKeyFilters.value[fieldKey] = ''" />
+          <div v-if="isNestedSchemaVisible" class="hide-empty-toggle">
+            <Checkbox v-model="hideEmptySchemaFields" :binary="true" :inputId="fieldId + '-hideEmpty'" />
+            <label :for="fieldId + '-hideEmpty'" class="text-sm">Hide empty</label>
+          </div>
         </div>
-        <NestedSchemaRenderer v-if="isNestedSchemaEnabled && objectsSchema" :schema="objectsSchema"
-          :modelValue="internalValue" @update:modelValue="emit('update:modelValue', $event)"
-          :core-data-for-nested-schema="fieldCoreValue" :item-data="props.itemData" :root-schema="props.rootSchema"
-          :field-id-prefix="fieldId" :filter-key="fieldKey" />
+        <template v-if="isNestedSchemaVisible && objectsSchema">
+          <NestedSchemaRenderer v-if="isActiveItem" :schema="objectsSchema" :modelValue="internalValue"
+            @update:modelValue="emit('update:modelValue', $event)" :core-data-for-nested-schema="fieldCoreValue"
+            :item-data="props.itemData" :root-schema="props.rootSchema" :field-id-prefix="fieldId"
+            :toggle-id-prefix="props.toggleIdPrefix || fieldId"
+            :filter-key="fieldKey" :hide-empty="hideEmptySchemaFields" :force-active="props.forceActive" />
+          <div v-else class="text-color-secondary text-sm p-2">Loading...</div>
+        </template>
       </div>
     </div>
 
@@ -942,34 +910,52 @@ onMounted(() => {
     <div v-else-if="fieldType === 'schema[]'" class="field-container schema-array-field">
       <div class="input-wrapper">
 
-        <div v-tooltip.left="tooltip" class="nested_top_wrapper">
-          <label class="block mb-2 font-medium">{{ label }}</label>
+        <div v-tooltip.left="tooltip" class="schema-header">
+          <ToggleSwitch v-model="isNestedSchemaVisible" :inputId="fieldId + '-switch'" class="schema-toggle" />
+          <label>{{ label }}</label>
+          <template v-if="isNestedSchemaVisible && localSchemaArray.length > 0">
+            <InputText :modelValue="editor.schemaKeyFilters.value[fieldKey] ?? ''"
+              @update:modelValue="val => editor.schemaKeyFilters.value[fieldKey] = val ?? ''"
+              placeholder="Filter keys..." size="small" class="schema-key-filter-input" />
+            <Button v-if="editor.schemaKeyFilters.value[fieldKey]" icon="pi pi-times" size="small" severity="secondary"
+              text @click="editor.schemaKeyFilters.value[fieldKey] = ''" />
+            <div class="hide-empty-toggle">
+              <Checkbox v-model="hideEmptySchemaFields" :binary="true" :inputId="fieldId + '-hideEmpty'" />
+              <label :for="fieldId + '-hideEmpty'" class="text-sm">Hide empty</label>
+            </div>
+          </template>
         </div>
 
-        <!-- List Container -->
-        <div ref="schemaListContainer" class="space-y-4">
-          <div v-for="(item, index) in localSchemaArray" :key="item.uid"
-            class="flex items-start gap-2 schema-array-item relative p-3 border-round border-1 border-surface-200">
-            <!-- Drag Handle (Positioned Top-Left for block element) -->
-            <Button icon="pi pi-bars" text rounded
-              class="drag-handle cursor-move p-button-sm absolute top-0 left-0 mt-1 ml-1"
-              aria-label="Drag to reorder" />
+        <template v-if="isNestedSchemaVisible && isActiveItem">
+          <!-- List Container -->
+          <div ref="schemaListContainer" class="space-y-4">
+            <div v-for="(item, index) in localSchemaArray" :key="item.uid"
+              class="flex items-start gap-2 schema-array-item relative p-3 border-round border-1 border-surface-200">
+              <!-- Drag Handle (Positioned Top-Left for block element) -->
+              <Button icon="pi pi-bars" text rounded
+                class="drag-handle cursor-move p-button-sm absolute top-0 left-0 mt-1 ml-1"
+                aria-label="Drag to reorder" />
 
-            <!-- Nested Renderer takes full width -->
-            <NestedSchemaRenderer :schema="objectsSchema || {}" v-model="localSchemaArray[index]" class="flex-grow pt-4"
-              :core-data-for-nested-schema="fieldCoreValue && Array.isArray(fieldCoreValue) && item.id ? fieldCoreValue.find(coreItem => coreItem.id === item.id) : null"
-              :item-data="props.itemData" :root-schema="props.rootSchema" :field-id-prefix="`${fieldId}-${index}`" />
+              <!-- Nested Renderer takes full width -->
+              <NestedSchemaRenderer :schema="objectsSchema || {}" v-model="localSchemaArray[index]"
+                class="flex-grow pt-4"
+                :core-data-for-nested-schema="fieldCoreValue && Array.isArray(fieldCoreValue) && item.id ? fieldCoreValue.find(coreItem => coreItem.id === item.id) : null"
+                :item-data="props.itemData" :root-schema="props.rootSchema" :field-id-prefix="`${fieldId}-${index}`"
+                :toggle-id-prefix="props.toggleIdPrefix || fieldId"
+                :filter-key="fieldKey" :hide-empty="hideEmptySchemaFields" :force-active="props.forceActive" />
 
-            <!-- Delete Button (Positioned Top-Right) -->
-            <Button icon="pi pi-trash" severity="danger" class="p-button-sm absolute top-0 right-0 mt-1 mr-1"
-              aria-label="Remove Item" @click="deleteSchemaItem(index)" />
+              <!-- Delete Button (Positioned Top-Right) -->
+              <Button icon="pi pi-trash" severity="danger" class="p-button-sm absolute top-0 right-0 mt-1 mr-1"
+                aria-label="Remove Item" @click="deleteSchemaItem(index)" />
+            </div>
           </div>
-        </div>
 
-        <!-- Add Item Button -->
-        <div class="mt-3">
-          <Button label="Add" icon="pi pi-plus" @click="addSchemaItem" size="small" />
-        </div>
+          <!-- Add Item Button -->
+          <div class="mt-3">
+            <Button label="Add" icon="pi pi-plus" @click="addSchemaItem" size="small" />
+          </div>
+        </template>
+        <div v-else-if="isNestedSchemaVisible && !isActiveItem" class="text-color-secondary text-sm p-2">Loading...</div>
       </div>
     </div>
 
@@ -1001,6 +987,22 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.schema-toggle :deep(.p-toggleswitch-slider) {
+  border-radius: 4px;
+}
+
+.schema-toggle :deep(.p-toggleswitch-slider::before) {
+  border-radius: 2px;
+}
+
+.schema-toggle:not(.p-toggleswitch-checked) :deep(.p-toggleswitch-slider) {
+  background: #a38516;
+}
+
+.schema-toggle:not(.p-toggleswitch-checked):hover :deep(.p-toggleswitch-slider) {
+  background: #72a70a !important;
+}
+
 .form-field-renderer {
   width: 100%;
   /* Ensure it takes full width */
@@ -1078,6 +1080,13 @@ onMounted(() => {
 
 .schema-key-filter-input {
   max-width: 200px;
+}
+
+.hide-empty-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.25rem;
 }
 
 /* Styles from Dform that apply per field */

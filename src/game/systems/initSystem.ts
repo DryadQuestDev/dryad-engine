@@ -78,8 +78,8 @@ export const CORE_EMITTER_SIGNATURES = {
     "item_equip_after": (item: Item, character: Character): boolean | void => { },
     "item_unequip_before": (item: Item, character: Character): boolean | void => { },
     "item_unequip_after": (item: Item, character: Character): boolean | void => { },
-    //"item_use_before": (item: Item, character: Character): boolean | void => { },
-    //"item_use_after": (item: Item, character: Character): boolean | void => { },
+    "item_consume_before": (item: Item, character: Character): boolean | void => { },
+    "item_consume_after": (item: Item, character: Character): boolean | void => { },
     // "item_pickup": (item: Item, character: Character): boolean | void => { },
     "inventory_open": (inventory: Inventory): boolean | void => { },
     "inventory_close": (inventory: Inventory): boolean | void => { },
@@ -146,7 +146,7 @@ export class InitSystem {
                 let character = this.game.characterSystem.characters.value.get(characterObject.id);
                 if (character) {
                     this.game.logicSystem.resolveActions({
-                        updateCharacter: {
+                        update_character: {
                             id: character.id,
                             party: characterObject.add_to_party
                         }
@@ -196,6 +196,7 @@ export class InitSystem {
         this.game.registerState('active_item', null);
         this.game.registerState('popup_state', null);
         this.game.registerState('overlay_state', 'overlay-navigation');
+        this.game.registerState('previous_overlay_state', null);
 
         this.game.registerState('supress_game_events', false);
         this.game.registerState('disable_saves', false);
@@ -203,7 +204,6 @@ export class InitSystem {
         this.game.registerState('replay_mode_unlock_choices', false);
 
         this.game.registerState('max_log', 40);
-        this.game.registerState('character_stat_groups', null);
     }
 
     // ============================================
@@ -696,6 +696,36 @@ export class InitSystem {
             if (typeof value === 'object') return JSON.stringify(value);
             return String(value);
         });
+
+        // Shared: parse key->value args, resolve a locale entry through the full pipeline
+        const resolveLocale = (localeId: string, args: string[]): string => {
+            const params: Record<string, any> = {};
+            for (const arg of args) {
+                const sep = arg.indexOf('->');
+                if (sep !== -1) params[arg.slice(0, sep).trim()] = arg.slice(sep + 2).trim();
+            }
+            const raw = this.game.logicSystem.getLine(localeId, params);
+            return this.game.logicSystem.resolveString(raw, true).output;
+        };
+
+        // Usage: |from(localeId)| or |from(localeId, name->Elf, species->minotaur)|
+        this.game.registerPlaceholder("from", (localeId: string, ...args: string[]) => {
+            return resolveLocale(localeId, args);
+        });
+
+        // Usage: |pick(baseId)| or |pick(baseId, name->Elf)|
+        // Randomly selects from numbered locale variants: baseId, baseId_2, baseId_3, ...
+        this.game.registerPlaceholder("pick", (baseId: string, ...args: string[]) => {
+            const variants = [baseId];
+            for (let i = 2; ; i++) {
+                const id = `${baseId}_${i}`;
+                const line = this.game.logicSystem.getLine(id);
+                if (line === `[${id}]`) break;
+                variants.push(id);
+            }
+            const chosen = variants[Math.floor(Math.random() * variants.length)];
+            return resolveLocale(chosen, args);
+        });
     }
 
     // ============================================
@@ -1021,7 +1051,7 @@ export class InitSystem {
             }
         });
 
-        this.game.registerAction("choicesOver", {
+        this.game.registerAction("choices_over", {
             onGameLoad: true,
             action: (value: string) => {
                 let { sceneId, dungeonId } = this.game.dungeonSystem.resolveSceneId(value);
@@ -1030,9 +1060,9 @@ export class InitSystem {
                     this.game.dungeonSystem.isChoices = 2;
                     this.game.dungeonSystem.eventChoices.value = choices;
                     const count = Array.isArray(choices) ? choices.length : 1;
-                    gameLogger.info(`[choicesOver] Loaded ${count} choice(s) (override mode) from scene: "${sceneId}"`);
+                    gameLogger.info(`[choices_over] Loaded ${count} choice(s) (override mode) from scene: "${sceneId}"`);
                 } else {
-                    gameLogger.info(`[choicesOver] No choices found for scene: "${sceneId}"`);
+                    gameLogger.info(`[choices_over] No choices found for scene: "${sceneId}"`);
                 }
             }
         });
@@ -1269,41 +1299,41 @@ export class InitSystem {
     private registerCharacterActions(): void {
 
 
-        this.game.registerAction("joinParty", (data: string) => {
+        this.game.registerAction("join_party", (data: string) => {
             for (let part of this.game.logicSystem.getParts(data, true)) {
                 let character = this.game.characterSystem.getCharacter(part);
                 if (!character) {
                     throw new Error(`Character with id "${part}" not found.`);
                 }
                 if (this.game.characterSystem.isCharacterInParty(character)) {
-                    gameLogger.warn(`[joinParty] Character "${part}" is already in the party, skipping`);
+                    gameLogger.warn(`[join_party] Character "${part}" is already in the party, skipping`);
                     continue;
                 }
                 this.game.characterSystem.addToParty(character);
-                gameLogger.info(`[joinParty] Added character "${part}" to party`);
+                gameLogger.info(`[join_party] Added character "${part}" to party`);
                 this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.joined', { character: character.getName() }));
             }
 
         });
 
-        this.game.registerAction("leaveParty", (data: string) => {
+        this.game.registerAction("leave_party", (data: string) => {
             for (let part of this.game.logicSystem.getParts(data, true)) {
                 let character = this.game.characterSystem.getCharacter(part);
                 if (!character) {
                     throw new Error(`Character with id "${part}" not found.`);
                 }
                 if (!this.game.characterSystem.isCharacterInParty(character)) {
-                    gameLogger.warn(`[leaveParty] Character "${part}" is not in the party, skipping`);
+                    gameLogger.warn(`[leave_party] Character "${part}" is not in the party, skipping`);
                     continue;
                 }
                 this.game.characterSystem.removeFromParty(character);
-                gameLogger.info(`[leaveParty] Removed character "${part}" from party`);
+                gameLogger.info(`[leave_party] Removed character "${part}" from party`);
                 this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.left', { character: character.getName() }));
             }
         });
 
 
-        this.game.registerAction("createCharacter", (data: any) => {
+        this.game.registerAction("create_character", (data: any) => {
             if (!data.id) {
                 throw new Error("Character id is required when creating a character.");
             }
@@ -1311,16 +1341,16 @@ export class InitSystem {
             let character
             if (data.template) {
                 character = this.game.characterSystem.createCharacter(data.id, data.template);
-                gameLogger.info(`[createCharacter] Created character "${data.id}" from template "${data.template}"${data.party ? ' and added to party' : ''}`);
+                gameLogger.info(`[create_character] Created character "${data.id}" from template "${data.template}"${data.party ? ' and added to party' : ''}`);
             } else {
                 character = this.game.characterSystem.createCharacter(data.id, data);
-                gameLogger.info(`[createCharacter] Created character "${data.id}"${data.party ? ' and added to party' : ''}`);
+                gameLogger.info(`[create_character] Created character "${data.id}"${data.party ? ' and added to party' : ''}`);
             }
 
             this.game.characterSystem.addCharacter(character, data.party);
         });
 
-        this.game.registerAction("updateCharacter", (data: any) => {
+        this.game.registerAction("update_character", (data: any) => {
             if (!data.id) {
                 throw new Error("Character id is required when updating a character.");
             }
@@ -1341,19 +1371,19 @@ export class InitSystem {
                     partyStatus = ', removed from party';
                 }
             }
-            gameLogger.info(`[updateCharacter] Updated character "${data.id}"${partyStatus}`);
+            gameLogger.info(`[update_character] Updated character "${data.id}"${partyStatus}`);
         });
 
-        this.game.registerAction("deleteCharacter", (data: any) => {
+        this.game.registerAction("delete_character", (data: any) => {
             if (!data.id) {
                 throw new Error("Character id is required when deleting a character.");
             }
             this.game.characterSystem.partyIds.value.delete(data.id);
             this.game.characterSystem.characters.value.delete(data.id);
-            gameLogger.info(`[deleteCharacter] Deleted character "${data.id}"`);
+            gameLogger.info(`[delete_character] Deleted character "${data.id}"`);
         });
 
-        this.game.registerAction("addStatus", (data: any) => {
+        this.game.registerAction("add_status", (data: any) => {
             if (!data.character) {
                 throw new Error("Character id is required when adding a status.");
             }
@@ -1370,7 +1400,7 @@ export class InitSystem {
             status.id = data.statusId;
             status.setValues(statusObject);
             character.addStatus(status);
-            gameLogger.info(`[addStatus] Added status "${data.statusId}" to character "${data.character}"`);
+            gameLogger.info(`[add_status] Added status "${data.statusId}" to character "${data.character}"`);
         });
 
         this.game.registerAction("char", {
@@ -1381,31 +1411,31 @@ export class InitSystem {
             }
         });
 
-        this.game.registerAction("addSkinLayer", {
+        this.game.registerAction("add_skin_layer", {
             action: (data: string) => {
                 this.game.characterSystem.processAddSkinLayerAction(data);
-                gameLogger.info(`[addSkinLayer] Added skin layer: ${data}`);
+                gameLogger.info(`[add_skin_layer] Added skin layer: ${data}`);
             }
         });
 
-        this.game.registerAction("removeSkinLayer", {
+        this.game.registerAction("remove_skin_layer", {
             action: (data: string) => {
                 this.game.characterSystem.processRemoveSkinLayerAction(data);
-                gameLogger.info(`[removeSkinLayer] Removed skin layer: ${data}`);
+                gameLogger.info(`[remove_skin_layer] Removed skin layer: ${data}`);
             }
         });
 
-        this.game.registerAction("addItemSlot", {
+        this.game.registerAction("add_item_slot", {
             action: (data: string) => {
                 this.game.characterSystem.processAddItemSlotAction(data);
-                gameLogger.info(`[addItemSlot] Added item slot: ${data}`);
+                gameLogger.info(`[add_item_slot] Added item slot: ${data}`);
             }
         });
 
-        this.game.registerAction("removeItemSlot", {
+        this.game.registerAction("remove_item_slot", {
             action: (data: string) => {
                 this.game.characterSystem.processRemoveItemSlotAction(data);
-                gameLogger.info(`[removeItemSlot] Removed item slot: ${data}`);
+                gameLogger.info(`[remove_item_slot] Removed item slot: ${data}`);
             }
         });
 
@@ -1473,7 +1503,7 @@ export class InitSystem {
      * Register item system actions
      */
     private registerItemActions(): void {
-        this.game.registerAction("equipItem", (data: {
+        this.game.registerAction("equip_item", (data: {
             itemUid: string;
             characterId: string;
             slotId: string;
@@ -1487,10 +1517,10 @@ export class InitSystem {
             }
 
             character.equipItem(itemUid, data.slotId, data.slotIndex);
-            gameLogger.info(`[equipItem] Equipped item "${itemUid}" to character "${character.id}"`);
+            gameLogger.info(`[equip_item] Equipped item "${itemUid}" to character "${character.id}"`);
         });
 
-        this.game.registerAction("unequipItem", (data: {
+        this.game.registerAction("unequip_item", (data: {
             characterId: string;
             itemUid: string;
         }) => {
@@ -1502,10 +1532,116 @@ export class InitSystem {
 
             const itemUid = data.itemUid || this.game.getState('active_item');
             character.unequipItem(itemUid);
-            gameLogger.info(`[unequipItem] Unequipped item "${itemUid}" from character "${character.id}"`);
+            gameLogger.info(`[unequip_item] Unequipped item "${itemUid}" from character "${character.id}"`);
         });
 
-        this.game.registerAction("addItem", (data: string | string[]) => {
+        this.game.registerAction("consume_item", (data: {
+            itemUid: string;
+            characterId: string;
+        }) => {
+            const itemUid = data.itemUid || this.game.getState('active_item');
+            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+            const character = this.game.getCharacter(characterId);
+            if (!character) {
+                throw new Error(`Character with id "${characterId}" not found.`);
+            }
+
+            const inventory = character.getPartyInventory();
+            if (!inventory) {
+                throw new Error(`No inventory found for character "${characterId}"`);
+            }
+
+            const item = inventory.getItemByUid(itemUid);
+            if (!item || !item.is_consumable) {
+                throw new Error(`Item with uid "${itemUid}" not found or not consumable`);
+            }
+
+            // Set active states for action scripts
+            if (!this.game.getState('supress_game_events')) {
+                this.game.coreSystem.setState('active_character', characterId);
+                this.game.coreSystem.setState('active_inventory', inventory.id);
+                this.game.coreSystem.setState('active_item', item.uid);
+            }
+
+            // Before scripts + emitter (cancellable)
+            if (item.actions?.item_consume_before) {
+                this.game.logicSystem.resolveActions(item.actions.item_consume_before);
+            }
+            if (!this.game.trigger('item_consume_before', item, character)) return;
+
+            // 1) Apply status (visible, with consume_duration)
+            const statusObj = item.statusObject;
+            if (statusObj && Object.keys(statusObj).length > 0) {
+                let status = new Status();
+                status.id = item.consume_status_id || ("consume_" + item.id);
+                status.setValues(statusObj);
+                // Inherit image and name from item if not set by statusObject
+                if (!status.image) {
+                    status.image = item.getTrait('image') || '';
+                }
+                if (!status.name) {
+                    status.name = item.getTrait('name') || item.id;
+                }
+                if (!status.description) {
+                    status.description = item.getTrait('description') || '';
+                }
+                status.isHidden = false;
+                status.maxStacks = item.consume_max_stacks;  // default -1 (unlimited)
+                if (item.consume_polarity) status.polarity = item.consume_polarity;
+                const itemRarity = item.attributes['rarity'] || '';
+                if (itemRarity) status.rarity = itemRarity;
+                const dur = item.consume_duration;
+                if (dur !== undefined && dur !== -1) {
+                    status.duration = dur;
+                }
+                character.addStatus(status);  // handles stacking automatically
+            }
+
+            // 2) Apply consume_percentage (% of max resource)
+            for (const statId in item.consume_percentage) {
+                const pct = item.consume_percentage[statId];
+                if (!pct) continue;
+                const stat = this.game.characterSystem.statsMap.get(statId);
+                if (!stat || !stat.is_resource) {
+                    gameLogger.warn(`[consume_item] Stat "${statId}" not found or not a resource, skipping`);
+                    continue;
+                }
+                const maxVal = character.getStat(statId);
+                character.addResource(statId, maxVal * (pct / 100));
+            }
+
+            // 3) Apply consume_absolute (flat resource change)
+            for (const statId in item.consume_absolute) {
+                const amount = item.consume_absolute[statId];
+                if (!amount) continue;
+                const stat = this.game.characterSystem.statsMap.get(statId);
+                if (!stat || !stat.is_resource) {
+                    gameLogger.warn(`[consume_item] Stat "${statId}" not found or not a resource, skipping`);
+                    continue;
+                }
+                character.addResource(statId, amount);
+            }
+
+            // 4) Reduce quantity by 1; remove if empty
+            inventory.reduceItemQuantity(item, 1);
+
+            // After scripts + emitter
+            if (item.actions?.item_consume_after) {
+                this.game.logicSystem.resolveActions(item.actions.item_consume_after);
+            }
+            this.game.trigger('item_consume_after', item, character);
+
+            const itemName = item.getTrait('name') || item.id;
+            const rarity = item.attributes['rarity'] || '';
+            const rarityClass = rarity ? `item-name rarity_${rarity}` : '';
+            const itemHtml = `<b class="${rarityClass}">${itemName}</b>`;
+            Global.getInstance().addNotification(
+                `${character.getName()} consumed ${itemHtml}`
+            );
+            gameLogger.info(`[consume_item] "${character.id}" consumed "${item.id}"`);
+        });
+
+        this.game.registerAction("add_item", (data: string | string[]) => {
             // Convert single string to array, splitting by commas if needed
             let items: string[];
             if (Array.isArray(data)) {
@@ -1561,7 +1697,7 @@ export class InitSystem {
             }
 
             if (addedItems.length > 0) {
-                gameLogger.info(`[addItem] Added item(s): ${addedItems.join(', ')}`);
+                gameLogger.info(`[add_item] Added item(s): ${addedItems.join(', ')}`);
             }
         })
 
@@ -1585,13 +1721,13 @@ export class InitSystem {
             }
         );
 
-        this.game.registerAction("learnRecipe", (recipeId: string) => {
+        this.game.registerAction("learn_recipe", (recipeId: string) => {
             let parts = recipeId.split(",").map(p => p.trim());
             for (const part of parts) {
                 this.game.itemSystem.addLearnedRecipe(part);
                 console.log("recipe learned:", part);
             }
-            gameLogger.info(`[learnRecipe] Learned recipe(s): ${parts.join(', ')}`);
+            gameLogger.info(`[learn_recipe] Learned recipe(s): ${parts.join(', ')}`);
         });
     }
 

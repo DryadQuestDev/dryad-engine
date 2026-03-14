@@ -3,13 +3,16 @@ import { Schema, SchemaToType } from '../utility/schema';
 export const PluginSchema = {
     uid: { type: 'uid', required: true },
     id: { type: 'string', required: true, tooltip: 'Unique identifier for the plugin' },
-    meta: {
-        type: 'schema', tooltip: 'Plugin metadata', objects: {
-            name: { type: 'string', tooltip: 'Display name of the plugin' },
-            description: { type: 'textarea', tooltip: 'Description of what the plugin does' },
-            author: { type: 'string', tooltip: 'Author of the plugin' },
-            version: { type: 'string', tooltip: 'Version number (e.g., 1.0.0)' },
-        }
+    name: { type: 'string', tooltip: 'Display name of the plugin' },
+    description: { type: 'textarea', tooltip: 'Description of what the plugin does' },
+    author: { type: 'string', tooltip: 'Author of the plugin' },
+    version: { type: 'string', tooltip: 'Version number (e.g., 1.0.0)' },
+    order: { type: 'number', tooltip: 'Display and load order (lower numbers load first, default: 0)', defaultValue: 0 },
+    scripts: {
+        type: 'string[]', tooltip: 'Array of script paths relative to scripts/ folder to load. Use this to specify entry point(s) when using ES6 imports (e.g., ["main.mjs"]). Only specified scripts will be loaded - imported modules should not be listed here.'
+    },
+    asset_folders: {
+        type: 'string[]', tooltip: "Asset folders used by this plugin, relative to 'games_assets/'. Included in file search and game export automatically."
     },
     tabs: {
         type: 'schema[]', tooltip: 'Custom tabs added by this plugin', objects: {
@@ -50,11 +53,13 @@ export const PluginSchema = {
                             'number',
                             'boolean',
                             'chooseOne',
+                            'chooseMany',
                             'custom',
+                            'values',
                         ], show: { type: ['schema', 'schema[]', 'chooseOne', 'chooseMany'] }
                     },
-                    fromFileTypeAnd: { type: 'textarea', tooltip: 'Filter options where ALL key-value pairs match (JSON object format, e.g., {"is_currency": true, "rarity": "rare"})', show: { type: ['chooseOne', 'chooseMany'] } },
-                    fromFileTypeOr: { type: 'textarea', tooltip: 'Filter options where AT LEAST ONE key-value pair matches (JSON object format, e.g., {"type": "weapon", "type": "armor"})', show: { type: ['chooseOne', 'chooseMany'] } },
+                    fromFileTypeAnd: { type: 'textarea', tooltip: 'Filter options where ALL key-value pairs match (JSON object format, e.g., {"is_currency": true, "rarity": "rare"})', show: { type: ['schema', 'schema[]', 'chooseOne', 'chooseMany'] } },
+                    fromFileTypeOr: { type: 'textarea', tooltip: 'Filter options where AT LEAST ONE key-value pair matches (JSON object format, e.g., {"type": "weapon", "type": "armor"})', show: { type: ['schema', 'schema[]', 'chooseOne', 'chooseMany'] } },
                     defaultValue: { type: 'string', tooltip: 'Default value for new items' },
                     fileType: { type: 'chooseOne', tooltip: 'Allowed file type', options: ['image', 'video', 'audio', 'asset', 'css', 'js'], show: { type: ['file', 'file[]'] } },
                     step: { type: 'number', tooltip: 'Step increment for number input', show: { type: ['number'] } },
@@ -90,11 +95,13 @@ export const PluginSchema = {
                                     'number',
                                     'boolean',
                                     'chooseOne',
+                                    'chooseMany',
                                     'custom',
+                                    'values',
                                 ], show: { type: ['schema', 'schema[]', 'chooseOne', 'chooseMany'] }
                             },
-                            fromFileTypeAnd: { type: 'textarea', tooltip: 'Filter options where ALL key-value pairs match (JSON object format, e.g., {"is_currency": true, "rarity": "rare"})', show: { type: ['chooseOne', 'chooseMany'] } },
-                            fromFileTypeOr: { type: 'textarea', tooltip: 'Filter options where AT LEAST ONE key-value pair matches (JSON object format, e.g., {"type": "weapon", "type": "armor"})', show: { type: ['chooseOne', 'chooseMany'] } },
+                            fromFileTypeAnd: { type: 'textarea', tooltip: 'Filter options where ALL key-value pairs match (JSON object format, e.g., {"is_currency": true, "rarity": "rare"})', show: { type: ['schema', 'schema[]', 'chooseOne', 'chooseMany'] } },
+                            fromFileTypeOr: { type: 'textarea', tooltip: 'Filter options where AT LEAST ONE key-value pair matches (JSON object format, e.g., {"type": "weapon", "type": "armor"})', show: { type: ['schema', 'schema[]', 'chooseOne', 'chooseMany'] } },
                             defaultValue: { type: 'string', tooltip: 'Default value for new items' },
                             fileType: { type: 'chooseOne', tooltip: 'Allowed file type', options: ['image', 'video', 'audio', 'asset', 'css', 'js'], show: { type: ['file', 'file[]'] } },
                             step: { type: 'number', tooltip: 'Step increment for number input', show: { type: ['number'] } },
@@ -108,7 +115,7 @@ export const PluginSchema = {
         type: 'schema[]', tooltip: 'Additional data files to inject into the game', objects: {
             uid: { type: 'uid', required: true },
             fileName: { type: 'string', tooltip: 'Target file path (e.g., "character_traits")' },
-            fileData: { type: 'textarea', tooltip: 'JSON data to inject (must be valid JSON array)' },
+            fileData: { type: 'textarea', tooltip: 'JSON data to inject (array for array files, object for single files)' },
         }
     },
 

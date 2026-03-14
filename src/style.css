@@ -54,6 +54,37 @@ p {
   display: none;
 }
 
+/* Fix Quill 2.x list rendering (PrimeVue bundles Quill 1.x CSS) */
+.ql-editor li::before {
+  content: none !important;
+}
+.ql-editor li[data-list] {
+  list-style-type: none;
+  padding-left: 1.5em;
+  position: relative;
+}
+.ql-editor .ql-ui {
+  position: absolute;
+}
+.ql-editor li > .ql-ui:before {
+  display: inline-block;
+  margin-left: -1.5em;
+  margin-right: 0.3em;
+  text-align: right;
+  white-space: nowrap;
+  width: 1.2em;
+}
+.ql-editor li[data-list="bullet"] > .ql-ui:before {
+  content: '\2022';
+}
+.ql-editor li[data-list="ordered"] > .ql-ui:before {
+  content: counter(list-0, decimal) '. ';
+}
+.ql-editor li[data-list="ordered"] {
+  counter-increment: list-0;
+  counter-reset: list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;
+}
+
 .p-inputtext {
   width: 100%;
 }
@@ -172,6 +203,11 @@ p {
 }
 
 /* GAME STYLES */
+.delta-value {
+  color: #f0c674;
+  font-weight: 700;
+}
+
 .flash-content .special {
   color: #17ff32;
 }
@@ -187,22 +223,26 @@ p {
   color: #8fcdff;
 }
 
-/* Dark Scrollbar Styles (reusable) */
+/* Dark Scrollbar Styles (reusable) — targets both the element itself and descendants */
+.dark-scrollbar::-webkit-scrollbar,
 .dark-scrollbar ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
+.dark-scrollbar::-webkit-scrollbar-track,
 .dark-scrollbar ::-webkit-scrollbar-track {
   background: #1a1a1a;
 }
 
+.dark-scrollbar::-webkit-scrollbar-thumb,
 .dark-scrollbar ::-webkit-scrollbar-thumb {
   background: #444;
   border-radius: 4px;
   transition: background 0.2s;
 }
 
+.dark-scrollbar::-webkit-scrollbar-thumb:hover,
 .dark-scrollbar ::-webkit-scrollbar-thumb:hover {
   background: #555;
 }
@@ -334,7 +374,8 @@ p {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 250px;
+  /*min-width: 320px;*/
+  width: 350px;
   pointer-events: auto;
 }
 

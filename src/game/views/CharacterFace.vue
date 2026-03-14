@@ -7,8 +7,12 @@ import { Character } from '../core/character/character';
 const props = defineProps<{
   character?: Character;
   showName?: boolean;
+  nameStyle?: 'badge' | 'overlay';
   size?: number;
   borderRadius?: number | string;
+  borderColor?: string;
+  noWrapper?: boolean;
+  overlaySlot?: string;
 }>();
 
 const characterName = computed(() => props.character?.getTrait('name') || '');
@@ -18,6 +22,8 @@ const faceBorderRadius = computed(() => {
   if (typeof props.borderRadius === 'number') return props.borderRadius + 'px';
   return props.borderRadius;
 });
+
+const faceBorderColor = computed(() => props.borderColor || 'rgb(174, 174, 174)');
 
 const COMPONENT_ID = 'character-face';
 
@@ -33,14 +39,22 @@ const faceStaticPath = computed(() => props.character?.getTrait('face_static'));
 // Negate values to move the doll in the opposite direction
 // Multiply by scale because the transform affects positioning
 const scale = computed(() => props.character?.getTrait('face_shift_scale') || 1);
-const faceShiftX = computed(() => -(props.character?.getTrait('face_shift_x') || 0) * scale.value);
-const faceShiftY = computed(() => -(props.character?.getTrait('face_shift_y') || 0) * scale.value);
-const faceShiftScale = computed(() => scale.value);
+const sizeRatio = computed(() => (props.size ?? 100) / 100);
+const faceShiftX = computed(() => -(props.character?.getTrait('face_shift_x') || 0) * scale.value * sizeRatio.value);
+const faceShiftY = computed(() => -(props.character?.getTrait('face_shift_y') || 0) * scale.value * sizeRatio.value);
+const faceShiftScale = computed(() => scale.value * sizeRatio.value);
+
+// Scale name label relative to face size (baseline: 100px)
+const sizeNum = computed(() => props.size ?? 100);
+const nameFontSize = computed(() => Math.max(9, sizeNum.value * 0.13) + 'px');
+const nameMaxWidth = computed(() => sizeNum.value * 1.2 + 'px');
+// Stable badge height so it doesn't shrink when v-fit reduces font-size
+const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) + 'px');
 
 </script>
 
 <template>
-  <div :id="COMPONENT_ID" class="character-face-wrapper" v-if="character">
+  <div class="character-face-wrapper" v-if="character && !noWrapper">
     <div class="character-face">
       <!-- Static face image if available -->
       <img v-if="hasFaceStatic" :src="faceStaticPath" class="character-face-image" />
@@ -51,11 +65,27 @@ const faceShiftScale = computed(() => scale.value);
       </div>
 
       <!-- Custom components registered to this container -->
-      <CustomComponentContainer :slot="COMPONENT_ID" />
+      <CustomComponentContainer :slot="COMPONENT_ID" :context="{ character }" />
+      <CustomComponentContainer v-if="overlaySlot" :slot="overlaySlot" :context="{ character }" />
+
+      <!-- Overlay name (inside face bounds) -->
+      <div v-if="showName && (nameStyle ?? 'badge') === 'overlay'" v-fit class="character-face-name-overlay">{{
+        characterName }}</div>
     </div>
 
-    <!-- Name label below face -->
-    <div v-if="showName" class="character-face-name">{{ characterName }}</div>
+    <!-- Badge name (below face, default) -->
+    <div v-if="showName && (nameStyle ?? 'badge') === 'badge'" v-fit class="character-face-name">{{ characterName }}
+    </div>
+  </div>
+
+  <!-- No-wrapper mode: just the face, no column layout -->
+  <div class="character-face" v-else-if="character && noWrapper">
+    <img v-if="hasFaceStatic" :src="faceStaticPath" class="character-face-image" />
+    <div v-else class="character-face-doll-container">
+      <CharacterDoll :character="character" />
+    </div>
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ character }" />
+    <CustomComponentContainer v-if="overlaySlot" :slot="overlaySlot" :context="{ character }" />
   </div>
 </template>
 
@@ -68,11 +98,12 @@ const faceShiftScale = computed(() => scale.value);
 }
 
 .character-face {
+  position: relative;
   height: v-bind(faceSize);
   width: v-bind(faceSize);
   border-radius: v-bind(faceBorderRadius);
   overflow: clip;
-  outline: 2px solid rgb(174, 174, 174)
+  outline: 2px solid v-bind(faceBorderColor)
 }
 
 .character-face-name {
@@ -81,16 +112,34 @@ const faceShiftScale = computed(() => scale.value);
   left: 50%;
   transform: translateX(-50%) translateY(50%);
   background: rgba(0, 0, 0, 1);
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 13px;
+  padding: 0.3em 0.9em;
+  border-radius: 0.9em;
+  font-size: v-bind(nameFontSize);
   font-weight: 500;
   white-space: nowrap;
-  text-overflow: clip;
   overflow: hidden;
-  max-width: 120px;
+  max-width: v-bind(nameMaxWidth);
+  height: v-bind(nameMinHeight);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   outline: 2px solid rgba(255, 255, 255, 0.3);
   color: white;
+}
+
+.character-face-name-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.5);
+  font-size: v-bind(nameFontSize);
+  font-weight: 500;
+  padding: 0.3em 0;
+  text-align: center;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .character-face-image {

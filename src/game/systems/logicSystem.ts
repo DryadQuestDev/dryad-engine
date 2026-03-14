@@ -31,7 +31,7 @@ export class LogicSystem {
     // note: the reason why we cannot get rid of conditionRegistry and use placeholderRegistry for both conditions and placeholders is because placeholders return strings, while conditions return booleans/numbers
     conditionRegistry = new Map<string, Function>();
 
-    placeholderRegistry = new Map<string, Function>(); // TODO
+    placeholderRegistry = new Map<string, Function>();
     actionRegistry = new Map<string, ActionObject>(); // make it an object {func: Function}
 
     @Skip()
@@ -387,7 +387,7 @@ export class LogicSystem {
     // takes: my_placeholder(arg1, arg2)
     private resolvePlaceholder(value: string): string {
         // Parse function syntax: name or name(arg1, arg2)
-        const funcMatch = value.match(/^([a-zA-Z0-9_]+)(?:\(([^)]*)\))?$/);
+        const funcMatch = value.match(/^([a-zA-Z0-9_'\-]+)(?:\(([^)]*)\))?$/);
         if (!funcMatch) {
             throw new Error(`Invalid placeholder format: ${value}`);
         }
@@ -418,6 +418,9 @@ export class LogicSystem {
 
         // if{}
         output = this.ifLogic(output);
+
+        // |@slot|
+        output = this.resolveNarrativeSlots(output);
 
         // |$template|
         output = this.resolveTemplate(output);
@@ -498,8 +501,8 @@ export class LogicSystem {
             const placeholderName = currentMatch[1]; // The captured group, e.g., "placeholderName"
 
 
-            // if placeholder starts with $ it means it's a template, skip it.
-            if (placeholderName.startsWith("$")) {
+            // if placeholder starts with $ or @ it means it's a template or narrative slot, skip it.
+            if (placeholderName.startsWith("$") || placeholderName.startsWith("@")) {
                 continue;
             }
 
@@ -587,6 +590,23 @@ export class LogicSystem {
         return { resultString: processedString, resultActions: accumulatedActions };
     }
 
+    private resolveNarrativeSlots(text: string): string {
+        const slotRegex = /\|@([a-zA-Z0-9_]+)(?:\(([^)]*)\))?\|/g;
+        const matches = Array.from(text.matchAll(slotRegex));
+        if (matches.length === 0) return text;
+
+        let output = text;
+        for (const match of matches) {
+            const fullMatch = match[0];
+            const slotType = match[1];
+            const argsString = match[2] || '';
+            const args = argsString ? argsString.split(',').map(a => a.trim()) : [];
+            const resolved = this.game.narrativeSystem.resolveSlot(slotType, args);
+            output = output.replace(fullMatch, resolved);
+        }
+        return output;
+    }
+
     private resolveTemplate(text: string): string {
 
         const templateRegex = /\|(\$[^|]+?)\|/g;
@@ -616,13 +636,24 @@ export class LogicSystem {
         let dungeon = null;
         let templateId = ""
         if (parts.length == 1) {
-            templateId = value
+            templateId = value;
         } else {
             dungeon = parts[0].slice(1);
             templateId = "$" + parts[1];
         }
-        let realDungeonId = this.game.dungeonSystem.getDungeonId(dungeon);
-        let content = this.game.dungeonSystem.getLineByDungeonId(templateId, realDungeonId).val;
+        let realDungeonId = this.game.getDungeonId(dungeon);
+
+        // Collect variants: base + ~2, ~3, ...
+        const variants = [templateId];
+        for (let i = 2; ; i++) {
+            const variantId = `${templateId}~${i}`;
+            const line = this.game.getLineByDungeonId(variantId, realDungeonId);
+            if (!line) break;
+            variants.push(variantId);
+        }
+
+        const chosen = variants[Math.floor(Math.random() * variants.length)];
+        let content = this.game.getLineByDungeonId(chosen, realDungeonId).val;
         let resolved = this.resolveString(content).output;
         return resolved;
     }
@@ -897,7 +928,7 @@ export class LogicSystem {
      * @param settings Optional draw settings (type, draws, unique)
      * @returns Array of template IDs drawn from the pool
      */
-    public drawFromPool(entry: string | PoolEntryObject, settings?: PoolSettings): string[] {
+    public drawFromPool(entry: string | PoolEntryObject, settings?: PoolSettings): PoolDrawResult[] {
         // 1. Resolve pool entry
         const poolEntry = typeof entry === 'string'
             ? this.poolEntriesMap.get(entry)
@@ -927,12 +958,12 @@ export class LogicSystem {
             return [];
         }
 
-        // Get source data
+        // Get source data (pool sources are always entity collections which return Maps)
         let sourceMap: Map<string, any> | undefined;
         if (settings?.customData) {
             sourceMap = this.toMap(settings.customData);
         } else {
-            sourceMap = this.game.getData(sourceId!);
+            sourceMap = this.game.getData(sourceId!) as Map<string, any>;
         }
 
         if (!sourceMap) {
@@ -948,7 +979,7 @@ export class LogicSystem {
         // 5. getData already returns a deep copy, so we can mutate directly
         const workingSourceMap = sourceMap;
 
-        const result: string[] = [];
+        const stackMap = new Map<string, number>();
 
         // 6. Perform draws
         for (let d = 0; d < draws; d++) {
@@ -967,10 +998,11 @@ export class LogicSystem {
                     }
 
                     const filtered = this.getFilteredTemplates(workingSourceMap, winner);
-                    const count = winner.count || 1;
+                    const count = this.resolveCount(winner);
+                    const isUnique = winner.unique ?? unique;
 
                     // Check if winner can fulfill the requirement
-                    if (unique && filtered.length < count) {
+                    if (isUnique && filtered.length < count) {
                         gameLogger.warn(`Pool entity "${winner.id || 'unnamed'}" cannot provide ${count} unique items (only ${filtered.length} available) - re-rolling`);
                         excludedEntities.add(winner);
                         continue;
@@ -983,14 +1015,18 @@ export class LogicSystem {
                     }
 
                     // Draw templates
-                    for (let i = 0; i < count && filtered.length > 0; i++) {
-                        const idx = Math.floor(Math.random() * filtered.length);
-                        const templateId = filtered[idx];
-                        result.push(templateId);
+                    if (filtered.length === 1 && !isUnique) {
+                        stackMap.set(filtered[0], (stackMap.get(filtered[0]) || 0) + count);
+                    } else {
+                        for (let i = 0; i < count && filtered.length > 0; i++) {
+                            const idx = Math.floor(Math.random() * filtered.length);
+                            const templateId = filtered[idx];
+                            stackMap.set(templateId, (stackMap.get(templateId) || 0) + 1);
 
-                        if (unique) {
-                            workingSourceMap.delete(templateId);
-                            filtered.splice(idx, 1);
+                            if (isUnique) {
+                                workingSourceMap.delete(templateId);
+                                filtered.splice(idx, 1);
+                            }
                         }
                     }
 
@@ -1002,27 +1038,32 @@ export class LogicSystem {
 
                 for (const winner of winners) {
                     const filtered = this.getFilteredTemplates(workingSourceMap, winner);
-                    const count = winner.count || 1;
+                    const count = this.resolveCount(winner);
+                    const isUnique = winner.unique ?? unique;
 
-                    if (unique && filtered.length < count) {
+                    if (isUnique && filtered.length < count) {
                         gameLogger.warn(`Pool entity "${winner.id || 'unnamed'}" cannot provide ${count} unique items (only ${filtered.length} available)`);
                     }
 
-                    for (let i = 0; i < count && filtered.length > 0; i++) {
-                        const idx = Math.floor(Math.random() * filtered.length);
-                        const templateId = filtered[idx];
-                        result.push(templateId);
+                    if (filtered.length === 1 && !isUnique) {
+                        stackMap.set(filtered[0], (stackMap.get(filtered[0]) || 0) + count);
+                    } else {
+                        for (let i = 0; i < count && filtered.length > 0; i++) {
+                            const idx = Math.floor(Math.random() * filtered.length);
+                            const templateId = filtered[idx];
+                            stackMap.set(templateId, (stackMap.get(templateId) || 0) + 1);
 
-                        if (unique) {
-                            workingSourceMap.delete(templateId);
-                            filtered.splice(idx, 1);
+                            if (isUnique) {
+                                workingSourceMap.delete(templateId);
+                                filtered.splice(idx, 1);
+                            }
                         }
                     }
                 }
             }
         }
 
-        return result;
+        return [...stackMap.entries()].map(([id, quantity]) => ({ id, quantity }));
     }
 
     /**
@@ -1063,6 +1104,17 @@ export class LogicSystem {
     }
 
     /**
+     * Resolve count with optional delta randomization.
+     * delta > 0: count ± delta (uniform random).
+     */
+    private resolveCount(entity: PoolEntityGroup): number {
+        const base = entity.count || 1;
+        const delta = entity.delta || 0;
+        if (delta <= 0) return base;
+        return base + Math.floor(Math.random() * (2 * delta + 1)) - delta;
+    }
+
+    /**
      * Get templates matching an entity's filters.
      */
     private getFilteredTemplates(
@@ -1070,6 +1122,24 @@ export class LogicSystem {
         entity: PoolEntityGroup
     ): string[] {
         const result: string[] = [];
+
+        // Fast path: direct Map lookup when filtering by id (ids are unique)
+        if (entity.filters_include && 'id' in entity.filters_include) {
+            const targetId = entity.filters_include.id as string;
+            const template = sourceMap.get(targetId);
+            if (!template) return result;
+
+            // Check remaining include filters (excluding 'id')
+            const { id: _id, ...restInclude } = entity.filters_include;
+            if (Object.keys(restInclude).length > 0 && !this.matchesFilter(template, restInclude, false)) {
+                return result;
+            }
+            if (!this.matchesFilter(template, entity.filters_exclude, true)) {
+                return result;
+            }
+            result.push(targetId);
+            return result;
+        }
 
         for (const [id, template] of sourceMap) {
             // Check include filters (must match all)
@@ -1161,7 +1231,7 @@ export class LogicSystem {
      * @param valueField Name for the value field (e.g., 'weight', 'amount', 'chance')
      * @returns Array of objects with id and value (e.g., [{ id: 'goblins', weight: 50 }, ...])
      */
-    public toEntries<T>(data: Record<string, T>, valueField: string): { id: string; [key: string]: T | string }[] {
+    public toEntries<T>(data: Record<string, T>, valueField: string): { id: string;[key: string]: T | string }[] {
         return Object.entries(data).map(([id, value]) => ({ id, [valueField]: value }));
     }
 
@@ -1278,6 +1348,168 @@ export class LogicSystem {
     }
 
     /**
+     * Build auto-generated description lines for an ability's effects.
+     * Uses ingame_description templates from ability definitions.
+     * [v] = aspect's own value, [other_id] = sibling aspect value.
+     */
+    public buildAbilityEffectsDescription(
+        abilityIdOrData: string | { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> },
+        characterId?: string, isFlat?: boolean,
+        baseData?: { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }
+    ): { name?: string, lines: string[] }[] | string[] {
+        const definitionsMap = this.game.characterSystem.abilityDefinitionsMap;
+        if (!definitionsMap) return [];
+
+        const abilityData = typeof abilityIdOrData === 'string'
+            ? this.resolveAbilityData(abilityIdOrData, characterId)
+            : abilityIdOrData;
+        if (!abilityData?.effects) return [];
+
+        const result: { name?: string, lines: string[] }[] = [];
+        for (const effectId in abilityData.effects) {
+            const aspects = abilityData.effects[effectId];
+            const fallback = baseData?.effects?.[effectId];
+            const lines = this.buildDescriptionLines(aspects, definitionsMap, undefined, fallback);
+            if (lines.length > 0) {
+                result.push({ name: aspects.__name || fallback?.__name, lines });
+            }
+        }
+
+        return isFlat ? result.flatMap(r => r.lines) : result;
+    }
+
+    public buildAbilityMetaDescription(
+        abilityIdOrData: string | { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> },
+        characterId?: string,
+        baseData?: { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }
+    ): string[] {
+        const definitionsMap = this.game.characterSystem.abilityDefinitionsMap;
+        if (!definitionsMap) return [];
+
+        const abilityData = typeof abilityIdOrData === 'string'
+            ? this.resolveAbilityData(abilityIdOrData, characterId)
+            : abilityIdOrData;
+        if (!abilityData?.meta) return [];
+
+        return this.buildDescriptionLines(abilityData.meta, definitionsMap, 'meta', baseData?.meta);
+    }
+
+    /**
+     * Resolve ability data from a character (merged with modifiers) or fall back to base template.
+     */
+    private resolveAbilityData(abilityId: string, characterId?: string): { meta: Record<string, any>; effects: Record<string, Record<string, any>> } | null {
+        if (characterId) {
+            const character = this.game.getCharacter(characterId);
+            const ability = character?.getAbility(abilityId);
+            if (ability) return ability;
+        }
+
+        const template = this.game.characterSystem.abilityTemplatesMap?.get(abilityId);
+        if (!template) return null;
+
+        const data: { meta: Record<string, any>; effects: Record<string, Record<string, any>> } = {
+            meta: template.meta || {},
+            effects: {}
+        };
+        if (Array.isArray(template.effects)) {
+            for (const effect of template.effects) {
+                if (effect.id) {
+                    const normalized: any = { ...(effect.aspects || {}) };
+                    if (effect.name) normalized.__name = effect.name;
+                    data.effects[effect.id] = normalized;
+                }
+            }
+        } else if (template.effects) {
+            data.effects = template.effects as any;
+        }
+        return data;
+    }
+
+    /**
+     * Build description lines from a flat key-value object using ability definitions' ingame_description.
+     */
+    private buildDescriptionLines(fields: Record<string, any>, definitionsMap: Map<string, any>, roleFilter?: string, fallbackFields?: Record<string, any>): string[] {
+        const lines: string[] = [];
+        for (const fieldId in fields) {
+            if (fieldId.startsWith('__')) continue;
+            const definition = definitionsMap.get(fieldId);
+            if (!definition || !definition.ingame_description) continue;
+            if (roleFilter && definition.role !== roleFilter) continue;
+
+            let line = definition.ingame_description as string;
+            line = line.replace(/\[v\]/g, `<b>${this.resolveAspectValue(fields[fieldId], definition)}</b>`);
+            line = line.replace(/\[([a-zA-Z0-9_]+)(?::id)?\]/g, (match: string, siblingId: string) => {
+                if (siblingId === 'v') return match;
+                const value = fields[siblingId] ?? fallbackFields?.[siblingId];
+                if (value !== undefined) {
+                    if (match.endsWith(':id]')) return String(value);
+                    const sibDef = definitionsMap.get(siblingId);
+                    return `<b>${this.resolveAspectValue(value, sibDef)}</b>`;
+                }
+                return match;
+            });
+            lines.push(line);
+        }
+        return lines;
+    }
+
+    /**
+     * Resolve an aspect value to a display string.
+     * For fromFile definitions, looks up the referenced item's display name.
+     */
+    private resolveAspectValue(value: any, definition?: any): string {
+        if (value === undefined || value === null) return '';
+
+        if (definition?.fromFile) {
+            const sourceData = this.game.getData(definition.fromFile, true);
+            if (sourceData) {
+                const refPath = definition.ingame_description_ref || 'name';
+
+                if (Array.isArray(value)) {
+                    return value.map((id: string) => {
+                        const item = sourceData.get(id);
+                        if (item) {
+                            const name = this.getNestedValue(item, refPath);
+                            return name || id;
+                        }
+                        return id;
+                    }).join(', ');
+                } else {
+                    const item = sourceData.get(String(value));
+                    if (item) {
+                        const name = this.getNestedValue(item, refPath);
+                        return name || String(value);
+                    }
+                }
+            }
+        }
+
+        // Locale lookup for non-fromFile values
+        if (Array.isArray(value)) {
+            return value.map((v: any) => {
+                const localeEntry = this.game.coreSystem.localeMap?.get(String(v));
+                return localeEntry?.val || String(v);
+            }).join(', ');
+        }
+
+        const localeEntry = this.game.coreSystem.localeMap?.get(String(value));
+        return localeEntry?.val || String(value);
+    }
+
+    /**
+     * Get a localized string by ID with placeholder substitution.
+     * Looks up locale entry and replaces |placeholder| tokens with provided params.
+     */
+    public getLine(lineId: string, params: Record<string, any> = {}): string {
+        const localeEntry = this.game.coreSystem.localeMap?.get(lineId);
+        let string = localeEntry?.val || `[${lineId}]`;
+        for (const key in params) {
+            string = string.replaceAll(`|${key}|`, String(params[key]));
+        }
+        return string;
+    }
+
+    /**
      * Draw items based on chance field. Each item is rolled `count` times independently.
      * May return 0 or more than `count` items.
      */
@@ -1299,6 +1531,11 @@ export class LogicSystem {
 
 }
 
+export type PoolDrawResult = {
+    id: string;
+    quantity: number;
+}
+
 export type PoolSettings = {
     type?: 'weight' | 'chance';
     draws?: number; // how many times to draw from the pool
@@ -1311,6 +1548,8 @@ export type PoolEntityGroup = {
     weight?: number;
     chance?: number;
     count?: number;
+    delta?: number;
+    unique?: boolean;
     filters_include?: Record<string, any>;
     filters_exclude?: Record<string, any>;
 }

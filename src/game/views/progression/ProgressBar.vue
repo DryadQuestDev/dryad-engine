@@ -9,10 +9,12 @@ const props = withDefaults(defineProps<{
   width?: string;
   height?: string;
   hideMax?: boolean;
+  formatNumbers?: boolean;
 }>(), {
   barColor: '#42b983',
   bgColor: '#555',
-  hideMax: false
+  hideMax: false,
+  formatNumbers: false
 });
 
 const percentage = computed(() => {
@@ -21,7 +23,8 @@ const percentage = computed(() => {
 });
 
 const displayText = computed(() => {
-  return props.hideMax ? String(props.current) : `${props.current} / ${props.max}`;
+  const formatNum = (n: number) => props.formatNumbers ? n.toLocaleString('en-US') : String(n);
+  return props.hideMax ? formatNum(props.current) : `${formatNum(props.current)} / ${formatNum(props.max)}`;
 });
 </script>
 

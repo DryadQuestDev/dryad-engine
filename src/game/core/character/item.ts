@@ -21,6 +21,14 @@ export class Item {
     public price: Record<string, number> = {};
     public is_currency: boolean = false;
 
+    public is_consumable: boolean = false;
+    public consume_duration: number = -1;
+    public consume_max_stacks: number = -1;
+    public consume_percentage: Record<string, number> = {};
+    public consume_absolute: Record<string, number> = {};
+    public consume_polarity: string = "";
+    public consume_status_id: string = "";
+
     public tradePrice: {
         player: Record<string, number>; // the player party's items price
         trader: Record<string, number>; // the trader's items price

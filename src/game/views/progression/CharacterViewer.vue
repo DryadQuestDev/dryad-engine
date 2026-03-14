@@ -85,6 +85,7 @@ function selectCharacter(index: number) {
     padding-bottom: 1.5rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     margin-bottom: 1rem;
+    padding-left: 10px;
 }
 
 .viewer-faces {
@@ -104,20 +105,12 @@ function selectCharacter(index: number) {
     pointer-events: none;
 }
 
-.viewer-face-image :deep(.character-face) {
-    transition: outline 0.2s ease;
-}
-
 .viewer-face-item:hover .viewer-face-image :deep(.character-face) {
     outline: 2px solid rgba(0, 222, 37, 0.5);
 }
 
 .viewer-face-item.selected .viewer-face-image :deep(.character-face) {
     outline: 2px solid rgb(0, 222, 37);
-}
-
-.viewer-face-image :deep(.character-face-name) {
-    transition: outline 0.2s ease;
 }
 
 .viewer-face-item.selected .viewer-face-image :deep(.character-face-name) {
@@ -136,6 +129,7 @@ function selectCharacter(index: number) {
     width: 50vh;
     flex-shrink: 0;
     height: 100%;
+    max-height: 100vh;
     position: relative;
     display: flex;
     align-items: center;
@@ -167,5 +161,6 @@ function selectCharacter(index: number) {
     overflow: hidden;
     min-height: 0;
     padding-right: 10px;
+    max-width: 1000px;
 }
 </style>

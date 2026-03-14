@@ -17,6 +17,9 @@ import ConfirmationService from 'primevue/confirmationservice';
 import { initDialogService } from './services/dialogService';
 import { initGlobalErrorHandlers } from './services/errorHandler';
 import { gameLogger } from './game/utils/logger';
+import { persistImage } from './game/directives/persistImageDirective';
+import { fitText } from './game/directives/fitTextDirective';
+import { dragscroll } from 'vue-dragscroll';
 
 const RootComponent = {
   render() {
@@ -35,6 +38,9 @@ app.use(PrimeVue, {
 });
 app.use(ConfirmationService);
 app.directive('tooltip', Tooltip);
+app.directive('persist', persistImage);
+app.directive('fit', fitText);
+app.directive('dragscroll', dragscroll);
 app.config.globalProperties.vTooltip = Tooltip;
 
 // Configure Vue error handler

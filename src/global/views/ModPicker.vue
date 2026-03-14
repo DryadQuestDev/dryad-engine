@@ -197,7 +197,7 @@ async function applyModChanges() {
     </div>
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ availableMods, selectedMods }" />
   </div>
 </template>
 

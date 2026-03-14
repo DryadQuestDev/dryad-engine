@@ -9,6 +9,13 @@ export const ItemTemplateSchema = {
     traits: { type: 'schema', fromFile: 'item_traits', fromFileType: 'custom', tooltip: 'Custom item traits defined in item_traits file.' },
     attributes: { type: 'schema', fromFile: 'item_attributes', fromFileType: 'chooseOne', tooltip: 'Item attributes with selectable values from item_attributes file.' },
     properties: { type: 'schema', fromFile: 'item_properties', fromFileType: 'number', tooltip: 'Numeric properties (e.g., weight) from item_properties file.' },
+    is_consumable: { type: 'boolean', tooltip: 'If true, the item can be consumed for one-time effects.' },
+    consume_duration: { type: 'number', tooltip: 'Duration (turns) for the status applied on consume. -1 or empty = permanent.', show: { is_consumable: [true] } },
+    consume_max_stacks: { type: 'number', tooltip: 'Max stacks for the consume status. -1 = unlimited. Consuming the same item again adds stacks. Default: -1.', show: { is_consumable: [true] } },
+    consume_polarity: { type: 'chooseOne', options: ['positive', 'neutral', 'negative'], tooltip: 'Polarity of the consume status: positive (green), neutral (gray), negative (red).', show: { is_consumable: [true] } },
+    consume_status_id: { type: 'string', tooltip: 'Custom status ID for the consume effect. Items sharing the same ID will replace each other instead of stacking. If empty, defaults to "consume_" + item ID.', show: { is_consumable: [true] } },
+    consume_percentage: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', fromFileTypeAnd: { is_resource: true }, tooltip: 'Percentage of max resource to restore/reduce on consume. Positive = restore, negative = reduce.', show: { is_consumable: [true] } },
+    consume_absolute: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', fromFileTypeAnd: { is_resource: true }, tooltip: 'Flat resource amount to restore/reduce on consume. Positive = restore, negative = reduce.', show: { is_consumable: [true] } },
     status: {
         type: 'schema', tooltip: 'The status to apply to the character when equipped.', objects: {
             ...BaseStatusSchema
@@ -24,6 +31,8 @@ export const ItemTemplateSchema = {
             item_equip_after: { type: 'textarea', tooltip: 'Script executed after the item is equipped.' },
             item_unequip_before: { type: 'textarea', tooltip: 'Script executed before the item is unequipped.' },
             item_unequip_after: { type: 'textarea', tooltip: 'Script executed after the item is unequipped.' },
+            item_consume_before: { type: 'textarea', tooltip: 'Script executed before the item is consumed.' },
+            item_consume_after: { type: 'textarea', tooltip: 'Script executed after the item is consumed.' },
         }
     },
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },

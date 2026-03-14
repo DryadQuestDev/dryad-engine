@@ -1,4 +1,4 @@
-function deepMerge(target: Record<string, any>, source: Record<string, any>): Record<string, any> {
+export function deepMerge(target: Record<string, any>, source: Record<string, any>): Record<string, any> {
     const result: Record<string, any> = { ...target };
     for (const key in source) {
       if (Object.prototype.hasOwnProperty.call(source, key)) {

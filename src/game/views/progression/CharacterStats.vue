@@ -2,19 +2,19 @@
 import { computed, ref } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
-import { Global } from '../../../global/global';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import type { EntityStatObject } from '../../../schemas/entityStatSchema';
 import StatEntity from './StatEntity.vue';
 
-export interface StatGroup {
-  groupName: string;
+interface StatGroup {
+  id: string;
   stats: string[];
 }
 
 const props = defineProps<{
   character: Character;
-  groups?: StatGroup[];
+  tags?: string[];
+  noHeaders?: boolean;
 }>();
 
 const game = Game.getInstance();
@@ -26,52 +26,61 @@ const activeStatsMap = computed(() => {
     : game.characterSystem.statsVisibleMap;
 });
 
-// Compute stat groups - use prop if provided, otherwise default to Resources/Stats
-const statGroups = computed((): StatGroup[] => {
-  let groups: StatGroup[];
+// Sort stat IDs by order field, then by id
+const sortStats = (statIds: string[]) => {
+  return statIds.sort((a, b) => {
+    const statA = activeStatsMap.value.get(a);
+    const statB = activeStatsMap.value.get(b);
+    const orderDiff = (statA?.order || 0) - (statB?.order || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return a.localeCompare(b);
+  });
+};
 
-  if (props.groups) {
-    groups = props.groups;
-  } else {
-    // Default behavior: separate resources from regular stats
-    const resourceIds: string[] = [];
-    const regularIds: string[] = [];
-
+// Build stat groups from tags prop, resolver, or default Resources/Stats split
+const buildGroupsFromTags = (tags: string[]): StatGroup[] => {
+  const groups: StatGroup[] = [];
+  for (const tag of tags) {
+    const statIds: string[] = [];
     for (const [statId, stat] of activeStatsMap.value.entries()) {
-      if (props.character.hasStat(statId)) {
-        if (stat.is_resource) {
-          resourceIds.push(statId);
-        } else {
-          regularIds.push(statId);
-        }
-      }
+      if (stat.tags?.includes(tag)) statIds.push(statId);
     }
-
-    // Sort by order field, then by id
-    const sortFn = (a: string, b: string) => {
-      const statA = activeStatsMap.value.get(a);
-      const statB = activeStatsMap.value.get(b);
-      const orderDiff = (statA?.order || 0) - (statB?.order || 0);
-      if (orderDiff !== 0) return orderDiff;
-      return a.localeCompare(b);
-    };
-    resourceIds.sort(sortFn);
-    regularIds.sort(sortFn);
-
-    groups = [];
-    const global = Global.getInstance();
-    if (resourceIds.length > 0) {
-      groups.push({ groupName: global.getString('stat_group.resources'), stats: resourceIds });
-    }
-    if (regularIds.length > 0) {
-      groups.push({ groupName: global.getString('stat_group.stats'), stats: regularIds });
+    if (statIds.length) {
+      sortStats(statIds);
+      groups.push({ id: tag, stats: statIds });
     }
   }
-
-  // Filter out groups where character has none of the specified stats
   return groups.filter(group =>
-    group.stats.some(statId => props.character.hasStat(statId))
+    group.stats.some(statId => props.character.hasStat(statId) || props.character.getStat(statId) !== 0)
   );
+};
+
+const statGroups = computed((): StatGroup[] => {
+  // Tags prop overrides everything — used by custom components for filtered views
+  if (props.tags) return buildGroupsFromTags(props.tags);
+
+  const resolver = game.characterSystem.getStatGroupResolver();
+
+  if (resolver) {
+    return buildGroupsFromTags(resolver(props.character));
+  }
+
+  // Default: separate resources from regular stats
+  const resourceIds: string[] = [];
+  const regularIds: string[] = [];
+  for (const [statId, stat] of activeStatsMap.value.entries()) {
+    if (props.character.hasStat(statId) || props.character.getStat(statId) !== 0) {
+      if (stat.is_resource) resourceIds.push(statId);
+      else regularIds.push(statId);
+    }
+  }
+  sortStats(resourceIds);
+  sortStats(regularIds);
+
+  const groups: StatGroup[] = [];
+  if (resourceIds.length > 0) groups.push({ id: 'resources', stats: resourceIds });
+  if (regularIds.length > 0) groups.push({ id: 'stats', stats: regularIds });
+  return groups;
 });
 
 // Popup state for stats/resources
@@ -109,9 +118,9 @@ const resolvedDescription = computed(() => {
 </script>
 
 <template>
-  <div class="character-stats">
-    <div v-for="group in statGroups" :key="group.groupName" class="stats-section">
-      <h3 v-if="group.groupName">{{ group.groupName }}</h3>
+  <div v-if="statGroups.length" class="character-stats">
+    <div v-for="group in statGroups" :key="group.id" class="stats-section">
+      <h3 v-if="group.id && !noHeaders">{{ game.getLine('group.' + group.id) }}</h3>
       <StatEntity
         v-for="statId in group.stats"
         :key="statId"

@@ -96,6 +96,13 @@ export function useGeneratedFields(
     if (item.description) {
       schemable.tooltip = item.description;
     }
+    // Preserve fromFile-related properties for downstream resolution
+    const fromFileProps = ['fromFile', 'fromFileType', 'fromFileTypeAnd', 'fromFileTypeOr'] as const;
+    for (const prop of fromFileProps) {
+      if (item[prop] !== undefined) {
+        (schemable as any)[prop] = item[prop];
+      }
+    }
     return schemable;
   }
 
@@ -137,9 +144,47 @@ export function useGeneratedFields(
     if (field.type !== 'chooseOne' && field.type !== 'chooseMany') return field;
 
     // Load data from the referenced file
-    const refData = await editor.loadFullData(field.fromFile);
+    let refData = await editor.loadFullData(field.fromFile);
     if (!refData || !Array.isArray(refData)) {
       return { type: 'chooseMany', options: [] };
+    }
+
+    // Apply fromFileTypeAnd filtering - ALL conditions must match
+    if (field.fromFileTypeAnd && typeof field.fromFileTypeAnd === 'object') {
+      refData = refData.filter((item: any) => {
+        for (const key in field.fromFileTypeAnd!) {
+          const expected = field.fromFileTypeAnd![key];
+          const actual = item[key];
+          if (expected === '$truthy' && !actual) return false;
+          if (expected === '$falsy' && !!actual) return false;
+          if (expected !== '$truthy' && expected !== '$falsy') {
+            if (Array.isArray(actual)) {
+              if (!actual.includes(expected)) return false;
+            } else if (actual !== expected) return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    // Apply fromFileTypeOr filtering - AT LEAST ONE condition must match
+    if (field.fromFileTypeOr && typeof field.fromFileTypeOr === 'object') {
+      refData = refData.filter((item: any) => {
+        for (const key in field.fromFileTypeOr!) {
+          const expected = field.fromFileTypeOr![key];
+          const actual = item[key];
+          if (expected === '$truthy' && !!actual) return true;
+          if (expected === '$falsy' && !actual) return true;
+          if (expected !== '$truthy' && expected !== '$falsy') {
+            if (Array.isArray(actual)) {
+              if (actual.includes(expected)) return true;
+            } else if (Array.isArray(expected)) {
+              if (expected.includes(actual)) return true;
+            } else if (actual === expected) return true;
+          }
+        }
+        return false;
+      });
     }
 
     // Extract IDs as options
@@ -184,10 +229,14 @@ export function useGeneratedFields(
           // If the parent schema has a specific fromFileType (not 'custom'), use that
           // e.g., price: { type: 'schema', fromFile: 'item_templates', fromFileType: 'number' }
           // 'custom' means "use the item's own type field"
-          if (field.fromFileType && field.fromFileType !== 'custom') {
-            return fromFileTypeToSchemable(field.fromFileType, dataItem);
+          const result = (field.fromFileType && field.fromFileType !== 'custom')
+            ? fromFileTypeToSchemable(field.fromFileType, dataItem)
+            : dataItemToSchemable(dataItem);
+          // Resolve double fromFile chain (e.g., traits.factions where factions has its own fromFile)
+          if (result && (result.type === 'chooseOne' || result.type === 'chooseMany') && result.fromFile) {
+            return processChooseFieldWithFromFile(result);
           }
-          return dataItemToSchemable(dataItem);
+          return result;
         }
 
         // Continue with remaining path segments (for deeply nested paths)

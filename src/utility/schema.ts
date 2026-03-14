@@ -13,7 +13,7 @@ export interface Schemable {
   isFromPlugins?: boolean; // if true, the field's values are loaded from plugin folders
   logic?: string; //special logic for the field
   // 'chooseOne' refers to 'values' field in the file
-  fromFileType?: 'string' | 'number' | 'boolean' | 'chooseOne' | 'custom';
+  fromFileType?: 'string' | 'number' | 'boolean' | 'chooseOne' | 'chooseMany' | 'custom' | 'values';
   fromFileTypeAnd?: Record<string, any>; // Object mapping property paths to required values
   fromFileTypeOr?: Record<string, any>; // Object mapping property paths to required values (at least one must match)
   defaultValue?: any;

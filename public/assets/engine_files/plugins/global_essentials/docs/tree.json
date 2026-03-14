@@ -1,0 +1,10 @@
+{
+  "introduction": ["overview", "getting_started", "creating_new_game"],
+  "dungeons": ["what_is_dungeon", "dungeon_template", "google_docs_integration", "quests", "glossary", "dungeons_api"],
+  "characters": ["characters_overview", "actor_slots", "skills", "characters_computed", "abilities", "characters_api"],
+  "items": ["items_overview", "exchange", "apply", "items_api"],
+  "resources": ["audio", "assets", "galleries", "file_browser"],
+  "miscellaneous": ["properties", "store", "data", "locale", "random_pools", "narrative_system", "game_settings"],
+  "advanced": ["set_up_coding", "vue", "registry", "debugging", "plugins", "releasing_game", "custom_vue", "3rd_party"],
+  "builtins": ["actions", "placeholders", "conditions", "game_emitters", "states", "components_export", "component_slots"]
+}

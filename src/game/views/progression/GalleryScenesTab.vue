@@ -52,7 +52,7 @@ const exitReplayMode = () => {
       </button>
     </div>
 
-    <CustomComponentContainer :slot="'replay-custom-block'" v-if="game.getState('replay_mode')" />
+    <CustomComponentContainer :slot="'replay-custom-block'" v-if="game.getState('replay_mode')" :context="{ replayMode: true, data }" />
 
     <div v-if="!data?.dungeons?.length" class="empty-state">
       No scenes available in the gallery

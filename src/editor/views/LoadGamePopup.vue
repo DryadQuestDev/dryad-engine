@@ -254,13 +254,14 @@ function closeDialog() {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
+  min-width: 0;
   width: 100%;
 }
 
 .save_item_header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   width: 100%;
   margin-bottom: 8px;
 }
@@ -269,9 +270,16 @@ function closeDialog() {
   font-weight: bold;
   margin-right: 10px;
   flex-grow: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.save_name span {
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .dev_badge {

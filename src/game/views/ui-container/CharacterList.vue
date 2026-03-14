@@ -63,8 +63,7 @@ function onLeave(el: Element, done: () => void) {
       <div :class="{ 'selected': game.characterSystem.selectedCharacter.value === character }"
         class="character-list-item" v-for="character of game.characterSystem.party.value" :key="character!.id"
         @click="clickCharacter(character!)">
-        <CharacterFace class="character-list-image" :character="character" />
-        <div class="character-list-name">{{ character!.getTrait('name') }}</div>
+        <CharacterFace class="character-list-image" :character="character" :showName="true" nameStyle="badge" overlaySlot="character-list-item" />
       </div>
     </TransitionGroup>
   </div>
@@ -88,6 +87,8 @@ function onLeave(el: Element, done: () => void) {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  max-height: 95vh;
+  overflow: auto;
 }
 
 .character-list-item {
@@ -97,35 +98,15 @@ function onLeave(el: Element, done: () => void) {
   cursor: pointer;
 }
 
-.character-list-item.selected .character-list-image {
+.character-list-item.selected .character-list-image :deep(.character-face) {
   outline: 2px solid rgb(0, 222, 37);
 }
 
-.character-list-item.selected .character-list-name {
+.character-list-item.selected .character-list-image :deep(.character-face-name) {
   outline: 2px solid rgb(0, 222, 37);
 }
 
 .character-list-image {
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
   pointer-events: none;
-}
-
-.character-list-name {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%) translateY(50%);
-  background: rgba(0, 0, 0, 1);
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  text-overflow: clip;
-  overflow: hidden;
-  max-width: 120px;
-  outline: 2px solid rgba(255, 255, 255, 0.3);
 }
 </style>

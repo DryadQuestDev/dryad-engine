@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { Global } from '../global';
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, Ref } from 'vue';
+import { Editor as EngineEditor } from '../../editor/editor';
+import { Game } from '../../game/game';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useStorage } from '@vueuse/core';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
+import Select from 'primevue/select';
 
 const global = Global.getInstance();
 
@@ -33,69 +36,57 @@ function normalizeForSearch(text: string): string {
     .toLowerCase();
 }
 
-// Hardcoded documentation tree structure (for ordering)
-const DOCS_TREE: Record<string, string[]> = {
-  'introduction': ['overview', 'getting_started', 'creating_new_game'],
-  'dungeons': ['what_is_dungeon', 'dungeon_template', 'google_docs_integration', 'quests', 'glossary', 'dungeons_api'],
-  'characters': ['characters_overview', 'actor_slots', 'skills', 'characters_computed', 'abilities', 'characters_api'],
-  'items': ['items_overview', 'exchange', 'apply', 'items_api'],
-  'resources': ['audio', 'assets', 'galleries', 'file_browser'],
-  'miscellaneous': ['properties', 'store', 'data', 'random_pools'],
-  'advanced': ['set_up_coding', 'vue', '3rd_party', 'registry', 'debugging', 'plugins', 'releasing_game'],
-  'builtins': ['actions', 'placeholders', 'conditions', 'game_events', 'states', 'components_export', 'component_slots'],
-};
-
-const CHANGELOG_TREE: Record<string, string[]> = {
-  '0.3': ['0.3.0'],
-  '0.2': ['0.2.0'],
-};
-
-// Viewer configuration - all settings for each viewer type
-const VIEWER_CONFIG: Record<string, {
-  tree: Record<string, string[]>;
+// Plugin docs entry
+interface DocPlugin {
+  id: string;
+  name: string;
   basePath: string;
-  title: string;
-  storageKey: string;
-  defaultTab: string;
-  useLocale: boolean;
-}> = {
-  docs: {
-    tree: DOCS_TREE,
-    basePath: 'engine_files/docs',
-    title: '📚 Dryad Engine Documentation',
-    storageKey: 'docs-active-tab',
-    defaultTab: 'introduction/overview',
-    useLocale: true
-  },
-  changelog: {
-    tree: CHANGELOG_TREE,
-    basePath: 'engine_files/changelog',
-    title: '📋 Changelog',
-    storageKey: 'changelog-active-tab',
-    defaultTab: '0.2/0.2.0',
-    useLocale: false
-  }
-};
+  order: number;
+  isActive: boolean;
+}
 
-// Computed properties for current viewer
+// Viewer type from global state
 const viewerType = computed(() => global.openViewer.value || 'docs');
-const currentConfig = computed(() => VIEWER_CONFIG[viewerType.value] || VIEWER_CONFIG.docs);
-const currentTree = computed(() => currentConfig.value.tree);
+const isChangelog = computed(() => viewerType.value === 'changelog');
+const isDocsMode = computed(() => !isChangelog.value);
 
-// Create storages from config (use / as separator for clarity with version numbers)
-const activeTabStorages: Record<string, Ref<string>> = Object.fromEntries(
-  Object.entries(VIEWER_CONFIG).map(([key, config]) => [
-    key,
-    useStorage(config.storageKey, config.defaultTab)
-  ])
-);
+// Plugin docs state
+const availableDocPlugins = ref<DocPlugin[]>([]);
+const selectedPluginId = useStorage('docs-selected-plugin', '');
+const selectedPlugin = computed(() => availableDocPlugins.value.find(p => p.id === selectedPluginId.value));
 
-// Get current active tab based on viewer type
+// Tree and headers (loaded dynamically per plugin or auto-discovered for changelog)
+const currentTree = ref<Record<string, string[]>>({});
+const headersMap = ref<Record<string, string>>({});
+
+// Active tab storage (per-plugin key for docs, hardcoded key for changelog)
+const docsActiveTab = ref('');
+const changelogActiveTab = useStorage('changelog-active-tab', '');
+
+function getDocsStorageKey(): string {
+  return `docs-active-tab-${selectedPluginId.value || 'default'}`;
+}
+
+function saveDocsActiveTab(val: string) {
+  docsActiveTab.value = val;
+  try { localStorage.setItem(getDocsStorageKey(), val); } catch {}
+}
+
+function restoreDocsActiveTab() {
+  try {
+    docsActiveTab.value = localStorage.getItem(getDocsStorageKey()) || '';
+  } catch {
+    docsActiveTab.value = '';
+  }
+}
+
 const activeTab = computed({
-  get: () => activeTabStorages[viewerType.value]?.value || VIEWER_CONFIG.docs.defaultTab,
+  get: () => isChangelog.value ? changelogActiveTab.value : docsActiveTab.value,
   set: (val) => {
-    if (activeTabStorages[viewerType.value]) {
-      activeTabStorages[viewerType.value].value = val;
+    if (isChangelog.value) {
+      changelogActiveTab.value = val;
+    } else {
+      saveDocsActiveTab(val);
     }
   }
 });
@@ -108,10 +99,14 @@ const loadError = ref('');
 const contentContainerRef = ref<HTMLElement | null>(null);
 const sidebarRef = ref<HTMLElement | null>(null);
 
-// Documentation language and state
-const availableLanguages = ref<string[]>([]);
-const docsLanguage = useStorage('docs-language', ''); // Empty means use global.selectedLanguage
+// Language state
+const pluginLanguages = ref<string[]>([]);
+const docsLanguage = useStorage('docs-language', '');
 const isLoadingTree = ref(false);
+
+const currentLanguage = computed(() => {
+  return docsLanguage.value || global.selectedLanguage || 'en';
+});
 
 // Filesystem validation state
 const existingPages = ref<Set<string>>(new Set());
@@ -122,138 +117,355 @@ const searchQuery = ref('');
 const searchResults = ref<any[]>([]);
 const isSearching = ref(false);
 const showSearchResults = ref(false);
-const highlightTerm = ref(''); // Term to highlight in content
+const highlightTerm = ref('');
 const searchContainerRef = ref<HTMLElement | null>(null);
 
-// Computed: Current language (with fallback to global.selectedLanguage)
-const currentLanguage = computed(() => {
-  return docsLanguage.value || global.selectedLanguage || 'en';
+// Title: plugin name for docs, locale string for changelog
+const viewerTitle = computed(() => {
+  if (isChangelog.value) return global.getString('changelog') || 'Changelog';
+  return selectedPlugin.value?.name || 'Documentation';
 });
 
-// Load available documentation languages
-async function loadAvailableLanguages() {
-  try {
-    const languages = await global.listFolders(currentConfig.value.basePath);
+// Pick the best language from available languages
+function pickBestLanguage(available: string[]): string {
+  if (!available.length) return 'en';
+  const preferred = docsLanguage.value || global.selectedLanguage || 'en';
+  if (available.includes(preferred)) return preferred;
+  if (available.includes('en')) return 'en';
+  return available[0];
+}
 
-    if (languages && languages.length > 0) {
-      availableLanguages.value = languages;
-    } else {
-      availableLanguages.value = ['en']; // Fallback
+// Get header display text for a category or page
+function getHeader(key: string): string {
+  return headersMap.value[key] || key;
+}
+
+// Get base path for the current doc content (for readDocFile/searchDocs)
+function getCurrentBasePath(): string {
+  if (isChangelog.value) return 'engine_files/changelog';
+  return selectedPlugin.value?.basePath || '';
+}
+
+// ============================================
+// Plugin Discovery
+// ============================================
+
+async function loadAvailableDocPlugins() {
+  const plugins: DocPlugin[] = [];
+  const engineState = global.engineState.value;
+
+  // Get activated plugin IDs
+  let activatedIds: string[] = [];
+  if (engineState === 'editor') {
+    try {
+      activatedIds = EngineEditor.getInstance().pluginManager.pluginList.value || [];
+    } catch { activatedIds = []; }
+  } else if (engineState === 'game') {
+    try {
+      activatedIds = Game.getInstance().coreSystem.mergedManifest?.plugins || [];
+    } catch { activatedIds = []; }
+  }
+
+  // Scan global plugins for docs/ subfolder
+  try {
+    const globalPluginIds = await global.listFolders('engine_files/plugins');
+    for (const pluginId of globalPluginIds) {
+      const docsPath = `engine_files/plugins/${pluginId}/docs`;
+      const hasDocs = await global.pathExists(docsPath);
+      if (hasDocs) {
+        let name = pluginId;
+        let order = 0;
+        try {
+          const json = await global.readJson(`engine_files/plugins/${pluginId}/plugin.json`);
+          if (json?.name) name = json.name;
+          if (json?.order) order = json.order;
+        } catch { }
+        plugins.push({ id: pluginId, name, basePath: docsPath, order, isActive: activatedIds.includes(pluginId) });
+      }
     }
-  } catch (error) {
-    console.error('Error loading languages:', error);
-    availableLanguages.value = ['en'];
+  } catch { }
+
+  // Scan game/mod plugins for docs/ subfolder (editor/game context only)
+  if (engineState === 'editor') {
+    try {
+      const editor = EngineEditor.getInstance();
+      if (editor.selectedGame && editor.selectedMod) {
+        for (const modId of editor.getModList(editor.selectedMod)) {
+          const basePath = `games_files/${editor.selectedGame}/${modId}/plugins`;
+          const modPluginIds = await global.listFolders(basePath);
+          for (const pluginId of modPluginIds) {
+            // Skip if already found as global plugin
+            if (plugins.some(p => p.id === pluginId)) continue;
+            const docsPath = `${basePath}/${pluginId}/docs`;
+            const hasDocs = await global.pathExists(docsPath);
+            if (hasDocs) {
+              let name = pluginId;
+              let order = 0;
+              try {
+                const json = await global.readJson(`${basePath}/${pluginId}/plugin.json`);
+                if (json?.name) name = json.name;
+                if (json?.order) order = json.order;
+              } catch { }
+              plugins.push({ id: pluginId, name, basePath: docsPath, order, isActive: activatedIds.includes(pluginId) });
+            }
+          }
+        }
+      }
+    } catch { }
+  }
+
+  // Sort: activated first (by order), then non-activated (by order)
+  plugins.sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    return (a.order || 0) - (b.order || 0);
+  });
+
+  availableDocPlugins.value = plugins;
+
+  // Restore last selected plugin, or fall back to first
+  if (plugins.length > 0) {
+    if (!selectedPluginId.value || !plugins.some(p => p.id === selectedPluginId.value)) {
+      selectedPluginId.value = plugins[0].id;
+    }
   }
 }
 
-// Validate documentation files against hardcoded tree
-async function validateDocsTree() {
+// ============================================
+// Changelog Auto-discovery
+// ============================================
+
+async function loadChangelogTree() {
   isLoadingTree.value = true;
+  currentTree.value = {};
+  headersMap.value = {};
+
+  try {
+    const basePath = 'engine_files/changelog';
+    try { pluginLanguages.value = await global.listFolders(basePath); }
+    catch { pluginLanguages.value = ['en']; }
+    const lang = currentLanguage.value;
+    let versionFolders: string[] = [];
+    try {
+      versionFolders = await global.listFolders(`${basePath}/${lang}`);
+    } catch {
+      // Try 'en' fallback
+      versionFolders = await global.listFolders(`${basePath}/en`);
+    }
+
+    // Sort by semver descending (latest first)
+    versionFolders.sort((a, b) => {
+      const partsA = a.split('.').map(Number);
+      const partsB = b.split('.').map(Number);
+      for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+        const diff = (partsB[i] || 0) - (partsA[i] || 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    });
+
+    const tree: Record<string, string[]> = {};
+    for (const folder of versionFolders) {
+      try {
+        const files = await global.listFiles(`${basePath}/${lang}/${folder}`);
+        const pages = files
+          .filter((f: string) => f.endsWith('.md'))
+          .map((f: string) => f.replace('.md', ''))
+          .sort((a: string, b: string) => {
+            // Sort sub-versions descending
+            const partsA = a.split('.').map(Number);
+            const partsB = b.split('.').map(Number);
+            for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+              const diff = (partsB[i] || 0) - (partsA[i] || 0);
+              if (diff !== 0) return diff;
+            }
+            return 0;
+          });
+        if (pages.length > 0) {
+          tree[folder] = pages;
+        }
+      } catch { }
+    }
+
+    currentTree.value = tree;
+
+    // Populate existingPages so nav items don't get inactive styling
+    existingPages.value = new Set();
+    for (const [folder, pages] of Object.entries(tree)) {
+      pages.forEach(page => existingPages.value.add(`${folder}/${page}`));
+    }
+
+    // Auto-select first entry if no active tab
+    if (!changelogActiveTab.value || !Object.keys(tree).length) {
+      const firstCategory = Object.keys(tree)[0];
+      const firstPage = tree[firstCategory]?.[0];
+      if (firstCategory && firstPage) {
+        changelogActiveTab.value = `${firstCategory}/${firstPage}`;
+      }
+    }
+  } catch (error) {
+    console.error('Error loading changelog tree:', error);
+  } finally {
+    isLoadingTree.value = false;
+  }
+}
+
+// ============================================
+// Plugin Selection & Tree Loading
+// ============================================
+
+async function onPluginSelected() {
+  const plugin = selectedPlugin.value;
+  if (!plugin) return;
+
+  isLoadingTree.value = true;
+
+  try {
+    // Load available languages for this plugin
+    pluginLanguages.value = await global.listFolders(plugin.basePath);
+    const lang = pickBestLanguage(pluginLanguages.value);
+
+    // Load tree.json
+    try {
+      currentTree.value = await global.readJson(`${plugin.basePath}/tree.json`) || {};
+    } catch {
+      currentTree.value = {};
+    }
+
+    // Load headers.json
+    try {
+      headersMap.value = await global.readJson(`${plugin.basePath}/${lang}/headers.json`) || {};
+    } catch {
+      headersMap.value = {};
+    }
+
+    // Validate tree against filesystem
+    await validateDocsTree();
+
+    // Restore saved tab for this plugin, fall back to first doc if invalid
+    restoreDocsActiveTab();
+    const [category, page] = docsActiveTab.value.split('/');
+    const treePages = currentTree.value[category];
+    if (!treePages || !treePages.includes(page)) {
+      const firstCategory = Object.keys(currentTree.value)[0];
+      const firstPage = currentTree.value[firstCategory]?.[0];
+      if (firstCategory && firstPage) {
+        saveDocsActiveTab(`${firstCategory}/${firstPage}`);
+      }
+    }
+
+    // Always reload content — plugin changed even if activeTab didn't
+    await loadDocumentation();
+  } catch (error) {
+    console.error('Error loading plugin docs:', error);
+  } finally {
+    isLoadingTree.value = false;
+  }
+}
+
+// Watch plugin selection changes
+watch(selectedPluginId, () => {
+  if (isDocsMode.value) {
+    onPluginSelected();
+  }
+});
+
+// ============================================
+// Language Handling
+// ============================================
+
+async function changeDocsLanguage(lang: string) {
+  docsLanguage.value = lang;
+  if (isChangelog.value) {
+    await loadChangelogTree();
+  } else {
+    await onPluginSelected();
+  }
+}
+
+// ============================================
+// Filesystem Validation
+// ============================================
+
+async function validateDocsTree() {
   existingPages.value = new Set();
   orphanedFiles.value = [];
 
   try {
-    const basePath = currentConfig.value.basePath;
-    const categories = await global.listFolders(`${basePath}/${currentLanguage.value}`);
+    const basePath = getCurrentBasePath();
+    if (!basePath) return;
+    const lang = currentLanguage.value;
+    const categories = await global.listFolders(`${basePath}/${lang}`);
 
-    if (!categories || categories.length === 0) {
-      return;
-    }
+    if (!categories || categories.length === 0) return;
 
     const foundFiles = new Map<string, string[]>();
 
-    // Scan filesystem to find all .md files
     for (const category of categories) {
-      const files = await global.listFiles(`${basePath}/${currentLanguage.value}/${category}`);
-
+      // Skip non-category entries (like tree.json, headers.json)
+      if (category.includes('.')) continue;
+      const files = await global.listFiles(`${basePath}/${lang}/${category}`);
       if (files && files.length > 0) {
         const pages = files
           .filter((file: string) => file.endsWith('.md'))
           .map((file: string) => file.replace('.md', ''));
-
         if (pages.length > 0) {
           foundFiles.set(category, pages);
-          // Mark pages as existing
           pages.forEach(page => existingPages.value.add(`${category}/${page}`));
         }
       }
     }
 
-    // Find orphaned files (files that exist but aren't in current tree)
+    // Find orphaned files
     const orphaned: string[] = [];
-    const tree = currentTree.value;
-
     for (const [category, pages] of foundFiles.entries()) {
-      const expectedPages = tree[category] || [];
-
+      const expectedPages = currentTree.value[category] || [];
       for (const page of pages) {
         if (!expectedPages.includes(page)) {
           orphaned.push(`${category}/${page}.md`);
         }
       }
     }
-
     orphanedFiles.value = orphaned;
-
   } catch (error) {
     console.error('Error validating docs tree:', error);
-  } finally {
-    isLoadingTree.value = false;
   }
 }
 
-// Check if a page exists in the filesystem
 function pageExists(category: string, page: string): boolean {
   return existingPages.value.has(`${category}/${page}`);
 }
 
-// Change documentation language
-async function changeDocsLanguage(lang: string) {
-  docsLanguage.value = lang;
-  await validateDocsTree();
+// ============================================
+// Navigation
+// ============================================
 
-  // Reset to first available tab if current tab doesn't exist in new language
-  const [category, page] = activeTab.value.split('/');
-  if (!pageExists(category, page)) {
-    const tree = currentTree.value;
-    const firstCategory = Object.keys(tree)[0];
-    const firstPage = tree[firstCategory]?.[0];
-    if (firstCategory && firstPage) {
-      activeTab.value = `${firstCategory}/${firstPage}`;
-    }
-  }
-}
-
-// Toggle group collapse
 function toggleGroup(groupId: string) {
   if (collapsedGroups.value.has(groupId)) {
     collapsedGroups.value.delete(groupId);
   } else {
     collapsedGroups.value.add(groupId);
   }
-  // Force reactivity
   collapsedGroups.value = new Set(collapsedGroups.value);
 }
 
-// Check if group is collapsed
 function isGroupCollapsed(groupId: string): boolean {
   return collapsedGroups.value.has(groupId);
 }
 
-// Set active tab
 function setActiveTab(category: string, page: string) {
   activeTab.value = `${category}/${page}`;
 }
 
-// Check if tab is active
 function isTabActive(category: string, page: string): boolean {
   return activeTab.value === `${category}/${page}`;
 }
 
-// Load and render markdown content
+// ============================================
+// Content Loading
+// ============================================
+
 async function loadDocumentation() {
   const [category, page] = activeTab.value.split('/');
-
   if (!category || !page) {
     docContent.value = '';
     return;
@@ -263,7 +475,7 @@ async function loadDocumentation() {
   loadError.value = '';
 
   try {
-    const result = await global.readDocFile(category, page, currentLanguage.value, currentConfig.value.basePath);
+    const result = await global.readDocFile(category, page, currentLanguage.value, getCurrentBasePath());
 
     if (result.error || !result.content) {
       throw new Error(result.error || 'No content returned');
@@ -272,16 +484,13 @@ async function loadDocumentation() {
     docContent.value = md.render(result.content);
     isLoading.value = false;
 
-    // Add copy buttons and process custom syntax after DOM updates (must wait for isLoading to be false)
     await nextTick();
     addCopyButtons();
     processCustomSyntax();
 
-    // Highlight search term if present
     if (highlightTerm.value) {
       highlightSearchTerm();
     }
-
   } catch (error) {
     console.error('Error loading documentation:', error);
     loadError.value = error instanceof Error ? error.message : 'Failed to load documentation';
@@ -290,10 +499,12 @@ async function loadDocumentation() {
   }
 }
 
-// Search documentation
+// ============================================
+// Search
+// ============================================
+
 async function searchDocs() {
   const query = searchQuery.value.trim();
-
   if (query.length < 2) {
     searchResults.value = [];
     showSearchResults.value = false;
@@ -304,14 +515,11 @@ async function searchDocs() {
   showSearchResults.value = true;
 
   try {
-    const result = await global.searchDocs(query, currentLanguage.value, currentConfig.value.basePath);
-
+    const result = await global.searchDocs(query, currentLanguage.value, getCurrentBasePath());
     if (result.error) {
-      console.error('Search error:', result.error);
       searchResults.value = [];
     } else {
       const results = result.results || [];
-      // Sort results so current page appears first
       const [currentCategory, currentPage] = activeTab.value.split('/');
       results.sort((a: any, b: any) => {
         const aIsCurrent = a.category === currentCategory && a.page === currentPage;
@@ -330,11 +538,8 @@ async function searchDocs() {
   }
 }
 
-// Navigate to a search result
 async function goToSearchResult(result: any) {
-  // Store the search term for highlighting
   highlightTerm.value = searchQuery.value.trim();
-
   const targetTab = `${result.category}/${result.page}`;
   const isAlreadyActive = activeTab.value === targetTab;
 
@@ -343,21 +548,18 @@ async function goToSearchResult(result: any) {
   searchQuery.value = '';
   searchResults.value = [];
 
-  // If already on this tab, manually trigger highlighting since watch won't fire
   if (isAlreadyActive) {
     await nextTick();
     highlightSearchTerm();
   }
 }
 
-// Clear search
 function clearSearch() {
   searchQuery.value = '';
   searchResults.value = [];
   showSearchResults.value = false;
 }
 
-// Highlight search query in text (for search results display)
 function highlightInText(text: string, query: string): string {
   if (!query || !text) return text;
 
@@ -369,48 +571,33 @@ function highlightInText(text: string, query: string): string {
   let currentIndex = normalizedText.indexOf(normalizedQuery);
 
   while (currentIndex !== -1) {
-    // Add text before match
     result += text.substring(lastIndex, currentIndex);
-
-    // Add highlighted match (use original text for display)
     result += `<mark class="search-highlight-result">${text.substring(currentIndex, currentIndex + normalizedQuery.length)}</mark>`;
-
     lastIndex = currentIndex + normalizedQuery.length;
     currentIndex = normalizedText.indexOf(normalizedQuery, lastIndex);
   }
 
-  // Add remaining text
   result += text.substring(lastIndex);
-
   return result;
 }
 
-// Process custom markdown syntax in a single pass
-// Handles: ->category.page (internal links) and @path/image.png (doc images)
+// ============================================
+// Custom Syntax Processing
+// ============================================
+
 function processCustomSyntax() {
   if (!contentContainerRef.value) return;
-
   const markdownContent = contentContainerRef.value.querySelector('.markdown-content');
   if (!markdownContent) return;
 
-  // Combined pattern: capture both link and image syntax
-  // Group 1: link category, Group 2: link page, Group 3: image path
   const combinedPattern = /->(\w+)\.(\w+)|@([\w\-\/]+\.\w+)/g;
 
-  // Walk through all text nodes (single pass)
-  const walker = document.createTreeWalker(
-    markdownContent,
-    NodeFilter.SHOW_TEXT,
-    null
-  );
-
+  const walker = document.createTreeWalker(markdownContent, NodeFilter.SHOW_TEXT, null);
   const nodesToProcess: { node: Text; matches: RegExpMatchArray[] }[] = [];
 
   let node: Text | null;
   while ((node = walker.nextNode() as Text | null)) {
-    // Skip text inside code blocks (inline code or pre blocks)
     if (node.parentElement?.closest('code, pre')) continue;
-
     const text = node.textContent || '';
     const matches = [...text.matchAll(combinedPattern)];
     if (matches.length > 0) {
@@ -418,7 +605,6 @@ function processCustomSyntax() {
     }
   }
 
-  // Process nodes (in reverse to avoid DOM mutation issues)
   nodesToProcess.reverse().forEach(({ node, matches }) => {
     const text = node.textContent || '';
     const fragment = document.createDocumentFragment();
@@ -428,24 +614,21 @@ function processCustomSyntax() {
       const [fullMatch, linkCategory, linkPage, imagePath] = match;
       const matchIndex = match.index!;
 
-      // Add text before match
       if (matchIndex > lastIndex) {
         fragment.appendChild(document.createTextNode(text.substring(lastIndex, matchIndex)));
       }
 
       if (linkCategory && linkPage) {
-        // Internal link: ->category.page
         const span = document.createElement('span');
         span.className = 'docs-internal-link';
-        span.textContent = global.getString(`docs.${linkCategory}.${linkPage}`) || `${linkCategory}/${linkPage}`;
+        span.textContent = getHeader(`${linkCategory}.${linkPage}`) || `${linkCategory}/${linkPage}`;
         span.addEventListener('click', () => {
           setActiveTab(linkCategory, linkPage);
         });
         fragment.appendChild(span);
       } else if (imagePath) {
-        // Doc image: @path/to/image.png
         const img = document.createElement('img');
-        img.src = `./assets/engine_assets/docs/${imagePath}`;
+        img.src = `./assets/${getCurrentBasePath()}/${imagePath}`;
         img.alt = imagePath;
         img.className = 'docs-image';
         fragment.appendChild(img);
@@ -454,112 +637,79 @@ function processCustomSyntax() {
       lastIndex = matchIndex + fullMatch.length;
     });
 
-    // Add remaining text
     if (lastIndex < text.length) {
       fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
     }
 
-    // Replace the text node with the fragment
     node.parentNode?.replaceChild(fragment, node);
   });
 }
 
-// Add copy buttons to code blocks
-function addCopyButtons() {
-  if (!contentContainerRef.value) {
-    console.warn('contentContainerRef is null');
-    return;
-  }
+// ============================================
+// Copy Buttons
+// ============================================
 
-  // Query within .markdown-content specifically
+function addCopyButtons() {
+  if (!contentContainerRef.value) return;
   const markdownContent = contentContainerRef.value.querySelector('.markdown-content');
-  if (!markdownContent) {
-    console.warn('No .markdown-content found');
-    return;
-  }
+  if (!markdownContent) return;
 
   const codeBlocks = markdownContent.querySelectorAll('pre code');
-  //console.log('Found code blocks:', codeBlocks.length);
-
-  codeBlocks.forEach((codeElement, index) => {
+  codeBlocks.forEach((codeElement) => {
     const pre = codeElement.parentElement;
-    if (!pre) {
-      //console.warn('No parent pre element for code block', index);
-      return;
-    }
+    if (!pre || pre.querySelector('.copy-button')) return;
 
-    // Check if button already exists
-    if (pre.querySelector('.copy-button')) {
-      //console.log('Button already exists for code block', index);
-      return;
-    }
-
-    // Create copy button
     const button = document.createElement('button');
     button.className = 'copy-button';
-    button.textContent = '📋 Copy';
+    button.textContent = 'Copy';
     button.setAttribute('type', 'button');
-    //console.log('Creating button for code block', index);
 
     button.onclick = async () => {
       try {
         await navigator.clipboard.writeText(codeElement.textContent || '');
-        button.textContent = '✅ Copied!';
+        button.textContent = 'Copied!';
         button.classList.add('copied');
-
         setTimeout(() => {
-          button.textContent = '📋 Copy';
+          button.textContent = 'Copy';
           button.classList.remove('copied');
         }, 2000);
       } catch (err) {
-        console.error('Failed to copy:', err);
-        button.textContent = '❌ Failed';
+        button.textContent = 'Failed';
         setTimeout(() => {
-          button.textContent = '📋 Copy';
+          button.textContent = 'Copy';
         }, 2000);
       }
     };
 
     pre.appendChild(button);
-    //console.log('Button appended to code block', index);
   });
 }
 
-// Highlight search term in content
+// ============================================
+// Search Term Highlighting
+// ============================================
+
 function highlightSearchTerm() {
-  if (!contentContainerRef.value || !highlightTerm.value) {
-    return;
-  }
-
+  if (!contentContainerRef.value || !highlightTerm.value) return;
   const markdownContent = contentContainerRef.value.querySelector('.markdown-content');
-  if (!markdownContent) {
-    return;
-  }
+  if (!markdownContent) return;
 
-  // Clear any existing highlights first
   const existingHighlights = markdownContent.querySelectorAll('.search-highlight');
   existingHighlights.forEach(mark => {
     const textNode = document.createTextNode(mark.textContent || '');
     mark.parentNode?.replaceChild(textNode, mark);
   });
-
-  // Normalize text nodes after removing marks to merge adjacent text nodes
   markdownContent.normalize();
 
-  // Get search terms to highlight - try full phrase first, then individual words
   const fullTerm = normalizeForSearch(highlightTerm.value);
   let searchTerms = [fullTerm];
 
-  // Function to highlight text in a single text node for given terms
   function highlightInTextNode(node: Node, terms: string[]): boolean {
-    if (node.nodeType !== Node.TEXT_NODE || !node.textContent) {
-      return false;
-    }
+    if (node.nodeType !== Node.TEXT_NODE || !node.textContent) return false;
 
     const text = node.textContent;
     const normalizedText = normalizeForSearch(text);
 
-    // Find all matches for all terms
     const matches: { start: number; end: number }[] = [];
     for (const term of terms) {
       let idx = normalizedText.indexOf(term);
@@ -569,11 +719,8 @@ function highlightSearchTerm() {
       }
     }
 
-    if (matches.length === 0) {
-      return false;
-    }
+    if (matches.length === 0) return false;
 
-    // Sort matches by start position and merge overlapping
     matches.sort((a, b) => a.start - b.start);
     const merged: { start: number; end: number }[] = [];
     for (const m of matches) {
@@ -584,60 +731,45 @@ function highlightSearchTerm() {
       }
     }
 
-    // Create a document fragment with highlighted text
     const fragment = document.createDocumentFragment();
     let lastIndex = 0;
 
     for (const { start, end } of merged) {
-      // Add text before match
       if (start > lastIndex) {
         fragment.appendChild(document.createTextNode(text.substring(lastIndex, start)));
       }
-
-      // Add highlighted match (use original text for display)
       const mark = document.createElement('mark');
       mark.className = 'search-highlight';
       mark.textContent = text.substring(start, end);
       fragment.appendChild(mark);
-
       lastIndex = end;
     }
 
-    // Add remaining text
     if (lastIndex < text.length) {
       fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
     }
 
-    // Replace the text node with the fragment
     node.parentNode?.replaceChild(fragment, node);
     return true;
   }
 
-  // Walk through all text nodes
   function walkNodes(node: Node, terms: string[]) {
     if (node.nodeType === Node.TEXT_NODE) {
       highlightInTextNode(node, terms);
     } else {
-      // Process child nodes (create array copy since we're modifying DOM)
       const children = Array.from(node.childNodes);
       children.forEach(child => walkNodes(child, terms));
     }
   }
 
-  // Try to find and highlight the full search term
   walkNodes(markdownContent, searchTerms);
 
-  // Scroll to first highlight
   let scrollTarget: Element | null = markdownContent.querySelector('.search-highlight');
 
-  // Fallback: if no highlight, use search query to find scroll location
   if (!scrollTarget && highlightTerm.value) {
     const queryWords = normalizeForSearch(highlightTerm.value).split(/\s+/);
-
-    // Try progressively shorter portions of the query (from end first)
     for (let len = queryWords.length; len >= 2 && !scrollTarget; len--) {
-      const searchStr = queryWords.slice(-len).join(' '); // Last N words
-
+      const searchStr = queryWords.slice(-len).join(' ');
       const walker = document.createTreeWalker(markdownContent, NodeFilter.SHOW_TEXT);
       let node;
       while ((node = walker.nextNode())) {
@@ -653,38 +785,51 @@ function highlightSearchTerm() {
     scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  // Clear after use
   highlightTerm.value = '';
 }
 
-// Scroll sidebar to active item
+// ============================================
+// Sidebar scroll
+// ============================================
+
 async function scrollSidebarToActive() {
   await nextTick();
   if (!sidebarRef.value) return;
-
   const activeItem = sidebarRef.value.querySelector('.nav-item.active');
   if (activeItem) {
     activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 }
 
-// Watch for tab changes and load content
+// ============================================
+// Watchers
+// ============================================
+
 watch(activeTab, async () => {
-  // Expand the group containing the active tab
   const [category] = activeTab.value.split('/');
   if (collapsedGroups.value.has(category)) {
     collapsedGroups.value.delete(category);
     collapsedGroups.value = new Set(collapsedGroups.value);
   }
-
   await loadDocumentation();
   scrollSidebarToActive();
 }, { immediate: true });
 
-// Watch for language changes
-watch(currentLanguage, async () => {
-  await validateDocsTree();
+// Watch viewer type changes
+watch(viewerType, async (newType) => {
+  if (newType === 'changelog') {
+    await loadChangelogTree();
+  } else if (newType === 'docs') {
+    await loadAvailableDocPlugins();
+    if (selectedPluginId.value) {
+      await onPluginSelected();
+    }
+  }
 });
+
+// ============================================
+// Events
+// ============================================
 
 function handleClickOutside(event: MouseEvent) {
   if (event.target === event.currentTarget) {
@@ -698,13 +843,21 @@ function handleEscKey(event: KeyboardEvent) {
   }
 }
 
-// Initialize on mount
+// ============================================
+// Initialize
+// ============================================
+
 onMounted(async () => {
   window.addEventListener('keydown', handleEscKey);
 
-  // Load available languages and validate tree
-  await loadAvailableLanguages();
-  await validateDocsTree();
+  if (isChangelog.value) {
+    await loadChangelogTree();
+  } else {
+    await loadAvailableDocPlugins();
+    if (selectedPluginId.value) {
+      await onPluginSelected();
+    }
+  }
 });
 
 onUnmounted(() => {
@@ -717,13 +870,38 @@ onUnmounted(() => {
     <div class="docs-container-bg" @click="handleClickOutside">
       <div class="docs-container-content">
         <div class="docs-header">
-          <h1>{{ currentConfig.title }}</h1>
+          <h1 v-if="isChangelog">{{ viewerTitle }}</h1>
+
+          <!-- Plugin selector (docs mode only) -->
+          <div v-if="isDocsMode && availableDocPlugins.length > 0" class="plugin-selector">
+            <Select
+              v-model="selectedPluginId"
+              :options="availableDocPlugins"
+              optionLabel="name"
+              optionValue="id"
+              filter
+              :resetFilterOnHide="true"
+              filterPlaceholder="Find plugin docs..."
+              emptyFilterMessage="No plugins found"
+              scrollHeight="250px"
+              class="plugin-select"
+            >
+              <template #option="{ option }">
+                <span :style="{ fontWeight: option.isActive ? 'bold' : 'normal' }">
+                  {{ option.name }}
+                </span>
+              </template>
+              <template #value>
+                <span v-if="selectedPlugin">{{ selectedPlugin.name }}</span>
+              </template>
+            </Select>
+          </div>
 
           <!-- Language selector -->
           <div class="language-selector">
             <select v-model="docsLanguage" @change="changeDocsLanguage(docsLanguage)" class="language-select">
               <option value="">Auto ({{ global.selectedLanguage || 'en' }})</option>
-              <option v-for="lang in availableLanguages" :key="lang" :value="lang">
+              <option v-for="lang in pluginLanguages" :key="lang" :value="lang">
                 {{ lang.toUpperCase() }}
               </option>
             </select>
@@ -733,10 +911,10 @@ onUnmounted(() => {
           <div class="search-container">
             <input v-model="searchQuery" @input="searchDocs" @keydown.escape="clearSearch" type="text"
               class="search-input" placeholder="Search documentation... (min 2 chars)" />
-            <button v-if="searchQuery" class="clear-search-button" @click="clearSearch">✕</button>
-            <span v-if="isSearching" class="search-spinner">⏳</span>
+            <button v-if="searchQuery" class="clear-search-button" @click="clearSearch">&#10005;</button>
+            <span v-if="isSearching" class="search-spinner">&#9203;</span>
 
-            <!-- Search results dropdown (positioned below search input) -->
+            <!-- Search results dropdown -->
             <div v-if="showSearchResults" class="search-results-dropdown">
               <div class="search-results-header">
                 <span class="results-count">{{ searchResults.length }} result{{ searchResults.length !== 1 ? 's' : ''
@@ -756,20 +934,20 @@ onUnmounted(() => {
                 <div v-for="(result, index) in searchResults" :key="index" class="search-result-item"
                   @click="goToSearchResult(result)">
                   <div class="search-result-title" v-html="highlightInText(result.title, searchQuery)"></div>
-                  <div class="search-result-path">{{ result.category }} › {{ result.page }}</div>
+                  <div class="search-result-path">{{ result.category }} &rsaquo; {{ result.page }}</div>
                   <div class="search-result-context" v-html="highlightInText(result.context, searchQuery)"></div>
                 </div>
               </div>
             </div>
           </div>
 
-          <button class="close-button" @click="global.closeViewer()">✕</button>
+          <button class="close-button" @click="global.closeViewer()">&#10005;</button>
         </div>
 
         <div class="docs-body">
           <!-- Orphaned files warning -->
           <div v-if="orphanedFiles.length > 0" class="orphaned-warning">
-            <strong>⚠️ Warning:</strong> Found {{ orphanedFiles.length }} documentation file(s) not in tree:
+            <strong>Warning:</strong> Found {{ orphanedFiles.length }} documentation file(s) not in tree:
             <ul>
               <li v-for="file in orphanedFiles" :key="file">{{ file }}</li>
             </ul>
@@ -788,15 +966,14 @@ onUnmounted(() => {
               <!-- Navigation tree -->
               <div v-else v-for="(pages, category) in currentTree" :key="category" class="nav-group">
                 <div class="nav-group-header" @click="toggleGroup(category)">
-                  <span class="collapse-icon">{{ isGroupCollapsed(category) ? '▶' : '▼' }}</span>
-                  <span class="nav-group-title">{{ currentConfig.useLocale ? global.getString('docs.' + category) :
-                    category }}</span>
+                  <span class="collapse-icon">{{ isGroupCollapsed(category) ? '&#9654;' : '&#9660;' }}</span>
+                  <span class="nav-group-title">{{ getHeader(category) }}</span>
                 </div>
                 <div v-if="!isGroupCollapsed(category)" class="nav-group-items">
                   <div v-for="page in pages" :key="page" class="nav-item"
                     :class="{ active: isTabActive(category, page), inactive: !pageExists(category, page) }"
                     @click="setActiveTab(category, page)">
-                    {{ currentConfig.useLocale ? global.getString('docs.' + category + '.' + page) : page }}
+                    {{ isChangelog ? page : getHeader(category + '.' + page) }}
                   </div>
                 </div>
               </div>
@@ -812,11 +989,11 @@ onUnmounted(() => {
 
               <!-- Error state -->
               <div v-else-if="loadError" class="docs-error">
-                <h2>⚠️ Error Loading Documentation</h2>
+                <h2>Error Loading Documentation</h2>
                 <p>{{ loadError }}</p>
                 <p class="error-hint">
                   Make sure the documentation file exists at:
-                  <code>/assets/{{ currentConfig.basePath }}/{{ currentLanguage }}/{{ activeTab }}.md</code>
+                  <code>/assets/{{ getCurrentBasePath() }}/{{ currentLanguage }}/{{ activeTab }}.md</code>
                 </p>
               </div>
 
@@ -825,7 +1002,7 @@ onUnmounted(() => {
 
               <!-- No content state -->
               <div v-else class="docs-empty">
-                <h2>📚 Select a Topic</h2>
+                <h2>Select a Topic</h2>
                 <p>Choose a documentation topic from the sidebar to get started.</p>
               </div>
             </div>
@@ -884,6 +1061,16 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+/* Plugin selector */
+.plugin-selector {
+  display: flex;
+  align-items: center;
+}
+
+.plugin-select {
+  min-width: 200px;
+}
+
 /* Language selector */
 .language-selector {
   display: flex;
@@ -930,7 +1117,6 @@ onUnmounted(() => {
   flex: 1;
   max-width: 500px;
   z-index: 100;
-  /* Ensure dropdown appears above other elements */
 }
 
 .search-input {
@@ -1321,8 +1507,6 @@ onUnmounted(() => {
   text-align: center;
 }
 
-
-
 /* Scrollbar styling for sidebar */
 .docs-sidebar::-webkit-scrollbar {
   width: 6px;
@@ -1484,10 +1668,6 @@ onUnmounted(() => {
 
 .markdown-content tr:nth-child(even) {
   background: #f8f9fa;
-}
-
-.markdown-content pre {
-  position: relative;
 }
 
 /* Copy button for code blocks (unscoped for JS-created elements) */

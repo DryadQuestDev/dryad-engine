@@ -2,7 +2,7 @@ import { Schema, SchemaToType } from '../utility/schema';
 
 export const CustomChoiceSchema = {
     uid: { type: 'uid', required: true, tooltip: 'Unique identifier for the entity trait.' },
-    id: { type: 'string', required: true, tooltip: 'Trait ID used to reference this trait in code.' },
+    id: { type: 'string', required: true, tooltip: 'ID used to reference this trait in code.' },
     group: { type: 'chooseOne', options: ['any', 'character', 'item', 'debug'], tooltip: 'Group the choice belongs to.' },
     name: { type: 'string', tooltip: 'Display name of the choice.' },
     params: {

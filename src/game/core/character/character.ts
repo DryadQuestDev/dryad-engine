@@ -12,6 +12,7 @@ import { Global } from "../../../global/global";
 import { gameLogger } from "../../utils/logger";
 import { Inventory } from "./inventory";
 import { PARTY_INVENTORY_ID } from "../../systems/itemSystem";
+import { mergeTrait } from "../../../functions/mergeTrait";
 import ShortUniqueId from "short-unique-id";
 
 export type learnedSkill = {
@@ -59,7 +60,13 @@ export class Character {
 
     let inv = this.getPrivateInventory();
     if (inv) {
+      const oldInvId = inv.id;
       inv.id = "_character_" + id;
+      const inventories = game.itemSystem.inventories.value;
+      if (inventories.has(oldInvId)) {
+        inventories.delete(oldInvId);
+        inventories.set(inv.id, inv);
+      }
     }
   }
 
@@ -122,7 +129,7 @@ export class Character {
         const skillData = game.characterSystem.skillSlotsMap.get(skillId);
         if (skillData?.status) {
           const statusId = this.getSkillStatusId(skillTreeId, id);
-          const existingStatus = this.statuses.find(s => s.id === statusId);
+          const existingStatus = this.statuses.get(statusId);
           if (existingStatus) {
             this.setStatusStacks(statusId, newLevel);
           }
@@ -276,11 +283,11 @@ export class Character {
   private _imageLayersWithMetaGetter: ComputedRef<ImageLayerMeta[]> | null = null;
 
   @Populate(Status) //, {mode: 'replace'}
-  public statuses: Status[] = [];
+  public statuses: Map<string, Status> = new Map();
 
   // ignore types
   public getCoreStatus(): Status {
-    return this.statuses[0];
+    return this.statuses.values().next().value!;
   }
 
   // Helper method to build image URLs from an array of skin layer objects
@@ -445,16 +452,29 @@ export class Character {
 
   // ignore types
   public reevaluate() {
+    const game = Game.getInstance();
     const newProperties: Record<string, any> = {};
     const newAttributes: Record<string, string> = {};
     const newSkinLayers = new Set<string>();
     const newAbilities = new Set<string>();
     const newStatIds = new Set<string>();
 
-    for (const status of this.statuses) {
-      // Properties: latest status overwrites
+    for (const status of this.statuses.values()) {
+      // Properties: latest status overwrites (unless is_merge)
       if (status.traits) {
-        Object.assign(newProperties, status.traits);
+        for (const key in status.traits) {
+          const value = status.traits[key];
+          const traitDef = game.characterSystem.traitsMap.get(key);
+
+          if (traitDef?.is_merge && key in newProperties) {
+            newProperties[key] = mergeTrait(newProperties[key], value, traitDef.type ?? '');
+          } else {
+            // Clone arrays/objects to avoid sharing references with status data
+            newProperties[key] = Array.isArray(value) ? [...value]
+              : (value && typeof value === 'object') ? { ...value }
+                : value;
+          }
+        }
       }
 
       // Attributes: latest status overwrites
@@ -488,7 +508,7 @@ export class Character {
     const collectedModifiers: Record<string, any[]> = {};
 
     // Collect all modifiers grouped by ability_id
-    for (const status of this.statuses) {
+    for (const status of this.statuses.values()) {
       if (status.abilityModifiers) {
         for (const modifier of status.abilityModifiers) {
           const abilityId = modifier.ability_id;
@@ -510,7 +530,12 @@ export class Character {
     this.traits = newProperties;
     this.attributes = newAttributes;
     this.skinLayers = newSkinLayers;
-    this.abilities = newAbilities;
+    // Sort abilities by cooldown ascending so iteration order is consistent
+    const abilityTemplates = Game.getInstance().characterSystem.abilityTemplatesMap;
+    const sortedAbilities = [...newAbilities].sort((a, b) =>
+      ((abilityTemplates.get(a)?.meta as any)?.cooldown || 0) - ((abilityTemplates.get(b)?.meta as any)?.cooldown || 0)
+    );
+    this.abilities = new Set(sortedAbilities);
     this.statIds = newStatIds;
     this.abilityModifiers = mergedAbilityModifiers;
 
@@ -532,84 +557,10 @@ export class Character {
 
   /**
    * Generic merge function for ability objects (meta + effects)
-   * Merges source into target using type-based logic
+   * Delegates to CharacterSystem.mergeAbilityData
    */
-  private mergeAbilityObjects(target: any, source: any): any {
-    const game = Game.getInstance();
-
-    // Normalize effects to Record format
-    const normalizeEffects = (effects: any): Record<string, any> => {
-      if (!effects) return {};
-      if (Array.isArray(effects)) {
-        const result: Record<string, any> = {};
-        for (const effect of effects) {
-          result[effect.id] = { ...(effect.aspects || {}) };
-        }
-        return result;
-      }
-      return effects;
-    };
-
-    const targetEffects = normalizeEffects(target.effects);
-    const sourceEffects = normalizeEffects(source.effects);
-
-    const result: any = {
-      meta: { ...(target.meta || {}), ...(source.meta || {}) },  // Meta: last wins
-      effects: { ...targetEffects }  // Clone target effects
-    };
-
-    // Merge source effects into result
-    for (const effectId in sourceEffects) {
-      const sourceAspects = sourceEffects[effectId];
-
-      if (!result.effects[effectId]) {
-        // New effect from source
-        result.effects[effectId] = { ...sourceAspects };
-      } else {
-        // Merge with existing effect
-        const targetAspects = result.effects[effectId];
-        const mergedAspects: any = { ...targetAspects };
-
-        // Merge each aspect
-        for (const aspectKey in sourceAspects) {
-          const definition = game.characterSystem.abilityDefinitionsMap.get(aspectKey);
-          const sourceValue = sourceAspects[aspectKey];
-
-          if (!definition) {
-            // No definition, last wins
-            mergedAspects[aspectKey] = sourceValue;
-            continue;
-          }
-
-          // Merge based on type
-          if (definition.type === 'number') {
-            // Sum
-            mergedAspects[aspectKey] = (targetAspects[aspectKey] || 0) + sourceValue;
-          } else if (definition.type === 'chooseMany') {
-            // Concatenate + dedupe
-            const targetArr = Array.isArray(targetAspects[aspectKey])
-              ? targetAspects[aspectKey]
-              : (targetAspects[aspectKey] ? [targetAspects[aspectKey]] : []);
-            const sourceArr = Array.isArray(sourceValue) ? sourceValue : [sourceValue];
-            mergedAspects[aspectKey] = Array.from(new Set([...targetArr, ...sourceArr]));
-          } else if (definition.type === 'array') {
-            // Concatenate (keep duplicates)
-            const targetArr = Array.isArray(targetAspects[aspectKey])
-              ? targetAspects[aspectKey]
-              : (targetAspects[aspectKey] ? [targetAspects[aspectKey]] : []);
-            const sourceArr = Array.isArray(sourceValue) ? sourceValue : [sourceValue];
-            mergedAspects[aspectKey] = [...targetArr, ...sourceArr];
-          } else {
-            // Last wins
-            mergedAspects[aspectKey] = sourceValue;
-          }
-        }
-
-        result.effects[effectId] = mergedAspects;
-      }
-    }
-
-    return result;
+  private mergeAbilityData(target: any, source: any): any {
+    return Game.getInstance().characterSystem.mergeAbilityData(target, source);
   }
 
   /**
@@ -619,7 +570,7 @@ export class Character {
   private mergeAbilityModifiers(modifiers: any[]): any {
     let result = { meta: {}, effects: {} };
     for (const modifier of modifiers) {
-      result = this.mergeAbilityObjects(result, modifier);
+      result = this.mergeAbilityData(result, modifier);
     }
     return result;
   }
@@ -650,10 +601,10 @@ export class Character {
       // Merge with modifier if exists (using same merge function!)
       const modifier = this.abilityModifiers[abilityId];
       if (modifier) {
-        result[abilityId] = this.mergeAbilityObjects(baseAbility, modifier);
+        result[abilityId] = this.mergeAbilityData(baseAbility, modifier);
       } else {
         // No modifier, just normalize the base template
-        result[abilityId] = this.mergeAbilityObjects(baseAbility, { meta: {}, effects: {} });
+        result[abilityId] = this.mergeAbilityData(baseAbility, { meta: {}, effects: {} });
       }
     }
 
@@ -773,6 +724,20 @@ export class Character {
     this.reevaluate();
   }
 
+  public addAbility(abilityId: string): void {
+    const template = Game.getInstance().characterSystem.abilityTemplatesMap.get(abilityId);
+    if (!template) {
+      throw new Error(`Ability Template ${abilityId} does not exist`);
+    }
+    this.getCoreStatus().abilities.add(abilityId);
+    this.reevaluate();
+  }
+
+  public removeAbility(abilityId: string): void {
+    this.getCoreStatus().abilities.delete(abilityId);
+    this.reevaluate();
+  }
+
   /**
    * Set (overwrite) the style classes for a specific skin layer
    * @param layerId The skin layer ID
@@ -830,7 +795,7 @@ export class Character {
 
   public addStatus(status: Status) {
     // Check if status with this id already exists
-    const existingStatus = this.statuses.find(s => s.id === status.id);
+    const existingStatus = this.statuses.get(status.id);
 
     if (existingStatus) {
       // Debug: console.log(`Found existing status: ${status.id}`, {...});
@@ -843,9 +808,9 @@ export class Character {
         return;
       }
 
-      // If not stackable, don't add duplicate - just ignore or log warning
-      gameLogger.info(`Status "${status.id}" already exists and is not stackable - ignoring duplicate`);
-      return;
+      // If not stackable, replace the existing status with the new one
+      gameLogger.info(`Status "${status.id}" already exists and is not stackable - replacing`);
+      this.removeStatus(existingStatus.id);
     } else {
       // Debug: console.log(`Adding new status: ${status.id}`, {...});
     }
@@ -854,7 +819,7 @@ export class Character {
     const oldReplenishableValues = this.captureResourceStatValues();
 
     // Add as a new status
-    this.statuses.push(status);
+    this.statuses.set(status.id, status);
     this.reevaluate();
     this._updateAndSetResources(status);
 
@@ -864,7 +829,7 @@ export class Character {
 
 
   public removeStatus(id: string): void {
-    let statusToRemove = this.statuses.find(status => status.id === id);
+    const statusToRemove = this.statuses.get(id);
     if (!statusToRemove) {
       gameLogger.warn(`Failed to remove status "${id}" - status does not exist`);
       return;
@@ -873,7 +838,7 @@ export class Character {
     // Capture all replenishable stat values before removing status (for computed stats)
     const oldReplenishableValues = this.captureResourceStatValues();
 
-    this.statuses = this.statuses.filter(status => status !== statusToRemove);
+    this.statuses.delete(id);
 
     if (statusToRemove) {
       this._updateAndSetResources(statusToRemove);
@@ -888,7 +853,7 @@ export class Character {
    * Set status stacks with proper resource adjustment for replenishable stats
    */
   public setStatusStacks(statusId: string, newStacks: number): void {
-    const status = this.statuses.find(s => s.id === statusId);
+    const status = this.statuses.get(statusId);
     if (!status) {
       throw new Error(`Status "${statusId}" not found on character "${this.id}"`);
     }
@@ -904,7 +869,7 @@ export class Character {
    * Add stacks to status with proper resource adjustment for replenishable stats
    */
   public addStatusStacks(statusId: string, amount: number = 1): boolean {
-    const status = this.statuses.find(s => s.id === statusId);
+    const status = this.statuses.get(statusId);
     if (!status) {
       throw new Error(`Status "${statusId}" not found on character "${this.id}"`);
     }
@@ -1016,11 +981,19 @@ export class Character {
   }
 
   public getStatus(id: string): Status {
-    let status = this.statuses.find(status => status.id === id);
+    const status = this.statuses.get(id);
     if (!status) {
       throw new Error(`Status ${id} does not exist`);
     }
     return status;
+  }
+
+  public hasStatus(id: string): boolean {
+    return this.statuses.has(id);
+  }
+
+  public getStatuses(): Status[] {
+    return [...this.statuses.values()];
   }
 
   public getResourceRatio(name: string): number {
@@ -1076,10 +1049,7 @@ export class Character {
 
 
   private applyPrecision(value: number, stat: EntityStatObject): number {
-    const precision = stat.precision; // Read config from instance
-    if (precision === undefined || precision === null) {
-      return value;
-    }
+    const precision = stat.precision ?? 0;
     const factor = Math.pow(10, precision);
     return Math.round(value * factor) / factor;
   }
@@ -1131,6 +1101,17 @@ export class Character {
   }
 
   /**
+   * Set the base value of a stat on the character's core status.
+   * Convenience wrapper around update({ stats: { [name]: value } }).
+   * @param name - The stat name
+   * @param value - The value to set
+   * @throws Error if stat doesn't exist in schema
+   */
+  public setStat(name: string, value: number): void {
+    this.update({ stats: { [name]: value } });
+  }
+
+  /**
    * Get a stat's reactive ComputedRef.
    * Use when you need the ref itself (e.g., for watch() or storing).
    * @param name - The stat name
@@ -1151,7 +1132,7 @@ export class Character {
         let statValue = 0;
         const game = Game.getInstance();
 
-        for (const status of this.statuses) {
+        for (const status of this.statuses.values()) {
           // Multiply stat value by currentStacks
           const multiplier = status.currentStacks || 1;
 
@@ -1172,6 +1153,10 @@ export class Character {
           }
         }
 
+        if (stat.is_binary) {
+          statValue = statValue > 0 ? 1 : 0;
+        }
+
         return this.applyPrecision(statValue, stat);
       });
       this._statGetters.set(name, newComputedGetter);
@@ -1181,7 +1166,7 @@ export class Character {
   /*
     public get statMap(): Record<string, number> {
       const result: Record<string, number> = {};
-      for (const status of this.statuses) {
+      for (const status of this.statuses.values()) {
         if (status && status.stats) {
           Object.entries(status.stats).forEach(([key, value]) => {
             if (typeof value === 'number') {
@@ -1304,6 +1289,18 @@ export class Character {
       resolvedItem = item;
     }
 
+    // Guard: if already equipped, don't equip again
+    if (resolvedItem.isEquipped) {
+      gameLogger.error(`Item "${resolvedItem.id}" (${resolvedItem.uid}) is already equipped`);
+      return;
+    }
+
+    // Auto-add to inventory if not already present (addItem clones, so use the clone)
+    if (!inventory.getItemByUid(resolvedItem.uid)) {
+      const [addedItem] = inventory.addItem(resolvedItem, 1, true);
+      resolvedItem = addedItem;
+    }
+
     let slot: ItemSlot | null = null;
     if (slotIndex !== undefined && slotId) {
       slot = this.getItemSlotByIdandIndex(slotId, slotIndex);
@@ -1354,6 +1351,21 @@ export class Character {
       }
     }
 
+    // consume choice
+    if (item.is_consumable && !item.isEquipped) {
+      const params = {
+        consumeItem: {
+          itemUid: item.uid,
+          characterId: this.id,
+        }
+      };
+      let choice = Game.getInstance().logicSystem.createCustomChoice({
+        id: "consume_item",
+        name: Global.getInstance().getString("consume_item"),
+        params: params
+      });
+      choices.push(choice);
+    }
 
     // to equip item choices
     if (!item.isEquipped) {

@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { Character } from '../../core/character/character';
-import { Game } from '../../game';
 import { computed, ref, watch, onBeforeUnmount } from 'vue';
-
-const game = Game.getInstance();
 
 const props = defineProps<{
   character: Character;
@@ -140,7 +137,7 @@ const getLayerStyle = (index: number) => {
   <div class="character-doll" :class="{ 'natural-size': naturalSize }">
     <TransitionGroup name="layer-fade" :appear="enableAppear || false">
       <img class="character-doll-image" v-for="(layer, index) of imageLayers" :key="layer.image" :src="layer.image"
-        :style="getLayerStyle(index)" :class="getLayerClasses(layer.layerId)" draggable="false" @load="game.persistImage(layer.image)" />
+        :style="getLayerStyle(index)" :class="getLayerClasses(layer.layerId)" draggable="false" v-persist />
     </TransitionGroup>
   </div>
 </template>

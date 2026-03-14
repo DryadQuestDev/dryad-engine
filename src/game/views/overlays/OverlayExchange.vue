@@ -14,6 +14,12 @@ const game = Game.getInstance();
 const global = Global.getInstance();
 const COMPONENT_ID = 'overlay-exchange';
 
+function getCurrencyName(price: Record<string, number>): string {
+    const id = Object.keys(price)[0];
+    const tmpl = game.itemSystem.itemTemplatesMap.get(id);
+    return (tmpl?.traits as any)?.name || id;
+}
+
 // Currency hover state
 const hoveredCurrencyId = ref<string | null>(null);
 const hoveredCurrencyIsParty = ref(false);
@@ -42,6 +48,27 @@ const popupPosition = ref({ x: 0, y: 0, isParty: true });
 // Max quantity computed for popup
 const maxQuantity = computed(() => {
   return quantityPopupItem.value?.quantity || 1;
+});
+
+// Total cost for the selected quantity in the popup
+const popupTotalCost = computed(() => {
+  const item = quantityPopupItem.value;
+  const source = quantityPopupSource.value;
+  if (!item || !source || mode.value !== 'trade') return [];
+
+  const isSourceParty = source.id === PARTY_INVENTORY_ID;
+  const context: TradeContext = isSourceParty ? 'player' : 'trader';
+  const price = item.getTradePriceInContext(context);
+  if (!price || Object.keys(price).length === 0) return [];
+
+  return Object.entries(price).map(([currencyId, amount]) => {
+    const template = game.itemSystem.itemTemplatesMap.get(currencyId);
+    return {
+      id: currencyId,
+      image: (template?.traits as any)?.image || '',
+      amount: Math.round(amount * selectedQuantity.value * 100) / 100
+    };
+  });
 });
 
 // Get inventories
@@ -167,7 +194,7 @@ function moveItem(item: Item, source: Inventory, target: Inventory, quantity: nu
 
       // Check if buyer can afford BEFORE attempting transfer
       if (!target.canAffordPrice(totalPrice)) {
-        global.addNotificationId('not_enough_currency');
+        global.addNotificationId('not_enough_currency', { currency: getCurrencyName(totalPrice) });
         return false;
       }
 
@@ -183,7 +210,7 @@ function moveItem(item: Item, source: Inventory, target: Inventory, quantity: nu
         // This shouldn't happen since we checked canAfford, but handle it anyway
         // Need to reverse the item transfer
         target.transferTo(source, item, quantity);
-        global.addNotificationId('not_enough_currency');
+        global.addNotificationId('not_enough_currency', { currency: getCurrencyName(totalPrice) });
         return false;
       }
 
@@ -207,7 +234,7 @@ function openQuantityPopup(item: Item, source: Inventory, target: Inventory, eve
   quantityPopupItem.value = item;
   quantityPopupSource.value = source;
   quantityPopupTarget.value = target;
-  selectedQuantity.value = 1;
+  selectedQuantity.value = item.quantity;
 
   // Center the popup on screen
   popupPosition.value = {
@@ -269,6 +296,7 @@ function handleLootAll() {
   let looted = 0;
   let total = items.length;
   let failureReason: string | null = null;
+  let failedCurrencyName = '';
 
   for (const item of items) {
     // In trade mode, check affordability first
@@ -285,7 +313,10 @@ function handleLootAll() {
 
         // Check if we can afford before trying to transfer
         if (!partyInventory.value.canAffordPrice(totalPrice)) {
-          if (!failureReason) failureReason = 'cannot_afford';
+          if (!failureReason) {
+            failureReason = 'cannot_afford';
+            failedCurrencyName = getCurrencyName(totalPrice);
+          }
           continue; // Skip this item, try next
         }
 
@@ -330,7 +361,7 @@ function handleLootAll() {
   } else {
     // Nothing looted
     if (failureReason === 'cannot_afford') {
-      global.addNotificationId('not_enough_currency');
+      global.addNotificationId('not_enough_currency', { currency: failedCurrencyName });
     } else if (failureReason === 'inventory_full') {
       global.addNotificationId('target_inventory_full');
     } else {
@@ -403,7 +434,7 @@ function close() {
 </script>
 
 <template>
-  <div :id="COMPONENT_ID" class="overlay-exchange">
+  <div :id="COMPONENT_ID" class="overlay-exchange overlay-hoist">
     <div class="exchange-header">
       <h2>{{ mode === 'loot' ? 'Loot' : 'Trade' }}</h2>
       <button class="close-button" @click="close">✕</button>
@@ -450,8 +481,17 @@ function close() {
           <input type="range" v-model.number="selectedQuantity" :min="1" :max="maxQuantity" class="quantity-slider" />
           <input type="number" v-model.number="selectedQuantity" :min="1" :max="maxQuantity" class="quantity-input" />
         </div>
+        <div v-if="popupTotalCost.length > 0" class="popup-total-cost">
+          <span class="total-cost-label">{{ global.getString('total_cost') }}</span>
+          <div class="total-cost-currencies">
+            <div v-for="currency in popupTotalCost" :key="currency.id" class="total-cost-item">
+              <img v-if="currency.image" :src="currency.image" class="total-cost-icon" />
+              <span class="total-cost-amount">{{ currency.amount }}</span>
+            </div>
+          </div>
+        </div>
         <div class="popup-buttons">
-          <button @click="moveAllQuantity" class="move-all-button">Move All</button>
+          <button @click="moveAllQuantity" class="move-all-button">{{ mode === 'trade' ? global.getString('buy_all') : global.getString('move_all') }}</button>
           <button @click="confirmQuantity" class="confirm-button">Confirm</button>
           <button @click="closeQuantityPopup" class="cancel-button">Cancel</button>
         </div>
@@ -497,9 +537,7 @@ function close() {
   font-size: v-bind("global.userSettings.value.font_size + 'px'");
   overflow: visible;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 0 0 1px rgba(0, 0, 0, 0.3);
+    0 8px 32px #c1c1c180, inset 0 1px #c3c3c35e, 0 0 0 1px #6b6b6b4d;
 }
 
 .exchange-header {
@@ -513,8 +551,8 @@ function close() {
 
 .exchange-header h2 {
   margin: 0;
-  font-size: 1.5em;
-  color: #006c72;
+  font-size: 24px;
+  color: #dceb59;
 }
 
 .close-button {
@@ -597,7 +635,7 @@ function close() {
 
 .currency-amount {
   font-weight: bold;
-  font-size: 0.9em;
+  font-size: 14px;
   color: #42b983;
   text-align: center;
 }
@@ -687,6 +725,45 @@ function close() {
 .quantity-input[type=number] {
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+.popup-total-cost {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(66, 185, 131, 0.3);
+  border-radius: 4px;
+}
+
+.total-cost-label {
+  color: #999;
+  font-size: 13px;
+}
+
+.total-cost-currencies {
+  display: flex;
+  gap: 8px;
+}
+
+.total-cost-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.total-cost-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.total-cost-amount {
+  font-size: 14px;
+  font-weight: bold;
+  color: #42b983;
 }
 
 .popup-buttons {

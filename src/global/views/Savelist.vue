@@ -292,6 +292,8 @@ h3 {
   flex-direction: column;
   /* Stack header and meta vertically */
   flex-grow: 1;
+  min-width: 0;
+  /* Allow flex child to shrink below content size */
   width: 100%;
   /* Ensure it takes full width */
 }
@@ -300,8 +302,8 @@ h3 {
   display: flex;
   justify-content: space-between;
   /* Puts save_name left, button right */
-  align-items: center;
-  /* Vertically align name and button */
+  align-items: flex-start;
+  /* Keep delete button at top when name wraps */
   width: 100%;
   margin-bottom: 8px;
   /* Space between header and meta */
@@ -313,9 +315,16 @@ h3 {
   /* Space between name and delete button if they were closer */
   flex-grow: 1;
   /* Allow name to take available space */
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.save_name span {
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .dev_badge {

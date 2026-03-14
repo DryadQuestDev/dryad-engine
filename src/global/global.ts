@@ -60,7 +60,12 @@ import ItemCard from '../game/views/progression/ItemCard.vue';
 import ItemChoices from '../game/views/progression/ItemChoices.vue';
 import SkillTree from '../game/views/progression/SkillTree.vue';
 import SkillSlot from '../game/views/progression/SkillSlot.vue';
+import AbilityCard from '../game/views/progression/AbilityCard.vue';
+import StatusObjectDisplay from '../game/views/progression/StatusObjectDisplay.vue';
+import AbilitiesViewer from '../game/views/progression/AbilitiesViewer.vue';
 import CharacterViewer from '../game/views/progression/CharacterViewer.vue';
+import CharacterViewerPopup from '../game/views/progression/CharacterViewerPopup.vue';
+import CharacterRename from '../game/views/progression/CharacterRename.vue';
 
 // Define the notification item structure
 interface NotificationItem {
@@ -518,9 +523,19 @@ export class Global {
     game.coreSystem.musicMap = await this.fetchMapValues(gameId, `music`, modsIds);
     game.coreSystem.soundsMap = await this.fetchMapValues(gameId, `sounds`, modsIds);
 
+    // load object maps for locale system
+    game.coreSystem.localeMap = await this.fetchMapValues(gameId, `locale`, modsIds);
+
     // load object maps for pool system
     game.logicSystem.poolDefinitionsMap = await this.fetchMapValues(gameId, `pool_definitions`, modsIds);
     game.logicSystem.poolEntriesMap = await this.fetchMapValues(gameId, `pool_entries`, modsIds);
+
+    // load object maps for narrative system
+    await this.fetchMapValues(gameId, `narrative_tags`, modsIds);
+    await this.fetchMapValues(gameId, `narrative_slots`, modsIds);
+    await this.fetchMapValues(gameId, `narrative_states`, modsIds);
+    await this.fetchMapValues(gameId, `narrative_segments`, modsIds);
+    game.narrativeSystem.buildSegmentIndex();
 
     // set debug settings
     game.coreSystem.debugSettings.value = this.optionsToObject(DebugSettings);
@@ -678,14 +693,9 @@ export class Global {
       }
     }
 
-    const finalPluginPaths = Array.from(pluginPathsMap.values());
-    game.coreSystem.pluginPaths = pluginPathsMap;
-    //console.log("finalPluginPaths", finalPluginPaths);
-
-    // load plugin.json for each path, retrieve a list of schemas' ids, load the corresponding files from plugins_data folder using loadAndMergeArrayFile and populate game.coreSystem.plugins with this data
-    for (const pluginPath of finalPluginPaths) {
+    // Pass 1: Load all plugin.json configs and store in pluginConfigs
+    for (const [pluginName, pluginPath] of pluginPathsMap) {
       try {
-        // Load plugin.json file
         const pluginJsonPath = `${pluginPath}/plugin.json`;
         const pluginJson = await this.storageService.readJson(pluginJsonPath);
 
@@ -694,32 +704,45 @@ export class Global {
           continue;
         }
 
-        // Convert plugin.json to PluginObject format
         const pluginConfig = this.convertJsonToPluginObject(pluginJson, pluginJson.id);
-
-        // Store the plugin config for later reuse in loadAndMergeArrayFile
         game.coreSystem.pluginConfigs.set(pluginConfig.id, pluginConfig);
+      } catch (error) {
+        gameLogger.error(`Failed to load plugin config from ${pluginPath}:`, error);
+      }
+    }
 
+    // Sort plugins by their `order` field (lower values first) and rebuild pluginPaths in sorted order
+    // This determines plugin load order for both data (pass 2) and scripts/CSS (loadExternalFiles)
+    const sortedPluginIds = [...game.coreSystem.pluginConfigs.entries()]
+      .sort((a, b) => (a[1].order || 0) - (b[1].order || 0))
+      .map(([id]) => id);
+
+    const sortedPluginPaths = new Map<string, string>();
+    for (const id of sortedPluginIds) {
+      const path = pluginPathsMap.get(id);
+      if (path) sortedPluginPaths.set(id, path);
+    }
+    game.coreSystem.pluginPaths = sortedPluginPaths;
+
+    // Pass 2: Load plugin tab data (schemas, plugins_data files) in sorted order and register in dataRegistry
+    for (const [pluginId] of sortedPluginPaths) {
+      const pluginConfig = game.coreSystem.pluginConfigs.get(pluginId);
+      if (!pluginConfig) continue;
+
+      try {
         if (pluginConfig.tabs && Array.isArray(pluginConfig.tabs)) {
-          // Initialize plugin data map for this plugin
           const pluginDataMap = new Map<string, any>();
 
-          // Process each tab/schema
           for (const tab of pluginConfig.tabs) {
             const schemaId = tab.id;
-
-            if (!schemaId) {
-              continue;
-            }
+            if (!schemaId) continue;
 
             try {
-              // Load data for this schema from plugins_data folder using appropriate method based on isArray
               const pluginDataPath = `plugins_data/${pluginConfig.id}/${schemaId}`;
               let schemaData: any;
 
               if (tab.isArray) {
                 const arrayData = await this.loadAndMergeArrayFile<any>(gameId, pluginDataPath, modsIds);
-                // Convert array to Map using id as key (consistent with other data types)
                 schemaData = new Map<string, any>();
                 for (const item of arrayData) {
                   schemaData.set(item.id || item.uid, item);
@@ -728,32 +751,22 @@ export class Global {
                 schemaData = await this.loadAndMergeSingleFile<any>(gameId, pluginDataPath, modsIds);
               }
 
-              // Store the data in the plugin's data map
               pluginDataMap.set(schemaId, schemaData);
-
-              // Debug: console.log(`Loaded plugin data for ${pluginConfig.id}/${schemaId}:`, schemaData);
             } catch (error) {
               gameLogger.warn(`Failed to load plugin data for ${pluginConfig.id}/${schemaId}:`, error);
-              // Continue with other schemas even if one fails
             }
           }
 
-          // Store the plugin data map in game.coreSystem.plugins
           game.coreSystem.plugins.set(pluginConfig.id, pluginDataMap);
 
-          // Register plugin data in dataRegistry for centralized access
           for (const [schemaId, schemaData] of pluginDataMap) {
             const registryPath = `plugins_data/${pluginConfig.id}/${schemaId}`;
             game.coreSystem.dataRegistry.set(registryPath, schemaData);
           }
         }
-
       } catch (error) {
-        gameLogger.error(`Failed to load plugin config from ${pluginPath}:`, error);
+        gameLogger.error(`Failed to process plugin data for ${pluginId}:`, error);
       }
-
-
-
     }
 
     // load plugins end
@@ -781,6 +794,9 @@ export class Global {
       floatingUi: FloatingUi,
       gsap: gsap,
       fastCopy: fastCopy,
+      // expose dialog utilities
+      showConfirm,
+      showAlert,
       // expose reusable components
       components: {
         CharacterFace,
@@ -793,6 +809,8 @@ export class Global {
         CharacterStatuses,
         CharacterSlot,
         CharacterViewer,
+        CharacterViewerPopup,
+        CharacterRename,
         StatEntity,
         ProgressBar,
         InventoryComponent,
@@ -804,6 +822,9 @@ export class Global {
         ItemChoices,
         SkillTree,
         SkillSlot,
+        AbilityCard,
+        StatusObjectDisplay,
+        AbilitiesViewer,
       }
     };
 
@@ -811,14 +832,22 @@ export class Global {
     // load js and css from plugins
     for (const [pluginId, pluginPath] of this.game.coreSystem.pluginPaths) {
       //console.warn("pluginPath", pluginPath);
-      let scripts = await this.listFiles(`${pluginPath}/scripts`);
-      let csss = await this.listFiles(`${pluginPath}/css`);
-      //console.warn("pluginPath scripts", scripts);
-      //console.warn("pluginPath csss", csss);
-      for (const script of scripts) {
-        // Add 'assets/' prefix for browser loading
-        await this.loadScript(`assets/${pluginPath}/scripts/${script}`);
+      const pluginJson = this.game.coreSystem.pluginConfigs.get(pluginId);
+
+      // Load only explicitly specified scripts
+      const scripts = pluginJson?.scripts;
+      if (scripts && Array.isArray(scripts)) {
+        for (const scriptPath of scripts) {
+          // Normalize path separators for browser (Windows uses \ but browsers need /)
+          const normalizedPath = scriptPath.replace(/\\/g, '/');
+          const fullPath = `assets/${pluginPath}/scripts/${normalizedPath}`;
+          await this.loadScript(fullPath);
+        }
       }
+
+      // CSS loading - always load all CSS files
+      let csss = await this.listFiles(`${pluginPath}/css`);
+      //console.warn("pluginPath csss", csss);
       for (const css of csss) {
         // Add 'assets/' prefix for browser loading
         await this.loadCss(`assets/${pluginPath}/css/${css}`);
@@ -883,11 +912,10 @@ export class Global {
   }
 
   private removeGameCss(): void {
-    const existingLinks = document.querySelectorAll(`link[${GAME_CSS_ATTRIBUTE}]`);
-    existingLinks.forEach(link => {
-      if (link.parentNode) {
-        link.parentNode.removeChild(link);
-        // Debug: console.log(`Removed CSS: ${link.getAttribute('href')}`);
+    const existingStyles = document.querySelectorAll(`style[${GAME_CSS_ATTRIBUTE}]`);
+    existingStyles.forEach(style => {
+      if (style.parentNode) {
+        style.parentNode.removeChild(style);
       }
     });
   }
@@ -915,26 +943,26 @@ export class Global {
     });
   }
 
-  private loadCss(path: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Check if CSS link already exists
-      if (document.querySelector(`link[href="${path}"]`)) {
-        gameLogger.warn(`CSS already loaded: ${path}`);
-        resolve();
-        return;
-      }
+  private async loadCss(path: string): Promise<void> {
+    // Check if CSS already loaded
+    if (document.querySelector(`style[${GAME_CSS_ATTRIBUTE}="${path}"]`)) {
+      gameLogger.warn(`CSS already loaded: ${path}`);
+      return;
+    }
 
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = path;
-      link.setAttribute(GAME_CSS_ATTRIBUTE, 'true'); // Mark as game CSS
-      link.onload = () => resolve();
-      link.onerror = (error) => {
-        gameLogger.error(`Error loading CSS ${path}:`, error);
-        reject(error);
-      };
-      document.head.appendChild(link); // Append link to head
-    });
+    try {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const cssText = await response.text();
+
+      const style = document.createElement('style');
+      style.setAttribute(GAME_CSS_ATTRIBUTE, path);
+      style.textContent = cssText;
+      document.head.appendChild(style);
+    } catch (error) {
+      gameLogger.error(`Error loading CSS ${path}:`, error);
+      throw error;
+    }
   }
 
   public async loadAndMergeSingleFile<T extends Identifiable>(gameId: string, path: string, modList: string[], ignorePlugins: boolean = false): Promise<T> {
@@ -1013,16 +1041,13 @@ export class Global {
       return [];
     }
 
-    // Extract the file name from path (remove directory structure)
-    const fileNameOnly = fileName.split('/').pop() || fileName;
-
     // Use the already-loaded plugin configs from game.coreSystem.pluginConfigs
     // These were loaded during initGame() to avoid loading them twice
     for (const [pluginId, pluginConfig] of this.game.coreSystem.pluginConfigs) {
       // Check if plugin has data for this file
       if (pluginConfig.data && Array.isArray(pluginConfig.data)) {
         for (const dataItem of pluginConfig.data) {
-          if (dataItem.fileName === fileNameOnly && dataItem.fileData) {
+          if (dataItem.fileName === fileName && dataItem.fileData) {
             try {
               const parsedData = JSON.parse(dataItem.fileData);
               if (Array.isArray(parsedData)) {
@@ -1060,16 +1085,13 @@ export class Global {
       return [];
     }
 
-    // Extract the file name from path (remove directory structure)
-    const fileNameOnly = fileName.split('/').pop() || fileName;
-
     // Use the already-loaded plugin configs from game.coreSystem.pluginConfigs
     // These were loaded during initGame() to avoid loading them twice
     for (const [pluginId, pluginConfig] of this.game.coreSystem.pluginConfigs) {
       // Check if plugin has data for this file
       if (pluginConfig.data && Array.isArray(pluginConfig.data)) {
         for (const dataItem of pluginConfig.data) {
-          if (dataItem.fileName === fileNameOnly && dataItem.fileData) {
+          if (dataItem.fileName === fileName && dataItem.fileData) {
             try {
               const parsedData = JSON.parse(dataItem.fileData);
               // For single files, the data should be a single object
@@ -1219,14 +1241,14 @@ export class Global {
   }
 
   // Documentation methods
-  async readDocFile(category: string, page: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
+  async readDocFile(category: string, page: string, language: string = 'en', basePath: string): Promise<{
     content?: string;
     error?: string;
   }> {
     return this.storageService.readDocFile(category, page, language, basePath);
   }
 
-  async searchDocs(query: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
+  async searchDocs(query: string, language: string = 'en', basePath: string): Promise<{
     results?: any[];
     total?: number;
     error?: string;
@@ -1265,17 +1287,14 @@ export class Global {
       }
     }
 
+    // Start with shallow copy of all top-level fields (future-proof - new fields automatically included)
+    // Then override specific fields that need special handling
     const pluginObject: PluginObject = {
-      uid: json.uid || this.generateUid(),
-      id: pluginId,
-      meta: {
-        name: json.name,
-        description: json.description,
-        author: json.author,
-        version: json.version,
-      },
-      tabs: convertedTabs,
-      data: dataArray
+      ...json,
+      uid: this.generateUid(),  // Always generate new uid (editor-only field)
+      id: pluginId,              // Use parameter (folder name) as id
+      tabs: convertedTabs,       // Use converted tabs
+      data: dataArray            // Use converted data
     };
 
     return pluginObject;

@@ -1,0 +1,908 @@
+/* Battle Screen Layout */
+.battle-screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  color: #f0f0f0;
+  gap: 16px;
+}
+
+.battle-no-data {
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+}
+
+/* Top Bar: Speed Controls + Initiative */
+.battle-top-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+/* Speed Controls */
+.speed-controls {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.speed-btn {
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f0f0f0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.speed-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.speed-btn.active {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.6);
+  color: rgba(234, 179, 8, 0.9);
+}
+
+/* Initiative Bar */
+.initiative-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  align-items: center;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.initiative-actor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.initiative-actor:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.initiative-actor:not(.active) {
+  opacity: 0.75;
+}
+
+.initiative-actor.active {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.8);
+}
+
+/* Turn Marker */
+.initiative-turn-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 48px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
+}
+
+.initiative-turn-marker.active {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.5);
+  color: rgba(234, 179, 8, 0.9);
+}
+
+/* Battle Arena - 3 columns */
+.battle-arena {
+  margin: auto;
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  align-items: flex-start;
+}
+
+/* Battle Grid */
+.battle-grid-wrapper {
+  flex-shrink: 0;
+}
+
+.battle-grid {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
+.battle-cell {
+  position: relative;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.battle-cell.has-character {
+  cursor: pointer;
+}
+
+.battle-cell.has-character:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.battle-cell.active-actor {
+  z-index: 3;
+}
+
+.grid-actor.active {
+  animation: active-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes active-pulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 12px 4px rgba(255, 255, 255, 0.5);
+  }
+
+  50% {
+    box-shadow: 0 0 22px 8px rgba(255, 255, 255, 0.7);
+  }
+}
+
+.empty-battle-cell {
+  width: 100%;
+  height: 100%;
+}
+
+/* Battle Center Column (Log) */
+.battle-center {
+  width: 300px;
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ability-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  font-size: 12px;
+  transition: opacity 0.2s;
+}
+
+.ability-chip.chosen {
+  border-color: rgba(234, 179, 8, 0.7);
+  box-shadow: 0 0 6px rgba(234, 179, 8, 0.4);
+}
+
+.ability-chip.disabled {
+  opacity: 0.35;
+}
+
+.ability-chip-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: cover;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.ability-chip-name {
+  white-space: nowrap;
+}
+
+.ability-chip-badge {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.cd-badge {
+  background: rgba(239, 68, 68, 0.3);
+  color: rgba(239, 68, 68, 0.9);
+}
+
+.charge-badge {
+  background: rgba(59, 130, 246, 0.3);
+  color: rgba(59, 130, 246, 0.9);
+}
+
+/* Battle Log */
+.battle-log {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.battle-log-header {
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 20px;
+  margin: auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.battle-log-entries {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 12px;
+}
+
+.battle-log-empty {
+  opacity: 0.5;
+  font-style: italic;
+  font-size: 13px;
+}
+
+/* Turn separator */
+.log-turn-separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.log-turn-separator::before,
+.log-turn-separator::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Actor block */
+.log-actor-block {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.log-actor-block.active {
+  background: rgba(234, 179, 8, 0.06);
+  box-shadow:
+    0 2px 8px rgba(234, 179, 8, 0.15),
+    0 4px 16px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(234, 179, 8, 0.12);
+}
+
+.log-actor-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.log-actor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.log-actor-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-actor-entries .ability-card {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.log-effects-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  border-left: 3px solid rgba(168, 85, 247, 0.5);
+}
+
+.log-effect-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.06);
+}
+
+/* Battle Result Banner (in log) */
+.log-battle-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.log-battle-result.victory {
+  background: radial-gradient(ellipse at center, rgba(66, 185, 131, 0.15) 0%, transparent 70%);
+}
+
+.log-battle-result.defeat {
+  background: radial-gradient(ellipse at center, rgba(239, 68, 68, 0.15) 0%, transparent 70%);
+}
+
+.log-battle-result.retreat {
+  background: radial-gradient(ellipse at center, rgba(234, 179, 8, 0.15) 0%, transparent 70%);
+}
+
+.log-battle-result-label {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  animation: result-glow 2s ease-in-out infinite;
+}
+
+.log-battle-result.victory .log-battle-result-label {
+  color: #42b983;
+  text-shadow: 0 0 20px rgba(66, 185, 131, 0.6), 0 0 40px rgba(66, 185, 131, 0.3);
+}
+
+.log-battle-result.defeat .log-battle-result-label {
+  color: #ef4444;
+  text-shadow: 0 0 20px rgba(239, 68, 68, 0.6), 0 0 40px rgba(239, 68, 68, 0.3);
+}
+
+.log-battle-result.retreat .log-battle-result-label {
+  color: #eab308;
+  text-shadow: 0 0 20px rgba(234, 179, 8, 0.6), 0 0 40px rgba(234, 179, 8, 0.3);
+}
+
+.log-battle-result-line {
+  width: 80%;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.log-battle-result.victory .log-battle-result-line {
+  background: linear-gradient(90deg, transparent, rgba(66, 185, 131, 0.6), transparent);
+}
+
+.log-battle-result.defeat .log-battle-result-line {
+  background: linear-gradient(90deg, transparent, rgba(239, 68, 68, 0.6), transparent);
+}
+
+.log-battle-result.retreat .log-battle-result-line {
+  background: linear-gradient(90deg, transparent, rgba(234, 179, 8, 0.6), transparent);
+}
+
+@keyframes result-glow {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Battle Controls */
+.battle-controls {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.battle-center-controls {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+  flex-shrink: 0;
+}
+
+.retreat-btn {
+  padding: 6px 24px;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(180, 40, 40, 0.25));
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: rgba(240, 200, 200, 0.9);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transition: all 0.2s;
+  backdrop-filter: blur(4px);
+}
+
+.retreat-btn:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(180, 40, 40, 0.4));
+  border-color: rgba(239, 68, 68, 0.7);
+  color: #f0f0f0;
+}
+
+.retreat-btn.retreating {
+  opacity: 0.5;
+  cursor: not-allowed;
+  font-style: italic;
+}
+
+/* Grid Actor Overlay */
+.grid-actor {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  background: rgba(20, 20, 30, 1);
+  border-radius: 8px;
+  overflow: visible;
+}
+
+.grid-actor-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.grid-actor-health {
+  margin: -2px;
+}
+
+/* Dead character visual */
+.grid-actor.dead {
+  filter: grayscale(0.8) brightness(0.5);
+  opacity: 0.6;
+}
+
+/* Defeated character in battle log — gray face but keep border color */
+.log-actor-block .defeated {
+  cursor: default;
+  pointer-events: none;
+}
+
+.log-actor-block .defeated .character-face-image,
+.log-actor-block .defeated .character-face-doll-container {
+  filter: grayscale(0.8);
+}
+
+/* Retreated character in battle log — sepia face, no click */
+.log-actor-block .retreated {
+  cursor: default;
+  pointer-events: none;
+}
+
+.log-actor-block .retreated .character-face-image,
+.log-actor-block .retreated .character-face-doll-container {
+  filter: sepia(0.7);
+}
+
+/* Clock-turn hourglass icon in battle log */
+.log-clock-turn-icon {
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+  background: url('assets/engine_assets/plugins/auto_battler/hourglass.png') center / contain no-repeat;
+  border-radius: 4px;
+}
+
+/* Target Highlights — ::after overlay on top of character */
+.battle-cell.target-primary-hostile::after,
+.battle-cell.target-aoe-hostile::after,
+.battle-cell.target-primary-friendly::after,
+.battle-cell.target-aoe-friendly::after,
+.battle-cell.target-primary-border::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.battle-cell.target-primary-hostile::after {
+  background: rgba(239, 68, 68, 0.3);
+  border: 3px solid rgba(239, 68, 68, 0.8);
+  box-shadow: inset 0 0 12px rgba(239, 68, 68, 0.4);
+}
+
+.battle-cell.target-aoe-hostile::after {
+  background: repeating-linear-gradient(45deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.15) 4px,
+      transparent 4px, transparent 8px);
+  border: 2px solid rgba(239, 68, 68, 0.4);
+}
+
+.battle-cell.target-primary-friendly::after {
+  background: rgba(66, 185, 131, 0.3);
+  border: 3px solid rgba(66, 185, 131, 0.8);
+  box-shadow: inset 0 0 12px rgba(66, 185, 131, 0.4);
+}
+
+.battle-cell.target-aoe-friendly::after {
+  background: repeating-linear-gradient(45deg, rgba(66, 185, 131, 0.15), rgba(66, 185, 131, 0.15) 4px,
+      transparent 4px, transparent 8px);
+  border: 2px solid rgba(66, 185, 131, 0.4);
+}
+
+.battle-cell.target-primary-border::after {
+  border: 2px solid rgba(66, 185, 131, 0.6);
+}
+
+/* Floating Combat Text */
+.floating-combat-text {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 6px;
+  font-size: 22px;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.floating-combat-text.status-apply {
+  color: var(--effect-token);
+  font-style: italic;
+}
+
+.floating-combat-icon {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.8));
+}
+
+b.retreat {
+  color: #eab308;
+}
+
+/* Battle result stats (inside log) */
+.log-battle-result-stats {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.log-battle-stat {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Continue button above log */
+.log-continue-btn {
+  width: 100%;
+  padding: 8px 16px;
+  background: rgba(66, 185, 131, 0.2);
+  border: none;
+  border-bottom: 1px solid rgba(66, 185, 131, 0.5);
+  color: #f0f0f0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.log-continue-btn:hover {
+  background: rgba(66, 185, 131, 0.4);
+  border-color: rgba(66, 185, 131, 0.8);
+}
+
+/* Token Icons on Grid Actor */
+.grid-actor-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px 0px;
+  justify-content: flex-start;
+  max-width: 100px;
+}
+
+.grid-actor-token {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.grid-actor-token.positive {
+  background: rgba(66, 185, 131, 0.4);
+  border: 1px solid rgba(66, 185, 131, 0.6);
+}
+
+.grid-actor-token.negative {
+  background: rgba(239, 68, 68, 0.4);
+  border: 1px solid rgba(239, 68, 68, 0.6);
+}
+
+.grid-actor-token.neutral {
+  background: rgba(168, 85, 247, 0.4);
+  border: 1px solid rgba(168, 85, 247, 0.6);
+}
+
+.token-icon {
+  width: 12px;
+  height: 12px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+
+.token-stacks {
+  min-width: 8px;
+  text-align: center;
+}
+
+.log-inline-icon {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+
+/* Projectile Orb */
+.battle-projectile {
+  position: fixed;
+  z-index: 50;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.battle-projectile.physical {
+  background-color: var(--dmg-physical);
+  box-shadow: 0 0 8px var(--dmg-physical), 0 0 16px var(--dmg-physical);
+}
+
+.battle-projectile.fire {
+  background-color: var(--dmg-fire);
+  box-shadow: 0 0 8px var(--dmg-fire), 0 0 16px var(--dmg-fire);
+}
+
+.battle-projectile.water {
+  background-color: var(--dmg-water);
+  box-shadow: 0 0 8px var(--dmg-water), 0 0 16px var(--dmg-water);
+}
+
+.battle-projectile.air {
+  background-color: var(--dmg-air);
+  box-shadow: 0 0 8px var(--dmg-air), 0 0 16px var(--dmg-air);
+}
+
+.battle-projectile.earth {
+  background-color: var(--dmg-earth);
+  box-shadow: 0 0 8px var(--dmg-earth), 0 0 16px var(--dmg-earth);
+}
+
+.battle-projectile.arcane {
+  background-color: var(--dmg-arcane);
+  box-shadow: 0 0 8px var(--dmg-arcane), 0 0 16px var(--dmg-arcane);
+}
+
+.battle-projectile.poison {
+  background-color: var(--dmg-poison);
+  box-shadow: 0 0 8px var(--dmg-poison), 0 0 16px var(--dmg-poison);
+}
+
+.battle-projectile.light {
+  background-color: var(--dmg-light);
+  box-shadow: 0 0 8px var(--dmg-light), 0 0 16px var(--dmg-light);
+}
+
+.battle-projectile.dark {
+  background-color: var(--dmg-dark);
+  box-shadow: 0 0 8px var(--dmg-dark), 0 0 16px var(--dmg-dark);
+}
+
+.battle-projectile.absolute {
+  background-color: var(--dmg-absolute);
+  box-shadow: 0 0 8px var(--dmg-absolute), 0 0 16px var(--dmg-absolute);
+}
+
+/* Token Bricks (injected into CharacterStatuses via slot) */
+.token-brick {
+  position: relative;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #888;
+  border-radius: 4px;
+  padding: 0.4rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 50px;
+}
+
+.token-brick:hover {
+  background: rgba(136, 136, 136, 0.15);
+  border-color: #aaa;
+}
+
+.token-brick.polarity-positive {
+  border-color: #42b983;
+}
+
+.token-brick.polarity-positive:hover {
+  background: rgba(66, 185, 131, 0.15);
+  border-color: #52c593;
+}
+
+.token-brick.polarity-negative {
+  border-color: #e74c3c;
+}
+
+.token-brick.polarity-negative:hover {
+  background: rgba(231, 76, 60, 0.15);
+  border-color: #ef5f50;
+}
+
+.token-brick.polarity-neutral {
+  border-color: #888;
+}
+
+.token-brick.has-image {
+  padding: 1px;
+  background: transparent;
+}
+
+.token-brick.has-image:hover {
+  background: transparent;
+}
+
+.token-brick-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.token-brick-name {
+  font-size: 0.8rem;
+  color: #ccc;
+  padding: 0.2rem 0.4rem;
+  white-space: nowrap;
+}
+
+.token-brick-stacks {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: #1a1a1a;
+  border: 1px solid #ffd700;
+  border-radius: 8px;
+  padding: 0 4px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: #ffd700;
+  line-height: 1.2;
+}
+
+.token-brick-duration {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #1a1a1a;
+  border: 1px solid #999;
+  border-radius: 8px;
+  padding: 0 4px;
+  font-size: 0.65rem;
+  color: #999;
+  line-height: 1.2;
+}
+
+/* Token Brick Popup */
+.token-brick-popup {
+  position: fixed;
+  z-index: 9999;
+  background: rgba(26, 26, 26, 0.98);
+  border: 2px solid #444;
+  border-radius: 8px;
+  padding: 12px;
+  width: 300px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  pointer-events: none;
+}
+
+.token-brick-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #555;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+
+.token-brick-popup-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: bold;
+  color: #e2c044;
+}
+
+.token-brick-popup-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.token-brick-popup-body {
+  font-size: 14px;
+}
+
+.token-brick-popup-desc {
+  margin: 0 0 6px 0;
+  color: #ccc;
+}
+
+.token-brick-popup-details {
+  display: flex;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+}

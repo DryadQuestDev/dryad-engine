@@ -25,6 +25,9 @@ import { AbilityTemplateObject } from "../../schemas/abilityTemplateSchema";
 // Type for the function that computes stats
 export type StatComputerFunction = (character: Character) => Record<string, number>;
 
+// Type for stat group resolver — returns stat tag names, engine builds groups
+export type StatGroupResolverFunction = (character: Character) => string[];
+
 
 export class CharacterSystem {
 
@@ -96,6 +99,9 @@ export class CharacterSystem {
   @Skip()
   public statComputersRegistry = new Map<string, StatComputerFunction>();
 
+  @Skip()
+  private statGroupResolver: StatGroupResolverFunction | null = null;
+
   // Populated Data
   @Populate(Character, { mode: 'merge' })
   public characters: Ref<Map<string, Character>> = ref(new Map());
@@ -105,6 +111,78 @@ export class CharacterSystem {
 
 
 
+
+  /**
+   * Merge two ability data objects (base + modifier) using type-aware logic.
+   * Numbers are summed, chooseMany arrays are concatenated and deduped, other fields use last-wins.
+   */
+  public mergeAbilityData(target: any, source: any): any {
+    // Normalize effects to Record format
+    const normalizeEffects = (effects: any): Record<string, any> => {
+      if (!effects) return {};
+      if (Array.isArray(effects)) {
+        const result: Record<string, any> = {};
+        for (const effect of effects) {
+          const normalized: any = { ...(effect.aspects || {}) };
+          if (effect.name) normalized.__name = effect.name;
+          result[effect.id] = normalized;
+        }
+        return result;
+      }
+      return effects;
+    };
+
+    const targetEffects = normalizeEffects(target.effects);
+    const sourceEffects = normalizeEffects(source.effects);
+
+    const result: any = {
+      meta: { ...(target.meta || {}), ...(source.meta || {}) },
+      effects: { ...targetEffects }
+    };
+
+    for (const effectId in sourceEffects) {
+      const sourceAspects = sourceEffects[effectId];
+
+      if (!result.effects[effectId]) {
+        result.effects[effectId] = { ...sourceAspects };
+      } else {
+        const targetAspects = result.effects[effectId];
+        const mergedAspects: any = { ...targetAspects };
+
+        for (const aspectKey in sourceAspects) {
+          const definition = this.abilityDefinitionsMap.get(aspectKey);
+          const sourceValue = sourceAspects[aspectKey];
+
+          if (!definition) {
+            mergedAspects[aspectKey] = sourceValue;
+            continue;
+          }
+
+          if (definition.type === 'number') {
+            mergedAspects[aspectKey] = (targetAspects[aspectKey] || 0) + sourceValue;
+          } else if (definition.type === 'chooseMany') {
+            const targetArr = Array.isArray(targetAspects[aspectKey])
+              ? targetAspects[aspectKey]
+              : (targetAspects[aspectKey] ? [targetAspects[aspectKey]] : []);
+            const sourceArr = Array.isArray(sourceValue) ? sourceValue : [sourceValue];
+            mergedAspects[aspectKey] = Array.from(new Set([...targetArr, ...sourceArr]));
+          } else if (definition.type === 'array') {
+            const targetArr = Array.isArray(targetAspects[aspectKey])
+              ? targetAspects[aspectKey]
+              : (targetAspects[aspectKey] ? [targetAspects[aspectKey]] : []);
+            const sourceArr = Array.isArray(sourceValue) ? sourceValue : [sourceValue];
+            mergedAspects[aspectKey] = [...targetArr, ...sourceArr];
+          } else {
+            mergedAspects[aspectKey] = sourceValue;
+          }
+        }
+
+        result.effects[effectId] = mergedAspects;
+      }
+    }
+
+    return result;
+  }
 
   public createCharacter(characterId: string, template: CharacterTemplateObject | string, skipEvents: boolean = false): Character {
     // console.log("createCharacter", characterId, template);
@@ -302,14 +380,16 @@ export class CharacterSystem {
       character = found;
     }
 
+    // remove from party first (fires character_leave_party, transfers items, reassigns selected_character)
+    if (this.partyIds.value.has(character.id)) {
+      this.removeFromParty(character);
+    }
+
     // delete private inventory
     let inv = character.getPrivateInventory();
     if (inv) {
       this.game.itemSystem.removeInventory(inv);
     }
-
-    // remove character from party
-    this.partyIds.value.delete(character.id);
 
     // delete character
     this.characters.value.delete(character.id);
@@ -366,6 +446,14 @@ export class CharacterSystem {
 
   public getStatComputer(key: string): StatComputerFunction | undefined {
     return this.statComputersRegistry.get(key);
+  }
+
+  public registerStatGroupResolver(resolver: StatGroupResolverFunction): void {
+    this.statGroupResolver = resolver;
+  }
+
+  public getStatGroupResolver(): StatGroupResolverFunction | null {
+    return this.statGroupResolver;
   }
 
 

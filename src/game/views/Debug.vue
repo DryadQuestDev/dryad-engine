@@ -12,6 +12,8 @@ const COMPONENT_ID = 'debug-panel';
 const global = Global.getInstance();
 const game = Game.getInstance();
 
+const expanded = useStorage('debug-panel-expanded', false);
+
 // Get debug menu options from unified registry
 const debugMenuOptions = computed(() => {
   return game.coreSystem.getComponentsBySlot('debug-tabs').map(tab => ({
@@ -53,14 +55,7 @@ function test() {
   game.getProperty('lewds')?.addCurrentValue(1);
 }
 
-// Check if in dev mode
-const isDevMode = computed(() => localStorage.getItem('devMode') === 'true');
-
 async function backToEditor() {
-  if (!isDevMode.value) {
-    global.addNotificationId('not_in_dev_mode');
-    return;
-  }
 
   try {
     // Auto-save to dev slot
@@ -86,8 +81,13 @@ async function backToEditor() {
   <div :id="COMPONENT_ID" class="debug-panel">
     <!--<Button label="Test" @click="test" class="mb-2" />-->
 
-    <!-- Back to Editor Button (only in dev mode) -->
-    <div v-if="isDevMode" class="back-to-editor-container">
+    <!-- Expand/Collapse Button -->
+    <button class="expand-button" @click="expanded = !expanded"
+      :title="expanded ? 'Collapse panel' : 'Expand panel full width'">
+      <i :class="expanded ? 'pi pi-chevron-right' : 'pi pi-chevron-left'"></i>
+    </button>
+
+    <div class="back-to-editor-container">
       <Button label="Back to Editor" icon="pi pi-arrow-left" @click="backToEditor" class="back-to-editor-button"
         severity="warning" />
     </div>
@@ -111,12 +111,13 @@ async function backToEditor() {
     </div>
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ activeTabId }" />
   </div>
 </template>
 
 <style scoped>
 .debug-panel {
+  position: relative;
   width: 100%;
   height: 100%;
   padding: 1rem;
@@ -128,6 +129,31 @@ async function backToEditor() {
 .debug-panel h1 {
   margin-top: 0;
   color: #42b983;
+}
+
+.expand-button {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e0e0e0;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #555;
+  z-index: 1;
+  transition: all 0.15s ease;
+}
+
+.expand-button:hover {
+  background: #d0d0d0;
+  border-color: #999;
+  color: #333;
 }
 
 .mb-2 {

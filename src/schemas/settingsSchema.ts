@@ -8,7 +8,7 @@ export const SettingsSchema = {
   default_value: { type: 'string', show: { type: ['string', 'number', 'boolean', 'chooseOne', 'chooseMany', 'color'] }, tooltip: 'Default value for this setting.' },
   values: { type: 'string[]', show: { type: ['chooseOne', 'chooseMany'] }, tooltip: 'Available options for dropdown or multi-select settings.' },
   label: { type: 'string', tooltip: 'Display label shown to users in the settings UI.' },
-  tooltip: { type: 'string', show: { type: ['string', 'number', 'boolean', 'chooseOne', 'chooseMany', 'color'] }, tooltip: 'Help text shown when hovering over the setting.' },
+  tooltip: { type: 'textarea', show: { type: ['string', 'number', 'boolean', 'chooseOne', 'chooseMany', 'color'] }, tooltip: 'Help text shown when hovering over the setting.' },
   order: { type: 'number', tooltip: 'Display order in the settings list (lower numbers appear first).' },
   localizeValues: { type: 'boolean', show: { type: ['chooseOne', 'chooseMany'] }, tooltip: 'If true, values will be localized using getString with pattern: id.value (e.g., typing_speed.slow).' },
 } as const satisfies Schema;

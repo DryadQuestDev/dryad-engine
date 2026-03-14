@@ -1,9 +1,10 @@
 {
   "id": "global_essentials",
   "name": "Essentials",
-  "description": "A global plugin that adds default traits for items and characters, as well as default fallback images for encounters. Don't turn off this plugin unless you know what you are doing.",
+  "description": "A global plugin that adds default traits for items and characters, default ability definitions as well as default fallback images for encounters. Don't turn off this plugin unless you know what you are doing.",
   "author": "Nekon",
-  "version": "0.0.2",
+  "version": "0.4.0",
+  "order": -9999999,
   "tabs": [],
   "data": {
     "character_traits": [
@@ -60,27 +61,27 @@
         "description": "Color of character's title"
       }
     ],
-    "properties" : [
-            {
-    "id": "colored_character_title",
-    "name": "Colored Character Title",
-    "type": "number",
-    "default_value_number": 1,
-    "description": "0 - 'title_color' character trait is not used\n1 - 'title_color' is used",
-    "max_value": 1,
-    "min_value": 0,
-    "uid": "6BasdasdRdrNSE6o8r"
-    },
+    "properties": [
       {
-    "id": "colored_character_text",
-    "name": "Colored Character Text",
-    "type": "number",
-    "default_value_number": 1,
-    "description": "0 - 'title_color' character trait is not used\n1 - 'title_color' is used for all text. \n2 - 'title_color' is used only for text inside quotes.",
-    "max_value": 2,
-    "min_value": 0,
-    "uid": "6BRdrNSE6o8r"
-    }
+        "id": "colored_character_title",
+        "name": "Colored Character Title",
+        "type": "number",
+        "default_value_number": 1,
+        "description": "0 - 'title_color' character trait is not used\n1 - 'title_color' is used",
+        "max_value": 1,
+        "min_value": 0,
+        "uid": "6BasdasdRdrNSE6o8r"
+      },
+      {
+        "id": "colored_character_text",
+        "name": "Colored Character Text",
+        "type": "number",
+        "default_value_number": 1,
+        "description": "0 - 'title_color' character trait is not used\n1 - 'title_color' is used for all text. \n2 - 'title_color' is used only for text inside quotes.",
+        "max_value": 2,
+        "min_value": 0,
+        "uid": "6BRdrNSE6o8r"
+      }
     ],
     "item_traits": [
       {
@@ -118,27 +119,82 @@
       }
     ],
     "item_properties": [
-    {
-      "id": "durability",
-      "name": "Durability",
-      "is_resource": true,
-      "description": "Item's durability",
-      "uid": "QNDtd9wRq0eS"
-    }
+      {
+        "id": "durability",
+        "name": "Durability",
+        "is_resource": true,
+        "description": "Item's durability",
+        "uid": "QNDtd9wRq0eS"
+      }
     ],
     "item_attributes": [
-    {
-    "id": "rarity",
-    "values": [
-      "common",
-      "uncommon",
-      "rare",
-      "epic",
-      "legendary"
+      {
+        "id": "rarity",
+        "values": [
+          "common",
+          "uncommon",
+          "rare",
+          "epic",
+          "legendary"
+        ],
+        "description": "Item rarity tier",
+        "uid": "rLfghb4Ukzjm"
+      }
     ],
-    "description": "Item rarity tier",
-    "uid": "rLfghb4Ukzjm"
-    }
+    "ability_definitions": [
+      {
+        "id": "name",
+        "role": "meta",
+        "type": "string",
+        "description": "Display name of the ability shown in UI",
+        "uid": "GeDfAbName"
+      },
+      {
+        "id": "icon",
+        "role": "meta",
+        "type": "image",
+        "description": "Icon image displayed for the ability",
+        "uid": "GeDfAbIcon"
+      },
+      {
+        "id": "description",
+        "role": "meta",
+        "type": "htmlarea",
+        "description": "Player-facing description of the ability",
+        "uid": "GeDfAbDesc"
+      },
+      {
+        "id": "cooldown",
+        "role": "meta",
+        "type": "number",
+        "description": "Turns before ability can be used again",
+        "uid": "GeDfAbCooldown"
+      },
+      {
+        "id": "costs",
+        "role": "meta",
+        "type": "schema",
+        "objects": {},
+        "fromFile": "character_stats",
+        "fromFileType": "number",
+        "fromFileTypeAnd": "{ \"is_resource\": true }",
+        "description": "Resource costs {stat_id: amount}",
+        "uid": "GeDfAbCosts"
+      },
+      {
+        "id": "is_hidden",
+        "role": "meta",
+        "type": "boolean",
+        "description": "Hide this ability from UI (character sheet, battle log)",
+        "uid": "GeDfAbHidden"
+      },
+      {
+        "id": "is_basic",
+        "role": "meta",
+        "type": "boolean",
+        "description": "Marks this as the character's basic attack, replaced by damage polarity",
+        "uid": "GeDfAbIsBasic"
+      }
     ],
     "dev/encounters_default": [
       {
@@ -192,6 +248,18 @@
       {
         "id": "world",
         "image": "assets/engine_assets/encounters/default/world.png"
+      }
+    ],
+    "locale": [
+      {
+        "id": "group.resources",
+        "val": "Resources",
+        "uid": "GeDfGrpRes"
+      },
+      {
+        "id": "group.stats",
+        "val": "Stats",
+        "uid": "GeDfGrpStats"
       }
     ]
   }

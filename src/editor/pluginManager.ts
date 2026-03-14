@@ -33,7 +33,7 @@ export class PluginManager {
         return currentSchema;
     }
 
-    private async getAllPlugins(basePath: string): Promise<Array<{ value: string, label: string }>> {
+    private async getAllPlugins(basePath: string): Promise<Array<{ value: string, label: string, order: number }>> {
 
         // 1. fetch a list of global plugins
         const plugins = await Global.getInstance().listFolders(`engine_files/plugins`);
@@ -59,7 +59,7 @@ export class PluginManager {
         }
 
         // 5. Create options array with labels by loading plugin.json for each plugin
-        const allPlugins: Array<{ value: string, label: string }> = [];
+        const allPlugins: Array<{ value: string, label: string, order: number }> = [];
 
         for (const pluginId of allPluginIds) {
             let label: string;
@@ -104,9 +104,10 @@ export class PluginManager {
                 //console.log(`[PluginManager] Using formatted ID for ${pluginId}: ${label}`);
             }
 
-            allPlugins.push({ value: pluginId, label });
+            allPlugins.push({ value: pluginId, label, order: pluginJson?.order || 0 });
         }
 
+        allPlugins.sort((a, b) => a.order - b.order);
         return allPlugins;
     }
 
@@ -164,7 +165,10 @@ export class PluginManager {
         }
         //console.log('[PluginManager] Plugins:', this.plugins.value);
 
-        // 3. init plugin tabs
+        // 3. Sort plugins by order before creating tabs
+        this.plugins.value.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        // 4. init plugin tabs
         await this.initPluginTabs();
 
     }
@@ -277,7 +281,7 @@ export class PluginManager {
 
             let tab: EditorTab = {
                 id: plugin.id,
-                name: plugin.meta?.name && plugin.meta.name.trim() !== '' ? plugin.meta.name : plugin.id,
+                name: plugin.name && plugin.name.trim() !== '' ? plugin.name : plugin.id,
                 subtabs: subtabs,
             };
             this.pluginTabs.value.push(tab);
@@ -341,17 +345,14 @@ export class PluginManager {
             }
         }
 
+        // Start with shallow copy of all top-level fields (future-proof - new fields automatically included)
+        // Then override specific fields that need special handling
         const pluginObject: PluginObject = {
-            uid: json.uid || this.generateUid(),
-            id: pluginId,
-            meta: {
-                name: json.name,
-                description: json.description,
-                author: json.author,
-                version: json.version,
-            },
-            tabs: convertedTabs,
-            data: dataArray
+            ...json,
+            uid: this.generateUid(),  // Always generate new uid (editor-only field)
+            id: pluginId,              // Use parameter (folder name) as id
+            tabs: convertedTabs,       // Use converted tabs
+            data: dataArray            // Use converted data
         };
 
         //console.log('[PluginManager] Converted plugin:', pluginId, JSON.stringify(pluginObject, null, 2));
@@ -363,30 +364,29 @@ export class PluginManager {
      * Converts PluginObject (new format) back to plugin.json format (old format)
      */
     private convertPluginObjectToJson(pluginObject: PluginObject): any {
-        // Convert tabs schema from array format back to object format
-        const convertedTabs = (pluginObject.tabs || []).map((tab: any) => {
-            if (tab.schema && Array.isArray(tab.schema)) {
-                // Convert schema from array to object format
-                const schemaObject: any = {};
-                tab.schema.forEach((prop: any) => {
-                    const { propertyId, id, uid, ...schemaDef } = prop;
-                    if (propertyId) {
-                        schemaObject[propertyId] = schemaDef;
-                    }
-                });
-                return { ...tab, schema: schemaObject };
-            }
-            return tab;
-        });
+        // Start with shallow copy of all top-level fields (future-proof - new fields automatically included)
+        const json: any = { ...pluginObject };
 
-        const json: any = {
-            id: pluginObject.id,
-            name: pluginObject.meta?.name,
-            description: pluginObject.meta?.description,
-            author: pluginObject.meta?.author,
-            version: pluginObject.meta?.version,
-            tabs: convertedTabs
-        };
+        // Remove editor-only field
+        delete json.uid;
+
+        // Convert tabs schema from array format back to object format
+        if (pluginObject.tabs && Array.isArray(pluginObject.tabs)) {
+            json.tabs = pluginObject.tabs.map((tab: any) => {
+                if (tab.schema && Array.isArray(tab.schema)) {
+                    // Convert schema from array to object format
+                    const schemaObject: any = {};
+                    tab.schema.forEach((prop: any) => {
+                        const { propertyId, id, uid, ...schemaDef } = prop;
+                        if (propertyId) {
+                            schemaObject[propertyId] = schemaDef;
+                        }
+                    });
+                    return { ...tab, schema: schemaObject };
+                }
+                return tab;
+            });
+        }
 
         // Convert data from array format back to object format
         // From: [{ fileName: "character_properties", fileData: "[...]" }]

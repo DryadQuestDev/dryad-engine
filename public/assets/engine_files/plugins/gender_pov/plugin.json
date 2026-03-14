@@ -1,0 +1,169 @@
+{
+  "id": "gender_pov",
+  "name": "Gender & POV",
+  "author": "Nekon",
+  "version": "1.0.0",
+  "order": -5,
+  "scripts": [
+    "main.mjs"
+  ],
+  "tabs": [],
+  "data": {
+    "character_attributes": [
+      {
+        "uid": "attr_gender",
+        "id": "gender",
+        "values": [
+          "male",
+          "female"
+        ]
+      }
+    ],
+    "game_settings": [
+      {
+        "id": "point_of_view",
+        "type": "chooseOne",
+        "default_value": "1st",
+        "label": "Point of View",
+        "tooltip": "Determines if the scene descriptions will use 1st person POV (I do, they do it to me) or 2nd person POV (you do, they do it to you)",
+        "uid": "QeKyxEYW5htT",
+        "values": [
+          "1st",
+          "2nd"
+        ]
+      }
+    ],
+    "locale": [
+      {
+        "id": "he",
+        "val": "he",
+        "uid": "pRn01He"
+      },
+      {
+        "id": "she",
+        "val": "she",
+        "uid": "pRn02She"
+      },
+      {
+        "id": "his",
+        "val": "his",
+        "uid": "pRn03His"
+      },
+      {
+        "id": "her",
+        "val": "her",
+        "uid": "pRn04Her"
+      },
+      {
+        "id": "him",
+        "val": "him",
+        "uid": "pRn05Him"
+      },
+      {
+        "id": "himself",
+        "val": "himself",
+        "uid": "pRn06Hslf"
+      },
+      {
+        "id": "herself",
+        "val": "herself",
+        "uid": "pRn07Hrlf"
+      },
+      {
+        "id": "He",
+        "val": "He",
+        "uid": "pRn08HeCp"
+      },
+      {
+        "id": "She",
+        "val": "She",
+        "uid": "pRn09ShCp"
+      },
+      {
+        "id": "His",
+        "val": "His",
+        "uid": "pRn10HsCp"
+      },
+      {
+        "id": "Her",
+        "val": "Her",
+        "uid": "pRn11HrCp"
+      },
+      {
+        "id": "Him",
+        "val": "Him",
+        "uid": "pRn12HmCp"
+      },
+      {
+        "id": "Himself",
+        "val": "Himself",
+        "uid": "pRn13HsCp"
+      },
+      {
+        "id": "Herself",
+        "val": "Herself",
+        "uid": "pRn14HrCp"
+      },
+      {
+        "id": "he's",
+        "val": "he's",
+        "uid": "pRn15Hes"
+      },
+      {
+        "id": "she's",
+        "val": "she's",
+        "uid": "pRn16Shes"
+      },
+      {
+        "id": "he'd",
+        "val": "he'd",
+        "uid": "pRn17Hed"
+      },
+      {
+        "id": "she'd",
+        "val": "she'd",
+        "uid": "pRn18Shed"
+      },
+      {
+        "id": "he'll",
+        "val": "he'll",
+        "uid": "pRn19Hell"
+      },
+      {
+        "id": "she'll",
+        "val": "she'll",
+        "uid": "pRn20Shell"
+      },
+      {
+        "id": "He's",
+        "val": "He's",
+        "uid": "pRn21HesCp"
+      },
+      {
+        "id": "She's",
+        "val": "She's",
+        "uid": "pRn22ShesCp"
+      },
+      {
+        "id": "He'd",
+        "val": "He'd",
+        "uid": "pRn23HedCp"
+      },
+      {
+        "id": "She'd",
+        "val": "She'd",
+        "uid": "pRn24ShedCp"
+      },
+      {
+        "id": "He'll",
+        "val": "He'll",
+        "uid": "pRn25HellCp"
+      },
+      {
+        "id": "She'll",
+        "val": "She'll",
+        "uid": "pRn26ShellCp"
+      }
+    ]
+  }
+}

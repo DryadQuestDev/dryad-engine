@@ -20,6 +20,7 @@ import { AssetObject } from '../../schemas/assetSchema';
 import { InitSystem, CORE_EMITTER_SIGNATURES } from './initSystem';
 import ShortUniqueId from 'short-unique-id';
 import { PropertyObject } from '../../schemas/propertySchema';
+import { LocaleObject } from '../../schemas/localeSchema';
 
 export type CustomComponent = {
   id: string;
@@ -47,6 +48,12 @@ type GenericEmitterTaskPayload = {
     timestamp?: number;   // When registered (Date.now())
   };
 };
+
+export type SaveOptions = {
+  hidden?: boolean;
+  forceSave?: boolean;
+  noNotification?: boolean;
+}
 
 // EmitterMap is derived from CORE_EMITTER_SIGNATURES for strict type checking.
 // It ensures that EmitterMap perfectly reflects the defined core emitters.
@@ -481,7 +488,7 @@ export class CoreSystem {
   }
 
   // ignore types
-  public generateSaveMetaData(gameManifest: ManifestObject, modsManifests: ManifestObject[], options?: { hidden?: boolean }): any {
+  public generateSaveMetaData(gameManifest: ManifestObject, modsManifests: ManifestObject[], options?: SaveOptions): any {
     const currentTime = Date.now();
 
     // If the user is currently active, add the ongoing active segment to playtime
@@ -876,14 +883,14 @@ export class CoreSystem {
   /**
    * Save the current game state to IndexedDB.
    */
-  public async saveGame(game: any, saveName: string, options?: { hidden?: boolean }) {
+  public async saveGame(game: any, saveName: string, options?: SaveOptions) {
     const gameId = this.gameManifest?.id;
     if (!gameId) {
       gameLogger.error('Game ID is not set - cannot save game');
       return;
     }
 
-    if (this.isSaveDisabled()) {
+    if (!options?.forceSave && this.isSaveDisabled()) {
       gameLogger.warn('Save is disabled - cannot save game');
       return;
     }
@@ -903,7 +910,7 @@ export class CoreSystem {
       await this.indexedDbSaveService.save(gameId, saveName, dataToStore);
       // Debug: console.log(`Saved game ${gameId} as ${saveName}:`, dataToStore);
       gameLogger.success(`Game saved: ${saveName}`);
-      if (!options?.hidden) {
+      if (!options?.hidden && !options?.noNotification) {
         globalService.addNotification('Game saved: ' + saveName);
       }
     } catch (error) {
@@ -1012,6 +1019,10 @@ export class CoreSystem {
   public isSaveDisabled(): boolean {
     return this.getState('replay_mode') || this.getState('disable_saves');
   }
+
+  // Locale system
+  @Skip()
+  public localeMap!: Map<string, LocaleObject>;
 
   // Gallery system
   @Skip()

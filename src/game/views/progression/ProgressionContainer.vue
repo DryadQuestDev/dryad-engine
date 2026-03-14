@@ -50,15 +50,14 @@ function closeProgression() {
     </div>
 
     <div class="tab-content" v-if="activeTabPayload">
-      <component
-        :is="activeTabPayload.component"
+      <component :is="activeTabPayload.component"
         :character="activeTabPayload.id === 'character' ? game.characterSystem.selectedCharacter.value : undefined"
-        v-bind="activeTabPayload.props"
-      />
+        v-bind="activeTabPayload.props" />
     </div>
 
     <!-- Custom components injected to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID"
+      :context="{ activeTab: activeTabPayload, selectedCharacter: game.characterSystem.selectedCharacter.value }" />
   </div>
 
 
@@ -81,6 +80,8 @@ function closeProgression() {
 
 .tab-content {
   height: 100%;
+  /*overflow: auto;*/
+  padding-bottom: 30px;
 }
 
 .progression-header {

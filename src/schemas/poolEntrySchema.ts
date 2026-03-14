@@ -18,6 +18,8 @@ export const PoolEntrySchema = {
       weight: { type: 'number', defaultValue: 1, tooltip: 'Relative weight for weight mode (any positive number).' },
       chance: { type: 'number', defaultValue: 50, min: 0, max: 100, tooltip: 'Percentage chance (0-100) for chance mode.' },
       count: { type: 'number', defaultValue: 1, tooltip: 'How many items to draw.' },
+      delta: { type: 'number', defaultValue: 0, tooltip: 'Random variation applied to count. Final count = count ± delta (uniform).' },
+      unique: { type: 'boolean', tooltip: 'If true, drawn items cannot repeat within this entity group. Overrides the draw-level unique setting when set.' },
       filters_include: {
         type: 'schema',
         tooltip: 'Include items matching these criteria.',

@@ -126,6 +126,12 @@ if [ -d "dist/assets/engine_assets/test" ]; then
     rm -rf dist/assets/engine_assets/test
 fi
 
+# Delete backup folder
+if [ -d "dist/assets/backup" ]; then
+    echo "Removing backup folder..."
+    rm -rf dist/assets/backup
+fi
+
 # Step 5: Restore backup to dist/assets
 if [ -d "temp/games_assets" ]; then
     echo "Restoring games_assets from backup..."

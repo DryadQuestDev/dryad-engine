@@ -430,6 +430,27 @@ export class Inventory {
         this.items = this.items.filter(i => i !== item);
     }
 
+    /**
+     * Reduce item quantity by amount. Removes item if quantity reaches 0.
+     * @returns actual amount reduced
+     */
+    public reduceItemQuantity(item: Item, amount: number = 1): number {
+        const reduced = Math.min(item.quantity, amount);
+        item.quantity -= reduced;
+        if (item.quantity <= 0) {
+            this.removeItem(item);
+        }
+        return reduced;
+    }
+
+    /**
+     * Remove all unequipped items from the inventory.
+     * Equipped items are not affected.
+     */
+    public clear(): void {
+        this.items = this.items.filter(i => i.isEquipped);
+    }
+
     public getFirstItemById(id: string): Item | null {
         return this.items.find(i => i.id === id) || null;
     }

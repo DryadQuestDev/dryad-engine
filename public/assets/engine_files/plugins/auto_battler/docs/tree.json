@@ -1,0 +1,19 @@
+{
+  "guide": [
+    "overview",
+    "grid_formation",
+    "battle_flow",
+    "damage_formula",
+    "tokens",
+    "abilities",
+    "ai",
+    "autocasts"
+  ],
+  "reference": [
+    "emitters",
+    "actions",
+    "conditions",
+    "services",
+    "components"
+  ]
+}

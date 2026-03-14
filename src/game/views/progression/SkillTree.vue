@@ -6,7 +6,7 @@ import { Global, ARROWHEAD_SIZE } from '../../../global/global';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { getShapePath, getShapeEdgePoint, getArrowPath, ShapeType, getArrowheadPath } from '../../../utility/shapes';
 import BackgroundAsset from '../BackgroundAsset.vue';
-import StatusStatsDisplay from './StatusStatsDisplay.vue';
+import StatusObjectDisplay from './StatusObjectDisplay.vue';
 import SkillSlot from './SkillSlot.vue';
 import { isSkillVisible, isSkillDisabledByParams } from './useSkillParams';
 import type { SkillTreeObject } from '../../../schemas/skillTreeSchema';
@@ -640,15 +640,13 @@ watch(() => props.character, () => {
         <span>Level: {{ getLearnedSkillLevelBySlotId(hoveredSkill.slotId) }} / {{
           hoveredSkill.skillSlot.max_upgrade_level
           || 1
-          }}</span>
+        }}</span>
       </div>
 
-      <!-- Stats (from status) -->
-      <div v-if="popupSkillData.status?.stats" class="popup-stats">
-        <StatusStatsDisplay :stats="popupSkillData.status.stats"
-          :multiplier="getLearnedSkillLevelBySlotId(hoveredSkill.slotId) || undefined"
-          :isActive="getLearnedSkillLevelBySlotId(hoveredSkill.slotId) > 0" />
-      </div>
+      <!-- Stats & Abilities (from status) -->
+      <StatusObjectDisplay v-if="popupSkillData.status" :data="popupSkillData.status"
+        :multiplier="getLearnedSkillLevelBySlotId(hoveredSkill.slotId) || undefined"
+        :isActive="getLearnedSkillLevelBySlotId(hoveredSkill.slotId) > 0" />
 
       <!-- Currency Price Display (only show if not maxed) -->
       <div
@@ -894,7 +892,6 @@ watch(() => props.character, () => {
   border: 1px solid #42b983;
   border-radius: 8px;
   padding: 16px;
-  max-width: 300px;
   color: #fff;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
@@ -935,7 +932,6 @@ watch(() => props.character, () => {
   font-weight: bold;
 }
 
-.popup-stats,
 /* Popup Currency Display */
 .popup-currency {
   margin-bottom: 12px;

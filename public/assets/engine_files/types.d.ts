@@ -92,6 +92,10 @@ interface GameEvents {
   item_unequip_before: (item: Item, character: Character) => boolean | void;
   /** Triggered after an item is unequipped */
   item_unequip_after: (item: Item, character: Character) => boolean | void;
+  /** Triggered before an item is consumed (return false to cancel) */
+  item_consume_before: (item: Item, character: Character) => boolean | void;
+  /** Triggered after an item is consumed */
+  item_consume_after: (item: Item, character: Character) => boolean | void;
 
   // Inventory Events
   /** Triggered when an inventory is opened */
@@ -276,6 +280,15 @@ interface DungeonData {
   isEventVisited(eventId: string): boolean;
 }
 
+interface SaveOptions {
+  /** Exclude from save list UI */
+  hidden?: boolean;
+  /** Bypass isSaveDisabled() check (for autosave) */
+  forceSave?: boolean;
+  /** Suppress "Game saved" notification toast */
+  noNotification?: boolean;
+}
+
 interface Game {
   /**
    * Will be set to false when a game is loaded from a save file.
@@ -316,7 +329,7 @@ interface Game {
    * @param saveName - Name of the save file
    * @param options - Optional save options (e.g., hidden to hide from save list)
    */
-  saveGame(saveName: string, options?: { hidden?: boolean }): Promise<void>;
+  saveGame(saveName: string, options?: SaveOptions): Promise<void>;
 
   /**
    * Save the current game state to a downloadable JSON file.
@@ -475,6 +488,49 @@ interface Game {
    * game.clearComponentSlot('debug-tabs');
    */
   clearComponentSlot(slot: string): void;
+
+  /**
+   * Register a reusable component to window.engine.components.
+   * Allows plugins to share components with other plugins and game scripts.
+   * @param name - Component name (used as key in window.engine.components)
+   * @param component - The Vue component to register
+   * @example
+   * // In plugin main.mjs
+   * const MyGrid = defineComponent({ ... });
+   * game.registerComponent('MyGrid', MyGrid);
+   *
+   * // Other scripts can now use it
+   * const { MyGrid } = window.engine.components;
+   */
+  registerComponent(name: string, component: any): void;
+
+  /**
+   * Get a registered component by name.
+   * @param name - Component name
+   * @returns The Vue component or undefined if not found
+   * @example
+   * const CharacterFace = game.getComponent('CharacterFace');
+   */
+  getComponent(name: string): any;
+
+  // ============================================
+  // Service Registry
+  // ============================================
+
+  /**
+   * Register a named service for cross-script sharing.
+   * Plugins use this to expose utilities to game scripts.
+   * @example
+   * game.registerService('my_service', { greet: (name) => `Hello ${name}` });
+   */
+  registerService(id: string, service: any): void;
+
+  /**
+   * Get a registered service by ID. Returns undefined if not found.
+   * @example
+   * const { greet } = game.getService('my_service');
+   */
+  getService(id: string): any;
 
   // ============================================
   // State Management
@@ -1038,6 +1094,52 @@ interface Game {
   useStore<T = any>(id: string, key?: string): import('vue').ComputedRef<T | undefined>;
 
   // ============================================
+  // Settings
+  // ============================================
+
+  /**
+   * Get an engine-level setting value. These are shared across all games and persisted to browser localStorage.
+   * Built-in keys: music_volume, sound_volume, font_size, typing_speed.
+   * @param key - Setting ID
+   * @example
+   * const volume = game.getEngineSetting('music_volume');
+   */
+  getEngineSetting(key: string): any;
+
+  /**
+   * Set an engine-level setting value. Automatically persisted to browser localStorage.
+   * @param key - Setting ID
+   * @param value - New value
+   * @example
+   * game.setEngineSetting('music_volume', 50);
+   */
+  setEngineSetting(key: string, value: any): void;
+
+  /**
+   * Get a per-game setting value. Game settings are defined in game_settings.json via the editor.
+   * @param key - Setting ID
+   * @example
+   * const difficulty = game.getGameSetting('difficulty');
+   */
+  getGameSetting(key: string): any;
+
+  /**
+   * Set a per-game setting value. Persisted in save files.
+   * @param key - Setting ID
+   * @param value - New value
+   * @example
+   * game.setGameSetting('difficulty', 'hard');
+   */
+  setGameSetting(key: string, value: any): void;
+
+  // ============================================
+  // Plugin System
+  // ============================================
+
+  /** Get the resolved base path for a plugin (e.g. "games_files/my_game/_core/plugins/my_plugin"). Returns null if not found. */
+  getPluginPath(pluginId: string): string | null;
+
+  // ============================================
   // Data Access
   // ============================================
 
@@ -1067,7 +1169,7 @@ interface Game {
    * // Plugin data
    * const pluginData = game.getData("plugins_data/my_plugin/my_schema");
    */
-  getData(filePath: string, noCopy?: boolean): Map<string, any> | undefined;
+  getData(filePath: string, noCopy?: boolean): any;
 
   /**
    * Get a global property by ID.
@@ -1087,11 +1189,14 @@ interface Game {
    *
    * @param entry - Pool entry ID (string) or custom entry object
    * @param settings - Optional draw settings
-   * @returns Array of template IDs drawn from the pool
+   * @returns Array of { id, quantity } results — duplicates are stacked
    *
    * @example
    * // Basic usage - draw from a predefined pool entry
-   * const items = game.drawFromPool('common_loot');
+   * const results = game.drawFromPool('common_loot');
+   * for (const r of results) {
+   *   console.log(r.id, r.quantity); // e.g. 'iron_sword', 2
+   * }
    *
    * @example
    * // Multiple draws with unique results
@@ -1130,7 +1235,7 @@ interface Game {
    *   }]
    * });
    */
-  drawFromPool(entry: string | PoolEntry, settings?: PoolSettings): string[];
+  drawFromPool(entry: string | PoolEntry, settings?: PoolSettings): PoolDrawResult[];
 
   /**
    * Draw items from a collection based on random selection.
@@ -1231,6 +1336,35 @@ interface Game {
   registerPlaceholder(id: string, func: Function): void;
 
   /**
+   * Register a narrative state evaluator. States are defined in the editor
+   * (Narrative > States). Each state has a mode: **gate** (hard filter — mismatch
+   * eliminates the segment) or **identity** (soft preference — match adds specificity).
+   *
+   * @param id - State ID (must match a state defined in the editor)
+   * @param evaluator - Function that returns the current state value.
+   *   Return type depends on the state type:
+   *   - boolean: return boolean
+   *   - number: return number (exact match)
+   *   - range: return number (checked against segment's min/max)
+   *   - chooseOne: return string (exact match)
+   *   - chooseMany: return string[] (gate: must include ALL; identity: per-overlap scoring)
+   *
+   * @example
+   * // Boolean state — segment shows only when there's a leader
+   * game.registerNarrativeState("has_leader", () => leaderId != null);
+   *
+   * // Range state — segment's min/max checked against this value
+   * game.registerNarrativeState("troop_size", () => troopIds.length);
+   *
+   * // chooseMany state — identity mode scores per overlapping tag
+   * game.registerNarrativeState("faction_culture", () => {
+   *     const faction = factionsData.get(currentFactionId);
+   *     return faction?.culture_tags || [];
+   * });
+   */
+  registerNarrativeState(id: string, evaluator: Function): void;
+
+  /**
    * Register a stat computer function.
    * Stat computers calculate derived stat values based on other stats.
    * @param key - Stat property key
@@ -1253,6 +1387,21 @@ interface Game {
    * }
    */
   getStatComputer(key: string): Function | undefined;
+
+  /**
+   * Register a function that controls which stat groups appear in the character sheet.
+   * The resolver receives a character and returns an array of stat tag names.
+   * The engine builds groups by filtering stats that have each tag, sorts them by order,
+   * and resolves group display names from locale key `group.{tag}`.
+   * @param resolver - Function that receives a Character and returns stat tag names to display
+   * @example
+   * game.registerStatGroupResolver((character) => {
+   *   const tags = ['combat', 'survival'];
+   *   if (character.tags.includes('mc')) tags.push('breeding');
+   *   return tags;
+   * });
+   */
+  registerStatGroupResolver(resolver: (character: Character) => string[]): void;
 
   /**
    * Execute a list of actions.
@@ -1281,6 +1430,14 @@ interface Game {
   /**
    * Resolve a text string with placeholders, conditionals, and inline actions.
    * Processes |placeholder|, if{} blocks, templates, and {action} objects.
+   *
+   * Built-in placeholders: |flag(id)|, |property(id)|, |item(uid, invId)|,
+   * |from(localeId)| — fetches a locale entry and resolves it through the full pipeline.
+   * |pick(baseId)| — like from(), but randomly selects from numbered variants (baseId, baseId_2, baseId_3, ...).
+   * Both support inline params with key->value syntax: |from(greeting, name->Alice)|
+   *
+   * Narrative slots: |@slotId| — resolves a narrative slot by selecting the best matching segment.
+   *
    * @param input - The text string to resolve
    * @param noExecuteActions - If true, parses but doesn't execute inline actions
    * @returns Object with resolved output string and accumulated actions
@@ -1288,10 +1445,71 @@ interface Game {
    * const result = game.resolveString('Hello |player_name|! if{gold > 100}You are rich!fi{}');
    * console.log(result.output); // "Hello Alice! You are rich!"
    *
+   * // Compose from locale templates
+   * const { output } = game.resolveString('|from(breed_scene, faction->Fae)|');
+   *
    * // Parse without executing
    * const { output, actions } = game.resolveString('{heal: 10} You feel better.', true);
+   *
+   * // Resolve a narrative slot
+   * const text = game.resolveString("|@approach|").output;
    */
   resolveString(input: string, noExecuteActions?: boolean): { output: string; actions: Record<string, any> };
+
+  /**
+   * Build auto-generated description lines for an ability's effects.
+   * Uses ingame_description templates from ability definitions.
+   * [v] = aspect value, [other_id] = sibling aspect value in same effect.
+   * Values from fromFile definitions are resolved to display names via ingame_description_ref.
+   * @param abilityIdOrData - Ability template ID, or raw { meta, effects } data object
+   * @param characterId - Optional character ID to get merged ability data (with modifiers). Ignored when raw data is passed.
+   * @param isFlat - If true, returns a flat string[] instead of grouped objects
+   * @returns Array of effect objects with name and lines, or flat string[] if isFlat=true
+   * @example
+   * // Grouped by effect (default)
+   * const effects = game.buildAbilityEffectsDescription("fireball", "player");
+   * // [
+   * //   { name: "Fire Strike", lines: ["Deal 50 fire damage"] },
+   * //   { name: "Burn", lines: ["30% chance", "Deal 10 fire damage", "Apply Burning"] }
+   * // ]
+   *
+   * // Flat list (names dropped)
+   * const flat = game.buildAbilityEffectsDescription("fireball", "player", true);
+   * // ["Deal 50 fire damage", "30% chance", "Deal 10 fire damage", "Apply Burning"]
+   */
+  buildAbilityEffectsDescription(abilityIdOrData: string | { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }, characterId?: string, isFlat?: boolean, baseData?: { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }): { name?: string, lines: string[] }[] | string[];
+
+  /**
+   * Build player-facing description lines for an ability's meta fields (range, charges, requirements).
+   * Only includes meta fields that have `ingame_description` defined in ability_definitions.
+   * @param abilityIdOrData - Ability template ID, or raw { meta, effects } data object
+   * @param characterId - Optional character ID to get merged ability data (with modifiers). Ignored when raw data is passed.
+   * @returns Array of HTML description lines
+   * @example
+   * const meta = game.buildAbilityMetaDescription("fireball", "player");
+   * // ["Range: <b>3</b>", "Charges: <b>2</b>"]
+   */
+  buildAbilityMetaDescription(abilityIdOrData: string | { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }, characterId?: string, baseData?: { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }): string[];
+
+  /**
+   * Merge two ability data objects (base + modifier) using type-aware logic.
+   * Numbers are summed, chooseMany arrays are concatenated and deduped, other fields use last-wins.
+   * @param base - Base ability data (e.g., from ability template)
+   * @param modifier - Modifier data (e.g., from a status's ability_modifiers)
+   * @returns Merged ability data with { meta, effects } shape
+   */
+  mergeAbilityData(base: any, modifier: any): { meta: Record<string, any>, effects: Record<string, Record<string, any>> };
+
+  /**
+   * Get a localized string by ID with placeholder substitution.
+   * Looks up locale entry and replaces |placeholder| tokens with provided params.
+   * Returns [lineId] if no locale entry found.
+   * @param lineId - Locale entry ID
+   * @param params - Placeholder values (e.g., { count: 5 } replaces |count|)
+   * @example
+   * game.getLine('welcome_message', { playerName: 'Alice' })
+   */
+  getLine(lineId: string, params?: Record<string, any>): string;
 
   // ============================================
   // Miscellaneous
@@ -1386,8 +1604,8 @@ interface Character {
   /** Equipment slots on this character */
   itemSlots: ItemSlot[];
 
-  /** Status effects currently applied to this character */
-  statuses: Status[];
+  /** Status effects currently applied to this character. Use getStatuses() to iterate. */
+  statuses: Map<string, Status>;
 
   /** Character traits (key-value pairs for custom data) */
   traits: Record<string, any>;
@@ -1516,6 +1734,8 @@ interface Character {
 
   /**
    * Equip an item to this character.
+   * If the item is already equipped, logs an error and does nothing.
+   * If the item is not in the character's inventory, it is automatically added first.
    * @param item - The item to equip (Item instance or uid string)
    * @param slotId - Optional: specific slot type to equip to
    * @param slotIndex - Optional: specific slot index (when multiple slots of same type exist)
@@ -1524,6 +1744,10 @@ interface Character {
    * character.equipItem(swordItem);                // Using Item instance
    * character.equipItem("item_uid_123", "weapon"); // Specific slot type
    * character.equipItem("item_uid_123", "ring", 1); // Specific slot index
+   *
+   * // Item not in inventory? It's added automatically
+   * const sword = game.createItem("iron_sword");
+   * character.equipItem(sword); // Added to inventory and equipped
    */
   equipItem(item: Item | string, slotId?: string, slotIndex?: number): void;
 
@@ -1572,6 +1796,18 @@ interface Character {
    * @throws Error if status doesn't exist
    */
   getStatus(id: string): Status;
+
+  /** Check if the character has a status with the given ID. */
+  hasStatus(id: string): boolean;
+
+  /**
+   * Get all status effects on this character.
+   * @returns Array of statuses
+   * @example
+   * const statuses = character.getStatuses();
+   * const boons = statuses.filter(s => s.tags?.includes('boon'));
+   */
+  getStatuses(): Status[];
 
   /**
    * Set a status's stack count with proper resource adjustment.
@@ -1658,6 +1894,16 @@ interface Character {
   getStat(name: string): number;
 
   /**
+   * Set the base value of a stat on the character's core status.
+   * @param name - The stat name
+   * @param value - The value to set
+   * @throws Error if stat doesn't exist in schema
+   * @example
+   * character.setStat('semen_collected_potency', 42);
+   */
+  setStat(name: string, value: number): void;
+
+  /**
    * Get a stat's reactive ComputedRef.
    * Use when you need the ref itself (e.g., for watch() or storing).
    * @param name - The stat name
@@ -1734,6 +1980,23 @@ interface Character {
   removeSkinLayers(layers: string[]): void;
 
   /**
+   * Add an ability to the character's core status (persists through reevaluate and save/load).
+   * @param abilityId - The ability template ID to add
+   * @throws Error if the ability template doesn't exist
+   * @example
+   * character.addAbility('fireball');
+   */
+  addAbility(abilityId: string): void;
+
+  /**
+   * Remove an ability from the character's core status.
+   * @param abilityId - The ability template ID to remove
+   * @example
+   * character.removeAbility('fireball');
+   */
+  removeAbility(abilityId: string): void;
+
+  /**
    * Get the set of active skin layer IDs.
    * @returns Set of skin layer IDs
    */
@@ -1777,7 +2040,7 @@ interface Character {
    * Get all final computed abilities (base + modifiers merged).
    * @returns Reactive computed object of abilities
    * @example
-   * const abilities = character.getAbilities().value;
+   * const abilities = character.getAbilities();
    * // Returns:
    * // {
    * //   fireball: {
@@ -1790,7 +2053,7 @@ interface Character {
    * //   water_splash: { meta: {...}, effects: {...} }
    * // }
    */
-  getAbilities(): { value: Record<string, { meta: Record<string, any>; effects: Record<string, Record<string, any>> }> };
+  getAbilities(): Record<string, { meta: Record<string, any>; effects: Record<string, Record<string, any>> }>;
 
   /**
    * Get a specific final computed ability by ID.
@@ -2140,6 +2403,24 @@ interface Item {
   /** Whether this item is a currency (used for trading/crafting costs) */
   is_currency: boolean;
 
+  /** Whether this item can be consumed for one-time effects */
+  is_consumable: boolean;
+
+  /** Duration in turns for the status applied on consume. -1 = permanent */
+  consume_duration: number;
+
+  /** Max stacks for the consume status. -1 = unlimited. Same item consumed again adds stacks */
+  consume_max_stacks: number;
+
+  /** Percentage of max resource to restore/reduce on consume. Keys are resource stat IDs */
+  consume_percentage: Record<string, number>;
+
+  /** Flat amount of resource to restore/reduce on consume. Keys are resource stat IDs */
+  consume_absolute: Record<string, number>;
+
+  /** Polarity of the consume status: 'positive', 'neutral', or 'negative' */
+  consume_polarity: string;
+
   /** Equipment slot IDs this item can be equipped to */
   slots: string[];
 
@@ -2461,6 +2742,22 @@ interface Inventory {
   removeItem(item: Item): void;
 
   /**
+   * Reduce item quantity by amount. Removes item if quantity reaches 0.
+   * @param item - The item instance
+   * @param amount - Amount to reduce (default: 1)
+   * @returns Actual amount reduced
+   */
+  reduceItemQuantity(item: Item, amount?: number): number;
+
+  /**
+   * Remove all unequipped items from the inventory.
+   * Equipped items are not affected.
+   * @example
+   * inventory.clear();
+   */
+  clear(): void;
+
+  /**
    * Get the first item matching the given template ID.
    * @param id - Item template ID
    * @returns The first matching item or null
@@ -2644,6 +2941,18 @@ interface Status {
   /** Unique identifier for this status instance */
   id: string;
 
+  /** Display name of the status effect */
+  name: string;
+
+  /** Rich text description */
+  description: string;
+
+  /** Image/icon path for this status */
+  image: string;
+
+  /** Rarity tier for color coding */
+  rarity: string;
+
   /**
    * Maximum stack count for this status.
    * 1 = non-stackable, -1 = unlimited stacks
@@ -2656,15 +2965,15 @@ interface Status {
   /** Whether this status is hidden from the UI */
   isHidden: boolean;
 
-  /**
-   * When this status should expire.
-   * 'none' = never expires, 'exploration' = expires on exploration, 'combat' = expires after combat
-   */
-  expirationTrigger: 'none' | 'exploration' | 'combat';
+  /** Visual polarity: 'positive' (green), 'neutral' (gray), or 'negative' (red) border */
+  polarity: string;
+
+  /** Tags for categorizing and filtering (e.g. 'battle' for combat-timed statuses) */
+  tags: string[];
 
   /**
    * Duration of the status effect.
-   * -1 means permanent (no expiration).
+   * -1 means permanent (default). Interpretation depends on the game/plugin.
    */
   duration: number;
 
@@ -2855,6 +3164,13 @@ interface Choice {
  * // Multiple unique draws
  * game.drawFromPool('starter_pack', { draws: 5, unique: true });
  */
+interface PoolDrawResult {
+  /** Template ID */
+  id: string;
+  /** Number of times this template was drawn */
+  quantity: number;
+}
+
 interface PoolSettings {
   /**
    * Selection mode for entities.
@@ -2970,6 +3286,14 @@ interface PoolEntityGroup {
   count?: number;
 
   /**
+   * If true, drawn items from this entity group cannot repeat.
+   * If false, explicitly allows duplicates even when draw-level unique is true.
+   * When undefined, falls back to the draw-level unique setting.
+   * @default undefined
+   */
+  unique?: boolean;
+
+  /**
    * Include filters - items must match ALL specified criteria.
    * Filter formats:
    * - Array `['a', 'b']`: Item has ANY of these values (OR)
@@ -3009,6 +3333,7 @@ type _PoolSettings = PoolSettings;
 type _CollectionSettings = CollectionSettings;
 type _PoolEntry = PoolEntry;
 type _PoolEntityGroup = PoolEntityGroup;
+type _SaveOptions = SaveOptions;
 
 // ============================================
 // Global Window Interface
@@ -3043,31 +3368,39 @@ declare global {
       primeVue: any; // PrimeVue types are used in the templates, so keep them as any.
       vueUse: typeof VueUseTypes;
       floatingUi: typeof FloatingUiTypes;
-      gsap: typeof GsapTypes;
+      gsap: typeof GsapTypes.default;
       fastCopy: typeof FastCopyTypes;
+      /** Show a styled confirmation dialog. Returns true if accepted, false if rejected. */
+      showConfirm(options: { message: string; header?: string; icon?: string; acceptLabel?: string; rejectLabel?: string }): Promise<boolean>;
+      /** Show a styled alert dialog. Resolves when closed. */
+      showAlert(message: string, header?: string): Promise<void>;
       /** Reusable Vue components for custom scripts */
       components: {
         // === General ===
-        /** Renders all components registered to a slot. Props: slot (string). Use to create custom extensible UI areas. */
+        /** Renders all components registered to a slot. Props: slot (string), context? (object). Context props are merged into child components. */
         CustomComponentContainer: any;
         /** Generic animated progress bar for percentage-based values. Props: current (number), max (number), barColor?, bgColor?, width?, height?, hideMax? */
         ProgressBar: any;
 
         // === Characters ===
-        /** Character face/portrait component. Props: character (Character), showName? (boolean), size? (number, default 100), borderRadius? (string, default "50%") */
+        /** Character face/portrait component. Props: character (Character), showName? (boolean), nameStyle? ("badge"|"overlay", default "badge"), size? (number, default 100), borderRadius? (string, default "50%"), borderColor? (string, default "rgb(174,174,174)"), overlaySlot? (string — extra component slot rendered inside the face shape) */
         CharacterFace: any;
         /** Full character doll with skin layers. Props: character (Character) */
         CharacterDoll: any;
         /** Default character sheet layout with statuses, stats, and inventory sections. Props: character (Character) */
         CharacterSheet: any;
-        /** Displays character stats organized into groups. Props: character (Character), groups? (StatGroup[]) */
+        /** Displays character stats organized into groups. Props: character (Character), tags? (string[]) — filter by stat tags, noHeaders? (boolean) — hide group headers */
         CharacterStats: any;
-        /** Displays character statuses as compact bricks with hover popups. Props: character (Character) */
+        /** Displays equipped items and statuses as compact bricks with hover popups. Props: character (Character), showItems? (boolean, default true), showStatuses? (boolean, default true) */
         CharacterStatuses: any;
         /** Renders a character in a scene slot with animation support. Props: character (Character), slot (SceneSlot), showItemSlots?, enableAppear? */
         CharacterSlot: any;
         /** Displays character doll with stats/statuses panel. Supports single or multiple characters with face switching. Props: characters (Character | Character[]), initialIndex? */
         CharacterViewer: any;
+        /** Fullscreen popup overlay wrapping CharacterViewer. Teleports to body, handles overlay click-to-close. Props: characters (Character | Character[]), initialIndex? (number). Emits: close */
+        CharacterViewerPopup: any;
+        /** Inline character name editor with validation. Props: character (Character), maxLength? (number). Emits: rename(oldName, newName) */
+        CharacterRename: any;
         /** Renders a single stat entry as resource bar or text. Props: character (Character), statId (string). Emits: statHover, statLeave */
         StatEntity: any;
 
@@ -3092,6 +3425,14 @@ declare global {
         SkillTree: any;
         /** Renders a single skill node in a skill tree. Props: skill (any), character (Character), treeId (string), allSkills (any[]) */
         SkillSlot: any;
+
+        // === Abilities ===
+        /** Displays detailed ability information with icon, name, cooldown, resource costs (with stat colors), description, and auto-generated effect descriptions. Props: abilityId (string), characterId? (string), showDelta? (boolean) - with characterId shows base→merged transitions inline, improvementData? ({ meta, effects }) - external modifier delta shown inline, isGranted? (boolean) - shows "Granted" tag; "Modified" tag auto-shown when improvementData present */
+        AbilityCard: any;
+        /** Renders stats + abilities from a BaseStatusObject. Filters stat visibility, displays ability cards with modifier deltas. Props: data (BaseStatusObject), stacks? (number), multiplier? (number), isActive? (boolean) */
+        StatusObjectDisplay: any;
+        /** Lists character abilities as selectable items. Shows ability icons and names, with AbilityCard detail view for selected ability. Props: character (Character), showDelta? (boolean, default false) - whether to show base➜merged transitions */
+        AbilitiesViewer: any;
 
         // === Assets ===
         /** Background asset component for rendering images/videos/spine with transitions. Props: asset (Asset) */

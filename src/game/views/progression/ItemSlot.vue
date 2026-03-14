@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, inject } from 'vue';
 import { Item } from '../../core/character/item';
-import { Game } from '../../game';
 import { STICKY_ITEM_UID_KEY, HOVER_ITEM_UID_KEY } from './useItemPopup';
 import type { Ref } from 'vue';
-
-const game = Game.getInstance();
 
 const props = defineProps<{
   item: Item;
@@ -137,7 +134,7 @@ function handleDragStart(event: DragEvent) {
       'disabled': disabled
     }" :draggable="!disabled" @click="handleClick" @dragstart="handleDragStart" @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave">
-      <img v-if="icon" :src="icon" :alt="name" class="item-icon" @load="game.persistImage(icon)" />
+      <img v-if="icon" :src="icon" :alt="name" class="item-icon" v-persist />
 
       <!-- Durability indicator on the left side -->
       <span v-if="durability !== null" class="item-durability">

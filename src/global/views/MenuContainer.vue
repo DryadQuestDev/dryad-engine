@@ -40,7 +40,7 @@ function setMenuState(state: string) {
 
     <div class="menu-container-bg" @click="handleClickOutside">
       <div class="menu-container-content">
-        <CustomComponentContainer :slot="'menu-before'" />
+        <CustomComponentContainer :slot="'menu-before'" :context="{ menuState }" />
 
         <ul v-if="menuState === 'main'">
           <!-- Dev Mode Indicator and Toggle -->
@@ -82,7 +82,7 @@ function setMenuState(state: string) {
           <li @click="setMenuState('main')">Back</li>
           <ModPicker />
         </ul>
-        <CustomComponentContainer :slot="'menu-after'" />
+        <CustomComponentContainer :slot="'menu-after'" :context="{ menuState }" />
       </div>
     </div>
 

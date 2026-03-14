@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, nextTick, PropType } from 'vue';
-import { useIntersectionObserver } from '@vueuse/core';
+import { computed, ref, watch, PropType } from 'vue';
 import { Editor } from '../../editor';
 import Button from 'primevue/button';
 import FloatLabel from 'primevue/floatlabel';
 import { Global } from '../../../global/global';
-import { watchDebounced } from '@vueuse/core';
 
 // PrimeVue components
 import InputSwitch from 'primevue/inputswitch';
@@ -67,69 +65,8 @@ const itemsByPage = computed(() => {
   return groups;
 });
 
-// --- Active Bookmark State ---
-const activeBookmarkId = ref<string | null>(null);
-let stopObserver: (() => void) | null = null; // To store the observer stop function
-let lastBookmarkClickTime = 0; // Track when user last clicked a bookmark
-
-// --- Track if we've restored bookmark for current tab ---
-const hasRestoredForCurrentTab = ref(false);
-
-// --- Per-tab active bookmark storage key ---
-const activeBookmarkStorageKey = computed(() => {
-  return `dbookmarks-${editor.mainTab}-${editor.secondaryTab}-activeBookmark`;
-});
-
-// --- Reset restoration flag when tab changes ---
-watch(activeBookmarkStorageKey, () => {
-  hasRestoredForCurrentTab.value = false;
-});
-
-// --- Save active bookmark to localStorage whenever it changes ---
-watch(activeBookmarkId, (newBookmarkId) => {
-  if (newBookmarkId) {
-    // Save all bookmarks including static ones
-    localStorage.setItem(activeBookmarkStorageKey.value, newBookmarkId);
-  }
-});
-
-// --- Load saved active bookmark when tab changes and items are available ---
-watch(
-  [activeBookmarkStorageKey, () => props.items],
-  ([newKey, items]) => {
-    // Only restore once per tab (prevents re-restoring when items change due to dragging)
-    if (hasRestoredForCurrentTab.value) return;
-
-    const stored = localStorage.getItem(newKey);
-    if (stored) {
-      const staticBookmarks = ['new_item', 'filters', 'map'];
-      const isStaticBookmark = staticBookmarks.includes(stored);
-
-      if (isStaticBookmark) {
-        // Static bookmarks can be restored immediately without waiting for items
-        if (activeBookmarkId.value !== stored) {
-          hasRestoredForCurrentTab.value = true;
-          // Use longer delay on initial load to ensure DOM is fully ready
-          setTimeout(() => {
-            scrollToBookmark(stored);
-          }, 500);
-        }
-      } else {
-        // For regular item bookmarks, check if they exist in items
-        if (!items || items.length === 0) return;
-        const itemExists = items.some(item => item.uid === stored);
-        if (itemExists && activeBookmarkId.value !== stored) {
-          hasRestoredForCurrentTab.value = true;
-          // Use longer delay on initial load to ensure DOM is fully ready
-          setTimeout(() => {
-            scrollToBookmark(stored);
-          }, 500);
-        }
-      }
-    }
-  },
-  { immediate: false }
-);
+// --- Active Bookmark State (shared via editor singleton) ---
+const activeBookmarkId = editor.activeBookmarkId;
 
 function addItem() {
   editor.addItem();
@@ -148,131 +85,10 @@ watch([() => editor.schema.value, () => editor.isArray.value], ([newSchema, isAr
 
 const componentName = ref('Dbookmarks');
 
-// Methods (example)
-// function someMethod() {
-//   console.log('Method called');
-// }
-
-// Lifecycle hooks
-onMounted(() => {
-  console.log(`${componentName.value} component mounted.`);
-  // Initial setup after DOM is ready
-  nextTick(setupObserver); // Use nextTick for initial setup too
-});
-
-// --- Watch for item changes to reset observer ---
-watchDebounced(() => editor.activeObject.value, (newValue, oldValue) => {
-  // This watcher handles changes to the *underlying* full data set
-  // console.log('[Dbookmarks] activeObject changed, resetting observer.');
-
-  //activeBookmarkId.value = null; // Clear active state when base data changes
-  if (stopObserver) {
-    stopObserver();
-    stopObserver = null;
-  }
-  nextTick(() => {
-    setupObserver();
-  });
-}, { deep: true, debounce: 1000 }); // Watch deeply in case item properties change affecting IDs
-
-// --- Watch for FILTERED item changes to reset observer ---
-
-watchDebounced(() => props.items, (newItems, oldItems) => {
-  // This watcher handles when the *filtered* list changes
-  // Avoid unnecessary resets if the items array reference hasn't changed
-  // or if it's just internal property changes (already handled by the deep activeObject watcher generally)
-  // We mainly care when the *content* of the filtered list changes significantly.
-  // A simple length check can often suffice for filter changes.
-  if (newItems && oldItems && newItems.length === oldItems.length && newItems[0]?.uid === oldItems[0]?.uid) {
-    // Skip reset if length and first item UID are the same (heuristic to avoid excessive resets)
-    // console.log('[Dbookmarks] props.items watcher skipped reset (heuristic).');
-    return;
-  }
-
-  //console.log('[Dbookmarks] props.items changed, resetting observer.');
-  // activeBookmarkId.value = null; // Clear active state when filter changes
-  if (stopObserver) {
-    // console.log('[Dbookmarks] Stopping previous observer due to props.items change.');
-    stopObserver();
-    stopObserver = null;
-  }
-  nextTick(() => {
-    //console.log('[Dbookmarks] Re-running setupObserver after props.items change.');
-    setupObserver();
-  });
-}, { deep: true, debounce: 1000 }); // Watch deeply in case filter results change content but not length
-
-// --- Watch for pagination changes to reset observer ---
-watch(
-  () => props.paginationData?.currentPage,
-  () => {
-    // When page changes, reset the observer to track new items on the page
-    if (stopObserver) {
-      stopObserver();
-      stopObserver = null;
-    }
-    nextTick(() => {
-      setupObserver();
-    });
-  }
-);
-
-// --- Watch for itemsPerPage changes to reset observer ---
-watch(
-  () => props.paginationData?.itemsPerPage,
-  () => {
-    // When items per page changes, reset the observer
-    if (stopObserver) {
-      stopObserver();
-      stopObserver = null;
-    }
-
-    // Clear active bookmark if it's no longer on the current page
-    if (activeBookmarkId.value && props.items && props.paginationData) {
-      const itemIndex = props.items.findIndex(item => item.uid === activeBookmarkId.value);
-      if (itemIndex >= 0) {
-        const itemPage = Math.floor(itemIndex / props.paginationData.itemsPerPage) + 1;
-        // If the active bookmark is not on the current page (which will be page 1 after items per page change)
-        if (itemPage !== 1) {
-          // Clear it - the observer will set a new one based on what's visible
-          activeBookmarkId.value = null;
-        }
-      }
-    }
-
-    nextTick(() => {
-      setupObserver();
-    });
-  }
-);
-
-// --- Watch for page navigation to disable/enable scrollspy ---
-watch(
-  () => props.isPageNavigating,
-  (isNavigating) => {
-    if (isNavigating) {
-      // Page navigation started - stop the observer to prevent interference
-      if (stopObserver) {
-        stopObserver();
-        stopObserver = null;
-      }
-    } else {
-      // Page navigation completed - restart the observer after a delay
-      // This ensures all scroll events and intersection callbacks have settled
-      setTimeout(() => {
-        setupObserver();
-      }, 500); // 500ms delay to let all DOM updates and intersection events settle
-    }
-  }
-);
-
 // --- Scroll To Logic ---
 function scrollToBookmark(uid: string) {
   // Set active bookmark immediately
   activeBookmarkId.value = uid;
-
-  // Record the time of this bookmark click
-  lastBookmarkClickTime = Date.now();
 
   // Emit the bookmark click event - parent will handle navigation and scrolling
   emit('bookmark-click', uid);
@@ -290,83 +106,6 @@ function navigateToPage(pageNumber: number) {
       scrollToBookmark(firstItemOnPage.uid);
     }
   }
-}
-
-// --- Scrollspy Logic ---
-function setupObserver() {
-
-  if (!editor.isArray.value) {
-    return;
-  }
-
-  // Stop previous observer if setup is called again unexpectedly
-  if (stopObserver) {
-    stopObserver();
-    stopObserver = null;
-  }
-
-  const scrollContainer = document.querySelector('.editor-right') as HTMLElement | null;
-  if (!scrollContainer) {
-    console.error("[Dbookmarks] Scroll container '.editor-right' not found for observer setup.");
-    return; // Cannot set up observer without the root
-  }
-
-  // console.log('[Dbookmarks] Setting up intersection observer...');
-  // Find all potential target elements in the document each time
-  const targetsNodeList = document.querySelectorAll('[data-bookmark-id]');
-  const targetsArray = Array.from(targetsNodeList) as HTMLElement[]; // Cast to HTMLElement[]
-
-  if (targetsArray.length === 0) { // Check the array length
-    console.warn('[Dbookmarks] No elements with data-bookmark-id found for observer.');
-    return;
-  }
-
-  //console.log(`[Dbookmarks] Found ${targetsArray.length} target elements for observer.`);
-
-  // Adjust root if scrolling happens in a specific container
-  const { stop } = useIntersectionObserver(
-    targetsArray,
-    (entries) => { // Process all entries
-      // Find the topmost intersecting element
-      let topmostIntersectingEntry: IntersectionObserverEntry | null = null;
-
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          if (!topmostIntersectingEntry || entry.boundingClientRect.top < topmostIntersectingEntry.boundingClientRect.top) {
-            topmostIntersectingEntry = entry;
-          }
-        }
-      }
-
-      if (topmostIntersectingEntry) {
-        const uid = topmostIntersectingEntry.target.getAttribute('data-bookmark-id');
-
-        if (uid && activeBookmarkId.value !== uid) {
-          // Ignore scrollspy updates for 1 second after a bookmark click
-          // This prevents scrollspy from interfering during navigation
-          const timeSinceClick = Date.now() - lastBookmarkClickTime;
-          if (timeSinceClick < 1000) {
-            return;
-          }
-
-          activeBookmarkId.value = uid;
-        }
-      } else {
-        // Optional: Clear active ID if nothing is intersecting (scrolled past all items)
-        // activeBookmarkId.value = null;
-      }
-    },
-    {
-      root: scrollContainer, // <<<--- Specify the scroll container
-      threshold: 0, // Trigger as soon as any part becomes visible
-      rootMargin: "0px 0px -80% 0px" // Prioritize elements entering the top ~20% of the container
-    }
-  );
-  stopObserver = stop; // Store the stop function for cleanup
-
-  //console.log('[Dbookmarks] Intersection observer setup complete.');
-  // Set initial active bookmark (optional, e.g., find first visible)
-  // Maybe trigger scroll to top or first item initially?
 }
 
 const onActiveStateChange = (event: Event) => {

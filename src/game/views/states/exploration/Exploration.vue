@@ -534,7 +534,7 @@ const isMapInteractive = computed(() => {
     </div>
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ dungeon, currentRoom: game.dungeonSystem.currentRoom.value }" />
   </div>
   <div v-else>
     no map found

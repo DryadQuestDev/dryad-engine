@@ -30,7 +30,7 @@ const gridSlots = computed(() => {
 <template>
   <div :id="COMPONENT_ID" class="inventory">
     <!-- Custom components registered to inventory-header slot -->
-    <CustomComponentContainer slot="inventory-header" />
+    <CustomComponentContainer slot="inventory-header" :context="{ inventory }" />
 
     <!-- Inventory content -->
     <div class="inventory-content">
@@ -39,7 +39,7 @@ const gridSlots = computed(() => {
     </div>
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ inventory }" />
   </div>
 </template>
 

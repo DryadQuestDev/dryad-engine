@@ -201,7 +201,7 @@ onUnmounted(() => {
     <div class="notifications">
       <div class="notification" v-for="notification in notifications" :key="notification.id"
         :ref="(el) => setNotificationRef(el, notification.id)">
-        {{ notification.message }}
+        <span v-html="notification.message"></span>
       </div>
     </div>
 

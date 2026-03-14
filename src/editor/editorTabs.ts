@@ -23,6 +23,7 @@ import { DevSettingsSchema } from "../schemas/devSettings";
 import { CharacterSceneSlotSchema } from "../schemas/characterSceneSlotSchema";
 import { GallerySchema } from "../schemas/gallerySchema";
 import { CustomChoiceSchema } from "../schemas/customChoiceSchema";
+import { LocaleSchema } from "../schemas/localeSchema";
 import { ItemRecipeSchema } from "../schemas/itemRecipeSchema";
 import ExamplePopup from "./views/customPopups/ExamplePopup.vue";
 import SkillTreeEditorPopup from "./views/customPopups/SkillTreeEditorPopup.vue";
@@ -38,6 +39,7 @@ import { AbilityDefinitionSchema } from "../schemas/abilityDefinitionSchema";
 import { AbilityTemplateSchema } from "../schemas/abilityTemplateSchema";
 import { PoolDefinitionSchema } from "../schemas/poolDefinitionSchema";
 import { PoolEntrySchema } from "../schemas/poolEntrySchema";
+import { NarrativeTagSchema, NarrativeSlotSchema, NarrativeStateSchema, NarrativeSegmentSchema } from "../schemas/narrativeSchema";
 
 export type EditorTab = {
   id: string,
@@ -152,6 +154,14 @@ export const EDITOR_TABS: EditorTab[] = [
         schema: CustomChoiceSchema,
         file: 'custom_choices',
         title: 'custom_choice',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'locale',
+        schema: LocaleSchema,
+        file: 'locale',
+        title: 'locale',
         isArray: true,
         requiresMod: true,
       },
@@ -402,6 +412,43 @@ export const EDITOR_TABS: EditorTab[] = [
     ],
   },
   {
+    id: 'narrative',
+    subtabs: [
+      {
+        id: 'narrative_tags',
+        schema: NarrativeTagSchema,
+        file: 'narrative_tags',
+        title: 'narrative_tag',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'narrative_slots',
+        schema: NarrativeSlotSchema,
+        file: 'narrative_slots',
+        title: 'narrative_slot',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'narrative_states',
+        schema: NarrativeStateSchema,
+        file: 'narrative_states',
+        title: 'narrative_state',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'narrative_segments',
+        schema: NarrativeSegmentSchema,
+        file: 'narrative_segments',
+        title: 'narrative_segment',
+        isArray: true,
+        requiresMod: true,
+      },
+    ],
+  },
+  {
     id: 'dev',
     subtabs: [
       {
@@ -455,7 +502,7 @@ export function registerEditorCustomComponents(editor: Editor) {
   // Register face picker popup for character templates
   editor.registerCustomComponent({
     id: 'face-picker',
-    name: 'Face Picker',
+    name: 'Art Manager',
     component: FacePickerPopup
   });
 

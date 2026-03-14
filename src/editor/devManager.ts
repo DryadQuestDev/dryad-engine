@@ -52,6 +52,20 @@ export class DevManager {
         return;
       }
 
+      // Collect plugin asset_folders for this mod's plugins only
+      if (manifest.plugins && Array.isArray(manifest.plugins)) {
+        for (const pluginId of manifest.plugins) {
+          const pluginJsonPath = `games_files/${this.editor.selectedGame}/${modId}/plugins/${pluginId}/plugin.json`;
+          const pluginJson = await this.global.readJson(pluginJsonPath);
+          if (pluginJson?.asset_folders && Array.isArray(pluginJson.asset_folders)) {
+            assetFolders.push(...pluginJson.asset_folders);
+          }
+        }
+      }
+
+      // Deduplicate
+      const uniqueAssetFolders = [...new Set(assetFolders)];
+
       // Validate version format
       const versionValidation = validateVersionFormat(manifest.version);
       if (!versionValidation.isValid) {
@@ -71,7 +85,7 @@ export class DevManager {
       const result = await this.global.exportGameZip({
         gameId: this.editor.selectedGame,
         modId: modId,
-        assetFolders: assetFolders,
+        assetFolders: uniqueAssetFolders,
         outputFileName: outputFileName
       });
 

@@ -130,6 +130,11 @@ export class ItemSystem {
     }
 
     public openExchange(inventoryId: string, state: 'loot' | 'trade'): void {
+        // Don't re-open if exchange is already showing
+        if (this.game.coreSystem.getState('overlay_state') === 'overlay-exchange') {
+            return;
+        }
+
         let inventory = this.game.itemSystem.getInventory(inventoryId);
         if (!inventory) {
             throw new Error(`Inventory with id "${inventoryId}" not found.`);
@@ -168,6 +173,7 @@ export class ItemSystem {
         }
 
         this.game.coreSystem.setState('block_party_inventory', true);
+        this.game.coreSystem.setState('previous_overlay_state', this.game.coreSystem.getState('overlay_state'));
         this.game.coreSystem.setState('overlay_state', 'overlay-exchange');
     }
 
@@ -221,6 +227,13 @@ export class ItemSystem {
         item.choices = obj.choices || [];
         item.price = obj.price || {};
         item.is_currency = obj.is_currency || false;
+        item.is_consumable = obj.is_consumable || false;
+        item.consume_duration = obj.consume_duration ?? -1;
+        item.consume_max_stacks = obj.consume_max_stacks ?? -1;
+        item.consume_percentage = obj.consume_percentage || {};
+        item.consume_absolute = obj.consume_absolute || {};
+        item.consume_polarity = obj.consume_polarity || '';
+        item.consume_status_id = obj.consume_status_id || '';
         // Convert properties from Record<string, number> to Record<string, Property>
         const properties: Record<string, Property> = {};
         if (obj.properties) {
@@ -274,8 +287,12 @@ export class ItemSystem {
     }
 
     public closeExchangeInventory(exchangeInventory: Inventory): void {
+        const previousOverlayState = this.game.coreSystem.getState('previous_overlay_state');
         this.game.trigger("inventory_close", exchangeInventory);
         this.game.dungeonSystem.nextScene();
+        // Restore the overlay state that was active before the exchange opened
+        this.game.coreSystem.setState('overlay_state', previousOverlayState);
+        this.game.coreSystem.setState('previous_overlay_state', null);
     }
 
 }

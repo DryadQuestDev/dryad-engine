@@ -32,6 +32,7 @@ const currentGameStateComponent = computed(() => {
 
 // Debug panel visibility from localStorage (reactive)
 const showDebugPanel = useStorage('showDebugPanel', true);
+const debugPanelExpanded = useStorage('debug-panel-expanded', false);
 
 // Check if debug panel should be visible
 const shouldShowDebugPanel = computed(() => {
@@ -90,7 +91,7 @@ const shouldShowDebugPanel = computed(() => {
         <LogsPopup />
 
       </div>
-      <div v-if="shouldShowDebugPanel" class="game-body-panel">
+      <div v-if="shouldShowDebugPanel" :class="['game-body-panel', { expanded: debugPanelExpanded }]">
         <Debug />
       </div>
 
@@ -125,6 +126,10 @@ const shouldShowDebugPanel = computed(() => {
   height: 100%;
   background-color: #f0f0f0;
   z-index: 999;
+}
+
+.game-body-panel.expanded {
+  width: 100%;
 }
 
 .game-screen {
@@ -206,6 +211,10 @@ const shouldShowDebugPanel = computed(() => {
   width: 100%;
   height: 100%;
   z-index: 300;
+}
+
+.overlay-wrapper:has(.overlay-hoist) {
+  z-index: 500;
 }
 
 .ui-wrapper {

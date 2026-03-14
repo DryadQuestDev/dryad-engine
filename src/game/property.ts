@@ -68,6 +68,9 @@ export class Property {
             case 'number':
                 this.defaultValue = obj.default_value_number ?? 0;
                 initialValue = this.defaultValue;
+                if (this.precision === undefined || this.precision === null) {
+                    this.precision = Property.getDecimalPlaces(this.defaultValue as number);
+                }
                 break;
             case 'boolean':
                 this.defaultValue = obj.default_value_boolean ?? false;
@@ -91,7 +94,12 @@ export class Property {
                     gameLogger.warn(`Invalid JSON in default_value_object for property '${this.id}', using empty object`);
                     this.defaultValue = {};
                 }
-                initialValue = { ...this.defaultValue as Record<string, any> };
+                // Preserve arrays, don't convert them to objects with numeric keys
+                if (Array.isArray(this.defaultValue)) {
+                    initialValue = [...this.defaultValue];
+                } else {
+                    initialValue = { ...this.defaultValue as Record<string, any> };
+                }
                 break;
             default:
                 initialValue = undefined;
@@ -124,8 +132,13 @@ export class Property {
             this.state.currentValue = value;
         } else if (this.type === 'array' && Array.isArray(value)) {
             this.state.currentValue = [...value]; // Store a copy
-        } else if (this.type === 'object' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            this.state.currentValue = { ...value }; // Store a copy
+        } else if (this.type === 'object' && typeof value === 'object' && value !== null) {
+            // Support both objects and arrays for 'object' type (JSON can be either)
+            if (Array.isArray(value)) {
+                this.state.currentValue = [...value];
+            } else {
+                this.state.currentValue = { ...value };
+            }
         } else {
             if (value !== undefined) {
                 gameLogger.error(`Cannot set value of property '${this.id}': Expected type '${this.type}' but received:`, value);
@@ -206,6 +219,12 @@ export class Property {
     }
 
     // --- Helper Methods (operating on config + this.state) ---
+    private static getDecimalPlaces(value: number): number {
+        const str = String(value);
+        const dotIndex = str.indexOf('.');
+        return dotIndex === -1 ? 0 : str.length - dotIndex - 1;
+    }
+
     private applyPrecision(value: number): number {
         const precision = this.precision; // Read config from instance
         if (precision === undefined || precision === null || this.type !== 'number') {

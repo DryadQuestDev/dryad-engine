@@ -4,6 +4,23 @@ function getProperty(obj: any, path: string): any {
     return path.split('.').reduce((o, key) => (o && o[key] !== undefined && o[key] !== null) ? o[key] : undefined, obj);
 }
 
+// Recursively check if any string value in the object tree matches the search
+function deepStringMatch(value: any, searchLower: string): boolean {
+    if (value === null || value === undefined) return false;
+    if (Array.isArray(value)) {
+        return value.some(item => deepStringMatch(item, searchLower));
+    }
+    if (typeof value === 'object') {
+        for (const key in value) {
+            if (value.hasOwnProperty(key) && deepStringMatch(value[key], searchLower)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return String(value).toLowerCase().includes(searchLower);
+}
+
 export type Sifter = {
     id?: string, // if the object's id key has the value that matches the search, it passes
     search?: string, // if the object has any key with a value that matches the search, it passes
@@ -95,18 +112,9 @@ export class SifterManager<T extends Record<string, any>> {
             }
         }
 
-        // Search check (any value)
+        // Search check (any value, recursively checks nested objects)
         if (sifter.search) {
-            let valueFound = false;
-            for (const objKey in obj) {
-                if (anyObj.hasOwnProperty(objKey) && anyObj[objKey] !== null && anyObj[objKey] !== undefined) {
-                    if (String(anyObj[objKey]).toLowerCase().includes(sifter.search.toLowerCase())) {
-                        valueFound = true;
-                        break;
-                    }
-                }
-            }
-            if (!valueFound) {
+            if (!deepStringMatch(anyObj, sifter.search.toLowerCase())) {
                 return false;
             }
         }

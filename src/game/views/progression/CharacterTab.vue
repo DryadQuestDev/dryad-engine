@@ -2,14 +2,16 @@
 import { onMounted, computed } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import CharacterDoll from './CharacterDoll.vue';
 import CharacterSlot from './CharacterSlot.vue';
 
 const props = defineProps<{
-  character: Character;
+  character?: Character | null;
 }>();
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 
 // Get tabs from unified registry
 const tabs = computed(() => game.coreSystem.getComponentsBySlot('character-tabs'));
@@ -38,7 +40,7 @@ function selectTab(tabId: string) {
 <template>
 
 
-  <div class="character-sheet-container" v-if="game.getState('selected_character')">
+  <div class="character-sheet-container" v-if="character && game.getState('selected_character')">
     <div class="character-doll-wrapper">
       <CharacterSlot :key="character.id" :character="character" :slot="{ scale: 1 }" :showItemSlots="true"
         :enableAppear="true" />
@@ -58,6 +60,7 @@ function selectTab(tabId: string) {
       </div>
     </div>
   </div>
+  <div class="no-character-message" v-else>{{ global.getString('no_characters_in_party') }}</div>
 </template>
 
 <style scoped>
@@ -167,8 +170,17 @@ function selectTab(tabId: string) {
 @media (min-width: 1800px) {
   .character-doll-wrapper {
     max-width: 1000px;
-     Adjust this value as needed 
+     Adjust this value as needed
   }
 }
 */
+
+.no-character-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #888;
+  font-size: 1.1rem;
+}
 </style>

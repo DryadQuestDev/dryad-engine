@@ -4,6 +4,7 @@ import { computed } from 'vue';
 
 const props = defineProps<{
   slot: string;
+  context?: Record<string, any>;
 }>();
 
 const game = Game.getInstance();
@@ -20,5 +21,5 @@ const visibleComponents = computed(() => {
 </script>
 
 <template>
-  <component v-for="comp in visibleComponents" :key="comp.id" :is="comp.component" v-bind="comp.props" />
+  <component v-for="comp in visibleComponents" :key="comp.id" :is="comp.component" v-bind="{ ...context, ...comp.props }" />
 </template>

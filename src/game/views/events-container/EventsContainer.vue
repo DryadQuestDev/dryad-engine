@@ -15,7 +15,7 @@ const COMPONENT_ID = 'events-container';
       :character="game.characterSystem.getCharacter(slot.char)!" :slot="slot" />
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ sceneSlots: game.dungeonSystem.sceneSlots.value }" />
   </div>
 </template>
 

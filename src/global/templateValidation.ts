@@ -6,7 +6,31 @@
 import { compile } from 'vue';
 import * as Vue from 'vue';
 import { generateCodeFrame } from '@vue/shared';
-import { gameLogger } from '../game/utils/logger';
+import { gameLogger, captureCallerInfo } from '../game/utils/logger';
+
+/**
+ * Strip Vue error reference URLs from compiler error messages.
+ * In production builds, Vue replaces error messages with URLs like
+ * https://vuejs.org/error-reference/#compiler-23 — these are useless to developers.
+ */
+function cleanVueErrorMessage(msg: string, code?: number): string {
+  // Strip the URL entirely
+  const cleaned = msg.replace(/\s*https?:\/\/vuejs\.org\/error-reference\/#compiler-\d+\s*/g, '').trim();
+  // If message was only the URL (production build), provide a readable fallback
+  if (!cleaned && code != null) {
+    return `Compiler error #${code}`;
+  }
+  return cleaned || msg;
+}
+
+/** Escape HTML special characters to prevent injection in error templates. */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 /**
  * Validate JavaScript expressions in Vue template bindings.
@@ -70,11 +94,78 @@ export function validateExpressions(template: string): string[] {
 }
 
 /**
+ * Detect unclosed attribute quotes in template tags.
+ * Returns messages about unclosed quotes, or empty array if none found.
+ * Unclosed quotes are a common root cause of cascading tag mismatch errors.
+ */
+export function detectUnclosedQuotes(template: string): string[] {
+  const cleanTemplate = template.replace(/<!--[\s\S]*?-->/g, '');
+  const errors: string[] = [];
+
+  // State machine: walk through chars tracking tag/quote state
+  let inTag = false;
+  let quoteChar: string | null = null; // '"' or "'" when inside a quoted attribute
+  let quoteStartLine = 0;
+  let lineNum = 1;
+
+  for (let i = 0; i < cleanTemplate.length; i++) {
+    const ch = cleanTemplate[i];
+
+    if (ch === '\n') {
+      lineNum++;
+      continue;
+    }
+
+    if (quoteChar) {
+      // Inside a quoted attribute value — look for matching close
+      if (ch === quoteChar) {
+        quoteChar = null;
+      } else if (ch === '<') {
+        // Hit a new tag opening while quote is still open — the quote was never closed
+        const line = cleanTemplate.split('\n')[quoteStartLine - 1];
+        errors.push(`Unclosed quote ${quoteChar} on line ${quoteStartLine}:\n  ${line.trim()}\n  Fix: Add closing ${quoteChar} to the attribute value`);
+        // Reset state and treat this as new tag
+        quoteChar = null;
+        inTag = true;
+      }
+    } else if (inTag) {
+      if (ch === '"' || ch === "'") {
+        quoteChar = ch;
+        quoteStartLine = lineNum;
+      } else if (ch === '>') {
+        inTag = false;
+      }
+    } else {
+      if (ch === '<') {
+        inTag = true;
+      }
+    }
+  }
+
+  // Check for quote still open at end of template
+  if (quoteChar) {
+    const line = cleanTemplate.split('\n')[quoteStartLine - 1];
+    errors.push(`Unclosed quote ${quoteChar} on line ${quoteStartLine}:\n  ${line.trim()}\n  Fix: Add closing ${quoteChar} to the attribute value`);
+  }
+
+  return errors;
+}
+
+/**
  * Analyze template for tag count mismatches.
  * Returns a helpful message if there's an imbalance, null otherwise.
+ * Skipped if unclosed quotes are detected (they cause false tag mismatches).
  */
 export function analyzeTagCounts(template: string): string | null {
-  const lines = template.split('\n');
+  // Check for unclosed quotes first — they're the root cause of most tag mismatch noise
+  const quoteErrors = detectUnclosedQuotes(template);
+  if (quoteErrors.length > 0) {
+    return quoteErrors.join('\n');
+  }
+
+  // Strip HTML comments before analysis to avoid false positives from commented-out tags
+  const cleanTemplate = template.replace(/<!--[\s\S]*?-->/g, '');
+  const lines = cleanTemplate.split('\n');
   const voidElements = new Set([
     'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
     'link', 'meta', 'param', 'source', 'track', 'wbr'
@@ -117,6 +208,77 @@ export function analyzeTagCounts(template: string): string | null {
   return results.length > 0 ? results.join('\n') : null;
 }
 
+/** Standard HTML elements — used to filter out non-component tags. */
+const HTML_ELEMENTS = new Set([
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo',
+  'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
+  'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd',
+  'label', 'legend', 'li', 'link', 'main', 'map', 'mark', 'menu', 'meta', 'meter', 'nav',
+  'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'pre',
+  'progress', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select',
+  'slot', 'small', 'source', 'span', 'strong', 'style', 'sub', 'summary', 'sup', 'table',
+  'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'u',
+  'ul', 'var', 'video', 'wbr',
+]);
+
+/** SVG elements that might appear in templates. */
+const SVG_ELEMENTS = new Set([
+  'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'text', 'tspan',
+  'g', 'defs', 'use', 'symbol', 'clippath', 'mask', 'pattern', 'image', 'foreignobject',
+  'lineargradient', 'radialgradient', 'stop', 'filter', 'fegaussianblur', 'feoffset',
+  'feblend', 'fecolormatrix', 'fecomposite', 'feflood', 'femerge', 'femergenode',
+]);
+
+/** Vue built-in components that don't need registration. */
+const VUE_BUILTINS = new Set([
+  'teleport', 'transition', 'transition-group', 'transitiongroup',
+  'keep-alive', 'keepalive', 'suspense', 'component', 'template',
+]);
+
+/** Convert PascalCase to kebab-case. */
+function toKebabCase(str: string): string {
+  return str.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+}
+
+/**
+ * Validate that all component tags in a template are registered in the local components option.
+ * Returns warning messages for unresolved component tags.
+ */
+export function validateComponentResolution(template: string, options: any): string[] {
+  const warnings: string[] = [];
+  const cleanTemplate = template.replace(/<!--[\s\S]*?-->/g, '');
+
+  // Extract all opening tag names (not closing tags, not self-closing void elements)
+  const tagRegex = /<([a-zA-Z][a-zA-Z0-9-]*)/g;
+  const usedTags = new Set<string>();
+  let match;
+  while ((match = tagRegex.exec(cleanTemplate)) !== null) {
+    usedTags.add(match[1]);
+  }
+
+  // Build set of registered component names (both PascalCase and kebab-case forms)
+  const registered = new Set<string>();
+  if (options.components) {
+    for (const name of Object.keys(options.components)) {
+      registered.add(name.toLowerCase());
+      registered.add(toKebabCase(name));
+    }
+  }
+
+  for (const tag of usedTags) {
+    const lower = tag.toLowerCase();
+    // Skip HTML elements, SVG elements, and Vue built-ins
+    if (HTML_ELEMENTS.has(lower) || SVG_ELEMENTS.has(lower) || VUE_BUILTINS.has(lower)) continue;
+    // Check if registered locally
+    if (registered.has(lower)) continue;
+    warnings.push(`Unresolved component: <${tag}> is not registered in components option.\n  Fix: Add "${tag}" to the components: { ${tag} } option in defineComponent.`);
+  }
+
+  return warnings;
+}
+
 /**
  * Create a wrapped defineComponent that validates template expressions and structure.
  * This ensures all Vue components (including child components) get validated.
@@ -141,8 +303,8 @@ export function createValidatingDefineComponent() {
       const structureErrors: string[] = [];
       try {
         compile(template, {
-          onError: (err) => {
-            let msg = err.message;
+          onError: (err: any) => {
+            let msg = cleanVueErrorMessage(err.message, err.code);
             if (err.loc) {
               msg += `\n${generateCodeFrame(template, err.loc.start.offset, err.loc.end.offset)}`;
             }
@@ -152,8 +314,8 @@ export function createValidatingDefineComponent() {
             }
             structureErrors.push(msg);
           },
-          onWarn: (err) => {
-            let msg = `Warning: ${err.message}`;
+          onWarn: (err: any) => {
+            let msg = `Warning: ${cleanVueErrorMessage(err.message, err.code)}`;
             if (err.loc) {
               msg += `\n${generateCodeFrame(template, err.loc.start.offset, err.loc.end.offset)}`;
             }
@@ -164,12 +326,34 @@ export function createValidatingDefineComponent() {
         // compile() can throw for expression errors - but we already caught those above
         // Only log if we didn't already find expression errors
         if (exprErrors.length === 0) {
-          structureErrors.push(`Compile error: ${compileError.message}`);
+          structureErrors.push(`Compile error: ${cleanVueErrorMessage(compileError.message)}`);
         }
       }
 
       if (structureErrors.length > 0) {
         gameLogger.template(`\n${structureErrors.join('\n')}`);
+      }
+
+      // 3. Component resolution validation (catches unregistered components like <ItemCard> without components: { ItemCard })
+      const componentWarnings = validateComponentResolution(template, options);
+      if (componentWarnings.length > 0) {
+        gameLogger.template(`\n${componentWarnings.join('\n')}`);
+      }
+
+      // If errors found, replace with a safe error-display component
+      if (exprErrors.length > 0 || structureErrors.length > 0 || componentWarnings.length > 0) {
+        const allErrors = [...exprErrors, ...structureErrors, ...componentWarnings];
+        const componentName = options.name || '(unnamed component)';
+        const caller = captureCallerInfo();
+        const sourceLabel = caller ? `${escapeHtml(caller)}` : escapeHtml(componentName);
+        // Escape HTML, then convert \n to <br> since Vue's template compiler collapses whitespace
+        const errorHtml = allErrors.map(e => escapeHtml(e)).join('\n\n').replace(/\n/g, '<br>');
+
+        const errorOptions: any = {
+          name: options.name,
+          template: `<div style="background:rgba(220,38,38,0.15);border:2px solid #dc2626;border-radius:8px;padding:12px 16px;margin:4px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#fca5a5;word-break:break-word;max-height:300px;overflow-y:auto"><span style="color:#f87171;font-weight:bold;font-size:13px">Template Error in ${sourceLabel}</span><br><br>${errorHtml}</div>`
+        };
+        return Vue.defineComponent(errorOptions, ...args);
       }
     }
     return Vue.defineComponent(options, ...args);

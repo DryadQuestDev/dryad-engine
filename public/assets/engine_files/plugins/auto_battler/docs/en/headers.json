@@ -1,0 +1,17 @@
+{
+  "guide": "Guide",
+  "guide.overview": "Overview",
+  "guide.grid_formation": "Grid & Formation",
+  "guide.battle_flow": "Battle Flow",
+  "guide.damage_formula": "Damage Formula",
+  "guide.tokens": "Tokens",
+  "guide.abilities": "Abilities",
+  "guide.ai": "AI & Targeting",
+  "guide.autocasts": "Autocasts",
+  "reference": "Reference",
+  "reference.emitters": "Emitters",
+  "reference.conditions": "Conditions",
+  "reference.services": "Services",
+  "reference.actions": "Actions & Data",
+  "reference.components": "Components"
+}

@@ -242,7 +242,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
 .exchange-inventory-container h3 {
   margin: 0;
   font-size: 1.2em;
-  color: #42b983;
+  color: #47bbff;
 }
 
 .inventory-stats {

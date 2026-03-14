@@ -343,6 +343,12 @@ watch(() => props.visible, async (newVal) => {
       <div v-else class="archives-list">
         <div v-for="group in groupedArchives" :key="group.gameId" class="archive-group">
 
+          <!-- Group Header (shown when no game archive, so mods have context) -->
+          <div v-if="!group.gameArchive" class="group-header">
+            <i class="pi pi-box"></i>
+            <span>{{ group.gameName }}</span>
+          </div>
+
           <!-- Game Archive -->
           <div v-if="group.gameArchive" class="archive-item game-archive"
             :class="{ 'installing': installingArchive === group.gameArchive.zipFileName }">
@@ -381,6 +387,7 @@ watch(() => props.visible, async (newVal) => {
                   <span class="archive-type type-mod">Mod</span>
                 </div>
                 <div class="archive-details">
+                  <span class="archive-game">for {{ group.gameName }}</span>
                   <span class="archive-version">Version: {{ mod.version }}</span>
                   <span v-if="mod.installed" class="installed-version">
                     (Installed: {{ mod.installedVersion }})
@@ -513,6 +520,21 @@ watch(() => props.visible, async (newVal) => {
   max-height: 400px;
   overflow-y: auto;
   padding: 0.5rem;
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-weight: 600;
+  font-size: 1rem;
+  color: #555;
+}
+
+.archive-game {
+  color: #888;
+  font-style: italic;
 }
 
 /* Archive Group Styles */

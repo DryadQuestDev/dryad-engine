@@ -109,25 +109,6 @@ export class DocumentManager {
             this.selectUserToken(sortedTokens[0].id);
         }
 
-        this.cleanupAuthCallback = this.storageService.listenForGoogleAuthCallback(
-            ({ code, error }) => {
-                this.clearMessages();
-                if (error) {
-                    this.error.value = `Authentication failed: ${error}`;
-                    this.isLoading.value = false;
-                    this.isOAuthServerWaitingForCallback.value = false;
-                } else if (code && this.authFlowContext.tokenName && this.authFlowContext.oauthAppClientId) {
-                    this.handleAuthCodeReceived(code, this.authFlowContext.tokenName, this.authFlowContext.oauthAppClientId);
-                } else {
-                    this.error.value = "OAuth callback received without necessary context.";
-                    this.isLoading.value = false;
-                    this.isOAuthServerWaitingForCallback.value = false;
-                }
-                this.authFlowContext.tokenName = undefined;
-                this.authFlowContext.oauthAppClientId = undefined;
-            }
-        );
-
         watch(() => this.oauthAppConfigs, (newConfigs) => {
             localStorage.setItem(OAUTH_APP_CONFIGS_STORAGE_KEY, JSON.stringify(toRaw(newConfigs)));
         }, { deep: true });
@@ -360,7 +341,8 @@ export class DocumentManager {
                     }
                 }
                 this.isOAuthServerWaitingForCallback.value = true;
-            } else { 
+                this.startAuthPolling();
+            } else {
                  this.error.value = "Failed to get authentication URL from main process.";
                  await this.storageService.stopOAuthServer();
             }
@@ -374,6 +356,31 @@ export class DocumentManager {
             this.authFlowContext.tokenName = undefined;
             this.authFlowContext.oauthAppClientId = undefined;
         }
+    }
+
+    private startAuthPolling() {
+        // Stop any previous polling
+        if (this.cleanupAuthCallback) this.cleanupAuthCallback();
+
+        this.cleanupAuthCallback = this.storageService.listenForGoogleAuthCallback(
+            ({ code, error }) => {
+                this.cleanupAuthCallback = undefined;
+                this.clearMessages();
+                if (error) {
+                    this.error.value = `Authentication failed: ${error}`;
+                    this.isLoading.value = false;
+                    this.isOAuthServerWaitingForCallback.value = false;
+                } else if (code && this.authFlowContext.tokenName && this.authFlowContext.oauthAppClientId) {
+                    this.handleAuthCodeReceived(code, this.authFlowContext.tokenName, this.authFlowContext.oauthAppClientId);
+                } else {
+                    this.error.value = "OAuth callback received without necessary context.";
+                    this.isLoading.value = false;
+                    this.isOAuthServerWaitingForCallback.value = false;
+                }
+                this.authFlowContext.tokenName = undefined;
+                this.authFlowContext.oauthAppClientId = undefined;
+            }
+        );
     }
 
     private async handleAuthCodeReceived(code: string, tokenName: string, oauthAppClientId: string) {
@@ -756,6 +763,10 @@ export class DocumentManager {
         this.isOAuthServerWaitingForCallback.value = false;
         this.authFlowContext.tokenName = undefined;
         this.authFlowContext.oauthAppClientId = undefined;
+        if (this.cleanupAuthCallback) {
+            this.cleanupAuthCallback();
+            this.cleanupAuthCallback = undefined;
+        }
     }
 
 

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
+import StatusObjectDisplay from './StatusObjectDisplay.vue';
 import { Item } from '../../core/character/item';
 
 // for displaying item's info on hover like name, description, stats, etc.
@@ -13,25 +15,6 @@ const COMPONENT_ID = 'item-card';
 const props = defineProps<{
   item: Item;
 }>();
-
-// Get visible stats based on debug settings
-const visibleStats = computed(() => {
-  if (!props.item.statusObject.stats) return {};
-
-  const showHidden = game.coreSystem.getDebugSetting('show_hidden_stats');
-  const activeMap = showHidden
-    ? game.characterSystem.statsMap
-    : game.characterSystem.statsVisibleMap;
-
-  return Object.entries(props.item.statusObject.stats)
-    .filter(([statId]) => activeMap.has(statId))
-    .reduce((acc, [statId, value]) => {
-      if (typeof value === 'number') {
-        acc[statId] = value;
-      }
-      return acc;
-    }, {} as Record<string, number>);
-});
 
 // Get rarity CSS class
 const rarityClass = computed(() => {
@@ -47,6 +30,56 @@ const itemWeight = computed(() => {
   }
   return null;
 });
+
+// Consume effects for tooltip display
+const consumeEffects = computed(() => {
+  if (!props.item.is_consumable) return [];
+  const effects: Array<{ text: string; isPositive: boolean }> = [];
+  const global = Global.getInstance();
+
+  for (const statId in props.item.consume_percentage) {
+    const pct = props.item.consume_percentage[statId];
+    if (!pct) continue;
+    const stat = game.characterSystem.statsMap.get(statId);
+    const name = stat?.name || statId;
+    const key = pct > 0 ? 'item_consume_restore' : 'item_consume_reduce';
+    const isGood = stat?.reduction_is_good ? pct < 0 : pct > 0;
+    effects.push({ text: global.getString(key, { amount: Math.abs(pct) + '%', resource: name }), isPositive: isGood });
+  }
+
+  for (const statId in props.item.consume_absolute) {
+    const amt = props.item.consume_absolute[statId];
+    if (!amt) continue;
+    const stat = game.characterSystem.statsMap.get(statId);
+    const name = stat?.name || statId;
+    const key = amt > 0 ? 'item_consume_restore' : 'item_consume_reduce';
+    const isGood = stat?.reduction_is_good ? amt < 0 : amt > 0;
+    effects.push({ text: global.getString(key, { amount: String(Math.abs(amt)), resource: name }), isPositive: isGood });
+  }
+  return effects;
+});
+
+// Consume max stacks display (only if not unlimited)
+const consumeMaxStacksText = computed(() => {
+  if (!props.item.is_consumable) return null;
+  const so = props.item.statusObject;
+  if (!so || Object.keys(so).length === 0) return null;
+  const ms = props.item.consume_max_stacks;
+  if (ms === -1 || ms === undefined) return null;
+  return Global.getInstance().getString('item_consume_max_stacks', { stacks: String(ms) });
+});
+
+// Consume duration display (only if item has a status to apply)
+const consumeDurationText = computed(() => {
+  if (!props.item.is_consumable) return null;
+  const so = props.item.statusObject;
+  if (!so || Object.keys(so).length === 0) return null;
+  const d = props.item.consume_duration;
+  const global = Global.getInstance();
+  return (d === -1 || d === undefined)
+    ? global.getString('item_consume_duration_permanent')
+    : global.getString('item_consume_duration', { duration: String(d) });
+});
 </script>
 
 <template>
@@ -58,12 +91,9 @@ const itemWeight = computed(() => {
         <!-- Item cost display (only if item has price) -->
         <div v-if="item.isTradable()" class="item-cost">
           <div v-for="(amount, currencyId) in item.price" :key="currencyId" class="cost-item">
-            <img
-              v-if="game.itemSystem.itemTemplatesMap.get(currencyId)?.traits"
-              :src="(game.itemSystem.itemTemplatesMap.get(currencyId)?.traits as any)?.image"
-              :alt="currencyId"
-              class="cost-currency-icon"
-            />
+            <img v-if="game.itemSystem.itemTemplatesMap.get(currencyId)?.traits"
+              :src="(game.itemSystem.itemTemplatesMap.get(currencyId)?.traits as any)?.image" :alt="currencyId"
+              class="cost-currency-icon" />
             <span class="cost-amount">{{ amount }}</span>
           </div>
         </div>
@@ -74,14 +104,17 @@ const itemWeight = computed(() => {
       <div class="item-description" v-html="item.getTrait('description') || ''">
       </div>
 
-      <div class="item-stats" v-if="Object.keys(visibleStats).length > 0">
-        <h4>Stats:</h4>
-        <ul>
-          <li v-for="(value, statId) in visibleStats" :key="statId">
-            {{ game.characterSystem.statsMap.get(statId)?.name || statId }}: {{ value }}
-          </li>
-        </ul>
+      <!-- Consume effects display -->
+      <div v-if="consumeEffects.length > 0 || consumeMaxStacksText || consumeDurationText" class="consume-effects">
+        <div v-for="(effect, i) in consumeEffects" :key="i" class="consume-effect"
+          :class="effect.isPositive ? 'positive' : 'negative'">
+          {{ effect.text }}
+        </div>
+        <div v-if="consumeMaxStacksText" class="consume-duration">{{ consumeMaxStacksText }}</div>
+        <div v-if="consumeDurationText" class="consume-duration">{{ consumeDurationText }}</div>
       </div>
+
+      <StatusObjectDisplay :data="item.statusObject" />
 
       <!-- Weight display (for single item) -->
       <div v-if="itemWeight !== null" class="item-weight-info">
@@ -91,7 +124,7 @@ const itemWeight = computed(() => {
     </div>
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ item }" />
   </div>
 </template>
 
@@ -101,8 +134,8 @@ const itemWeight = computed(() => {
   border: 2px solid #444;
   border-radius: 8px;
   padding: 12px;
-  min-width: 200px;
-  max-width: 300px;
+  width: 350px;
+  /* max-width: 300px; */
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   color: #fff;
 }
@@ -161,6 +194,33 @@ const itemWeight = computed(() => {
   line-height: 1.4;
 }
 
+.consume-effects {
+  margin: 0 0 8px 0;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  border-left: 3px solid #42b983;
+}
+
+.consume-effect {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.consume-effect.positive {
+  color: #42b983;
+}
+
+.consume-effect.negative {
+  color: #e06c75;
+}
+
+.consume-duration {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+}
+
 .item-weight-info {
   display: flex;
   align-items: center;
@@ -182,35 +242,5 @@ const itemWeight = computed(() => {
   color: #ccc;
   font-size: 13px;
   font-weight: bold;
-}
-
-.item-stats {
-  background: rgba(0, 0, 0, 0.3);
-  padding: 8px;
-  border-radius: 4px;
-}
-
-.item-stats h4 {
-  margin: 0 0 6px 0;
-  font-size: 14px;
-  color: #ffd700;
-}
-
-.item-stats ul {
-  margin: 0;
-  padding-left: 20px;
-  list-style: none;
-}
-
-.item-stats li {
-  margin: 4px 0;
-  color: #ddd;
-}
-
-.item-stats li::before {
-  content: "• ";
-  color: #42b983;
-  font-weight: bold;
-  margin-right: 4px;
 }
 </style>

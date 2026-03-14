@@ -65,16 +65,23 @@ const activeObjectUpdateLogic = (newActiveObject: any) => {
 // Create a debounced version of this logic
 const debouncedActiveObjectUpdateHandler = debounce(activeObjectUpdateLogic, 500); // 500ms debounce delay
 
-watch(() => editor.activeObject.value, (newActiveObject) => {
+let lastActiveObjectRef: any = null;
 
+watch(() => editor.activeObject.value, (newActiveObject) => {
   if (!editor.isArray.value) {
     return;
   }
 
+  // Reference changed (tab switch) → update immediately
+  if (newActiveObject !== lastActiveObjectRef) {
+    lastActiveObjectRef = newActiveObject;
+    activeObjectUpdateLogic(newActiveObject);
+    return;
+  }
 
-  // Call the debounced handler
+  // Deep mutation (form edit) → debounce
   debouncedActiveObjectUpdateHandler(newActiveObject);
-}, { deep: true, immediate: true }); // immediate: true is okay as isFilterFormDirty is initially false.
+}, { deep: true, immediate: true });
 
 // --- Handler for updates from Dform/Dsearch ---
 function handleFilteredUpdate(newFilteredData: any[]) {
@@ -101,7 +108,6 @@ function handlePaginationUpdate(data: typeof paginationData.value) {
 
 // --- State for bookmark navigation ---
 const scrollToBookmarkId = ref<string | null>(null);
-const isPageNavigating = ref(false); // Track when Dform is doing a page change
 
 // --- Handler for bookmark click from Dbookmarks ---
 function handleBookmarkClick(bookmarkId: string) {
@@ -112,11 +118,6 @@ function handleBookmarkClick(bookmarkId: string) {
   nextTick(() => {
     scrollToBookmarkId.value = bookmarkId;
   });
-}
-
-// --- Handler for page navigation state from Dform ---
-function handlePageNavigationActive(isActive: boolean) {
-  isPageNavigating.value = isActive;
 }
 
 // --- Left Column Toggle Logic ---
@@ -145,13 +146,12 @@ onMounted(() => {
         :items="filteredItems"
         :isFilterActive="isFilterFormDirty"
         :paginationData="paginationData"
-        :isPageNavigating="isPageNavigating"
         @clear-requested="requestClearFilters"
         @bookmark-click="handleBookmarkClick" />
     </div>
 
     <!-- Right Column (Form/Map) -->
-    <div class="column editor-right" :class="{ navigating: isPageNavigating }">
+    <div class="column editor-right">
       <div v-if="editor.showMap.value" class="map_anchor" v-bind="{ 'data-bookmark-id': 'map' }"></div>
       <EditorMap v-if="editor.showMap.value" />
       <EditorDocument v-if="editor.secondaryTab === 'config'" />
@@ -163,8 +163,7 @@ onMounted(() => {
         :scrollToBookmarkId="scrollToBookmarkId"
         @filtered-update="handleFilteredUpdate"
         @update:isDirty="handleIsDirtyUpdate"
-        @pagination-update="handlePaginationUpdate"
-        @page-navigation-active="handlePageNavigationActive" />
+        @pagination-update="handlePaginationUpdate" />
     </div>
 
   </div>

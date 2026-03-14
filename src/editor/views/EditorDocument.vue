@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { Editor } from '../editor';
 import { Global } from '../../global/global';
 import { DocumentManager, OAuthAppConfig, StoredUserToken } from '../documentManager';
@@ -268,7 +268,7 @@ function copyToClipboard(text: string) {
     });
 }
 
-// Lifecycle Hooks (onUnmounted is handled in DocumentManager's constructor now indirectly via service)
+onUnmounted(() => documentManager.onTeardown());
 </script>
 
 <template>

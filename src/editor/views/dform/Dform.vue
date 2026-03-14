@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, PropType, nextTick } from 'vue';
+import { computed, ref, watch, PropType, nextTick, onMounted, onUnmounted } from 'vue';
 import { useStorage } from '@vueuse/core';
 import { Schema, Schemable } from '../../../utility/schema';
 import { Editor } from '../../editor';
@@ -40,7 +40,6 @@ const emit = defineEmits<{
   (e: 'filtered-update', data: any[]): void;
   (e: 'update:isDirty', value: boolean): void; // Add event for dirty state
   (e: 'pagination-update', data: { currentPage: number; totalPages: number; itemsPerPage: number; startIndex: number; endIndex: number }): void;
-  (e: 'page-navigation-active', isActive: boolean): void; // Signal when page navigation is happening
 }>();
 
 // --- Handler to emit filter updates upwards ---
@@ -53,46 +52,65 @@ function emitIsDirtyUpdate(value: boolean) {
   emit('update:isDirty', value);
 }
 
-// --- Pagination State ---
-// Shared itemsPerPage across all tabs
-const itemsPerPage = useStorage('dform-itemsPerPage', 20);
-
-// Per-tab currentPage storage key
-const currentPageStorageKey = computed(() => {
-  return `dform-${editor.mainTab}-${editor.secondaryTab}-currentPage`;
+// --- Shared Settings ---
+const dformSettings = useStorage('dform-settings', { itemsPerPage: 10, hideEmptySchemaFields: false });
+const itemsPerPage = computed({
+  get: () => dformSettings.value.itemsPerPage,
+  set: (val: number) => { dformSettings.value.itemsPerPage = val; }
 });
+
+// Per-tab state (pagination + bookmark) in a single localStorage object
+const dformTabState = useStorage('dform-tab-state', {} as Record<string, { currentPage: number, activeBookmark: string }>);
+const tabKey = computed(() => `${editor.mainTab}-${editor.secondaryTab}`);
+
+// --- Static bookmarks that should not trigger page navigation ---
+const staticBookmarks = ['new_item', 'filters', 'map'];
+
+// --- Scrollspy State (declared early — used by immediate watchers below) ---
+let _scrollRafId: number | null = null;
+const isScrollingProgrammatically = ref(false);
+let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null;
+let lastScrollTop = 0;
+let scrollDirection: 'up' | 'down' = 'down';
+let pendingRestore = false;
 
 // Current page state (using computed storage key)
 const currentPage = ref(1);
 
-// Track if page change is from bookmark navigation
-const isBookmarkNavigation = ref(false);
-
 // Load current page from localStorage on mount or when tab changes
 watch(
-  currentPageStorageKey,
-  (newKey) => {
-    const stored = localStorage.getItem(newKey);
-    currentPage.value = stored ? parseInt(stored, 10) : 1;
+  tabKey,
+  () => {
+    const tabState = dformTabState.value[tabKey.value];
+    currentPage.value = tabState?.currentPage ?? 1;
+    editor.activeItemUids.value = new Set();
+    isScrollingProgrammatically.value = true;
+    if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer);
+
+    // Restore sidebar highlight immediately, but defer scroll to when items arrive
+    editor.activeBookmarkId.value = tabState?.activeBookmark || 'new_item';
+    pendingRestore = true;
+    // Fade out stale content during tab transition
+    const editorRight = document.querySelector('.editor-right');
+    if (editorRight) editorRight.classList.add('navigating');
   },
   { immediate: true }
 );
 
-// Save current page to localStorage whenever it changes
-watch(currentPage, (newPage) => {
-  localStorage.setItem(currentPageStorageKey.value, newPage.toString());
-
-  // Only scroll to first item if NOT navigating via bookmark
-  if (!isBookmarkNavigation.value) {
-    nextTick(() => {
-      if (paginatedItems.value.length > 0) {
-        const firstItemUid = paginatedItems.value[0].uid;
-        if (firstItemUid) {
-          scrollToElement(firstItemUid);
-        }
-      }
-    });
+// Clean up navigating state when a non-array tab finishes loading
+// (isArray is stale in the currentPageStorageKey watcher due to async loadActiveObject)
+watch([() => editor.isArray.value, tabKey], ([isArray]) => {
+  if (!isArray) {
+    pendingRestore = false;
+    isScrollingProgrammatically.value = false;
+    document.querySelector('.editor-right')?.classList.remove('navigating');
   }
+});
+
+// Save current page to localStorage + clear activeItemUids on page change
+watch(currentPage, (newPage) => {
+  dformTabState.value[tabKey.value] = { ...dformTabState.value[tabKey.value], currentPage: newPage };
+  editor.activeItemUids.value = new Set();
 });
 
 // Calculate total pages
@@ -128,35 +146,261 @@ watch(
   }
 );
 
-// --- Static bookmarks that should not trigger page navigation ---
-const staticBookmarks = ['new_item', 'filters', 'map'];
+// --- Scroll compensation state ---
+let pendingBottomJump: { uid: string; observer: MutationObserver; timer: ReturnType<typeof setTimeout> | null } | null = null;
 
-// --- Scroll to element function (simplified) ---
+function cancelPendingBottomJump() {
+  if (pendingBottomJump) {
+    pendingBottomJump.observer.disconnect();
+    if (pendingBottomJump.timer) clearTimeout(pendingBottomJump.timer);
+    pendingBottomJump = null;
+  }
+
+}
+
+function waitForItemLoadAndJump(itemUid: string) {
+  cancelPendingBottomJump();
+
+  const scrollContainer = document.querySelector('.editor-right') as HTMLElement | null;
+  const container = document.querySelector(`[data-item-uid="${itemUid}"]`) as HTMLElement | null;
+  if (!scrollContainer || !container) return;
+
+  // Find the item below (the one the user was scrolling from)
+  const allItems = Array.from(scrollContainer.querySelectorAll('[data-item-uid]'));
+  const newItemIndex = allItems.indexOf(container);
+  const anchorUid = newItemIndex < allItems.length - 1
+    ? (allItems[newItemIndex + 1] as HTMLElement).getAttribute('data-item-uid')
+    : null;
+
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const observer = new MutationObserver(() => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      observer.disconnect();
+      pendingBottomJump = null;
+    
+      // Jump to the item the user was scrolling from (or filters for new_item)
+      if (itemUid === 'new_item') {
+        scrollToElement('filters');
+      } else if (anchorUid) {
+        scrollToElement(anchorUid);
+      }
+    }, 150);
+  });
+
+  observer.observe(container, { childList: true, subtree: true });
+  pendingBottomJump = { uid: itemUid, observer, timer };
+
+  // Safety timeout: clean up if no mutations within 2s
+  setTimeout(() => {
+    if (pendingBottomJump?.uid === itemUid) {
+      cancelPendingBottomJump();
+    }
+  }, 2000);
+}
+
+// --- Item activation helpers ---
+function activateVisibleItems(uids: string[], manualScroll = false) {
+  let changed = false;
+  const newUids: string[] = [];
+  const newSet = new Set(editor.activeItemUids.value);
+  for (const uid of uids) {
+    if (!newSet.has(uid)) {
+      newSet.add(uid);
+      newUids.push(uid);
+      changed = true;
+    }
+  }
+  if (changed) {
+    const newIds = newUids.map(uid => props.items?.find(item => item.uid === uid)?.id || uid);
+    console.log(`[Dform] Activated items:`, newIds);
+    editor.activeItemUids.value = newSet;
+
+    // If scrolling up and a new item was activated, wait for it to load then jump to its bottom
+    if (manualScroll && scrollDirection === 'up' && newUids.length > 0) {
+      waitForItemLoadAndJump(newUids[0]);
+    }
+  }
+}
+
+function activateItem(bookmarkId: string) {
+  if (staticBookmarks.includes(bookmarkId)) return;
+  if (!editor.activeItemUids.value.has(bookmarkId)) {
+    const itemId = props.items?.find(item => item.uid === bookmarkId)?.id || bookmarkId;
+    console.log(`[Dform] Activated item: ${itemId}`);
+    const newSet = new Set(editor.activeItemUids.value);
+    newSet.add(bookmarkId);
+    editor.activeItemUids.value = newSet;
+  }
+}
+
+// --- Scrollspy detection ---
+function detectActiveBookmark(manualScroll = false) {
+  const scrollContainer = document.querySelector('.editor-right') as HTMLElement | null;
+  if (!scrollContainer) return;
+
+  const containerRect = scrollContainer.getBoundingClientRect();
+
+  // 1) Active bookmark — uses [data-bookmark-id] headers (sidebar highlight)
+  const bookmarkElements = scrollContainer.querySelectorAll('[data-bookmark-id]');
+  let activeId: string | null = null;
+
+  for (const el of bookmarkElements) {
+    const rect = (el as HTMLElement).getBoundingClientRect();
+    const id = (el as HTMLElement).getAttribute('data-bookmark-id');
+    if (!id) continue;
+
+    if (rect.top <= containerRect.top + containerRect.height * 0.4) {
+      activeId = id;
+    }
+  }
+
+  if (!activeId && bookmarkElements.length > 0) {
+    activeId = (bookmarkElements[0] as HTMLElement).getAttribute('data-bookmark-id');
+  }
+
+  if (activeId && activeId !== editor.activeBookmarkId.value) {
+    editor.activeBookmarkId.value = activeId;
+    saveActiveBookmark(activeId);
+  }
+
+  // 2) Visible items — uses [data-item-uid] container divs (schema loading)
+  // 40px top buffer matches scrollToElement offset, prevents top neighbor activation from header gap
+  const allItemElements = Array.from(scrollContainer.querySelectorAll('[data-item-uid]'));
+  const visibleItemUids: string[] = [];
+
+  for (let i = 0; i < allItemElements.length; i++) {
+    const rect = (allItemElements[i] as HTMLElement).getBoundingClientRect();
+    if (rect.bottom > containerRect.top + 40 && rect.top < containerRect.bottom) {
+      const uid = (allItemElements[i] as HTMLElement).getAttribute('data-item-uid');
+      if (uid) visibleItemUids.push(uid);
+    }
+  }
+
+  activateVisibleItems(visibleItemUids, manualScroll);
+}
+
+function onScroll() {
+  if (_scrollRafId !== null) return;
+  _scrollRafId = requestAnimationFrame(() => {
+    _scrollRafId = null;
+    if (isScrollingProgrammatically.value) return;
+
+    // Cancel pending bottom jump — user is scrolling manually
+    cancelPendingBottomJump();
+
+    const scrollContainer = document.querySelector('.editor-right') as HTMLElement | null;
+    if (scrollContainer) {
+      scrollDirection = scrollContainer.scrollTop < lastScrollTop ? 'up' : 'down';
+      lastScrollTop = scrollContainer.scrollTop;
+    }
+
+    detectActiveBookmark(true);
+  });
+}
+
+function setupScrollspy() {
+  const scrollContainer = document.querySelector('.editor-right') as HTMLElement | null;
+  if (!scrollContainer) return;
+  scrollContainer.addEventListener('scroll', onScroll, { passive: true });
+}
+
+function teardownScrollspy() {
+  const scrollContainer = document.querySelector('.editor-right') as HTMLElement | null;
+  if (scrollContainer) {
+    scrollContainer.removeEventListener('scroll', onScroll);
+  }
+  if (_scrollRafId !== null) {
+    cancelAnimationFrame(_scrollRafId);
+    _scrollRafId = null;
+  }
+}
+
+// --- Save/restore active bookmark per tab ---
+function saveActiveBookmark(id: string) {
+  dformTabState.value[tabKey.value] = { ...dformTabState.value[tabKey.value], activeBookmark: id };
+}
+
+function restoreActiveBookmark() {
+  const stored = dformTabState.value[tabKey.value]?.activeBookmark;
+  if (!stored) {
+    editor.activeBookmarkId.value = 'new_item';
+    document.querySelector('.editor-right')?.classList.remove('navigating');
+    programmaticScrollTimer = setTimeout(() => {
+      isScrollingProgrammatically.value = false;
+      detectActiveBookmark();
+    }, 200);
+    return;
+  }
+
+  // Static bookmark (new_item, filters, map)
+  if (staticBookmarks.includes(stored)) {
+    editor.activeBookmarkId.value = stored;
+    nextTick(() => requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollToElement(stored));
+    }));
+    return;
+  }
+
+  // Item bookmark — find in items list
+  const itemIndex = props.items?.findIndex(item => item.uid === stored);
+  if (itemIndex !== undefined && itemIndex >= 0) {
+    const targetPage = Math.floor(itemIndex / itemsPerPage.value) + 1;
+    if (targetPage !== currentPage.value) {
+      currentPage.value = targetPage;
+    }
+    editor.activeBookmarkId.value = stored;
+    nextTick(() => {
+      activateItem(stored);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scrollToElement(stored));
+      });
+    });
+  } else {
+    editor.activeBookmarkId.value = 'new_item';
+    document.querySelector('.editor-right')?.classList.remove('navigating');
+    programmaticScrollTimer = setTimeout(() => {
+      isScrollingProgrammatically.value = false;
+      detectActiveBookmark();
+    }, 200);
+  }
+}
+
+// --- Scroll to element function (with programmatic scroll guard) ---
 function scrollToElement(bookmarkId: string): void {
   const scrollContainer = document.querySelector('.editor-right') as HTMLElement | null;
   if (!scrollContainer) {
-    console.warn('[Dform] Scroll container not found');
+    isScrollingProgrammatically.value = false;
     return;
   }
 
   const targetElement = scrollContainer.querySelector(`[data-bookmark-id="${bookmarkId}"]`) as HTMLElement | null;
   if (!targetElement) {
-    console.warn('[Dform] Target element not found:', bookmarkId);
+    isScrollingProgrammatically.value = false;
+    scrollContainer.classList.remove('navigating');
     return;
   }
 
-  // Use requestAnimationFrame to ensure layout is complete before calculating position
-  requestAnimationFrame(() => {
-    const targetElementRect = targetElement.getBoundingClientRect();
-    const scrollContainerRect = scrollContainer.getBoundingClientRect();
-    const relativeTop = targetElementRect.top - scrollContainerRect.top;
-    const currentScrollTop = scrollContainer.scrollTop;
-    const targetScrollTop = currentScrollTop + relativeTop - 20;
+  // Guard: prevent scrollspy from firing during programmatic scroll
+  isScrollingProgrammatically.value = true;
+  if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer);
 
-    scrollContainer.scrollTo({
-      top: Math.max(0, targetScrollTop),
-      behavior: 'instant'
-    });
+  requestAnimationFrame(() => {
+    const targetRect = targetElement.getBoundingClientRect();
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const relativeTop = targetRect.top - containerRect.top;
+    const targetScrollTop = scrollContainer.scrollTop + relativeTop - 40;
+
+    scrollContainer.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'instant' });
+    scrollContainer.classList.remove('navigating');
+
+    // Clear guard after scroll settles, then re-detect visible items (no top neighbor — avoid jerk)
+    programmaticScrollTimer = setTimeout(() => {
+      isScrollingProgrammatically.value = false;
+      detectActiveBookmark();
+    }, 200);
   });
 }
 
@@ -166,11 +410,15 @@ watch(
   (bookmarkId) => {
     if (!bookmarkId) return;
 
-    // Check if it's a static bookmark
+    saveActiveBookmark(bookmarkId);
+
+    // Set guard EARLY — block scrollspy during entire activation + scroll sequence
+    isScrollingProgrammatically.value = true;
+    if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer);
+
     const isStaticBookmark = staticBookmarks.includes(bookmarkId);
 
     if (isStaticBookmark) {
-      // Just scroll to it without changing page
       nextTick(() => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -179,31 +427,24 @@ watch(
         });
       });
     } else {
-      // Find the item and calculate which page it's on
       const itemIndex = props.items?.findIndex(item => item.uid === bookmarkId);
 
       if (itemIndex !== undefined && itemIndex >= 0) {
         const targetPage = Math.floor(itemIndex / itemsPerPage.value) + 1;
 
         if (targetPage !== currentPage.value) {
-          // Set flag to prevent auto-scroll to first item
-          isBookmarkNavigation.value = true;
-
-          // Signal to parent that page navigation is starting (disable scrollspy)
-          emit('page-navigation-active', true);
-
-          // Navigate to the correct page - paginatedItems watcher will handle scrolling
           currentPage.value = targetPage;
-        } else {
-          // Already on the correct page, just scroll
-          nextTick(() => {
+        }
+
+        // Activate AFTER page change settles (currentPage watcher clears activeItemUids synchronously)
+        nextTick(() => {
+          activateItem(bookmarkId);
+          requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                scrollToElement(bookmarkId);
-              });
+              scrollToElement(bookmarkId);
             });
           });
-        }
+        });
       }
     }
   }
@@ -217,28 +458,6 @@ const paginatedItems = computed(() => {
   const end = start + itemsPerPage.value;
 
   return props.items.slice(start, end);
-});
-
-// --- Watch paginatedItems for cross-page bookmark navigation ---
-watch(paginatedItems, () => {
-  if (!isBookmarkNavigation.value) return;
-
-  // paginatedItems just updated after page change
-  // Wait for DOM to render, then scroll
-  nextTick(() => {
-    // Use double RAF to ensure layout is fully complete
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (props.scrollToBookmarkId) {
-          scrollToElement(props.scrollToBookmarkId);
-        }
-
-        // Signal completion immediately after scroll attempt
-        isBookmarkNavigation.value = false;
-        emit('page-navigation-active', false);
-      });
-    });
-  });
 });
 
 // --- Expose pagination data for parent components ---
@@ -414,6 +633,34 @@ function handlePopupSave(mutatedItem: any) {
   closePopup();
 }
 
+// --- Trigger initial detection when items render ---
+// --- Restore active bookmark when items arrive after tab switch ---
+watch(() => props.items, () => {
+  if (pendingRestore) {
+    pendingRestore = false;
+    restoreActiveBookmark();
+  }
+});
+
+watch(paginatedItems, () => {
+  // Skip during programmatic navigation (bookmark click) — target item is already activated
+  if (isScrollingProgrammatically.value) return;
+  nextTick(() => requestAnimationFrame(() =>
+    detectActiveBookmark()
+  ));
+});
+
+// --- Lifecycle ---
+onMounted(() => {
+  setupScrollspy();
+});
+
+onUnmounted(() => {
+  teardownScrollspy();
+  cancelPendingBottomJump();
+  if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer);
+});
+
 </script>
 
 <template>
@@ -453,7 +700,7 @@ function handlePopupSave(mutatedItem: any) {
         <FormFieldRenderer :base-field-schema="fieldSchema" :field-key="fieldKey.toString()"
           :item-data="editor.activeObject.value" :root-schema="editor.schema.value" :field-id="fieldKey.toString()"
           v-model="editor.activeObject.value[fieldKey]" :parent-core-data-item="editor.coreObject.value"
-          :form-data="editor.activeObject.value" />
+          :form-data="editor.activeObject.value" :force-active="true" />
       </div>
     </div>
 
@@ -462,7 +709,7 @@ function handlePopupSave(mutatedItem: any) {
     <div v-if="editor.isArray.value">
       <!-- Form for adding a new item -->
 
-      <div class="new_item_form_container">
+      <div class="new_item_form_container" v-bind="{ 'data-item-uid': 'new_item' }">
         <div class="item_header">
           <div class="item_title_with_buttons">
             <h2 v-bind="{ 'data-bookmark-id': 'new_item' }" class="">New {{ editor.title.value }}</h2>
@@ -478,9 +725,9 @@ function handlePopupSave(mutatedItem: any) {
             class="form-field-wrapper">
             <FormFieldRenderer v-if="editor.newItem && typeof editor.newItem.value === 'object'"
               :base-field-schema="fieldSchema" :field-key="fieldKey.toString()" :item-data="editor.newItem.value"
-              :root-schema="editor.schema.value" :field-id="`new-${fieldKey.toString()}`"
+              :root-schema="editor.schema.value" :field-id="fieldKey.toString()"
               v-model="editor.newItem.value[fieldKey]" :parent-core-data-item="null"
-              :form-data="editor.newItem.value" />
+              :form-data="editor.newItem.value" :force-active="editor.activeItemUids.value.has('new_item')" />
             <div v-else>
               Field '{{ fieldKey }}' not ready in newItem...
             </div>
@@ -512,7 +759,7 @@ function handlePopupSave(mutatedItem: any) {
             :totalItems="props.items.length" @update:currentPage="(page) => currentPage = page"
             @update:itemsPerPage="(value) => itemsPerPage = value" />
 
-          <div v-for="(item, index) in paginatedItems" :key="item.uid || index">
+          <div v-for="(item, index) in paginatedItems" :key="item.uid || index" v-bind="{ 'data-item-uid': item.uid }">
             <div class="item_header">
               <div class="item_title_with_buttons">
                 <h2 class="item_title" v-bind="{ 'data-bookmark-id': item.uid }">{{ item.id || `Item ${index + 1}` }}
@@ -532,7 +779,7 @@ function handlePopupSave(mutatedItem: any) {
               <div v-for="(fieldSchema, fieldKey) in editor.schema.value"
                 :key="`${item.uid || index}-${fieldKey.toString()}`" class="form-field-wrapper">
                 <FormFieldRenderer :base-field-schema="fieldSchema" :field-key="fieldKey.toString()" :item-data="item"
-                  :root-schema="editor.schema.value" :field-id="`${item.uid || index}-${fieldKey.toString()}`"
+                  :root-schema="editor.schema.value" :field-id="fieldKey.toString()"
                   v-model="item[fieldKey]"
                   @update:modelValue="() => handleAttributeChangeLog(item, fieldKey.toString())"
                   :is-array-item-id="fieldKey.toString() === 'id'"

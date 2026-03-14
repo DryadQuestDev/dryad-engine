@@ -13,6 +13,7 @@ import { PluginManager } from "./pluginManager";
 import { DungeonConfigObject } from "../schemas/dungeonConfigSchema";
 import { showConfirm, showAlert } from "../services/dialogService";
 import { DevSettingsObject } from "../schemas/devSettings";
+import { jsonrepair } from 'jsonrepair';
 
 export type DungeonConfigBonus = {
   map_width?: number;
@@ -97,6 +98,12 @@ export class Editor {
   // Stores filter text per schema field key (persists across array items)
   public schemaKeyFilters: Ref<Record<string, string>> = ref({});
   // --- End Schema Key Filter ---
+
+  // --- Active Bookmark (scrollspy) ---
+  public activeBookmarkId: Ref<string | null> = ref(null);
+  public activeItemUids: Ref<Set<string>> = ref(new Set());
+  public pendingNestedRenders: Ref<number> = ref(0);
+  // --- End Active Bookmark ---
 
   // --- Custom Component Registry ---
   private editorCustomComponents = new Map<string, EditorCustomComponent>();
@@ -449,6 +456,18 @@ export class Editor {
 
     //this.loadState();
     await this.pluginManager.initActivePlugins(this.state.selectedGame ?? '', this.state.selectedMod ?? '');
+
+    // Merge active plugin asset_folders into devSettings for file search
+    if (this.devSettings.value) {
+      const folders = new Set(this.devSettings.value.asset_folders || []);
+      for (const plugin of this.pluginManager.plugins.value) {
+        if (plugin.asset_folders && Array.isArray(plugin.asset_folders)) {
+          for (const f of plugin.asset_folders) folders.add(f);
+        }
+      }
+      (this.devSettings.value as any).asset_folders = [...folders];
+      this.clearFileCache();
+    }
 
     // Restore plugin-specific tab states after plugins are initialized
     this.restorePluginTabStates();
@@ -1594,6 +1613,13 @@ export class Editor {
             const logicOptions = this.getFromLogicOptions(fieldSchema.fromLogic);
             if (fieldSchema.type === 'chooseOne' || fieldSchema.type === 'chooseMany') {
               fieldSchema.options = logicOptions;
+            } else if (fieldSchema.type === 'schema' || fieldSchema.type === 'schema[]') {
+              // Create objects from logic options with specified type or default to 'string'
+              const newObjects: Schema = {};
+              for (const id of logicOptions) {
+                newObjects[id] = { type: fieldSchema.fromFileType || 'string' } as Schemable;
+              }
+              fieldSchema.objects = newObjects;
             }
           } catch (error) {
             console.warn(`[Editor] Could not get options for fromLogic: ${fieldSchema.fromLogic}`, error);
@@ -1616,18 +1642,49 @@ export class Editor {
 
             if (mergedData && Array.isArray(mergedData)) {
               if (fieldSchema.type === 'chooseOne' || fieldSchema.type === 'chooseMany') {
-                fieldSchema.options = mergedData.map((item: any) => item.id).filter(id => id !== undefined);
+                if (fieldSchema.fromFileType === 'values') {
+                  fieldSchema.options = mergedData.flatMap((item: any) => item.values || []);
+                } else {
+                  fieldSchema.options = mergedData.map((item: any) => item.id).filter(id => id !== undefined);
+                }
               } else if (fieldSchema.type === 'schema' || fieldSchema.type === 'schema[]') {
                 const newObjects: Schema = {};
                 for (let item of mergedData) {
                   if (item.id !== undefined) {
-                    let schemaRecord = this.getShemaRecord(fieldSchema, item);
-                    schemaRecord.options = item.values || [];
-                    schemaRecord.tooltip = item.description || '';
+                    // Default to 'custom' which reads item.type from the data
+                    const effectiveFieldSchema = fieldSchema.fromFileType
+                      ? fieldSchema
+                      : { ...fieldSchema, fromFileType: 'custom' as const };
+                    let schemaRecord = this.getShemaRecord(effectiveFieldSchema, item);
+
+                    // Copy ALL relevant Schemable properties from the loaded item
+                    const propertiesToCopy = [
+                      'options', 'values', 'fromFile', 'fromFileType', 'fromFileTypeAnd', 'fromFileTypeOr',
+                      'description', 'order', 'fileType', 'objects'
+                    ];
+
+                    for (const prop of propertiesToCopy) {
+                      if (item[prop] !== undefined) {
+                        (schemaRecord as any)[prop] = item[prop];
+                      }
+                    }
+
+                    // Explicitly set tooltip from description
+                    // This way it won't be overwritten by recursive processing
+                    if (item.description && !schemaRecord.tooltip) {
+                      schemaRecord.tooltip = item.description;
+                    }
+                    if (item.tooltip) {
+                      schemaRecord.tooltip = item.tooltip;  // Direct tooltip takes precedence
+                    }
+
                     newObjects[item.id] = schemaRecord;
                   }
                 };
                 fieldSchema.objects = newObjects;
+
+                // Recursively process the populated objects to handle their fromFile fields
+                fieldSchema.objects = await this.processSchemaFromFileProperties(fieldSchema.objects, basePath) as Schema;
               }
             } else {
               console.warn(`[Editor] Merged data for fromFile '${fieldSchema.fromFile}' is not an array or is null.`);
@@ -1644,10 +1701,11 @@ export class Editor {
         }
 
         // Recursively process for nested schemas (e.g., in fieldSchema.objects if type is 'schema' or 'schema[]')
-        if ((fieldSchema.type === 'schema' || fieldSchema.type === 'schema[]') && fieldSchema.objects) {
+        // Only process if objects weren't already populated via fromFile (prevent double-processing)
+        if ((fieldSchema.type === 'schema' || fieldSchema.type === 'schema[]') && fieldSchema.objects && !fieldSchema.fromFile) {
           // Make sure objects is not the one we just created from fileData if it was meant to be the data itself.
           // This recursive call should process the *structure* of fieldSchema.objects if it itself contains fromFile.
-          // The current logic for `fromFile` on `schema` or `schema[]` type redefines `fieldSchema.objects` 
+          // The current logic for `fromFile` on `schema` or `schema[]` type redefines `fieldSchema.objects`
           // based on the *content* of the loaded file, not its schema.
           // If `fieldSchema.objects` itself could have `fromFile`, that would be a deeper level of recursion.
           // For now, assuming `fromFile` at one level populates based on file content.
@@ -1682,8 +1740,32 @@ export class Editor {
       return data;
     }
 
-    const hasAndCondition = fieldSchema.fromFileTypeAnd && typeof fieldSchema.fromFileTypeAnd === 'object';
-    const hasOrCondition = fieldSchema.fromFileTypeOr && typeof fieldSchema.fromFileTypeOr === 'object';
+    // Parse fromFileTypeAnd if it's a string (from textarea input)
+    let fromFileTypeAnd: Record<string, any> | undefined = fieldSchema.fromFileTypeAnd;
+    if (typeof fromFileTypeAnd === 'string' && (fromFileTypeAnd as string).trim()) {
+      try {
+        const repaired = jsonrepair(fromFileTypeAnd as string);
+        fromFileTypeAnd = JSON.parse(repaired);
+      } catch (error) {
+        console.warn('[Editor] Failed to parse fromFileTypeAnd:', error);
+        fromFileTypeAnd = undefined;
+      }
+    }
+
+    // Parse fromFileTypeOr if it's a string (from textarea input)
+    let fromFileTypeOr: Record<string, any> | undefined = fieldSchema.fromFileTypeOr;
+    if (typeof fromFileTypeOr === 'string' && (fromFileTypeOr as string).trim()) {
+      try {
+        const repaired = jsonrepair(fromFileTypeOr as string);
+        fromFileTypeOr = JSON.parse(repaired);
+      } catch (error) {
+        console.warn('[Editor] Failed to parse fromFileTypeOr:', error);
+        fromFileTypeOr = undefined;
+      }
+    }
+
+    const hasAndCondition = fromFileTypeAnd && typeof fromFileTypeAnd === 'object';
+    const hasOrCondition = fromFileTypeOr && typeof fromFileTypeOr === 'object';
 
     if (!hasAndCondition && !hasOrCondition) {
       return data;
@@ -1699,7 +1781,7 @@ export class Editor {
 
       // Check fromFileTypeAnd - ALL specified key-value pairs must match
       if (hasAndCondition) {
-        passesAndCondition = Object.entries(fieldSchema.fromFileTypeAnd!).every(([key, expectedValue]) => {
+        passesAndCondition = Object.entries(fromFileTypeAnd!).every(([key, expectedValue]) => {
           const actualValue = this.getNestedValue(item, key);
           // Support array-contains checks
           if (Array.isArray(actualValue)) {
@@ -1710,13 +1792,16 @@ export class Editor {
             // Single expected value must be in actual array
             return actualValue.includes(expectedValue);
           }
+          // Special sentinels for truthy/falsy checks
+          if (expectedValue === '$truthy') return !!actualValue;
+          if (expectedValue === '$falsy') return !actualValue;
           return actualValue === expectedValue;
         });
       }
 
       // Check fromFileTypeOr - AT LEAST ONE specified key-value pair must match
       if (hasOrCondition) {
-        passesOrCondition = Object.entries(fieldSchema.fromFileTypeOr!).some(([key, expectedValue]) => {
+        passesOrCondition = Object.entries(fromFileTypeOr!).some(([key, expectedValue]) => {
           const actualValue = this.getNestedValue(item, key);
           // Support array-contains checks
           if (Array.isArray(actualValue)) {
@@ -1731,6 +1816,9 @@ export class Editor {
           if (Array.isArray(expectedValue)) {
             return expectedValue.includes(actualValue);
           }
+          // Special sentinels for truthy/falsy checks
+          if (expectedValue === '$truthy') return !!actualValue;
+          if (expectedValue === '$falsy') return !actualValue;
           return actualValue === expectedValue;
         });
       } else {
@@ -1887,15 +1975,31 @@ export class Editor {
           return { type: 'chooseOne', options: item.values };
         case 'chooseMany':
           return { type: 'chooseMany', options: item.values };
+        case 'schema':
+          // Double-level fromFile: item itself defines a nested schema
+          return {
+            type: 'schema',
+            fromFile: item.fromFile,
+            fromFileType: item.fromFileType,
+            fromFileTypeAnd: item.fromFileTypeAnd,
+            fromFileTypeOr: item.fromFileTypeOr,
+            objects: item.objects
+          };
         case 'array':
           return { type: 'string[]', };
+        case 'range':
+          return { type: 'range' };
         default:
           console.warn(`[Editor] Unknown item.type '${itemType}' for custom fromFileType. Defaulting to 'string'.`);
           return { type: 'string' };
       }
     }
 
-    return { type: fieldSchema.fromFileType! };
+    if (fieldSchema.fromFileType === 'chooseOne' || fieldSchema.fromFileType === 'chooseMany') {
+      return { type: fieldSchema.fromFileType, options: item.values };
+    }
+
+    return { type: fieldSchema.fromFileType as Schemable['type'] };
 
   }
 

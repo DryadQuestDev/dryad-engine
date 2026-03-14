@@ -10,7 +10,7 @@ export const PropertySchema = {
   type: { type: 'chooseOne', options: ['number', 'string', 'boolean', 'array', 'object'], tooltip: 'Data type of the property value.' },
 
   // for numbers only
-  precision: { type: 'number', tooltip: 'Number of decimal places. E.g., 0->69, 1->69.5, 2->69.57', show: { type: ['number'] } },
+  precision: { type: 'number', tooltip: 'Number of decimal places. E.g., 0->69, 1->69.5, 2->69.57. If not set, the precision will be automatically derived from the default value.', show: { type: ['number'] } },
   is_negative: { type: 'boolean', tooltip: 'If true, reducing this value is positive (e.g., damage taken). Used for UI coloring.', show: { type: ['number'], is_constant: [false, undefined] } },
   min_value: { type: 'number', tooltip: 'Minimum allowed value for this property.', show: { type: ['number'], is_constant: [false, undefined] } },
   max_value: { type: 'number', tooltip: 'Maximum allowed value for this property.', show: { type: ['number'], is_constant: [false, undefined] } },

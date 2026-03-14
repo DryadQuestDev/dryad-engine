@@ -383,7 +383,7 @@ export class ElectronStorageService implements StorageService {
 
     // --- Documentation Methods ---
 
-    async readDocFile(category: string, page: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
+    async readDocFile(category: string, page: string, language: string = 'en', basePath: string): Promise<{
         content?: string;
         error?: string;
     }> {
@@ -395,7 +395,7 @@ export class ElectronStorageService implements StorageService {
         return this.invokeElectron('read-doc-file', category, page, language, basePath);
     }
 
-    async searchDocs(query: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
+    async searchDocs(query: string, language: string = 'en', basePath: string): Promise<{
         results?: any[];
         total?: number;
         error?: string;

@@ -495,7 +495,7 @@ export class LocalhostStorageService implements StorageService {
     }
 
     // --- Documentation Methods ---
-    async readDocFile(category: string, page: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
+    async readDocFile(category: string, page: string, language: string = 'en', basePath: string): Promise<{
         content?: string;
         error?: string;
     }> {
@@ -512,7 +512,7 @@ export class LocalhostStorageService implements StorageService {
         }
     }
 
-    async searchDocs(query: string, language: string = 'en', basePath: string = 'engine_files/docs'): Promise<{
+    async searchDocs(query: string, language: string = 'en', basePath: string): Promise<{
         results?: any[];
         total?: number;
         error?: string;

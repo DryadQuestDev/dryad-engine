@@ -5,10 +5,11 @@ import { computed, ComputedRef } from 'vue';
 
 import { DungeonSystem, DungeonLine } from './systems/dungeonSystem';
 import { DungeonData } from './core/dungeon/dungeonData';
-import { ActionObject, LogicSystem, PoolSettings, CollectionSettings } from './systems/logicSystem';
-import { CharacterSystem, StatComputerFunction } from './systems/characterSystem';
+import { ActionObject, LogicSystem, PoolSettings, PoolDrawResult, CollectionSettings } from './systems/logicSystem';
+import { NarrativeSystem } from './systems/narrativeSystem';
+import { CharacterSystem, StatComputerFunction, type StatGroupResolverFunction } from './systems/characterSystem';
 import { ItemSystem } from './systems/itemSystem';
-import { CoreSystem, type EmitterMap, type CustomComponent } from './systems/coreSystem';
+import { CoreSystem, type EmitterMap, type CustomComponent, type SaveOptions } from './systems/coreSystem';
 import { gameLogger } from './utils/logger';
 import { Character } from './core/character/character';
 import { Inventory } from './core/character/inventory';
@@ -54,6 +55,18 @@ export class Game {
   @Skip()
   public logicSystem = new LogicSystem();
 
+  /**
+   * Narrative system - data-driven component selection for narrative slots.
+   */
+  @Skip()
+  public narrativeSystem = new NarrativeSystem();
+
+  /**
+   * Service registry - cross-script utility sharing for plugins and game scripts.
+   */
+  @Skip()
+  private serviceRegistry = new Map<string, any>();
+
   // ============================================
   // PUBLIC API: Game Lifecycle
   // ============================================
@@ -65,7 +78,7 @@ export class Game {
   @Skip()
   public isNewGame = true;
 
-  public async saveGame(saveName: string, options?: { hidden?: boolean }) {
+  public async saveGame(saveName: string, options?: SaveOptions) {
     await this.coreSystem.saveGame(this, saveName, options);
   }
 
@@ -120,6 +133,47 @@ export class Game {
     this.coreSystem.clearComponentSlot(slot);
   }
 
+  public registerComponent(name: string, component: any): void {
+    if ((window as any).engine.components[name]) {
+      gameLogger.overwrite(`registerComponent: '${name}' already exists and will be overwritten`);
+    }
+    (window as any).engine.components[name] = component;
+    gameLogger.info(`registerComponent: '${name}'`);
+  }
+
+  public getComponent(name: string): any {
+    const comp = (window as any).engine.components[name];
+    if (!comp) {
+      gameLogger.error(`getComponent: '${name}' not found. Make sure it was registered with game.registerComponent() or is a built-in engine component.`);
+    }
+    return comp;
+  }
+
+  // ============================================
+  // PUBLIC API: Service Registry
+  // ============================================
+
+  /**
+   * Register a named service (utility object/function) for cross-script sharing.
+   */
+  public registerService(id: string, service: any): void {
+    if (this.serviceRegistry.has(id)) {
+      gameLogger.overwrite(`Service "${id}" already exists - overwriting`);
+    }
+    this.serviceRegistry.set(id, service);
+  }
+
+  /**
+   * Get a registered service by ID.
+   */
+  public getService(id: string): any {
+    const svc = this.serviceRegistry.get(id);
+    if (!svc) {
+      gameLogger.error(`Service "${id}" not found. Register it with game.registerService().`);
+    }
+    return svc;
+  }
+
   // ============================================
   // PUBLIC API: State Management
   // ============================================
@@ -134,14 +188,6 @@ export class Game {
 
   public setState<T>(key: string, value: T): void {
     this.coreSystem.setState(key, value);
-  }
-
-  /**
-   * Keep an image in browser memory cache to prevent GC eviction.
-   * Call on image @load events.
-   */
-  public persistImage(src: string): void {
-    this.coreSystem.persistImage(src);
   }
 
   public getDungeonType(): "map" | "screen" | "text" {
@@ -357,10 +403,50 @@ export class Game {
   }
 
   // ============================================
+  // PUBLIC API: Settings
+  // ============================================
+
+  /**
+   * Get an engine-level setting value (persisted to browser, shared across all games).
+   */
+  public getEngineSetting(key: string): any {
+    return Global.getInstance().userSettings.value[key];
+  }
+
+  /**
+   * Set an engine-level setting value. Automatically persisted to browser localStorage.
+   */
+  public setEngineSetting(key: string, value: any): void {
+    Global.getInstance().userSettings.value[key] = value;
+  }
+
+  /**
+   * Get a per-game setting value (defined in game_settings.json, shown in Game Settings menu).
+   */
+  public getGameSetting(key: string): any {
+    return this.coreSystem.settings.value[key];
+  }
+
+  /**
+   * Set a per-game setting value. Persisted in save files.
+   */
+  public setGameSetting(key: string, value: any): void {
+    this.coreSystem.settings.value[key] = value;
+  }
+
+  // ============================================
+  // PUBLIC API: Plugin System
+  // ============================================
+
+  public getPluginPath(pluginId: string): string | null {
+    return this.coreSystem.pluginPaths.get(pluginId) || null;
+  }
+
+  // ============================================
   // PUBLIC API: Data Access
   // ============================================
 
-  public getData(filePath: string, noCopy?: boolean): Map<string, any> | undefined {
+  public getData(filePath: string, noCopy?: boolean): Map<string, any> | Record<string, any> {
     const data = this.coreSystem.dataRegistry.get(filePath);
     if (!data) {
       throw new Error(`Data does not exist for path: ${filePath}`);
@@ -396,12 +482,24 @@ export class Game {
     this.logicSystem.registerPlaceholder(id, func);
   }
 
+  // ============================================
+  // PUBLIC API: Narrative System
+  // ============================================
+
+  public registerNarrativeState(id: string, evaluator: Function) {
+    this.narrativeSystem.registerState(id, evaluator);
+  }
+
   public registerStatComputer(key: string, computer: StatComputerFunction): void {
     this.characterSystem.registerStatComputer(key, computer);
   }
 
   public getStatComputer(key: string): StatComputerFunction | undefined {
     return this.characterSystem.getStatComputer(key);
+  }
+
+  public registerStatGroupResolver(resolver: StatGroupResolverFunction): void {
+    this.characterSystem.registerStatGroupResolver(resolver);
   }
 
   public execute(params: Record<string, any> | string, skipDelayed: boolean = false) {
@@ -416,6 +514,30 @@ export class Game {
     return this.logicSystem.resolveString(input, noExecuteActions);
   }
 
+  public buildAbilityEffectsDescription(
+    abilityIdOrData: string | { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> },
+    characterId?: string, isFlat?: boolean,
+    baseData?: { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }
+  ): { name?: string, lines: string[] }[] | string[] {
+    return this.logicSystem.buildAbilityEffectsDescription(abilityIdOrData, characterId, isFlat, baseData);
+  }
+
+  public buildAbilityMetaDescription(
+    abilityIdOrData: string | { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> },
+    characterId?: string,
+    baseData?: { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }
+  ): string[] {
+    return this.logicSystem.buildAbilityMetaDescription(abilityIdOrData, characterId, baseData);
+  }
+
+  public mergeAbilityData(base: any, modifier: any): { meta: Record<string, any>, effects: Record<string, Record<string, any>> } {
+    return this.characterSystem.mergeAbilityData(base, modifier);
+  }
+
+  public getLine(lineId: string, params: Record<string, any> = {}): string {
+    return this.logicSystem.getLine(lineId, params);
+  }
+
   // ============================================
   // POOL SYSTEM
   // ============================================
@@ -424,9 +546,9 @@ export class Game {
    * Draw templates from a pool based on weighted random selection.
    * @param entry Pool entry ID or custom entry object
    * @param settings Optional draw settings (type: 'weight'|'chance', draws: number, unique: boolean)
-   * @returns Array of template IDs drawn from the pool
+   * @returns Array of { id, quantity } results drawn from the pool
    */
-  public drawFromPool(entry: string | PoolEntryObject, settings?: PoolSettings): string[] {
+  public drawFromPool(entry: string | PoolEntryObject, settings?: PoolSettings): PoolDrawResult[] {
     return this.logicSystem.drawFromPool(entry, settings);
   }
 

@@ -1,0 +1,107 @@
+/* Damage & effect color variables (single source of truth) */
+:root {
+    --dmg-physical: #c8c8c8;
+    --dmg-fire: #ff6b35;
+    --dmg-water: #3b9eff;
+    --dmg-air: #a8e6cf;
+    --dmg-earth: #c69749;
+    --dmg-arcane: #b388ff;
+    --dmg-poison: #66bb6a;
+    --dmg-light: #fff59d;
+    --dmg-dark: #584a71;
+    --dmg-absolute: #ff4081;
+    --effect-heal: #42b983;
+    --effect-steal: #eab308;
+    --effect-token: #a78bfa;
+    --effect-cleanse: #e0e0e0;
+    --effect-defiance: #fff59d;
+}
+
+/* Damage type classes */
+.physical {
+    color: var(--dmg-physical);
+    font-weight: 600;
+}
+
+.fire {
+    color: var(--dmg-fire);
+    font-weight: 600;
+}
+
+.water {
+    color: var(--dmg-water);
+    font-weight: 600;
+}
+
+.air {
+    color: var(--dmg-air);
+    font-weight: 600;
+}
+
+.earth {
+    color: var(--dmg-earth);
+    font-weight: 600;
+}
+
+.arcane {
+    color: var(--dmg-arcane);
+    font-weight: 600;
+}
+
+.poison {
+    color: var(--dmg-poison);
+    font-weight: 600;
+}
+
+.light {
+    color: var(--dmg-light);
+    font-weight: 600;
+}
+
+.dark {
+    color: var(--dmg-dark);
+    font-weight: 600;
+}
+
+.absolute {
+    color: var(--dmg-absolute);
+    font-weight: 600;
+}
+
+/* Effect type classes (floating text) */
+.heal {
+    color: var(--effect-heal);
+    font-weight: 600;
+}
+
+.steal {
+    color: var(--effect-steal);
+    font-weight: 600;
+}
+
+.token-apply {
+    color: var(--effect-token);
+    font-weight: 600;
+}
+
+.cleanse {
+    color: var(--effect-cleanse);
+    font-weight: 600;
+}
+
+.death-defiance {
+    color: var(--effect-defiance);
+    font-weight: 600;
+}
+
+/* Health-lost overlay on character list portraits */
+.health-lost-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    background-color: rgba(200, 30, 30, 0.45);
+    transition: height 0.5s ease;
+    z-index: 1;
+}

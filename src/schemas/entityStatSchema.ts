@@ -7,6 +7,8 @@ export const EntityStatSchema = {
     is_replenishable: { type: 'boolean', show: { is_resource: [true] }, tooltip: 'If true, the resource will be replenished by the amount of value added to the stat.' },
     is_safe_removal: { type: 'boolean', show: { is_replenishable: [true] }, tooltip: 'If true, the resource will be set to 1 instead of 0 when a status is removed. Useful for resources like health to avoid auto death when unequpping an item.' },
     can_overflow: { type: 'boolean', show: { is_resource: [true] }, tooltip: 'If true, the current value can exceed the maximum value.' },
+    is_binary: { type: 'boolean', tooltip: 'Binary flag stat (0 or 1). Shows as a checkmark in UI instead of a number. Multiple sources keep it active until all removed.' },
+    reduction_is_good: { type: 'boolean', tooltip: 'If true, reducing this stat is beneficial (e.g., cooldowns). If false (default), increasing is beneficial (e.g., health, damage). Used for UI coloring.' },
     order: { type: 'number', tooltip: 'Display order in the stats list (lower numbers appear first).' },
     name: { type: 'string', tooltip: 'Display name of the stat shown to users.' },
     description: { type: 'textarea', tooltip: 'Description of what this stat represents(inside Editor).' },

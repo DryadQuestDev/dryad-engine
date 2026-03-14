@@ -7,14 +7,15 @@ export class Status {
     public maxStacks: number = 1; // -1 for unlimited
     public currentStacks: number = 1;
     public image: string = "";
+    public name: string = "";
+    public description: string = "";
+    public polarity: string = "";
+    public rarity: string = "";
 
     // todo: implement
     public isHidden: boolean = false;
 
-    // TODO: or turn it into type 'exploration' | 'combat'??
-    public expirationTrigger: 'none' | 'exploration' | 'combat' = 'none';
-
-    // add actual field to track expiration time, like expirationTime: number = 10;
+    public tags: string[] = [];
     public duration: number = -1;
 
     public stats: Record<string, number> = {};
@@ -22,7 +23,7 @@ export class Status {
     public attributes: Record<string, string> = {};
     public skinLayers: Set<string> = new Set();
     public abilities: Set<string> = new Set();
-    public abilityModifiers: BaseStatusObject['ability_modifiers'] = [];
+    public abilityModifiers: any[] = [];
 
 
     public setValues(obj: CharacterStatusObject | BaseStatusObject) {
@@ -31,13 +32,36 @@ export class Status {
         this.skinLayers = new Set(obj.skin_layers || []);
         this.abilities = new Set(obj.abilities || []);
         this.stats = obj.stats || {};
-        this.abilityModifiers = obj.ability_modifiers || [];
+
+        // Resolve ability_modifiers: string IDs (from editor) → deep-cloned template objects
+        const rawMods: any[] = obj.ability_modifiers || [];
+        const resolved: any[] = [];
+        for (const mod of rawMods) {
+            if (typeof mod === 'string') {
+                const template = Game.getInstance().characterSystem.abilityTemplatesMap.get(mod);
+                if (!template?.modifies) continue;
+                const clone = JSON.parse(JSON.stringify(template));
+                clone.ability_id = clone.modifies;
+                resolved.push(clone);
+            } else {
+                resolved.push(mod);
+            }
+        }
+        this.abilityModifiers = resolved;
 
         // If CharacterStatusObject is passed, also set status values
         if ('max_stacks' in obj && obj.max_stacks !== undefined) {
             this.maxStacks = obj.max_stacks;
             this.image = obj.image || "";
         }
+
+        if ('name' in obj && obj.name) this.name = obj.name;
+        if ('description' in obj && obj.description) this.description = obj.description;
+        if ('image' in obj && obj.image) this.image = obj.image;
+        if ('rarity' in obj && typeof obj.rarity === 'string') this.rarity = obj.rarity;
+        if ('polarity' in obj && obj.polarity) this.polarity = obj.polarity;
+        if ('tags' in obj && obj.tags) this.tags = obj.tags as string[];
+        if ('duration' in obj && typeof obj.duration === 'number') this.duration = obj.duration;
 
         // set computed stats
         if (obj.computed_stats) {

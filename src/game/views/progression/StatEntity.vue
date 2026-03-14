@@ -34,7 +34,12 @@ const displayValue = computed(() => {
   return props.character.getStat(props.statId);
 });
 
+const isBinary = computed(() => stat.value?.is_binary ?? false);
 const hasDescription = computed(() => !!stat.value?.ingame_description);
+const binaryColor = computed(() => {
+  const reductionIsGood = stat.value?.reduction_is_good ?? false;
+  return reductionIsGood ? '#ff453a' : '#42b983';
+});
 
 const onMouseEnter = (event: MouseEvent) => {
   if (stat.value) {
@@ -48,7 +53,12 @@ const onMouseLeave = () => {
 </script>
 
 <template>
-  <div v-if="stat && character.hasStat(statId)" class="stat-entity" :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter"
+  <div v-if="stat && isBinary && displayValue" class="stat-entity binary-stat" :class="{ 'has-description': hasDescription }"
+    @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+    <span class="binary-check" :style="{ color: binaryColor }">&#10003;</span>
+    <span class="stat-name">{{ stat.name || statId }}</span>
+  </div>
+  <div v-else-if="stat && (character.hasStat(statId) || maxValue !== 0)" class="stat-entity" :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave">
     <span class="stat-name">{{ stat.name || statId }}:</span>
     <ProgressBar v-if="isResource" class="resource-bar-right" :current="currentValue" :max="maxValue"
@@ -96,5 +106,14 @@ const onMouseLeave = () => {
 
 .resource-bar-right {
   margin-left: auto;
+}
+
+.binary-stat {
+  gap: 0.4rem;
+}
+
+.binary-check {
+  font-weight: bold;
+  font-size: 1.1em;
 }
 </style>

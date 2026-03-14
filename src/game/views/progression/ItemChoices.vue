@@ -49,7 +49,7 @@ function handleChoiceClick(choice: Choice) {
     </div>
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" />
+    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ item }" />
   </div>
 </template>
 

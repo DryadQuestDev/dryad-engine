@@ -27,6 +27,9 @@ const containerRef = ref<HTMLElement | null>(null);
 const isDragging = ref(false);
 const dragStartX = ref(0);
 const dragStartY = ref(0);
+const isArtDragging = ref(false);
+const artDragStartX = ref(0);
+const artDragStartY = ref(0);
 
 // Image dimensions
 const actualImageWidth = ref(0);
@@ -40,6 +43,22 @@ const skinLayersData = ref<Record<string, any>[]>([]);
 const localX = ref(50);
 const localY = ref(50);
 const localScale = ref(1);
+
+const localArtDx = ref(0);
+const localArtDy = ref(0);
+const localArtScale = ref(1);
+
+// Margin left scaled to rendered image height (game has 120px padding at ~1000px image height)
+const dollMarginLeft = computed(() => {
+  if (renderedImageHeight.value === 0) return '0px';
+  return (renderedImageHeight.value * 0.12) + 'px';
+});
+
+// Character-sheet start position (game: 120px padding + 50vh doll wrapper ≈ 62% of image height)
+const sheetStartLeft = computed(() => {
+  if (renderedImageHeight.value === 0) return '0px';
+  return (renderedImageHeight.value * 0.7) + 'px';
+});
 
 // Compute the scale factor between actual and rendered image
 const imageScaleFactor = computed(() => {
@@ -119,6 +138,10 @@ function initializeLocalValues() {
   localY.value = localItem.value.traits?.face_shift_y ?? coreItem.value?.traits?.face_shift_y ?? 50;
   localScale.value = localItem.value.traits?.face_shift_scale ?? coreItem.value?.traits?.face_shift_scale ?? 1;
 
+  localArtDx.value = localItem.value.traits?.art_dx ?? coreItem.value?.traits?.art_dx ?? 0;
+  localArtDy.value = localItem.value.traits?.art_dy ?? coreItem.value?.traits?.art_dy ?? 0;
+  localArtScale.value = localItem.value.traits?.art_scale ?? coreItem.value?.traits?.art_scale ?? 1;
+
   isInitialized.value = true;
 }
 
@@ -130,7 +153,7 @@ watch(() => props.item, (newItem) => {
 }, { deep: true });
 
 // Watch for local changes and emit updates
-watch([localX, localY, localScale], () => {
+watch([localX, localY, localScale, localArtDx, localArtDy, localArtScale], () => {
   updateItemTraits();
 });
 
@@ -143,6 +166,9 @@ function updateItemTraits() {
   localItem.value.traits.face_shift_x = localX.value;
   localItem.value.traits.face_shift_y = localY.value;
   localItem.value.traits.face_shift_scale = localScale.value;
+  localItem.value.traits.art_dx = localArtDx.value;
+  localItem.value.traits.art_dy = localArtDy.value;
+  localItem.value.traits.art_scale = localArtScale.value;
 
   emit('update:item', localItem.value);
 }
@@ -216,19 +242,42 @@ function handleMouseDown(event: MouseEvent) {
 }
 
 function handleMouseMove(event: MouseEvent) {
-  if (!isDragging.value || !containerRef.value) return;
+  if (isDragging.value && containerRef.value) {
+    const rect = containerRef.value.getBoundingClientRect();
+    const previewX = event.clientX - rect.left - dragStartX.value;
+    const previewY = event.clientY - rect.top - dragStartY.value;
 
-  const rect = containerRef.value.getBoundingClientRect();
-  const previewX = event.clientX - rect.left - dragStartX.value;
-  const previewY = event.clientY - rect.top - dragStartY.value;
+    // Convert from preview pixel coordinates to percentages
+    localX.value = previewPixelsToPercentage(previewX, actualImageWidth.value);
+    localY.value = previewPixelsToPercentage(previewY, actualImageHeight.value);
+  }
 
-  // Convert from preview pixel coordinates to percentages
-  localX.value = previewPixelsToPercentage(previewX, actualImageWidth.value);
-  localY.value = previewPixelsToPercentage(previewY, actualImageHeight.value);
+  if (isArtDragging.value && renderedImageHeight.value > 0) {
+    const dx = event.clientX - artDragStartX.value;
+    const dy = event.clientY - artDragStartY.value;
+    artDragStartX.value = event.clientX;
+    artDragStartY.value = event.clientY;
+
+    // Convert pixel delta to percentage of rendered image dimensions
+    // Divide by artScale because game uses scale(s) translate(dx%, dy%) — translation is magnified by scale
+    const renderedWidth = actualImageWidth.value * imageScaleFactor.value;
+    const s = localArtScale.value || 1;
+    localArtDx.value += (dx / (renderedWidth * s)) * 100;
+    localArtDy.value += (dy / (renderedImageHeight.value * s)) * 100;
+  }
 }
 
 function handleMouseUp() {
   isDragging.value = false;
+  isArtDragging.value = false;
+}
+
+// Art drag: mousedown on the character doll wrapper
+function handleArtMouseDown(event: MouseEvent) {
+  isArtDragging.value = true;
+  artDragStartX.value = event.clientX;
+  artDragStartY.value = event.clientY;
+  event.preventDefault();
 }
 
 function handleScaleChange(value: number | number[] | undefined) {
@@ -247,17 +296,20 @@ onMounted(() => {
 <template>
   <div class="face-picker-popup">
     <div class="picker-header">
-      <h3>Face Position Picker</h3>
+      <h3>Art Manager</h3>
       <p class="hint">Drag the rectangle to position the face indicator</p>
     </div>
 
     <div class="picker-content">
       <!-- Controls -->
       <div class="controls">
+        <div class="section-divider">Face Picker</div>
+
         <div class="control-group">
           <div class="control-label-row">
             <label>X Position: {{ localX.toFixed(1) }}%</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_x === undefined" class="core-value-indicator">
+            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_x === undefined"
+              class="core-value-indicator">
               (core: {{ (coreItem.traits.face_shift_x ?? 50).toFixed(1) }}%)
             </span>
           </div>
@@ -268,7 +320,8 @@ onMounted(() => {
         <div class="control-group">
           <div class="control-label-row">
             <label>Y Position: {{ localY.toFixed(1) }}%</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_y === undefined" class="core-value-indicator">
+            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_y === undefined"
+              class="core-value-indicator">
               (core: {{ (coreItem.traits.face_shift_y ?? 50).toFixed(1) }}%)
             </span>
           </div>
@@ -279,12 +332,51 @@ onMounted(() => {
         <div class="control-group">
           <div class="control-label-row">
             <label>Scale: {{ localScale.toFixed(2) }}</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_scale === undefined" class="core-value-indicator">
+            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_scale === undefined"
+              class="core-value-indicator">
               (core: {{ (coreItem.traits.face_shift_scale ?? 1).toFixed(2) }})
             </span>
           </div>
           <Slider :modelValue="localScale" @update:modelValue="handleScaleChange" :min="0.1" :max="3" :step="0.01"
             class="control-slider" />
+        </div>
+
+        <div class="section-divider">Art Offset</div>
+
+        <div class="control-group">
+          <div class="control-label-row">
+            <label>Art X Offset: {{ localArtDx.toFixed(1) }}%</label>
+            <span v-if="coreItem && coreItem.traits && localItem.traits?.art_dx === undefined"
+              class="core-value-indicator">
+              (core: {{ (coreItem.traits.art_dx ?? 0).toFixed(1) }}%)
+            </span>
+          </div>
+          <Slider :modelValue="localArtDx" @update:modelValue="(v) => localArtDx = Array.isArray(v) ? v[0] : v"
+            :min="-100" :max="100" :step="0.1" class="control-slider" />
+        </div>
+
+        <div class="control-group">
+          <div class="control-label-row">
+            <label>Art Y Offset: {{ localArtDy.toFixed(1) }}%</label>
+            <span v-if="coreItem && coreItem.traits && localItem.traits?.art_dy === undefined"
+              class="core-value-indicator">
+              (core: {{ (coreItem.traits.art_dy ?? 0).toFixed(1) }}%)
+            </span>
+          </div>
+          <Slider :modelValue="localArtDy" @update:modelValue="(v) => localArtDy = Array.isArray(v) ? v[0] : v"
+            :min="-100" :max="100" :step="0.1" class="control-slider" />
+        </div>
+
+        <div class="control-group">
+          <div class="control-label-row">
+            <label>Art Scale: {{ localArtScale.toFixed(2) }}</label>
+            <span v-if="coreItem && coreItem.traits && localItem.traits?.art_scale === undefined"
+              class="core-value-indicator">
+              (core: {{ (coreItem.traits.art_scale ?? 1).toFixed(2) }})
+            </span>
+          </div>
+          <Slider :modelValue="localArtScale" @update:modelValue="(v) => localArtScale = Array.isArray(v) ? v[0] : v"
+            :min="0.1" :max="3" :step="0.01" class="control-slider" />
         </div>
 
       </div>
@@ -297,17 +389,24 @@ onMounted(() => {
           <p class="info-text">Note: All image layer pictures should have the same size dimensions.</p>
         </div>
 
+        <!-- Game padding zone -->
+        <div v-if="imageLayers.length > 0" class="game-padding-zone" :style="{ width: dollMarginLeft }"></div>
+
+        <!-- Character-sheet start boundary -->
+        <div v-if="imageLayers.length > 0" class="sheet-boundary" :style="{ left: sheetStartLeft }"></div>
+
         <!-- Character Doll -->
-        <div v-else class="character-doll-wrapper">
-          <div class="character-doll">
+        <div v-if="imageLayers.length > 0" class="character-doll-wrapper" @mousedown="handleArtMouseDown">
+          <div class="character-doll"
+            :style="{ transform: `scale(${localArtScale}) translate(${localArtDx}%, ${localArtDy}%)`, transformOrigin: 'center center' }">
             <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="character-doll-image"
               @error="($event.target as HTMLImageElement).style.display = 'none'"
               @load="index === 0 ? updateRenderedHeight() : null" />
-          </div>
 
-          <!-- Draggable Purple Rectangle -->
-          <div class="face-selector-rect" :style="rectStyle" @mousedown="handleMouseDown">
-            <div class="rect-label">FACE</div>
+            <!-- Draggable Purple Rectangle (inside character-doll so it tracks art transform) -->
+            <div class="face-selector-rect" :style="rectStyle" @mousedown.stop="handleMouseDown">
+              <div class="rect-label">FACE</div>
+            </div>
           </div>
         </div>
       </div>
@@ -367,6 +466,21 @@ onMounted(() => {
   gap: 0.5rem;
 }
 
+.section-divider {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-top: 1px solid #ddd;
+  padding-top: 0.75rem;
+}
+
+.section-divider:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
 .control-group label {
   font-size: 0.9rem;
   font-weight: 500;
@@ -402,8 +516,9 @@ onMounted(() => {
   border: 1px solid #ddd;
   border-radius: 4px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
+  position: relative;
 }
 
 .no-layers-message {
@@ -422,9 +537,29 @@ onMounted(() => {
   color: #666;
 }
 
+.sheet-boundary {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 2px dashed rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.game-padding-zone {
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
 .character-doll-wrapper {
   position: relative;
   display: inline-block;
+  cursor: grab;
+}
+
+.character-doll-wrapper:active {
+  cursor: grabbing;
 }
 
 .character-doll {

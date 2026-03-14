@@ -51,6 +51,14 @@ const chooseManySchemaFields = ref<{ path: string; options: any[] }[]>([]);
 const stringArraySchemaFields = ref<{ path: string; uniqueValues?: Set<string | number> }[]>([]);
 const combinedTagFieldsForTemplate = ref<{ path: string; options: { value: string | number; label: string }[]; isStringArray: boolean }[]>([]);
 
+// Lazy-compute: track accordion state and stale tag data
+const openPanels = ref<string[]>([]);
+const tagDataStale = ref(true);
+
+function onPanelsUpdate(val: any) {
+    openPanels.value = Array.isArray(val) ? [...val] : [];
+}
+
 const formState = reactive({
   id: '',
   search: '',
@@ -305,9 +313,13 @@ watch(() => props.schema, (newSchema) => {
                 formState.selected[field.path][getControlName(opt.value)] = false;
             });
         });
-        // Initialize tags based on combined list (needs unique values first)
-        updateStringArrayUniqueValues(props.data || []); // Ensure unique values are ready
-        updateCombinedTagFieldsForTemplate(); // Now create combined list
+        // Initialize tags — defer expensive data scan, just mark stale
+        tagDataStale.value = true;
+        if (openPanels.value.includes('tags')) {
+            updateStringArrayUniqueValues(props.data || []);
+            tagDataStale.value = false;
+        }
+        updateCombinedTagFieldsForTemplate(); // Build from schema (stringArray options may be empty if stale)
         combinedTagFieldsForTemplate.value.forEach(field => {
             formState.tag[field.path] = { logic: false, values: {} };
              field.options.forEach(opt => {
@@ -341,14 +353,28 @@ watch(() => props.data, (newData, oldData) => {
         sifterManager.setObj([]); // Ensure it's cleared if data becomes null
     }
 
-    // Update unique values needed for tag filters if data changes
+    // Update unique values needed for tag filters — only if tags panel is open
     if (stringArraySchemaFields.value.length > 0) {
-        updateStringArrayUniqueValues(newData || []);
-        updateCombinedTagFieldsForTemplate(); // Rebuild combined list as options might change
+        if (openPanels.value.includes('tags')) {
+            updateStringArrayUniqueValues(newData || []);
+            updateCombinedTagFieldsForTemplate();
+            tagDataStale.value = false;
+        } else {
+            tagDataStale.value = true;
+        }
     }
     applySift(); // Re-apply filter when data source changes OR when it becomes null/empty
 }, { deep: true, immediate: true });
 
+
+// Watch accordion panels — recompute tag data when tags panel opens if stale
+watch(openPanels, (panels) => {
+    if (panels.includes('tags') && tagDataStale.value) {
+        updateStringArrayUniqueValues(props.data || []);
+        updateCombinedTagFieldsForTemplate();
+        tagDataStale.value = false;
+    }
+});
 
 // Watch the entire form state for changes (Calls debounced version)
 watch(formState, () => {
@@ -464,7 +490,7 @@ watch(() => props.triggerClear, (newValue, oldValue) => {
     </div>
 
     <!-- Accordion for Advanced Filters -->
-    <Accordion :multiple="true" :value="[]"> <!-- Use empty array for value to start closed -->
+    <Accordion :multiple="true" :value="openPanels" @update:value="onPanelsUpdate">
         <!-- Range Filters -->
         <AccordionPanel v-if="numericSchemaKeys.length > 0" value="ranges">
             <AccordionHeader>
