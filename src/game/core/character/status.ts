@@ -25,6 +25,9 @@ export class Status {
     public abilities: Set<string> = new Set();
     public abilityModifiers: any[] = [];
 
+    // Spine configs keyed by view ('' = default, 'back' = back view, etc.)
+    public spineViews: Map<string, { atlas: string, skeleton: string, animation: string }> = new Map();
+
 
     public setValues(obj: CharacterStatusObject | BaseStatusObject) {
         this.traits = obj.traits || {};
@@ -32,6 +35,20 @@ export class Status {
         this.skinLayers = new Set(obj.skin_layers || []);
         this.abilities = new Set(obj.abilities || []);
         this.stats = obj.stats || {};
+
+        // Spine configs: array of { id, view?, atlas, skeleton, default_animation }
+        if (obj.spine && Array.isArray(obj.spine)) {
+            for (const entry of obj.spine) {
+                if (entry.atlas && entry.skeleton) {
+                    const key = entry.view || '';
+                    this.spineViews.set(key, {
+                        atlas: entry.atlas,
+                        skeleton: entry.skeleton,
+                        animation: entry.default_animation || '',
+                    });
+                }
+            }
+        }
 
         // Resolve ability_modifiers: string IDs (from editor) → deep-cloned template objects
         const rawMods: any[] = obj.ability_modifiers || [];

@@ -2,12 +2,12 @@
 
 ## DryadScript Actions
 
-### `start_battle`
+### `battle`
 
 Start a battle from DryadScript. Pass enemy character IDs as a comma-separated string:
 
 ```js
-{ start_battle: "goblin, troll" }
+{ battle: "goblin, troll" }
 ```
 
 ## Config Fields

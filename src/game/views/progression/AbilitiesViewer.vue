@@ -46,7 +46,7 @@ function selectAbility(abilityId: string) {
 
 <template>
   <div class="abilities-viewer">
-    <CustomComponentContainer slot="abilities-viewer-header" :context="{ character }" />
+    <CustomComponentContainer slot="abilities-viewer-top" :context="{ character }" />
 
     <div v-if="abilityIds.length === 0" class="empty-state">
       No abilities
@@ -68,7 +68,7 @@ function selectAbility(abilityId: string) {
       </div>
     </div>
 
-    <CustomComponentContainer slot="abilities-viewer-footer" :context="{ character }" />
+    <CustomComponentContainer slot="abilities-viewer-bottom" :context="{ character }" />
   </div>
 </template>
 

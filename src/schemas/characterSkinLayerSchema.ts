@@ -8,6 +8,7 @@ export const CharacterSkinLayerSchema = {
     images: { type: 'schema', tooltip: 'Images of the skin layer, dynamically built based on attributes.' }, // change to build imgs dinamically
     masks: { type: 'schema', tooltip: 'Clip all image layers below this layer inside this mask boundaries.' },
     styles: { type: 'string[]', tooltip: 'Custom css classes to apply to the skin layer by default.' },
+    view: { type: 'chooseOne', fromFile: 'character_views', tooltip: 'View this layer belongs to (e.g. back, side). Empty = base layer, always rendered.' },
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
 } as const satisfies Schema;
 

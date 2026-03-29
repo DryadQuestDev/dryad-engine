@@ -161,9 +161,13 @@ interface CustomComponent {
  */
 interface ActionObject {
   /** The function to execute when the action is triggered */
-  action: Function;
-  /** If true, action is deferred until scene transition */
-  delayed?: boolean;
+  action?: Function;
+  /** If provided, modifies choices that reference this action's ID in their params */
+  choiceModifier?: Function;
+  /** If true, action runs on game load (save restoration) */
+  onGameLoad?: boolean;
+  /** If true, action is deferred until after the current event/scene transition */
+  eventDelayed?: boolean;
 }
 
 /**
@@ -1315,10 +1319,10 @@ interface Game {
    *   game.getProperty('gold').addCurrentValue(amount);
    * });
    *
-   * // With delayed execution
+   * // With delayed execution (runs after scene transition)
    * game.registerAction("delayed_heal", {
    *   action: (amount) => character.addResource('health', amount),
-   *   delayed: true
+   *   eventDelayed: true
    * });
    */
   registerAction(id: string, actionObject: ActionObject | Function): void;
@@ -1877,6 +1881,70 @@ interface Character {
    * character.setAttribute('hair_color', 'blonde');
    */
   setAttribute(key: string, value: string): void;
+
+  // ============================================
+  // Spine Animation Methods
+  // ============================================
+
+  /** Whether this character has a default spine config (no view). */
+  isSpineCharacter(): boolean;
+
+  /** Check if a spine config exists for the given view name (e.g. "back", "side"). */
+  isSpineForView(view: string): boolean;
+
+  /** Get the default spine config (no view). Returns null if not defined. */
+  getDefaultSpine(): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null;
+
+  /**
+   * Get spine config for a specific view. Returns null if no config exists for that view.
+   * @param view - View name (e.g. "back", "side")
+   * @returns Spine config or null
+   */
+  getSpineForView(view: string): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null;
+
+  /** Spine configs keyed by view ('' = default, 'back' = back view, etc.). Accumulated from statuses, last wins per view. */
+  spineViews: Map<string, { atlas: string, skeleton: string, animation: string }>;
+
+  /**
+   * Get image layers filtered by requested views.
+   * No view: returns viewless layers only (base rendering).
+   * With view: returns only layers matching that view.
+   * @param view - Optional view name to filter by
+   */
+  getImageLayersForView(view?: string): any[];
+
+  /**
+   * Get the list of Spine skin names derived from the character's current attributes.
+   * Convention-based: each attribute value becomes a Spine skin name.
+   * @returns Array of Spine skin names to combine
+   */
+  getSpineSkins(): string[];
+
+  /**
+   * Set the current Spine animation to play.
+   * @param animation - The animation name (must exist in the Spine skeleton)
+   * @param view - Optional view name (default: '' for default spine)
+   * @example
+   * character.setSpineAnimation('idle');
+   * character.setSpineAnimation('attack', 'back');
+   * character.setSpineAnimation('attack', 'back', 1); // play once then return to idle
+   */
+  setSpineAnimation(animation: string, view?: string, times?: number): void;
+
+  /**
+   * Check if a spine animation name exists for the given view.
+   * Populated by CharacterDollSpine on load. Returns false if spine hasn't loaded yet.
+   * @param animation - Animation name to check (e.g. 'attack', 'hit', 'idle_wounded')
+   * @param view - Optional view name (default: '' for default spine)
+   */
+  hasSpineAnimation(animation: string, view?: string): boolean;
+
+  /**
+   * Register available spine animation names for a view. Called by CharacterDollSpine on load.
+   * @param view - View name ('' for default)
+   * @param names - Array of animation names from the skeleton data
+   */
+  setAvailableSpineAnimations(view: string, names: string[]): void;
 
   // ============================================
   // Stat & Resource Methods
@@ -3385,7 +3453,7 @@ declare global {
         // === Characters ===
         /** Character face/portrait component. Props: character (Character), showName? (boolean), nameStyle? ("badge"|"overlay", default "badge"), size? (number, default 100), borderRadius? (string, default "50%"), borderColor? (string, default "rgb(174,174,174)"), overlaySlot? (string — extra component slot rendered inside the face shape) */
         CharacterFace: any;
-        /** Full character doll with skin layers. Props: character (Character) */
+        /** Full character doll with skin layers. Props: character (Character), view? (string — render a specific character view e.g. 'back', omit for default base rendering) */
         CharacterDoll: any;
         /** Default character sheet layout with statuses, stats, and inventory sections. Props: character (Character) */
         CharacterSheet: any;
@@ -3393,7 +3461,7 @@ declare global {
         CharacterStats: any;
         /** Displays equipped items and statuses as compact bricks with hover popups. Props: character (Character), showItems? (boolean, default true), showStatuses? (boolean, default true) */
         CharacterStatuses: any;
-        /** Renders a character in a scene slot with animation support. Props: character (Character), slot (SceneSlot), showItemSlots?, enableAppear? */
+        /** Renders a character in a scene slot with animation support. Props: character (Character), slot (SceneSlot), showItemSlots?, enableAppear?, view? (string — character view override e.g. 'back'), interactive? (boolean — enables pointer-events for click handling), overlaySlot? (string — slot name for overlay injection, same pattern as CharacterFace) */
         CharacterSlot: any;
         /** Displays character doll with stats/statuses panel. Supports single or multiple characters with face switching. Props: characters (Character | Character[]), initialIndex? */
         CharacterViewer: any;

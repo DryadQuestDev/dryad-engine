@@ -57,10 +57,12 @@ Renders a character's face portrait. Uses either a static face image (from `face
 
 ## CharacterDoll
 
-Renders a full character doll with all skin layers composited together.
+Renders a full character doll with all skin layers composited together. Supports view-based rendering for alternative perspectives.
 
 **Props:**
 - `character` (Character, required) - The character to display
+- `view` (string, optional) - Render a specific character view (e.g. `'back'`). When set, only layers tagged with that view are rendered. Base (viewless) layers are excluded. See ->characters.character_views
+- `instantLayers` (boolean, optional) - Disables the fade transition on skin layer changes. Use for combat animations where layer swaps should be immediate (default: `false`)
 
 ---
 
@@ -139,6 +141,10 @@ Renders a character in a scene slot with full animation support. Handles positio
 - `slot` (Partial<SceneSlot>, required) - Scene slot configuration with position, transforms, and animation data
 - `showItemSlots` (boolean, optional) - Whether to show equipped item slots
 - `enableAppear` (boolean, optional) - Enable appear animations
+- `view` (string, optional) - Character view override passed to CharacterDoll (e.g. `'back'`). See ->characters.character_views
+- `interactive` (boolean, optional) - Enables pointer-events on the slot, allowing click/hover handling (default: `false`)
+- `overlaySlot` (string, optional) - Slot name for overlay injection inside the character content area. Works the same as `CharacterFace.overlaySlot` — register components via `game.addComponent()` targeting this slot name
+- `instantLayers` (boolean, optional) - Disables the fade transition on skin layer changes. Use for combat animations where layer swaps should be immediate (default: `false`)
 
 ---
 
@@ -387,9 +393,9 @@ Lists a character's abilities as selectable items. Shows ability icons and names
 - Selected ability highlighted with accent color
 
 **Custom Slots:**
-- `abilities-viewer-header` - Before the ability list. Use for filters or search input.
+- `abilities-viewer-top` - Before the ability list. Use for filters or search input.
 - `abilities-viewer-list` - Inside the ability list, after the ability items. Use for "Add Ability" buttons.
-- `abilities-viewer-footer` - At the bottom of the viewer. Use for global actions.
+- `abilities-viewer-bottom` - At the bottom of the viewer. Use for global actions.
 
 **Slot Context:** All slots receive `character` (Character) as a prop.
 

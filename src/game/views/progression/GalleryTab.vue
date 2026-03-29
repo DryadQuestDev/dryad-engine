@@ -24,8 +24,8 @@ const descriptionMinimized = ref(false);
 const expandedGalleries = ref<Set<string>>(new Set());
 const isFullscreen = ref(false);
 
-// Character tweaks state: Map<templateId, { attributes: Map<key, value>, skinLayers: Set<layerId>, skinLayerStyles: Map<layerId, string[]> }>
-const characterTweaks = ref<Map<string, { attributes: Map<string, string>, skinLayers: Set<string>, skinLayerStyles: Map<string, string[]> }>>(new Map());
+// Character tweaks state
+const characterTweaks = ref<Map<string, { attributes: Map<string, string>, skinLayers: Set<string>, skinLayerStyles: Map<string, string[]>, view: string, spineModel: string | null, spineAnimation: string | null, spineSkins: string[] }>>(new Map());
 
 // Asset tweaks state: Map<assetId, { animation: string | null, skins: string[] }>
 const assetTweaks = ref<Map<string, { animation: string | null, skins: string[] }>>(new Map());
@@ -195,7 +195,11 @@ const initializeCharacterTweaks = (templateId: string) => {
   characterTweaks.value.set(templateId, {
     attributes: defaultAttributes,
     skinLayers: defaultSkinLayers,
-    skinLayerStyles: defaultSkinLayerStyles
+    skinLayerStyles: defaultSkinLayerStyles,
+    view: '',
+    spineModel: null,
+    spineAnimation: null,
+    spineSkins: []
   });
 };
 
@@ -203,6 +207,12 @@ const initializeCharacterTweaks = (templateId: string) => {
 const currentCharacterTweaks = computed(() => {
   if (!selectedItemId.value) return null;
   return characterTweaks.value.get(selectedItemId.value) || null;
+});
+
+// Computed: Current view for selected character
+const currentView = computed(() => {
+  if (!selectedItemId.value) return '';
+  return characterTweaks.value.get(selectedItemId.value)?.view ?? '';
 });
 
 // Initialize tweaks when an asset is selected
@@ -277,11 +287,20 @@ const getAttributeOptions = () => {
   return options;
 };
 
-// Function: Get skin layer options for multiselect
+// Function: Get skin layer options for multiselect (filtered by current view)
 const getSkinLayerOptions = () => {
   if (!discoveredCharacterData.value) return [];
 
+  const view = currentView.value;
+
   return Array.from(discoveredCharacterData.value.skinLayers)
+    .filter(layerId => {
+      const layerObj = game.characterSystem.skinLayersMap.get(String(layerId));
+      if (!layerObj) return true;
+      const layerView = (layerObj as any).view as string | undefined;
+      // Default view: show only base (viewless) layers; specific view: show matching layers
+      return !view ? !layerView : layerView === view;
+    })
     .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))
     .map(layerId => ({
       label: String(layerId),
@@ -308,6 +327,122 @@ const getSkinLayerStyleOptions = (layerId: string) => {
   return options;
 };
 
+// Computed: Available views for the selected character (only discovered views)
+const availableViews = computed(() => {
+  if (!discoveredCharacterData.value) return [];
+  return Array.from(discoveredCharacterData.value.views).sort();
+});
+
+// Function: Get view options for character view dropdown
+const VIEW_DEFAULT = '_default_';
+const getViewOptions = () => {
+  const views = availableViews.value;
+  if (views.length === 0) return [];
+  return [
+    { label: 'Default', value: VIEW_DEFAULT },
+    ...views.map(v => ({ label: v, value: v }))
+  ];
+};
+
+// Computed: view select model (maps '' to sentinel for PrimeVue compatibility)
+const viewSelectModel = computed(() => currentView.value || VIEW_DEFAULT);
+
+// Update view selection
+const updateView = (view: string) => {
+  if (!currentCharacterTweaks.value) return;
+  currentCharacterTweaks.value.view = view === VIEW_DEFAULT ? '' : view;
+  currentCharacterTweaks.value.spineModel = null;
+  currentCharacterTweaks.value.spineAnimation = null;
+  currentCharacterTweaks.value.spineSkins = [];
+};
+
+// Function: Get spine model options for character dropdown (filtered by current view)
+const getSpineModelOptions = () => {
+  if (!discoveredCharacterData.value) return [];
+  const view = currentView.value;
+  const configs = discoveredCharacterData.value.spineConfigs.filter(c => c.view === view);
+  if (configs.length <= 1) return [];
+  return configs.map(c => {
+    // Extract filename without extension as label
+    const parts = c.skeleton.split('/');
+    const filename = parts[parts.length - 1].replace(/\.[^.]+$/, '');
+    return { label: filename, value: c.skeleton };
+  });
+};
+
+// Computed: resolved spine model (falls back to first discovered config for current view)
+const resolvedSpineModel = computed(() => {
+  if (currentCharacterTweaks.value?.spineModel) return currentCharacterTweaks.value.spineModel;
+  if (!discoveredCharacterData.value) return null;
+  const view = currentView.value;
+  const first = discoveredCharacterData.value.spineConfigs.find(c => c.view === view);
+  return first?.skeleton ?? null;
+});
+
+// Update spine model for character
+const updateSpineModel = (skeleton: string | null) => {
+  if (!currentCharacterTweaks.value) return;
+  currentCharacterTweaks.value.spineModel = skeleton;
+  currentCharacterTweaks.value.spineAnimation = null;
+  currentCharacterTweaks.value.spineSkins = [];
+};
+
+// Helper: get the current discovered spine config (matching view + resolved model)
+const currentSpineConfig = computed(() => {
+  if (!discoveredCharacterData.value) return null;
+  const view = currentView.value;
+  const skeleton = resolvedSpineModel.value;
+  if (!skeleton) return null;
+  return discoveredCharacterData.value.spineConfigs.find(c => c.view === view && c.skeleton === skeleton) ?? null;
+});
+
+// Computed: resolved spine animation (falls back to first discovered animation)
+const resolvedSpineAnimation = computed(() => {
+  if (currentCharacterTweaks.value?.spineAnimation) return currentCharacterTweaks.value.spineAnimation;
+  const cfg = currentSpineConfig.value;
+  return cfg?.animations[0] ?? null;
+});
+
+// Function: Get spine animation options for character dropdown
+const getCharacterAnimationOptions = () => {
+  const cfg = currentSpineConfig.value;
+  if (!cfg || cfg.animations.length === 0) return [];
+
+  return cfg.animations
+    .slice()
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(anim => ({ label: anim, value: anim }));
+};
+
+// Function: Get spine skin options for character multiselect
+const getCharacterSkinOptions = () => {
+  const cfg = currentSpineConfig.value;
+  if (!cfg || cfg.skins.length === 0) return [];
+
+  return cfg.skins
+    .slice()
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(skin => ({ label: skin, value: skin }));
+};
+
+// Update spine skins for character
+const updateCharacterSkins = (skins: string[]) => {
+  if (!currentCharacterTweaks.value) return;
+  currentCharacterTweaks.value.spineSkins = skins;
+};
+
+// Update spine animation for character
+const updateCharacterAnimation = (animation: string | null) => {
+  if (!currentCharacterTweaks.value) return;
+  currentCharacterTweaks.value.spineAnimation = animation;
+
+  const char = previewCharacterDiscovered.value;
+  const view = currentView.value;
+  if (char && animation) {
+    char.setSpineAnimation(animation, view);
+  }
+};
+
 // Computed: Preview character for undiscovered
 const previewCharacterUndiscovered = computed(() => {
   if (selectedTabType.value !== 'characters' || !selectedItemId.value) return null;
@@ -327,6 +462,27 @@ const previewCharacterDiscovered = computed(() => {
   }
   char.skinLayers = new Set(currentCharacterTweaks.value.skinLayers);
   char.skinLayerStyles = new Map(currentCharacterTweaks.value.skinLayerStyles);
+
+  // Apply spine model tweak if set (override the spine config for this view)
+  const view = currentCharacterTweaks.value.view ?? '';
+  const selectedSkeleton = currentCharacterTweaks.value.spineModel;
+  if (selectedSkeleton && discoveredCharacterData.value) {
+    const cfg = discoveredCharacterData.value.spineConfigs.find(c => c.view === view && c.skeleton === selectedSkeleton);
+    if (cfg) {
+      char.spineViews.set(view, { atlas: cfg.atlas, skeleton: cfg.skeleton, animation: cfg.animations[0] || 'idle' });
+    }
+  }
+
+  // Apply spine animation tweak if set
+  if (currentCharacterTweaks.value.spineAnimation && char.isSpineForView(view)) {
+    char.setSpineAnimation(currentCharacterTweaks.value.spineAnimation, view);
+  }
+
+  // Override spine skins if custom selection
+  const customSkins = currentCharacterTweaks.value.spineSkins;
+  if (customSkins.length > 0) {
+    char.getSpineSkins = () => customSkins;
+  }
 
   return char;
 });
@@ -513,6 +669,33 @@ onMounted(() => {
                     class="tweaks-panel-inline">
                     <div class="tweaks-divider"></div>
 
+                    <!-- View Section -->
+                    <div v-if="availableViews.length > 0" class="tweaks-section">
+                      <div class="tweak-field tweak-field-full">
+                        <FloatLabel variant="on">
+                          <Select :model-value="viewSelectModel"
+                            @update:model-value="updateView($event)" :options="getViewOptions()"
+                            optionLabel="label" optionValue="value" class="w-full"
+                            :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
+                          <label>View</label>
+                        </FloatLabel>
+                      </div>
+                    </div>
+
+                    <!-- Spine Model Section -->
+                    <div v-if="getSpineModelOptions().length > 0" class="tweaks-section">
+                      <div class="tweak-field tweak-field-full">
+                        <FloatLabel variant="on">
+                          <Select :model-value="resolvedSpineModel"
+                            @update:model-value="updateSpineModel($event)"
+                            :options="getSpineModelOptions()"
+                            optionLabel="label" optionValue="value" class="w-full"
+                            :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
+                          <label>Model</label>
+                        </FloatLabel>
+                      </div>
+                    </div>
+
                     <!-- Attributes Section -->
                     <div v-if="getAttributeOptions().size > 0" class="tweaks-section">
                       <div class="tweaks-section-header">Attributes</div>
@@ -564,6 +747,35 @@ onMounted(() => {
                       </div>
                     </div>
 
+                    <!-- Spine Animation Section (for spine characters) -->
+                    <div v-if="getCharacterAnimationOptions().length > 0" class="tweaks-section">
+                      <div class="tweaks-section-header">Animation</div>
+                      <div class="tweak-field tweak-field-full">
+                        <FloatLabel variant="on">
+                          <Select :model-value="resolvedSpineAnimation"
+                            @update:model-value="updateCharacterAnimation($event)"
+                            :options="getCharacterAnimationOptions()"
+                            optionLabel="label" optionValue="value" class="w-full"
+                            :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
+                          <label>Animation</label>
+                        </FloatLabel>
+                      </div>
+                    </div>
+
+                    <!-- Spine Skins Section (for spine characters) -->
+                    <div v-if="getCharacterSkinOptions().length > 0" class="tweaks-section">
+                      <div class="tweaks-section-header">Skins</div>
+                      <div class="tweak-field tweak-field-full">
+                        <FloatLabel variant="on">
+                          <MultiSelect :model-value="currentCharacterTweaks?.spineSkins || []"
+                            @update:model-value="updateCharacterSkins($event)"
+                            :options="getCharacterSkinOptions()"
+                            optionLabel="label" optionValue="value" display="chip" class="w-full"
+                            :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
+                          <label>Skins</label>
+                        </FloatLabel>
+                      </div>
+                    </div>
 
                   </div>
 
@@ -641,8 +853,9 @@ onMounted(() => {
                 :natural-size="true" :direct-render="true" />
             </div>
             <div v-else class="discovered-character" @click="toggleFullscreen">
-              <CharacterDoll v-if="previewCharacterDiscovered" :character="previewCharacterDiscovered"
-                :natural-size="true" :direct-render="true" />
+              <CharacterDoll v-if="previewCharacterDiscovered" :key="`${selectedItemId}_${currentView}_${currentCharacterTweaks?.spineModel}`"
+                :character="previewCharacterDiscovered"
+                :natural-size="true" :direct-render="true" :view="currentView || undefined" />
             </div>
           </template>
 
@@ -667,7 +880,7 @@ onMounted(() => {
           </div>
           <div v-else class="fullscreen-character">
             <CharacterDoll v-if="previewCharacterDiscovered" :character="previewCharacterDiscovered"
-              :natural-size="true" :direct-render="true" />
+              :natural-size="true" :direct-render="true" :view="currentView || undefined" />
           </div>
         </template>
         <template v-else-if="selectedItem.type === 'asset'">

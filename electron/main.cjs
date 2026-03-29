@@ -401,8 +401,8 @@ function normalizeForSearch(text) {
     .replace(/#{1,6}\s/g, '')          // headings
     .replace(/\*\*([^*]+)\*\*/g, '$1') // bold (preserve content)
     .replace(/\*([^*]+)\*/g, '$1')     // italic (preserve content)
-    .replace(/__([^_]+)__/g, '$1')     // bold alt
-    .replace(/_([^_]+)_/g, '$1')       // italic alt
+    .replace(/(?<!\w)__([^_]+)__(?!\w)/g, '$1') // bold alt
+    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, '$1')   // italic alt
     .replace(/`([^`]+)`/g, '$1')       // inline code (preserve content)
     .replace(/```[\s\S]*?```/g, '')    // code blocks
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links (keep text)

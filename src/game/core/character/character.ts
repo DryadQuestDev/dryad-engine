@@ -77,6 +77,11 @@ export class Character {
 
   public actions: any = {};
 
+  // Spine configs keyed by view ('' = default, 'back' = back view, etc.)
+  public spineViews: Map<string, { atlas: string, skeleton: string, animation: string, animationTimes?: number }> = new Map();
+
+  // Available spine animation names per view, populated by CharacterDollSpine on load
+  public spineAnimationsAvailable: Map<string, Set<string>> = new Map();
 
   // Skills Logic
   public skillTrees: Set<string> = new Set();
@@ -324,12 +329,14 @@ export class Character {
   // Public method to build image layers directly from skinLayers (for gallery/ephemeral characters)
   // ignore types
   public buildImageLayersFromSkinLayers(): ImageLayerMeta[] {
-    // Build layers from skinLayers
+    // Build layers from skinLayers (exclude view-tagged layers)
     const skinLayerObjects: CharacterSkinLayerObject[] = [];
 
     for (const layerId of this.skinLayers) {
       const layerObj = Game.getInstance().characterSystem.skinLayersMap.get(layerId);
       if (layerObj) {
+        // Skip view-tagged layers — they only render when explicitly requested
+        if ((layerObj as any).view) continue;
         skinLayerObjects.push(layerObj);
       }
     }
@@ -450,6 +457,110 @@ export class Character {
     this.reevaluate();
   }
 
+  /** Whether this character has a default spine config (no view). */
+  public isSpineCharacter(): boolean {
+    return this.spineViews.has('');
+  }
+
+  /** Get the default spine config (no view). Returns null if not defined. */
+  public getDefaultSpine(): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null {
+    return this.spineViews.get('') || null;
+  }
+
+  /**
+   * Get spine config for a specific view (e.g. "back", "side").
+   * Returns null if no spine view is defined for that view.
+   */
+  public getSpineForView(view: string): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null {
+    return this.spineViews.get(view) || null;
+  }
+
+  /**
+   * Check if a spine view exists for the given view name.
+   */
+  public isSpineForView(view: string): boolean {
+    return this.spineViews.has(view);
+  }
+
+  /** Get all available view names for this character (excludes '' default). */
+  public getAvailableViews(): string[] {
+    const views = new Set<string>();
+    const game = Game.getInstance();
+
+    for (const viewKey of this.spineViews.keys()) {
+      if (viewKey !== '') views.add(viewKey);
+    }
+
+    for (const layerId of this.skinLayers) {
+      const layerObj = game.characterSystem.skinLayersMap.get(layerId);
+      if (layerObj) {
+        const layerView = (layerObj as any).view as string | undefined;
+        if (layerView) views.add(layerView);
+      }
+    }
+
+    return Array.from(views).sort();
+  }
+
+  /**
+   * Get image layers filtered by requested views.
+   * - No views: returns layers with no `view` field + layers with `is_base: true`
+   * - With views: returns layers matching requested views + layers with `is_base: true`
+   */
+  public getImageLayersForView(view?: string): ImageLayerMeta[] {
+    const game = Game.getInstance();
+    const skinLayerObjects: CharacterSkinLayerObject[] = [];
+
+    for (const layerId of this.skinLayers) {
+      const layerObj = game.characterSystem.skinLayersMap.get(layerId);
+      if (!layerObj) continue;
+
+      const layerView = (layerObj as any).view as string | undefined;
+
+      if (!view) {
+        // Default mode: only viewless layers
+        if (!layerView) {
+          skinLayerObjects.push(layerObj);
+        }
+      } else {
+        // View requested: only layers matching that view
+        if (layerView === view) {
+          skinLayerObjects.push(layerObj);
+        }
+      }
+    }
+
+    skinLayerObjects.sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
+    return this.buildImageUrlsFromLayers(skinLayerObjects);
+  }
+
+  // Convention-based: each attribute value becomes a Spine skin name
+  public getSpineSkins(): string[] {
+    const skins: string[] = [];
+    for (const key in this.attributes) {
+      const value = this.attributes[key];
+      if (value) skins.push(value);
+    }
+    return skins;
+  }
+
+  public setSpineAnimation(animation: string, view: string = '', times?: number): void {
+    const config = this.spineViews.get(view);
+    if (config) {
+      config.animation = animation;
+      config.animationTimes = times;
+    }
+  }
+
+  public hasSpineAnimation(animation: string, view: string = ''): boolean {
+    const anims = this.spineAnimationsAvailable.get(view);
+    return anims ? anims.has(animation) : false;
+  }
+
+  public setAvailableSpineAnimations(view: string, names: string[]): void {
+    this.spineAnimationsAvailable.set(view, new Set(names));
+  }
+
   // ignore types
   public reevaluate() {
     const game = Game.getInstance();
@@ -458,6 +569,7 @@ export class Character {
     const newSkinLayers = new Set<string>();
     const newAbilities = new Set<string>();
     const newStatIds = new Set<string>();
+    const newSpineViews = new Map<string, { atlas: string, skeleton: string, animation: string, animationTimes?: number }>();
 
     for (const status of this.statuses.values()) {
       // Properties: latest status overwrites (unless is_merge)
@@ -502,6 +614,13 @@ export class Character {
           newStatIds.add(statId);
         }
       }
+
+      // Spine: last status wins per view key
+      if (status.spineViews.size > 0) {
+        for (const [viewKey, config] of status.spineViews) {
+          newSpineViews.set(viewKey, { ...config });
+        }
+      }
     }
 
     // Ability Modifiers: merge by ability_id
@@ -538,6 +657,9 @@ export class Character {
     this.abilities = new Set(sortedAbilities);
     this.statIds = newStatIds;
     this.abilityModifiers = mergedAbilityModifiers;
+
+    // Spine: unified map ('' = default, 'back' = back view, etc.)
+    this.spineViews = newSpineViews;
 
     // Initialize skinLayerStyles for new skin layers
     for (const layerId of newSkinLayers) {
@@ -613,18 +735,20 @@ export class Character {
 
   // ignore types
   public evaluateRenderedLayers(): void {
-    // Build default renderedLayers from skinLayers
+    // Build default renderedLayers from skinLayers (exclude view-tagged layers)
     let layers: CharacterSkinLayerObject[] = [];
     for (let value of this.skinLayers) {
       let skinLayerObject = Game.getInstance().characterSystem.skinLayersMap.get(value);
       if (!skinLayerObject) {
         throw new Error(`Skin Layer ${value} does not exist`);
       }
+      // Skip view-tagged layers — they only render when explicitly requested
+      if ((skinLayerObject as any).view) continue;
       layers.push(skinLayerObject);
     }
     layers = layers.sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
 
-    // Set renderedLayers to default (all layers)
+    // Set renderedLayers to default (viewless layers only)
     this.renderedLayers = layers;
 
     // Trigger character_render event - listeners can reassign character.renderedLayers
@@ -1396,7 +1520,7 @@ export class Character {
 
         const choiceName = Global.getInstance().getString("equip_item_in_slot", { slot: slotName });
         const params = {
-          equipItem: {
+          equip_item: {
             itemUid: item.uid,
             slotId: slot.slotId,
             slotIndex: slotIndex,
@@ -1413,7 +1537,7 @@ export class Character {
       }
     } else {
       const params = {
-        unequipItem: {
+        unequip_item: {
           itemUid: item.uid,
           characterId: this.id,
         }

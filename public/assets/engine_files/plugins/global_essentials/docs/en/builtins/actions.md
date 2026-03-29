@@ -46,6 +46,37 @@ All built-in actions for scenes and choices.
 
 ---
 
+## Scene Params
+
+| Param | Description | Example |
+|-------|-------------|---------|
+| `intro` | Play block 1 on first visit, block 2 on repeat visits | `{intro: true}` |
+
+### intro
+
+Add `{intro: true}` to the first paragraph of a scene. On the first visit, column 1 plays normally. On any subsequent visit, the engine skips column 1 and plays column 2 instead.
+
+**Example (DryadScript):**
+
+```
+#npc~talk{intro: true}
+1
+%
+The old man looks up from his desk.
+
+old_man: Ah, a visitor. I am Gareth, the keeper of this archive.
+
+old_man: What brings you here?
+%
+Gareth nods as you approach.
+
+old_man: Back again? What do you need?
+```
+
+Column 1 (before `%`) plays on first visit. Column 2 (after `%`) plays on every subsequent visit. Both share the same choices below.
+
+**Note:** Column 2 must exist. If missing, the engine logs an error.
+
 ## Character Actions
 
 | Action | Description | Example | Delayed |
@@ -57,6 +88,7 @@ All built-in actions for scenes and choices.
 | `delete_character` | Delete a character | `{ id: "npc1" }` | |
 | `add_status` | Add status effect to character | `{ character: "alice", statusId: "poison" }` | |
 | `char` | Modify character property (`=` set, `>` add, `<` subtract) | `"alice.resource.health>10"` | |
+| | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle`, `animation` | `"mc.animation=idle"` | |
 | `add_skin_layer` | Add skin layer to character | `"alice.armor"` | |
 | `remove_skin_layer` | Remove skin layer from character | `"alice.armor"` | |
 | `add_item_slot` | Add equipment slot to character | `"alice.ring"` | |

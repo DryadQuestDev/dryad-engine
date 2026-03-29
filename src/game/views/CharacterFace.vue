@@ -177,4 +177,13 @@ const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) +
   transform: translate(v-bind("faceShiftX + '%'"), v-bind("faceShiftY + '%'")) scale(v-bind("faceShiftScale"));
   transform-origin: top left;
 }
+
+/* Spine character face crop — dimensions must match FacePickerPopup's .spine-preview-container */
+.character-face-doll-container :deep(.character-doll-spine) {
+  position: absolute;
+  width: 500px;
+  height: 700px;
+  transform: translate(v-bind("faceShiftX + '%'"), v-bind("faceShiftY + '%'")) scale(v-bind("faceShiftScale"));
+  transform-origin: top left;
+}
 </style>

@@ -6,11 +6,18 @@ import AccordionPanel from 'primevue/accordionpanel';
 import AccordionHeader from 'primevue/accordionheader';
 import AccordionContent from 'primevue/accordioncontent';
 import InputText from 'primevue/inputtext';
+import Textarea from 'primevue/textarea';
+import Button from 'primevue/button';
+import { Global } from '../../../global/global';
 
 const game = Game.getInstance();
 
 // Search query
 const searchQuery = ref<string | undefined>('');
+
+// State editing
+const editingStateKey = ref<string | null>(null);
+const editStateValue = ref('');
 
 // Collect all registry data
 const emitters = ref<string[]>([]);
@@ -152,10 +159,38 @@ const formatValue = (value: any): string => {
   if (typeof value === 'boolean') return value.toString();
   if (typeof value === 'number') return value.toString();
   if (typeof value === 'string') return `"${value}"`;
-  if (Array.isArray(value)) return `Array(${value.length})`;
-  if (typeof value === 'object') return 'Object';
-  return String(value);
+  return JSON.stringify(value, null, 2);
 };
+
+const isComplexValue = (value: any): boolean => {
+  return value !== null && typeof value === 'object';
+};
+
+function startEditState(key: string, value: any) {
+  editingStateKey.value = key;
+  editStateValue.value = isComplexValue(value) ? JSON.stringify(value, null, 2) : formatValue(value);
+}
+
+function saveEditState() {
+  if (!editingStateKey.value) return;
+  try {
+    const fixedJson = game.logicSystem.fixJson(editStateValue.value ?? '');
+    const parsedValue = JSON.parse(fixedJson);
+    game.coreSystem.setState(editingStateKey.value, parsedValue);
+    cancelEditState();
+  } catch (e) {
+    Global.getInstance().addNotification('Invalid JSON: ' + (e as Error).message);
+  }
+}
+
+function cancelEditState() {
+  editingStateKey.value = null;
+  editStateValue.value = '';
+}
+
+function isEditingState(key: string): boolean {
+  return editingStateKey.value === key;
+}
 </script>
 
 <template>
@@ -200,9 +235,24 @@ const formatValue = (value: any): string => {
         <AccordionContent>
           <div class="registry-list">
             <div v-for="state in filteredStates" :key="state.key" class="registry-item state-item">
-              <div class="state-content">
-                <span class="item-name">{{ state.key }}</span>
-                <span class="item-value">{{ formatValue(state.value) }}</span>
+              <!-- View mode -->
+              <div v-if="!isEditingState(state.key)" class="state-content">
+                <div class="state-header">
+                  <span class="item-name">{{ state.key }}</span>
+                  <Button icon="pi pi-pencil" size="small" text
+                    @click="startEditState(state.key, state.value)" />
+                </div>
+                <span v-if="!isComplexValue(state.value)" class="item-value">{{ formatValue(state.value) }}</span>
+                <pre v-else class="state-value-pre">{{ formatValue(state.value) }}</pre>
+              </div>
+              <!-- Edit mode -->
+              <div v-else class="state-edit-form">
+                <h4>Edit: {{ state.key }}</h4>
+                <Textarea v-model="editStateValue" class="w-full" rows="8" />
+                <div class="state-edit-actions">
+                  <Button label="Save" icon="pi pi-check" size="small" @click="saveEditState" />
+                  <Button label="Cancel" icon="pi pi-times" size="small" severity="secondary" @click="cancelEditState" />
+                </div>
               </div>
             </div>
             <div v-if="filteredStates.length === 0" class="empty-message">
@@ -449,6 +499,43 @@ const formatValue = (value: any): string => {
   word-break: break-word;
   font-size: 0.8rem;
   padding-left: 0.5rem;
+}
+
+.state-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.state-value-pre {
+  background-color: #edf2f7;
+  padding: 0.75rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  font-family: var(--font-family-mono);
+  color: #2f855a;
+}
+
+.state-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.state-edit-form h4 {
+  margin: 0;
+  color: #2d3748;
+  font-size: 0.875rem;
+}
+
+.state-edit-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .component-item {

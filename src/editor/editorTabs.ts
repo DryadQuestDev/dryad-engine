@@ -40,6 +40,7 @@ import { AbilityTemplateSchema } from "../schemas/abilityTemplateSchema";
 import { PoolDefinitionSchema } from "../schemas/poolDefinitionSchema";
 import { PoolEntrySchema } from "../schemas/poolEntrySchema";
 import { NarrativeTagSchema, NarrativeSlotSchema, NarrativeStateSchema, NarrativeSegmentSchema } from "../schemas/narrativeSchema";
+import { CharacterViewSchema } from "../schemas/characterViewSchema";
 
 export type EditorTab = {
   id: string,
@@ -307,6 +308,14 @@ export const EDITOR_TABS: EditorTab[] = [
         schema: AbilityTemplateSchema,
         file: 'ability_templates',
         title: 'ability_template',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'character_views',
+        schema: CharacterViewSchema,
+        file: 'character_views',
+        title: 'character_view',
         isArray: true,
         requiresMod: true,
       },

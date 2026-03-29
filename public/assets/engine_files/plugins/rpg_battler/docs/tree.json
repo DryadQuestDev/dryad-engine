@@ -1,0 +1,18 @@
+{
+  "guide": [
+    "overview",
+    "battle_flow",
+    "damage_formula",
+    "tokens",
+    "abilities",
+    "ai",
+    "music"
+  ],
+  "reference": [
+    "emitters",
+    "actions",
+    "conditions",
+    "services",
+    "slots"
+  ]
+}

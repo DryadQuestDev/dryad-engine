@@ -204,6 +204,10 @@ export class InitSystem {
         this.game.registerState('replay_mode_unlock_choices', false);
 
         this.game.registerState('max_log', 40);
+
+        this.game.registerState('hide', 40);
+
+        this.game.registerState('hide_events', false);
     }
 
     // ============================================
@@ -1071,9 +1075,14 @@ export class InitSystem {
             action: (data: string | (Partial<CharacterSceneSlotObject> & { char: string })) => {
                 const processedActors: string[] = [];
 
-                // if data is empty, clear all actors from the scene
+                // if data is empty, remove all actors with exit animations
                 if (!data) {
-                    this.game.dungeonSystem.sceneSlots.value = [];
+                    const charIds = this.game.dungeonSystem.sceneSlots.value
+                        .filter(s => !s.isRemoving)
+                        .map(s => s.char!);
+                    for (const charId of charIds) {
+                        this.game.dungeonSystem.removeActorFromScene(charId);
+                    }
                     return;
                 }
 

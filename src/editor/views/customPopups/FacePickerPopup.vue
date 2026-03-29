@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
+import { SpinePlayer } from '@esotericsoftware/spine-player';
+import '@esotericsoftware/spine-player/dist/spine-player.css';
 import Slider from 'primevue/slider';
+import Select from 'primevue/select';
 
 const props = defineProps<EditorCustomPopupProps>();
 const emit = defineEmits<{ 'update:item': [item: any] }>();
@@ -39,6 +42,16 @@ const renderedImageHeight = ref(0);
 // Loaded skin layers
 const skinLayersData = ref<Record<string, any>[]>([]);
 
+// View selector
+const DEFAULT_VIEW = '__default__';
+const selectedView = ref(DEFAULT_VIEW);
+const characterViews = ref<{ id: string; name: string }[]>([]);
+const viewOptions = computed(() => [
+  { id: DEFAULT_VIEW, name: 'Default' },
+  ...characterViews.value.map(v => ({ id: v.id, name: v.name || v.id }))
+]);
+const isDefaultView = computed(() => selectedView.value === DEFAULT_VIEW);
+
 // Local position state (percentage 0-100)
 const localX = ref(50);
 const localY = ref(50);
@@ -48,16 +61,23 @@ const localArtDx = ref(0);
 const localArtDy = ref(0);
 const localArtScale = ref(1);
 
-// Margin left scaled to rendered image height (game has 120px padding at ~1000px image height)
+// Effective preview height: use rendered image height for static, spine container height for spine
+const effectivePreviewHeight = computed(() => {
+  if (renderedImageHeight.value > 0) return renderedImageHeight.value;
+  if (spineContainerRef.value) return spineContainerRef.value.offsetHeight;
+  return 0;
+});
+
+// Margin left scaled to preview height (game has 120px padding at ~1000px image height)
 const dollMarginLeft = computed(() => {
-  if (renderedImageHeight.value === 0) return '0px';
-  return (renderedImageHeight.value * 0.12) + 'px';
+  if (effectivePreviewHeight.value === 0) return '0px';
+  return (effectivePreviewHeight.value * 0.12) + 'px';
 });
 
 // Character-sheet start position (game: 120px padding + 50vh doll wrapper ≈ 62% of image height)
 const sheetStartLeft = computed(() => {
-  if (renderedImageHeight.value === 0) return '0px';
-  return (renderedImageHeight.value * 0.7) + 'px';
+  if (effectivePreviewHeight.value === 0) return '0px';
+  return (effectivePreviewHeight.value * 0.7) + 'px';
 });
 
 // Compute the scale factor between actual and rendered image
@@ -92,15 +112,17 @@ const rectStyle = computed(() => ({
   height: `${scaledRectSize.value}px`,
 }));
 
-// Get character image layers from skin_layers
+// Get character image layers from skin_layers (filtered by selected view)
 const imageLayers = computed(() => {
-  return loadCharacterImages(localItem.value, skinLayersData.value as any);
+  const view = isDefaultView.value ? undefined : selectedView.value;
+  return loadCharacterImages(localItem.value, skinLayersData.value as any, view);
 });
 
 // Initialize local values from item.traits
 onMounted(() => {
   initializeLocalValues();
   loadCharacterSkinLayers();
+  loadCharacterViews();
 });
 
 function initializeLocalValues() {
@@ -141,6 +163,8 @@ function initializeLocalValues() {
   localArtDx.value = localItem.value.traits?.art_dx ?? coreItem.value?.traits?.art_dx ?? 0;
   localArtDy.value = localItem.value.traits?.art_dy ?? coreItem.value?.traits?.art_dy ?? 0;
   localArtScale.value = localItem.value.traits?.art_scale ?? coreItem.value?.traits?.art_scale ?? 1;
+
+  initializeSpineRefs();
 
   isInitialized.value = true;
 }
@@ -186,8 +210,21 @@ async function loadCharacterSkinLayers() {
   }
 }
 
-// Load image dimensions
+// Load character views for view selector
+async function loadCharacterViews() {
+  try {
+    const data = await editor.loadFullData('character_views');
+    if (data && Array.isArray(data)) {
+      characterViews.value = data;
+    }
+  } catch (error) {
+    console.error('Failed to load character_views:', error);
+  }
+}
+
+// Load image dimensions (static images only — spine sets its own dimensions)
 function loadImageDimensions() {
+  if (isSpineCharacter.value) return;
   if (imageLayers.value.length === 0) return;
 
   const img = new Image();
@@ -198,8 +235,9 @@ function loadImageDimensions() {
   img.src = imageLayers.value[0];
 }
 
-// Watch for image layers changes to load dimensions
+// Watch for image layers changes to load dimensions (static only)
 watch(imageLayers, () => {
+  if (isSpineCharacter.value) return;
   if (imageLayers.value.length > 0) {
     loadImageDimensions();
     // Wait for images to render then get rendered size
@@ -252,18 +290,32 @@ function handleMouseMove(event: MouseEvent) {
     localY.value = previewPixelsToPercentage(previewY, actualImageHeight.value);
   }
 
-  if (isArtDragging.value && renderedImageHeight.value > 0) {
+  if (isArtDragging.value) {
     const dx = event.clientX - artDragStartX.value;
     const dy = event.clientY - artDragStartY.value;
     artDragStartX.value = event.clientX;
     artDragStartY.value = event.clientY;
 
-    // Convert pixel delta to percentage of rendered image dimensions
-    // Divide by artScale because game uses scale(s) translate(dx%, dy%) — translation is magnified by scale
-    const renderedWidth = actualImageWidth.value * imageScaleFactor.value;
-    const s = localArtScale.value || 1;
-    localArtDx.value += (dx / (renderedWidth * s)) * 100;
-    localArtDy.value += (dy / (renderedImageHeight.value * s)) * 100;
+    // For spine characters, use the spine container dimensions
+    // For static characters, use the rendered image dimensions
+    let refWidth: number;
+    let refHeight: number;
+
+    if (isSpineCharacter.value && spineContainerRef.value) {
+      refWidth = spineContainerRef.value.offsetWidth;
+      refHeight = spineContainerRef.value.offsetHeight;
+    } else {
+      refWidth = actualImageWidth.value * imageScaleFactor.value;
+      refHeight = renderedImageHeight.value;
+    }
+
+    if (refWidth > 0 && refHeight > 0) {
+      // Convert pixel delta to percentage of rendered dimensions
+      // Divide by artScale because game uses scale(s) translate(dx%, dy%) — translation is magnified by scale
+      const s = localArtScale.value || 1;
+      localArtDx.value += (dx / (refWidth * s)) * 100;
+      localArtDy.value += (dy / (refHeight * s)) * 100;
+    }
   }
 }
 
@@ -274,6 +326,7 @@ function handleMouseUp() {
 
 // Art drag: mousedown on the character doll wrapper
 function handleArtMouseDown(event: MouseEvent) {
+  if (!isDefaultView.value) return;
   isArtDragging.value = true;
   artDragStartX.value = event.clientX;
   artDragStartY.value = event.clientY;
@@ -285,6 +338,126 @@ function handleScaleChange(value: number | number[] | undefined) {
   const scaleValue = Array.isArray(value) ? value[0] : value;
   localScale.value = scaleValue;
 }
+
+// ============================================
+// Spine Character Support
+// ============================================
+
+// Stable refs — set once during init, not reactive to localItem trait mutations
+const spineAtlasRef = ref<string | null>(null);
+const spineSkeletonRef = ref<string | null>(null);
+const spineAnimationRef = ref<string | null>(null);
+
+const isSpineCharacter = computed(() => {
+  return !!(spineAtlasRef.value && spineSkeletonRef.value);
+});
+
+function findSpineForView(spineArray: any, view?: string | null): { atlas?: string, skeleton?: string, default_animation?: string } | null {
+  if (!Array.isArray(spineArray)) return null;
+  if (view) return spineArray.find((s: any) => s.view === view) || null;
+  return spineArray.find((s: any) => !s.view) || null;
+}
+
+function initializeSpineRefs(view?: string | null) {
+  const localSpine = findSpineForView(localItem.value.spine, view);
+  const coreSpine = findSpineForView(coreItem.value?.spine, view);
+  // Only fall back to default spine when no specific view is requested.
+  // If a view is requested but has no spine entry, return null so static layers render instead.
+  const localDefault = !view ? findSpineForView(localItem.value.spine) : null;
+  const coreDefault = !view ? findSpineForView(coreItem.value?.spine) : null;
+  spineAtlasRef.value = localSpine?.atlas || coreSpine?.atlas || localDefault?.atlas || coreDefault?.atlas || null;
+  spineSkeletonRef.value = localSpine?.skeleton || coreSpine?.skeleton || localDefault?.skeleton || coreDefault?.skeleton || null;
+  spineAnimationRef.value = localSpine?.default_animation || coreSpine?.default_animation || localDefault?.default_animation || coreDefault?.default_animation || null;
+}
+
+const spineContainerRef = ref<HTMLDivElement | null>(null);
+let spinePlayer: SpinePlayer | null = null;
+
+function initSpinePlayer() {
+  if (!spineContainerRef.value || !spineAtlasRef.value || !spineSkeletonRef.value) return;
+  // Prevent double init — dispose first if already created
+  disposeSpinePlayer();
+
+  try {
+    spinePlayer = new SpinePlayer(spineContainerRef.value, {
+      jsonUrl: spineSkeletonRef.value,
+      atlasUrl: spineAtlasRef.value,
+      animation: spineAnimationRef.value || undefined,
+      skin: 'default',
+      backgroundColor: '#00000000',
+      alpha: true,
+      preserveDrawingBuffer: false,
+      premultipliedAlpha: true,
+      showControls: false,
+      success: (player: SpinePlayer) => {
+        if (!player.skeleton) return;
+
+        // Apply skins from attributes (convention-based: attribute values = Spine skin names)
+        const attributes = localItem.value.attributes || {};
+        const skeletonData = player.skeleton.data;
+        const skins = Object.values(attributes).filter(
+          (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
+        );
+
+        if (skins.length > 0) {
+          if (skins.length === 1) {
+            player.skeleton.setSkinByName(skins[0]);
+          } else {
+            const firstSkinData = skeletonData.skins[0];
+            if (firstSkinData) {
+              const SkinConstructor = firstSkinData.constructor as any;
+              const combinedSkin = new SkinConstructor('combined-skin');
+              skins.forEach(name => {
+                const skin = skeletonData.skins.find((s: any) => s.name === name);
+                if (skin) combinedSkin.addSkin(skin);
+              });
+              player.skeleton.setSkin(combinedSkin);
+            }
+          }
+          player.skeleton.setSlotsToSetupPose();
+        }
+
+        // Set image dimensions from spine container so face rect positioning works
+        if (spineContainerRef.value) {
+          actualImageWidth.value = spineContainerRef.value.offsetWidth;
+          actualImageHeight.value = spineContainerRef.value.offsetHeight;
+          renderedImageHeight.value = spineContainerRef.value.offsetHeight;
+        }
+      },
+      error: (_player: SpinePlayer, error: string) => {
+        console.error('Spine preview error:', error);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to initialize Spine preview:', error);
+  }
+}
+
+function disposeSpinePlayer() {
+  if (spinePlayer) {
+    spinePlayer.dispose();
+    spinePlayer = null;
+  }
+}
+
+// Reinitialize spine when view changes
+watch(selectedView, (newView) => {
+  if (isSpineCharacter.value) {
+    initializeSpineRefs(newView === DEFAULT_VIEW ? null : newView);
+    nextTick(() => initSpinePlayer());
+  }
+});
+
+// Init spine when container appears (v-if)
+watch(spineContainerRef, (newRef) => {
+  if (newRef && isSpineCharacter.value) {
+    nextTick(() => initSpinePlayer());
+  }
+});
+
+onBeforeUnmount(() => {
+  disposeSpinePlayer();
+});
 
 // Add global mouse event listeners
 onMounted(() => {
@@ -303,112 +476,146 @@ onMounted(() => {
     <div class="picker-content">
       <!-- Controls -->
       <div class="controls">
-        <div class="section-divider">Face Picker</div>
-
-        <div class="control-group">
-          <div class="control-label-row">
-            <label>X Position: {{ localX.toFixed(1) }}%</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_x === undefined"
-              class="core-value-indicator">
-              (core: {{ (coreItem.traits.face_shift_x ?? 50).toFixed(1) }}%)
-            </span>
-          </div>
-          <Slider :modelValue="localX" @update:modelValue="(v) => localX = Array.isArray(v) ? v[0] : v" :min="0"
-            :max="100" :step="0.1" class="control-slider" />
+        <div v-if="characterViews.length > 0" class="control-group">
+          <label>View</label>
+          <Select v-model="selectedView" :options="viewOptions" optionLabel="name" optionValue="id"
+            class="control-select" />
         </div>
 
-        <div class="control-group">
-          <div class="control-label-row">
-            <label>Y Position: {{ localY.toFixed(1) }}%</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_y === undefined"
-              class="core-value-indicator">
-              (core: {{ (coreItem.traits.face_shift_y ?? 50).toFixed(1) }}%)
-            </span>
-          </div>
-          <Slider :modelValue="localY" @update:modelValue="(v) => localY = Array.isArray(v) ? v[0] : v" :min="0"
-            :max="100" :step="0.1" class="control-slider" />
-        </div>
+        <template v-if="isDefaultView">
+          <div class="section-divider">Face Picker</div>
 
-        <div class="control-group">
-          <div class="control-label-row">
-            <label>Scale: {{ localScale.toFixed(2) }}</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_scale === undefined"
-              class="core-value-indicator">
-              (core: {{ (coreItem.traits.face_shift_scale ?? 1).toFixed(2) }})
-            </span>
+          <div class="control-group">
+            <div class="control-label-row">
+              <label>X Position: {{ localX.toFixed(1) }}%</label>
+              <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_x === undefined"
+                class="core-value-indicator">
+                (core: {{ (coreItem.traits.face_shift_x ?? 50).toFixed(1) }}%)
+              </span>
+            </div>
+            <Slider :modelValue="localX" @update:modelValue="(v) => localX = Array.isArray(v) ? v[0] : v" :min="0"
+              :max="100" :step="0.1" class="control-slider" />
           </div>
-          <Slider :modelValue="localScale" @update:modelValue="handleScaleChange" :min="0.1" :max="3" :step="0.01"
-            class="control-slider" />
-        </div>
 
-        <div class="section-divider">Art Offset</div>
-
-        <div class="control-group">
-          <div class="control-label-row">
-            <label>Art X Offset: {{ localArtDx.toFixed(1) }}%</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.art_dx === undefined"
-              class="core-value-indicator">
-              (core: {{ (coreItem.traits.art_dx ?? 0).toFixed(1) }}%)
-            </span>
+          <div class="control-group">
+            <div class="control-label-row">
+              <label>Y Position: {{ localY.toFixed(1) }}%</label>
+              <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_y === undefined"
+                class="core-value-indicator">
+                (core: {{ (coreItem.traits.face_shift_y ?? 50).toFixed(1) }}%)
+              </span>
+            </div>
+            <Slider :modelValue="localY" @update:modelValue="(v) => localY = Array.isArray(v) ? v[0] : v" :min="0"
+              :max="100" :step="0.1" class="control-slider" />
           </div>
-          <Slider :modelValue="localArtDx" @update:modelValue="(v) => localArtDx = Array.isArray(v) ? v[0] : v"
-            :min="-100" :max="100" :step="0.1" class="control-slider" />
-        </div>
 
-        <div class="control-group">
-          <div class="control-label-row">
-            <label>Art Y Offset: {{ localArtDy.toFixed(1) }}%</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.art_dy === undefined"
-              class="core-value-indicator">
-              (core: {{ (coreItem.traits.art_dy ?? 0).toFixed(1) }}%)
-            </span>
+          <div class="control-group">
+            <div class="control-label-row">
+              <label>Scale: {{ localScale.toFixed(2) }}</label>
+              <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_scale === undefined"
+                class="core-value-indicator">
+                (core: {{ (coreItem.traits.face_shift_scale ?? 1).toFixed(2) }})
+              </span>
+            </div>
+            <Slider :modelValue="localScale" @update:modelValue="handleScaleChange" :min="0.1" :max="3" :step="0.01"
+              class="control-slider" />
           </div>
-          <Slider :modelValue="localArtDy" @update:modelValue="(v) => localArtDy = Array.isArray(v) ? v[0] : v"
-            :min="-100" :max="100" :step="0.1" class="control-slider" />
-        </div>
 
-        <div class="control-group">
-          <div class="control-label-row">
-            <label>Art Scale: {{ localArtScale.toFixed(2) }}</label>
-            <span v-if="coreItem && coreItem.traits && localItem.traits?.art_scale === undefined"
-              class="core-value-indicator">
-              (core: {{ (coreItem.traits.art_scale ?? 1).toFixed(2) }})
-            </span>
+          <div class="section-divider">Art Offset</div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <label>Art X Offset: {{ localArtDx.toFixed(1) }}%</label>
+              <span v-if="coreItem && coreItem.traits && localItem.traits?.art_dx === undefined"
+                class="core-value-indicator">
+                (core: {{ (coreItem.traits.art_dx ?? 0).toFixed(1) }}%)
+              </span>
+            </div>
+            <Slider :modelValue="localArtDx" @update:modelValue="(v) => localArtDx = Array.isArray(v) ? v[0] : v"
+              :min="-100" :max="100" :step="0.1" class="control-slider" />
           </div>
-          <Slider :modelValue="localArtScale" @update:modelValue="(v) => localArtScale = Array.isArray(v) ? v[0] : v"
-            :min="0.1" :max="3" :step="0.01" class="control-slider" />
-        </div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <label>Art Y Offset: {{ localArtDy.toFixed(1) }}%</label>
+              <span v-if="coreItem && coreItem.traits && localItem.traits?.art_dy === undefined"
+                class="core-value-indicator">
+                (core: {{ (coreItem.traits.art_dy ?? 0).toFixed(1) }}%)
+              </span>
+            </div>
+            <Slider :modelValue="localArtDy" @update:modelValue="(v) => localArtDy = Array.isArray(v) ? v[0] : v"
+              :min="-100" :max="100" :step="0.1" class="control-slider" />
+          </div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <label>Art Scale: {{ localArtScale.toFixed(2) }}</label>
+              <span v-if="coreItem && coreItem.traits && localItem.traits?.art_scale === undefined"
+                class="core-value-indicator">
+                (core: {{ (coreItem.traits.art_scale ?? 1).toFixed(2) }})
+              </span>
+            </div>
+            <Slider :modelValue="localArtScale" @update:modelValue="(v) => localArtScale = Array.isArray(v) ? v[0] : v"
+              :min="0.1" :max="3" :step="0.01" class="control-slider" />
+          </div>
+        </template>
 
       </div>
 
       <!-- Preview container -->
       <div class="preview-container" ref="containerRef">
-        <!-- No Skin Layers Message -->
-        <div v-if="imageLayers.length === 0" class="no-layers-message">
-          <p class="warning-text">⚠️ Select Character Image Layers in the <strong>skin_layers</strong> field.</p>
+        <!-- No Layers / No Spine Message -->
+        <div v-if="!isSpineCharacter && imageLayers.length === 0" class="no-layers-message">
+          <p class="warning-text">⚠️ Select Character Image Layers in the <strong>skin_layers</strong> field, or
+            configure
+            <strong>spine</strong> files.
+          </p>
           <p class="info-text">Note: All image layer pictures should have the same size dimensions.</p>
         </div>
 
-        <!-- Game padding zone -->
-        <div v-if="imageLayers.length > 0" class="game-padding-zone" :style="{ width: dollMarginLeft }"></div>
+        <!-- Game padding zone (default view only — relative to character sheet positioning) -->
+        <div v-if="isDefaultView && (isSpineCharacter || imageLayers.length > 0)" class="game-padding-zone"
+          :style="{ width: dollMarginLeft }">
+        </div>
 
-        <!-- Character-sheet start boundary -->
-        <div v-if="imageLayers.length > 0" class="sheet-boundary" :style="{ left: sheetStartLeft }"></div>
+        <!-- Character-sheet start boundary (default view only) -->
+        <div v-if="isDefaultView && (isSpineCharacter || imageLayers.length > 0)" class="sheet-boundary"
+          :style="{ left: sheetStartLeft }">
+        </div>
 
-        <!-- Character Doll -->
-        <div v-if="imageLayers.length > 0" class="character-doll-wrapper" @mousedown="handleArtMouseDown">
-          <div class="character-doll"
-            :style="{ transform: `scale(${localArtScale}) translate(${localArtDx}%, ${localArtDy}%)`, transformOrigin: 'center center' }">
-            <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="character-doll-image"
-              @error="($event.target as HTMLImageElement).style.display = 'none'"
-              @load="index === 0 ? updateRenderedHeight() : null" />
+        <!-- Spine Character Preview -->
+        <template v-if="isSpineCharacter">
+          <div class="character-doll-wrapper" :class="{ 'art-draggable': isDefaultView }"
+            @mousedown="handleArtMouseDown">
+            <div class="character-doll"
+              :style="{ transform: isDefaultView ? `scale(${localArtScale}) translate(${localArtDx}%, ${localArtDy}%)` : 'none', transformOrigin: 'center center' }">
+              <div ref="spineContainerRef" class="spine-preview-container" />
 
-            <!-- Draggable Purple Rectangle (inside character-doll so it tracks art transform) -->
-            <div class="face-selector-rect" :style="rectStyle" @mousedown.stop="handleMouseDown">
-              <div class="rect-label">FACE</div>
+              <!-- Draggable Purple Rectangle -->
+              <div v-if="isDefaultView" class="face-selector-rect" :style="rectStyle" @mousedown.stop="handleMouseDown">
+                <div class="rect-label">FACE</div>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
+
+        <!-- Static Image Character Preview -->
+        <template v-else-if="imageLayers.length > 0">
+          <div class="character-doll-wrapper" :class="{ 'art-draggable': isDefaultView }"
+            @mousedown="handleArtMouseDown">
+            <div class="character-doll"
+              :style="{ transform: isDefaultView ? `scale(${localArtScale}) translate(${localArtDx}%, ${localArtDy}%)` : 'none', transformOrigin: 'center center' }">
+              <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="character-doll-image"
+                @error="($event.target as HTMLImageElement).style.display = 'none'"
+                @load="index === 0 ? updateRenderedHeight() : null" />
+
+              <!-- Draggable Purple Rectangle (inside character-doll so it tracks art transform) -->
+              <div v-if="isDefaultView" class="face-selector-rect" :style="rectStyle" @mousedown.stop="handleMouseDown">
+                <div class="rect-label">FACE</div>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -491,6 +698,10 @@ onMounted(() => {
   width: 100%;
 }
 
+.control-select {
+  width: 100%;
+}
+
 .control-info {
   margin-top: auto;
   padding: 1rem;
@@ -555,16 +766,20 @@ onMounted(() => {
 .character-doll-wrapper {
   position: relative;
   display: inline-block;
+}
+
+.character-doll-wrapper.art-draggable {
   cursor: grab;
 }
 
-.character-doll-wrapper:active {
+.character-doll-wrapper.art-draggable:active {
   cursor: grabbing;
 }
 
 .character-doll {
   position: relative;
   display: inline-block;
+  border: 1px solid rgb(255, 183, 0)
 }
 
 .character-doll-image {
@@ -617,5 +832,15 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* Spine preview */
+.spine-preview-container {
+  width: 500px;
+  height: 700px;
+}
+
+.spine-preview-container :deep(.spine-player-controls) {
+  display: none !important;
 }
 </style>

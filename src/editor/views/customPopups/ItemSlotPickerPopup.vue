@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { ITEM_SLOT_SIZE_PERCENT } from '../../../global/global';
+import { SpinePlayer } from '@esotericsoftware/spine-player';
+import '@esotericsoftware/spine-player/dist/spine-player.css';
 import Select from 'primevue/select';
 
 const props = defineProps<EditorCustomPopupProps>();
@@ -171,8 +173,9 @@ async function loadCharacterSkinLayers() {
   }
 }
 
-// Load image dimensions
+// Load image dimensions (static images only — spine sets its own dimensions)
 function loadImageDimensions() {
+  if (isSpineCharacter.value) return;
   if (imageLayers.value.length === 0) return;
 
   const img = new Image();
@@ -183,8 +186,9 @@ function loadImageDimensions() {
   img.src = imageLayers.value[0];
 }
 
-// Watch for image layers changes to load dimensions
+// Watch for image layers changes to load dimensions (static only)
 watch(imageLayers, () => {
+  if (isSpineCharacter.value) return;
   if (imageLayers.value.length > 0) {
     loadImageDimensions();
     // Wait for images to render then get rendered size
@@ -298,8 +302,111 @@ function removeSlot() {
   }
 }
 
+// ============================================
+// Spine Character Support
+// ============================================
+
+const spineAtlasRef = ref<string | null>(null);
+const spineSkeletonRef = ref<string | null>(null);
+const spineAnimationRef = ref<string | null>(null);
+
+const isSpineCharacter = computed(() => {
+  return !!(spineAtlasRef.value && spineSkeletonRef.value);
+});
+
+function findDefaultSpine(spineArray: any): { atlas?: string, skeleton?: string, default_animation?: string } | null {
+  if (!Array.isArray(spineArray)) return null;
+  return spineArray.find((s: any) => !s.view) || null;
+}
+
+function initializeSpineRefs() {
+  const localSpine = findDefaultSpine(localItem.value.spine);
+  const coreSpine = findDefaultSpine(coreItem.value?.spine);
+  spineAtlasRef.value = localSpine?.atlas || coreSpine?.atlas || null;
+  spineSkeletonRef.value = localSpine?.skeleton || coreSpine?.skeleton || null;
+  spineAnimationRef.value = localSpine?.default_animation || coreSpine?.default_animation || null;
+}
+
+const spineContainerRef = ref<HTMLDivElement | null>(null);
+let spinePlayer: SpinePlayer | null = null;
+
+function initSpinePlayer() {
+  if (!spineContainerRef.value || !spineAtlasRef.value || !spineSkeletonRef.value) return;
+  disposeSpinePlayer();
+
+  try {
+    spinePlayer = new SpinePlayer(spineContainerRef.value, {
+      jsonUrl: spineSkeletonRef.value,
+      atlasUrl: spineAtlasRef.value,
+      animation: spineAnimationRef.value || undefined,
+      skin: 'default',
+      backgroundColor: '#00000000',
+      alpha: true,
+      preserveDrawingBuffer: false,
+      premultipliedAlpha: true,
+      showControls: false,
+      success: (player: SpinePlayer) => {
+        if (!player.skeleton) return;
+
+        const attributes = localItem.value.attributes || {};
+        const skeletonData = player.skeleton.data;
+        const skins = Object.values(attributes).filter(
+          (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
+        );
+
+        if (skins.length > 0) {
+          if (skins.length === 1) {
+            player.skeleton.setSkinByName(skins[0]);
+          } else {
+            const firstSkinData = skeletonData.skins[0];
+            if (firstSkinData) {
+              const SkinConstructor = firstSkinData.constructor as any;
+              const combinedSkin = new SkinConstructor('combined-skin');
+              skins.forEach(name => {
+                const skin = skeletonData.skins.find((s: any) => s.name === name);
+                if (skin) combinedSkin.addSkin(skin);
+              });
+              player.skeleton.setSkin(combinedSkin);
+            }
+          }
+          player.skeleton.setSlotsToSetupPose();
+        }
+
+        // Set dimensions from spine container for slot positioning
+        if (spineContainerRef.value) {
+          renderedImageHeight.value = spineContainerRef.value.offsetHeight;
+        }
+      },
+      error: (_player: SpinePlayer, error: string) => {
+        console.error('Spine preview error:', error);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to initialize Spine preview:', error);
+  }
+}
+
+function disposeSpinePlayer() {
+  if (spinePlayer) {
+    spinePlayer.dispose();
+    spinePlayer = null;
+  }
+}
+
+// Init spine when container appears
+watch(spineContainerRef, (newRef) => {
+  if (newRef && isSpineCharacter.value) {
+    nextTick(() => initSpinePlayer());
+  }
+});
+
+onBeforeUnmount(() => {
+  disposeSpinePlayer();
+});
+
 // Add global mouse event listeners
 onMounted(() => {
+  initializeSpineRefs();
   document.addEventListener('mousemove', handleMouseMove);
   document.addEventListener('mouseup', handleMouseUp);
 });
@@ -359,14 +466,28 @@ onMounted(() => {
 
       <!-- Preview container -->
       <div class="preview-container" ref="containerRef">
-        <!-- No Skin Layers Message -->
-        <div v-if="imageLayers.length === 0" class="no-layers-message">
-          <p class="warning-text">⚠️ Select Character Image Layers in the <strong>skin_layers</strong> field.</p>
+        <!-- No Layers / No Spine Message -->
+        <div v-if="!isSpineCharacter && imageLayers.length === 0" class="no-layers-message">
+          <p class="warning-text">⚠️ Select Character Image Layers in the <strong>skin_layers</strong> field, or configure <strong>spine</strong> files.</p>
           <p class="info-text">Note: All image layer pictures should have the same size dimensions.</p>
         </div>
 
-        <!-- Character Doll -->
-        <div v-else class="character-doll-wrapper">
+        <!-- Spine Character Preview -->
+        <div v-if="isSpineCharacter" class="character-doll-wrapper">
+          <div class="character-doll">
+            <div ref="spineContainerRef" class="spine-preview-container" />
+          </div>
+
+          <!-- Draggable Slot Rectangles -->
+          <div v-for="(slot, index) in allSlots" :key="index"
+            :class="['slot-selector-rect', { selected: slot.localIndex === selectedSlotIndex && !slot.isCore, 'core-slot': slot.isCore }]"
+            :style="getSlotStyle(slot)" @mousedown="(e) => handleMouseDown(e, slot)">
+            <div class="rect-label">{{ slot.id || slot.slot || `SLOT ${slot.localIndex + 1}` }}</div>
+          </div>
+        </div>
+
+        <!-- Static Image Character Preview -->
+        <div v-else-if="imageLayers.length > 0" class="character-doll-wrapper">
           <div class="character-doll">
             <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="character-doll-image"
               @error="($event.target as HTMLImageElement).style.display = 'none'"
@@ -677,5 +798,15 @@ onMounted(() => {
 .slot-selector-rect.core-slot:hover {
   border-color: #9E9E9E;
   background-color: rgba(158, 158, 158, 0.05);
+}
+
+/* Spine preview */
+.spine-preview-container {
+  width: 500px;
+  height: 700px;
+}
+
+.spine-preview-container :deep(.spine-player-controls) {
+  display: none !important;
 }
 </style>

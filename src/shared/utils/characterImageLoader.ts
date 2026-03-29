@@ -15,6 +15,7 @@ export interface SkinLayerData {
   images?: Record<string, string>;
   attributes?: string[];
   z_index?: number;
+  view?: string;
 }
 
 export interface ImageLayer {
@@ -31,7 +32,8 @@ export interface ImageLayer {
  */
 export function loadCharacterImages(
   character: CharacterTemplate,
-  skinLayersData: SkinLayerData[]
+  skinLayersData: SkinLayerData[],
+  view?: string
 ): string[] {
   const skinLayerIds = character?.skin_layers || [];
   if (!Array.isArray(skinLayerIds) || skinLayerIds.length === 0) return [];
@@ -43,6 +45,9 @@ export function loadCharacterImages(
   for (const layerId of skinLayerIds) {
     const skinLayer = skinLayersData.find((layer) => layer.id === layerId);
     if (!skinLayer || !skinLayer.images) continue;
+    // No view requested: only viewless layers. View requested: only matching layers.
+    if (!view) { if (skinLayer.view) continue; }
+    else { if (skinLayer.view !== view) continue; }
 
     // Build the image key from the layer's attributes
     const attributeValues: string[] = [layerId];
@@ -79,7 +84,8 @@ export function loadCharacterImages(
  */
 export function loadCharacterImageLayers(
   character: CharacterTemplate,
-  skinLayersData: SkinLayerData[]
+  skinLayersData: SkinLayerData[],
+  view?: string
 ): ImageLayer[] {
   const skinLayerIds = character?.skin_layers || [];
   if (!Array.isArray(skinLayerIds) || skinLayerIds.length === 0) return [];
@@ -91,6 +97,8 @@ export function loadCharacterImageLayers(
   for (const layerId of skinLayerIds) {
     const skinLayer = skinLayersData.find((layer) => layer.id === layerId);
     if (!skinLayer || !skinLayer.images) continue;
+    if (!view) { if (skinLayer.view) continue; }
+    else { if (skinLayer.view !== view) continue; }
 
     // Build the image key from the layer's attributes
     const attributeValues: string[] = [layerId];

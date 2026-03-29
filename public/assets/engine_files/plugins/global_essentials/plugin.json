@@ -187,13 +187,6 @@
         "type": "boolean",
         "description": "Hide this ability from UI (character sheet, battle log)",
         "uid": "GeDfAbHidden"
-      },
-      {
-        "id": "is_basic",
-        "role": "meta",
-        "type": "boolean",
-        "description": "Marks this as the character's basic attack, replaced by damage polarity",
-        "uid": "GeDfAbIsBasic"
       }
     ],
     "dev/encounters_default": [

@@ -8,6 +8,8 @@ import { useCharacterAnimation } from '../../../composables/useCharacterAnimatio
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import type { CharacterSceneSlotObject } from '../../../schemas/characterSceneSlotSchema';
 import { CharacterSceneSlotSchema } from '../../../schemas/characterSceneSlotSchema';
+import { SpinePlayer } from '@esotericsoftware/spine-player';
+import '@esotericsoftware/spine-player/dist/spine-player.css';
 import Button from 'primevue/button';
 import Dropdown from 'primevue/dropdown';
 import Slider from 'primevue/slider';
@@ -63,18 +65,27 @@ watch(contentRef, (el) => {
   animationControls.contentRef.value = el;
 });
 
-// Computed character images
-const characterImages = computed(() => {
-  if (!selectedCharacterId.value) return [];
-  const character = characterTemplates.value.find(c => c.id === selectedCharacterId.value);
-  if (!character) return [];
-  return loadCharacterImages(character, skinLayersData.value);
-});
-
 // Get selected character
 const selectedCharacter = computed(() => {
   if (!selectedCharacterId.value) return null;
   return characterTemplates.value.find(c => c.id === selectedCharacterId.value);
+});
+
+// Spine character detection (default spine = entry without view)
+const isSpineCharacter = computed(() => {
+  const char = selectedCharacter.value;
+  if (!Array.isArray(char?.spine)) return false;
+  const defaultSpine = char.spine.find((s: any) => !s.view);
+  return !!(defaultSpine?.atlas && defaultSpine?.skeleton);
+});
+
+// Computed character images (static only — spine renders via SpinePlayer)
+const characterImages = computed(() => {
+  if (isSpineCharacter.value) return [];
+  if (!selectedCharacterId.value) return [];
+  const character = characterTemplates.value.find(c => c.id === selectedCharacterId.value);
+  if (!character) return [];
+  return loadCharacterImages(character, skinLayersData.value);
 });
 
 // Character art offset from traits
@@ -87,6 +98,89 @@ const characterArtOffset = computed(() => {
     dy: selectedCharacter.value.traits.art_dy || 0,
     scale: selectedCharacter.value.traits.art_scale || 1
   };
+});
+
+// ============================================
+// Spine Character Support
+// ============================================
+
+const spineContainerRef = ref<HTMLDivElement | null>(null);
+let spinePlayer: SpinePlayer | null = null;
+
+function initSpinePlayer() {
+  const char = selectedCharacter.value;
+  if (!spineContainerRef.value || !Array.isArray(char?.spine)) return;
+  const defaultSpine = char.spine.find((s: any) => !s.view);
+  if (!defaultSpine?.atlas || !defaultSpine?.skeleton) return;
+  disposeSpinePlayer();
+
+  try {
+    spinePlayer = new SpinePlayer(spineContainerRef.value, {
+      jsonUrl: defaultSpine.skeleton,
+      atlasUrl: defaultSpine.atlas,
+      animation: defaultSpine.default_animation || undefined,
+      skin: 'default',
+      backgroundColor: '#00000000',
+      alpha: true,
+      preserveDrawingBuffer: false,
+      premultipliedAlpha: true,
+      showControls: false,
+      success: (player: SpinePlayer) => {
+        if (!player.skeleton) return;
+
+        const attributes = char.attributes || {};
+        const skeletonData = player.skeleton.data;
+        const skins = Object.values(attributes).filter(
+          (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
+        );
+
+        if (skins.length > 0) {
+          if (skins.length === 1) {
+            player.skeleton.setSkinByName(skins[0]);
+          } else {
+            const firstSkinData = skeletonData.skins[0];
+            if (firstSkinData) {
+              const SkinConstructor = firstSkinData.constructor as any;
+              const combinedSkin = new SkinConstructor('combined-skin');
+              skins.forEach(name => {
+                const skin = skeletonData.skins.find((s: any) => s.name === name);
+                if (skin) combinedSkin.addSkin(skin);
+              });
+              player.skeleton.setSkin(combinedSkin);
+            }
+          }
+          player.skeleton.setSlotsToSetupPose();
+        }
+      },
+      error: (_player: SpinePlayer, error: string) => {
+        console.error('Spine preview error:', error);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to initialize Spine preview:', error);
+  }
+}
+
+function disposeSpinePlayer() {
+  if (spinePlayer) {
+    spinePlayer.dispose();
+    spinePlayer = null;
+  }
+}
+
+// Init/reinit spine when character selection changes
+watch(selectedCharacter, () => {
+  disposeSpinePlayer();
+  if (isSpineCharacter.value && spineContainerRef.value) {
+    initSpinePlayer();
+  }
+});
+
+// Init spine when container appears
+watch(spineContainerRef, (newRef) => {
+  if (newRef && isSpineCharacter.value) {
+    initSpinePlayer();
+  }
 });
 
 // Computed styles for character slot (outer container - gets GSAP animated)
@@ -140,7 +234,7 @@ const scaleWrapperStyle = computed(() => {
 
   // Apply character art offset (for sprite padding compensation)
   if (artOffset.dx !== 0 || artOffset.dy !== 0) {
-    transforms.push(`translate(${artOffset.dx}%, ${artOffset.dy}%)`);
+    transforms.push(`translate(${artOffset.dx}cqh, ${artOffset.dy}cqh)`);
   }
 
   return {
@@ -433,19 +527,19 @@ function handleMouseMove(event: MouseEvent) {
     localItem.value.x = newX;
     localItem.value.y = newY;
     emit('update:item', localItem.value);
-  } else if (isDraggingAnchor.value && characterImagesRef.value) {
-    // Anchor point dragging - use character-images element for correct dimensions
-    const imagesRect = characterImagesRef.value.getBoundingClientRect();
+  } else if (isDraggingAnchor.value && characterElementRef.value) {
+    // Anchor point dragging - use slot element (anchor is in slot space, not art space)
+    const slotRect = characterElementRef.value.getBoundingClientRect();
 
     // Ensure valid dimensions
-    if (imagesRect.width > 0 && imagesRect.height > 0) {
-      // Calculate mouse position relative to character images element
-      const relativeX = event.clientX - imagesRect.left;
-      const relativeY = event.clientY - imagesRect.top;
+    if (slotRect.width > 0 && slotRect.height > 0) {
+      // Calculate mouse position relative to slot element
+      const relativeX = event.clientX - slotRect.left;
+      const relativeY = event.clientY - slotRect.top;
 
       // Convert to percentage with bounds checking
-      const newXAnchor = Math.round((relativeX / imagesRect.width) * 100);
-      const newYAnchor = Math.round((relativeY / imagesRect.height) * 100);
+      const newXAnchor = Math.round((relativeX / slotRect.width) * 100);
+      const newYAnchor = Math.round((relativeY / slotRect.height) * 100);
 
       // Only update if values are reasonable (prevent extreme values)
       if (isFinite(newXAnchor) && isFinite(newYAnchor)) {
@@ -491,6 +585,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', handleMouseMove);
   document.removeEventListener('mouseup', handleMouseUp);
   animationControls.cleanup();
+  disposeSpinePlayer();
 });
 </script>
 
@@ -512,21 +607,26 @@ onBeforeUnmount(() => {
         <div class="preview-canvas-container">
           <div ref="canvasRef" class="preview-canvas">
             <!-- Character Preview -->
-            <div v-if="characterImages.length > 0" ref="characterElementRef" class="character-slot"
+            <div v-if="characterImages.length > 0 || isSpineCharacter" ref="characterElementRef" class="character-slot"
               :style="characterSlotStyle" @mousedown="handleMouseDown">
               <div class="character-slot-positioner">
+                <!-- Anchor in slot space, unaffected by character art offset -->
+                <div class="anchor-point-marker" :style="anchorMarkerStyle" @mousedown="handleAnchorMouseDown">
+                  <div class="anchor-dot"></div>
+                  <div class="anchor-crosshair horizontal"></div>
+                  <div class="anchor-crosshair vertical"></div>
+                </div>
                 <div ref="scaleWrapperRef" class="character-slot-scale-wrapper" :style="scaleWrapperStyle">
                   <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper" :style="rotationWrapperStyle">
                     <div ref="contentRef" class="character-content" :style="contentStyle">
-                      <!-- Anchor Point Visualization (positioned relative to content, not rotated) -->
-                      <div class="anchor-point-marker" :style="anchorMarkerStyle" @mousedown="handleAnchorMouseDown">
-                        <div class="anchor-dot"></div>
-                        <div class="anchor-crosshair horizontal"></div>
-                        <div class="anchor-crosshair vertical"></div>
-                      </div>
                       <div ref="characterImagesRef" class="character-images" :style="characterImagesStyle">
-                        <img v-for="(image, index) in characterImages" :key="index" :src="image" class="character-image"
-                          @error="($event.target as HTMLImageElement).style.display = 'none'" />
+                        <!-- Spine character -->
+                        <div v-if="isSpineCharacter" ref="spineContainerRef" class="spine-preview-container" />
+                        <!-- Static image character -->
+                        <template v-else>
+                          <img v-for="(image, index) in characterImages" :key="index" :src="image" class="character-image"
+                            @error="($event.target as HTMLImageElement).style.display = 'none'" />
+                        </template>
                       </div>
                     </div>
                   </div>
@@ -975,6 +1075,7 @@ onBeforeUnmount(() => {
   position: absolute;
   height: 100%;
   width: 100%;
+  container-type: size;
   pointer-events: auto;
   cursor: grab;
   filter: v-bind("cssFilter");
@@ -1265,5 +1366,16 @@ onBeforeUnmount(() => {
   75% {
     transform: translate3d(var(--jitter-intensity, 2px), calc(var(--jitter-intensity, 2px) * -1), 0);
   }
+}
+
+/* Spine preview */
+.spine-preview-container {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 5 / 7;
+}
+
+.spine-preview-container :deep(.spine-player-controls) {
+  display: none !important;
 }
 </style>

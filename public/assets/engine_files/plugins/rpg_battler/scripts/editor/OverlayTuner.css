@@ -1,0 +1,130 @@
+.overlay-tuner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    user-select: none;
+}
+
+.tuner-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    background: #2a2a2a;
+    border-radius: 4px;
+}
+
+.tuner-controls label {
+    font-weight: 600;
+    color: #ccc;
+}
+
+.tuner-controls select {
+    padding: 4px 8px;
+    background: #3a3a3a;
+    color: #eee;
+    border: 1px solid #555;
+    border-radius: 3px;
+}
+
+.tuner-values {
+    color: #aaa;
+    font-size: 0.85rem;
+    font-family: monospace;
+}
+
+.tuner-reset {
+    padding: 4px 10px;
+    background: #555;
+    color: #ddd;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.tuner-toggle {
+    padding: 4px 10px;
+    background: #3a6a8a;
+    color: #eee;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.tuner-toggle:hover {
+    background: #4a7a9a;
+}
+
+.tuner-reset:hover {
+    background: #666;
+}
+
+.tuner-preview {
+    position: relative;
+    height: 500px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tuner-no-art {
+    color: #666;
+    font-style: italic;
+}
+
+.tuner-art-wrapper {
+    position: relative;
+    height: 80%;
+}
+
+.tuner-art {
+    position: relative;
+    display: inline-block;
+    height: 100%;
+}
+
+.tuner-art-img {
+    display: block;
+    height: 100%;
+    width: auto;
+}
+
+.tuner-art-stacked {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.tuner-overlay-rect {
+    position: absolute;
+    width: 100px;
+    height: 50px;
+    border: 2px dashed rgba(0, 200, 255, 0.7);
+    background: rgba(0, 200, 255, 0.1);
+    transform: translate(-50%, -50%);
+    cursor: grab;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.tuner-overlay-rect.is-dragging {
+    cursor: grabbing;
+    border-color: rgba(0, 200, 255, 1);
+    background: rgba(0, 200, 255, 0.2);
+}
+
+.tuner-overlay-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(0, 200, 255, 0.8);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    pointer-events: none;
+}

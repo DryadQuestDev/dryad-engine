@@ -1430,8 +1430,17 @@ export class LogicSystem {
      */
     private buildDescriptionLines(fields: Record<string, any>, definitionsMap: Map<string, any>, roleFilter?: string, fallbackFields?: Record<string, any>): string[] {
         const lines: string[] = [];
-        for (const fieldId in fields) {
-            if (fieldId.startsWith('__')) continue;
+
+        // Sort fields by definition order (lower = first, default 0)
+        const fieldIds = Object.keys(fields)
+            .filter(id => !id.startsWith('__'))
+            .sort((a, b) => {
+                const orderA = definitionsMap.get(a)?.order ?? 0;
+                const orderB = definitionsMap.get(b)?.order ?? 0;
+                return orderA - orderB;
+            });
+
+        for (const fieldId of fieldIds) {
             const definition = definitionsMap.get(fieldId);
             if (!definition || !definition.ingame_description) continue;
             if (roleFilter && definition.role !== roleFilter) continue;

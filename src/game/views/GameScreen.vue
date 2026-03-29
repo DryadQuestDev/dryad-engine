@@ -68,7 +68,8 @@ const shouldShowDebugPanel = computed(() => {
         </div>
 
 
-        <div class="events-body" v-if="game.dungeonSystem.currentSceneId.value">
+        <div class="events-body"
+          v-if="game.dungeonSystem.currentSceneId.value && !game.coreSystem.getState('hide_events')">
           <!--  && !game.coreSystem.getState('progression_state')-->
           <div :class="{ 'events-zone': game.coreSystem.getDebugSetting('events_zone') }" class="events-wrapper"
             id="events-wrapper">

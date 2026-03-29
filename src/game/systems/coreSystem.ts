@@ -329,8 +329,8 @@ export class CoreSystem {
     }
 
     this.musicArray = this.musicMap.get(this.music)?.files || [];
-    if (!this.musicArray) {
-      gameLogger.error(`Music not found in map: ${this.music}`);
+    if (this.musicArray.length === 0) {
+      gameLogger.error(`Music album "${this.music}" not found. Create it in the Music tab of the engine editor.`);
       return;
     }
 
@@ -1058,6 +1058,7 @@ export class CoreSystem {
 
       const discovered = new DiscoveredCharacter();
       discovered.attributes = attributesMap;
+      // Store all skin layers (base + view-specific) for gallery view switching
       discovered.skinLayers = new Set(character.skinLayers);
       discovered.skinLayerStyles = skinLayerStylesMap;
       this.discoveredCharacters.set(character.templateId, discovered);
@@ -1072,7 +1073,7 @@ export class CoreSystem {
         }
       }
 
-      // Merge skin layers: add new skin layers if not already present
+      // Merge skin layers: add all layers (base + view-specific)
       for (const layer of character.skinLayers) {
         discoveredCharacter.skinLayers.add(layer);
       }
@@ -1091,6 +1092,43 @@ export class CoreSystem {
         }
       }
     }
+
+    // Merge spine configs (dedup by view + skeleton path)
+    const dc = this.discoveredCharacters.get(character.templateId)!;
+    for (const [viewKey, config] of character.spineViews) {
+      const exists = dc.spineConfigs.some(c => c.view === viewKey && c.skeleton === config.skeleton);
+      if (!exists) {
+        dc.spineConfigs.push({
+          view: viewKey,
+          atlas: config.atlas,
+          skeleton: config.skeleton,
+          animations: [],
+          skins: []
+        });
+      }
+    }
+
+  }
+
+  public discoverCharacterView(templateId: string, view: string) {
+    if (!view) return;
+    const dc = this.discoveredCharacters.get(templateId);
+    if (dc) dc.views.add(view);
+  }
+
+  public updateDiscoveredSpineData(templateId: string, skeletonPath: string, animations: string[], skins: string[]) {
+    const dc = this.discoveredCharacters.get(templateId);
+    if (!dc) return;
+    const cfg = dc.spineConfigs.find(c => c.skeleton === skeletonPath);
+    if (!cfg) return;
+    // Merge new animations/skins into existing
+    const animSet = new Set(cfg.animations);
+    for (const a of animations) animSet.add(a);
+    cfg.animations = Array.from(animSet);
+
+    const skinSet = new Set(cfg.skins);
+    for (const s of skins) skinSet.add(s);
+    cfg.skins = Array.from(skinSet);
   }
 
   public addAssetToGallery(asset: AssetObject) {

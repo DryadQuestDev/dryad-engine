@@ -602,6 +602,48 @@ character.update({
 
 ---
 
+## Spine Animation Methods
+
+### setSpineAnimation(animation, view?, times?)
+
+Change the playing spine animation.
+
+```js
+character.setSpineAnimation('idle');               // Loop idle on default view
+character.setSpineAnimation('attack', 'back');     // Loop attack on back view
+character.setSpineAnimation('attack', 'back', 1);  // Play attack once, return to previous idle
+```
+
+- `times` — number of times to play. Omit for infinite loop. `1` = play once then return to previous animation.
+
+### hasSpineAnimation(animation, view?)
+
+Check if a spine animation exists for the given view. Returns `false` if spine hasn't loaded yet.
+
+```js
+if (character.hasSpineAnimation('attack', 'back')) {
+  character.setSpineAnimation('attack', 'back', 1);
+}
+```
+
+### setAvailableSpineAnimations(view, names)
+
+Register available animation names for a view. Called automatically by `CharacterDollSpine` on load — you normally don't call this directly.
+
+### isSpineCharacter()
+
+Returns `true` if the character has a default spine config.
+
+### isSpineForView(view)
+
+Check if a spine config exists for the given view (e.g. `"back"`).
+
+### getSpineSkins()
+
+Returns an array of Spine skin names derived from the character's current attributes.
+
+---
+
 ## Status Interface
 
 Status effects applied to characters.

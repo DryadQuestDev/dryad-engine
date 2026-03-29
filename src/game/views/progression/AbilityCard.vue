@@ -29,7 +29,7 @@ const abilityMeta = computed((): Record<string, any> | undefined => {
 
 const description = computed(() => {
   const delta = deltaData.value;
-  if (delta && Object.keys(delta.modifiedEffects).length > 0) {
+  if (delta) {
     // Overlay "base➜merged" strings onto base effects for inline display
     const displayEffects: Record<string, Record<string, any>> = {};
     for (const effectId in delta.baseData.effects) {
@@ -254,6 +254,10 @@ function getStatColor(statId: string): string | undefined {
   const color = game.characterSystem.statsMap.get(statId)?.color;
   return color ? `#${color}` : undefined;
 }
+
+function getStatIcon(statId: string): string | undefined {
+  return game.characterSystem.statsMap.get(statId)?.icon;
+}
 </script>
 
 <template>
@@ -277,11 +281,13 @@ function getStatColor(statId: string): string | undefined {
     <!-- Ability Meta Info (Cooldown & Costs) -->
     <div class="ability-meta" v-if="abilityMeta.cooldown || hasCosts">
       <span v-if="abilityMeta.cooldown" class="meta-item cooldown">
-        ⏱️ {{ abilityMeta.cooldown }} turns
+        {{ abilityMeta.cooldown }} {{ abilityMeta.cooldown === 1 ? 'turn' : 'turns' }}
       </span>
       <span v-for="(amount, statId) in abilityMeta.costs" :key="statId" class="meta-item cost"
         :style="getStatColor(String(statId)) ? { color: getStatColor(String(statId)) } : {}">
-        {{ amount }} {{ getStatName(String(statId)) }}
+        {{ amount }}
+        <img v-if="getStatIcon(String(statId))" :src="getStatIcon(String(statId))" class="cost-icon" />
+        <template v-else>{{ getStatName(String(statId)) }}</template>
       </span>
       <CustomComponentContainer slot="ability-card-meta" :context="{ abilityId, characterId }" />
     </div>
@@ -289,7 +295,8 @@ function getStatColor(statId: string): string | undefined {
     <div class="card-body">
       <div class="ability-description" v-if="abilityMeta.description" v-html="abilityMeta.description"></div>
 
-      <div class="ability-details" v-if="metaDescription.length > 0 || description.length > 0 || deltaNewDesc.length > 0">
+      <div class="ability-details"
+        v-if="metaDescription.length > 0 || description.length > 0 || deltaNewDesc.length > 0">
         <div v-for="(line, i) in metaDescription" :key="'m' + i" class="meta-desc-line" v-html="line"></div>
         <div v-for="(effect, i) in description" :key="'e' + i" class="effect-item">
           <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
@@ -370,8 +377,24 @@ function getStatColor(statId: string): string | undefined {
   color: #f0c674;
 }
 
+.cooldown::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  background: url('/assets/engine_assets/icons/cooldown.svg') center/contain no-repeat;
+  filter: brightness(0) invert(1) opacity(0.8);
+  flex-shrink: 0;
+}
+
 .cost {
   color: #81a2be;
+}
+
+.cost-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  vertical-align: -2px;
 }
 
 .card-body {

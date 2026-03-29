@@ -817,7 +817,10 @@ export class Editor {
     //  }, 1000);
 
     // set custom popups
-    this.customPopups.value = settings?.customPopups ?? [];
+    this.customPopups.value = [
+      ...(settings?.customPopups ?? []),
+      ...(this.secondaryTab ? this.pluginManager.getPopupsForTab(this.secondaryTab) : []),
+    ];
 
     // Start watching for changes *after* the object is loaded
     console.log("[Editor] Starting new activeObject watcher.");

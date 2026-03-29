@@ -336,9 +336,9 @@ game.registerService('start_battle', {
   }
 });
 
-// Action: start_battle (thin wrapper for script/dialogue access)
-// Called via game.execute({ start_battle: "orc, goblin" })
-game.registerAction('start_battle', (value) => {
+// Action: battle (thin wrapper for script/dialogue access)
+// Called via game.execute({ battle: "orc, goblin" })
+game.registerAction('battle', (value) => {
   const enemies = typeof value === 'string'
     ? value.split(',').map(s => s.trim()).filter(Boolean)
     : value;

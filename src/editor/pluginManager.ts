@@ -2,7 +2,10 @@ import { Schema } from "../utility/schema";
 import { Global } from "../global/global";
 import { EditorTab } from "./editorTabs";
 import { Ref, ref } from "vue";
+import * as Vue from "vue";
 import { ManifestObject } from "../schemas/manifestSchema";
+import { loadCharacterImages } from "../shared/utils/characterImageLoader";
+import EditorCharacterPreview from "./views/shared/EditorCharacterPreview.vue";
 import { Editor } from "./editor";
 import { PluginObject } from "../schemas/pluginShema";
 import { jsonrepair } from "jsonrepair";
@@ -17,6 +20,9 @@ export class PluginManager {
 
     // list of plugin tabs
     public pluginTabs: Ref<EditorTab[]> = ref([]);
+
+    // plugin popup IDs per subtab (e.g., "character_templates" → ["rpg-overlay-tuner"])
+    private pluginPopupsByTab = new Map<string, string[]>();
 
     // EDITOR LOGIC
     public async processSchema(currentSchema: Schema | null, basePath: string): Promise<Schema | null> {
@@ -171,6 +177,117 @@ export class PluginManager {
         // 4. init plugin tabs
         await this.initPluginTabs();
 
+        // 5. Load plugin editor popups
+        await this.initPluginPopups();
+
+    }
+
+    /**
+     * Returns plugin popup IDs registered for a given subtab.
+     */
+    public getPopupsForTab(subtabId: string): string[] {
+        return this.pluginPopupsByTab.get(subtabId) || [];
+    }
+
+    /**
+     * Loads editor popup components declared in plugin.json `editor_popups`.
+     * Each popup's .mjs script is dynamically imported and registered with the editor.
+     */
+    private async initPluginPopups(): Promise<void> {
+        this.pluginPopupsByTab.clear();
+        const editor = Editor.getInstance();
+
+        // Expose Vue and editor utilities so plugin editor scripts can access them without bare imports
+        (window as any).__editorVue = Vue;
+        (window as any).__editorUtils = { loadCharacterImages, editor, EditorCharacterPreview };
+
+        for (const plugin of this.plugins.value) {
+            const popups = (plugin as any).editor_popups;
+            if (!Array.isArray(popups) || popups.length === 0) continue;
+
+            // Resolve plugin path (same logic as initActivePlugins)
+            const pluginPath = await this.resolvePluginPath(plugin.id);
+            if (!pluginPath) continue;
+
+            for (const popup of popups) {
+                if (!popup.id || !popup.script || !popup.tab) continue;
+                try {
+                    // Load optional CSS
+                    if (popup.css) {
+                        this.loadPluginCss(`assets/${pluginPath}/${popup.css}`);
+                    }
+                    const mod = await this.importPluginScript(`assets/${pluginPath}/${popup.script}`);
+                    const component = mod.default || mod[Object.keys(mod)[0]];
+                    if (!component) {
+                        console.error(`[PluginManager] No component exported from ${popup.script} (plugin: ${plugin.id})`);
+                        continue;
+                    }
+                    editor.registerCustomComponent({
+                        id: popup.id,
+                        name: popup.name || popup.id,
+                        component,
+                    });
+                    const existing = this.pluginPopupsByTab.get(popup.tab) || [];
+                    existing.push(popup.id);
+                    this.pluginPopupsByTab.set(popup.tab, existing);
+                } catch (e) {
+                    console.error(`[PluginManager] Failed to load editor popup '${popup.id}' from ${popup.script}:`, e);
+                }
+            }
+        }
+    }
+
+    /**
+     * Dynamically imports an .mjs file from /public via fetch + blob URL
+     * (bypasses Vite's transform pipeline which rejects /public imports).
+     */
+    private async importPluginScript(url: string): Promise<any> {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+        const source = await response.text();
+        const blob = new Blob([source], { type: 'text/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        try {
+            return await import(/* @vite-ignore */ blobUrl);
+        } finally {
+            URL.revokeObjectURL(blobUrl);
+        }
+    }
+
+    /**
+     * Loads a CSS file by injecting a <link> tag into the document head.
+     */
+    private loadPluginCss(url: string): void {
+        if (document.querySelector(`link[href="${url}"]`)) return; // already loaded
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = url;
+        document.head.appendChild(link);
+    }
+
+    /**
+     * Resolves the base path for a plugin (global or mod-specific).
+     */
+    private async resolvePluginPath(pluginId: string): Promise<string | null> {
+        const editor = Editor.getInstance();
+        const gameId = editor.selectedGame;
+        const modId = editor.selectedMod;
+
+        // Check mod plugins first (they override global)
+        if (gameId && modId) {
+            for (const modIt of editor.getModList(modId)) {
+                const path = `games_files/${gameId}/${modIt}/plugins/${pluginId}`;
+                const json = await Global.getInstance().readJson(`${path}/plugin.json`);
+                if (json) return path;
+            }
+        }
+
+        // Fall back to global
+        const globalPath = `engine_files/plugins/${pluginId}`;
+        const json = await Global.getInstance().readJson(`${globalPath}/plugin.json`);
+        if (json) return globalPath;
+
+        return null;
     }
 
     /**

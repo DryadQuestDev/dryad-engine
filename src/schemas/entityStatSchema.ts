@@ -15,6 +15,7 @@ export const EntityStatSchema = {
     ingame_description: { type: 'htmlarea', tooltip: 'In-game description of the stat.' },
     precision: { type: 'number', tooltip: 'Number of decimal places to display (e.g., 0 for integers, 2 for values like 99.99).' },
     is_hidden: { type: 'boolean', tooltip: 'If true, this stat is hidden from the UI but still exists in data.' },
+    icon: { type: 'file', tooltip: 'Icon image for this stat. Used in ability costs and other UI elements.', fileType: 'image' },
     color: { type: 'color', show: { is_resource: [true] }, tooltip: 'Color of the stat in the UI.' },
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
 } as const satisfies Schema;

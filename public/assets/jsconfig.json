@@ -18,7 +18,8 @@
     "games_assets/**/*.mjs",
     "games_files/**/*.js",
     "games_files/**/*.mjs",
-    "engine_files/types.d.ts"
+    "engine_files/types.d.ts",
+    "engine_files/plugins/**/*.mjs"
   ],
   "exclude": ["node_modules"]
 }

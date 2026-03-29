@@ -4,6 +4,7 @@ import { computed, ref, onMounted, watch } from 'vue';
 import { SceneSlot } from '../../systems/dungeonSystem';
 import CharacterDoll from './CharacterDoll.vue';
 import ItemSlots from './ItemSlots.vue';
+import CustomComponentContainer from '../CustomComponentContainer.vue';
 import { Game } from '../../game';
 import { useCharacterAnimation } from '../../../composables/useCharacterAnimation';
 import gsap from 'gsap';
@@ -14,6 +15,10 @@ const props = defineProps<{
   showItemSlots?: boolean;
   enableAppear?: boolean; // Enable appear animations for CharacterDoll
   disableItemInteraction?: boolean; // Disable item click/drag while keeping hover tooltips
+  view?: string; // Character view overrides (e.g. ['back'])
+  interactive?: boolean; // Enable pointer-events for click handling
+  overlaySlot?: string; // Optional slot name for overlay injection (same pattern as CharacterFace)
+  instantLayers?: boolean; // Disable fade transition on layer changes (for combat animations)
 }>();
 
 const game = Game.getInstance();
@@ -53,18 +58,20 @@ const hue = computed(() => props.slot.hue ?? 0);
 
 // Note: Animation properties are now handled by the composable
 
-// Character art positioning (from traits) - animated to prevent jumps
+// Character art positioning (from traits) - only for default view
+const isDefaultView = !props.view;
+
 const animatedArtOffset = ref({
-  dx: props.character.getTrait('art_dx') || 0,
-  dy: props.character.getTrait('art_dy') || 0,
-  scale: props.character.getTrait('art_scale') || 1
+  dx: isDefaultView ? (props.character.getTrait('art_dx') || 0) : 0,
+  dy: isDefaultView ? (props.character.getTrait('art_dy') || 0) : 0,
+  scale: isDefaultView ? (props.character.getTrait('art_scale') || 1) : 1
 });
 
 // Watch for character changes and animate the art offset
 watch(() => props.character.id, () => {
-  const newDx = props.character.getTrait('art_dx') || 0;
-  const newDy = props.character.getTrait('art_dy') || 0;
-  const newScale = props.character.getTrait('art_scale') || 1;
+  const newDx = isDefaultView ? (props.character.getTrait('art_dx') || 0) : 0;
+  const newDy = isDefaultView ? (props.character.getTrait('art_dy') || 0) : 0;
+  const newScale = isDefaultView ? (props.character.getTrait('art_scale') || 1) : 1;
 
   gsap.to(animatedArtOffset.value, {
     dx: newDx,
@@ -75,8 +82,10 @@ watch(() => props.character.id, () => {
   });
 });
 
-const artDx = computed(() => animatedArtOffset.value.dx + "%");
-const artDy = computed(() => animatedArtOffset.value.dy + "%");
+// Use cqh (container query height) so offset is height-relative in both axes.
+// This prevents art_dx from scaling with container width (breaks in wide scenes vs square panels).
+const artDx = computed(() => (mirror.value ? -animatedArtOffset.value.dx : animatedArtOffset.value.dx) + "cqh");
+const artDy = computed(() => animatedArtOffset.value.dy + "cqh");
 const artScale = computed(() => animatedArtOffset.value.scale);
 const finalScale = computed(() => scale.value * artScale.value);
 
@@ -234,9 +243,15 @@ const onLeave = (_el: Element, done: () => void) => {
         <div ref="scaleWrapperRef" class="character-slot-scale-wrapper">
           <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper">
             <div ref="contentRef" class="character-content">
-              <CharacterDoll :character="character" :mirror="mirror" :enableAppear="enableAppear" />
+              <div class="character-doll-wrapper">
+                <CharacterDoll :character="character" :mirror="mirror" :enableAppear="enableAppear" :view="view"
+                  :instantLayers="instantLayers" />
+              </div>
             </div>
           </div>
+        </div>
+        <div v-if="overlaySlot" class="character-slot-overlay-wrapper">
+          <CustomComponentContainer :slot="overlaySlot" :context="{ character, slotScale: finalScale }" />
         </div>
         <div v-if="showItemSlots" class="item-slots-transform-wrapper">
           <ItemSlots :character="character" :disabled="props.disableItemInteraction === true" />
@@ -253,6 +268,7 @@ const onLeave = (_el: Element, done: () => void) => {
   top: v-bind("cssPosition.top");
   height: 100%;
   width: 100%;
+  container-type: size;
   pointer-events: none;
   opacity: v-bind("alpha");
   filter: v-bind("cssFilter");
@@ -271,7 +287,8 @@ const onLeave = (_el: Element, done: () => void) => {
   width: 100%;
   height: 100%;
   transform: v-bind("scaleWrapperTransform");
-  transform-origin: 50% 50%; /* Always centered for scale */
+  transform-origin: 50% 50%;
+  /* Always centered for scale */
 }
 
 .character-slot-rotation-wrapper {
@@ -304,6 +321,21 @@ const onLeave = (_el: Element, done: () => void) => {
   height: 100%;
   transform: v-bind("contentTransform");
   transform-origin: v-bind("contentTransformOrigin");
+  pointer-events: v-bind("interactive ? 'auto' : 'none'");
+  cursor: v-bind("interactive ? 'pointer' : 'default'");
+}
+
+.character-doll-wrapper {
+  display: inline-block;
+  height: 100%;
+}
+
+.character-slot-overlay-wrapper {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 /* No default transition styles - handled by GSAP */
@@ -315,15 +347,20 @@ const onLeave = (_el: Element, done: () => void) => {
 }
 
 @keyframes jitter-animation {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translate3d(0, 0, 0);
   }
+
   25% {
     transform: translate3d(var(--jitter-intensity, 2px), var(--jitter-intensity, 2px), 0);
   }
+
   50% {
     transform: translate3d(calc(var(--jitter-intensity, 2px) * -1), var(--jitter-intensity, 2px), 0);
   }
+
   75% {
     transform: translate3d(var(--jitter-intensity, 2px), calc(var(--jitter-intensity, 2px) * -1), 0);
   }

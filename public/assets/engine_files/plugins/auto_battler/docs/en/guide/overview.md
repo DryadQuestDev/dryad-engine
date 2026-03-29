@@ -27,7 +27,7 @@ game.getService('start_battle').start({
 **From DryadScript:**
 
 ```js
-{ start_battle: "enemy_goblin, enemy_troll" }
+{ battle: "enemy_goblin, enemy_troll" }
 ```
 
 The service accepts an array of live character instance IDs (characters that already exist in the game) and an optional `noRetreat` flag to prevent the player from retreating. The DryadScript action accepts a comma-separated string. The player's formation is read from the persistent `battle_positions` store (set up via the Formation tab).

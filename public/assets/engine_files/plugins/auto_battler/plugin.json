@@ -5,9 +5,7 @@
   "author": "Nekon",
   "version": "1.0.0",
   "order": -10,
-  "asset_folders": [
-
-  ],
+  "asset_folders": [],
   "scripts": [
     "main.mjs"
   ],
@@ -43,7 +41,10 @@
         },
         "retreat": {
           "type": "chooseOne",
-          "options": ["enabled", "disabled"],
+          "options": [
+            "enabled",
+            "disabled"
+          ],
           "tooltip": "Default retreat behavior for battles. Can be overridden per battle via noRetreat param. Default: enabled."
         }
       }
@@ -212,6 +213,13 @@
   ],
   "data": {
     "ability_definitions": [
+      {
+        "id": "is_basic",
+        "role": "meta",
+        "type": "boolean",
+        "description": "Marks this as the character's basic attack, replaced by damage polarity",
+        "uid": "GeDfAbIsBasic"
+      },
       {
         "id": "is_autocast",
         "role": "meta",

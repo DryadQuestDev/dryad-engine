@@ -456,6 +456,8 @@ export class DungeonSystem {
   isChoices: number = 0;
   public playScene(sceneId: string | null, dungeonId: string | null) {
 
+    this.game.setState('hide_events', false);
+
     this.cancelPathMovement();
 
     if (!sceneId) {
@@ -500,6 +502,22 @@ export class DungeonSystem {
       return;
     }
 
+    // Handle {intro: true} — redirect to block 2 on repeat visits
+    if (line.params?.intro && sceneId.endsWith(".1.1.1")) {
+      const isVisited = this.usedDungeonData.value.visitedEvents.has(sceneId);
+      if (isVisited) {
+        const block2Id = sceneId.replace(/\.1\.1\.1$/, ".1.2.1");
+        const block2Line = this.getLineByDungeonId(block2Id, dungeonUsedId);
+        if (block2Line) {
+          this.playScene(block2Id, dungeonUsedId);
+          return;
+        } else {
+          gameLogger.error(`Scene '${sceneId}' has {intro: true} but no block 2 scene '${block2Id}' exists.`);
+          return;
+        }
+      }
+    }
+
     gameLogger.info(`Playing scene: ${sceneId}`);
     let proceed = this.game.trigger('scene_play_before', sceneId, dungeonUsedId, isRootScene);
     if (!proceed) {
@@ -519,6 +537,11 @@ export class DungeonSystem {
 
     let { output, actions } = this.game.logicSystem.resolveString(line.val, true);
 
+    // If paragraph resolved to empty (e.g. inline if{} produced no text), skip to next paragraph
+    if (!output.trim() && Object.keys(actions).length === 0) {
+      this.playScene(this.getNextSceneId(sceneId), dungeonUsedId);
+      return;
+    }
 
     // Check for {redirect} first. If there's then resolve and return immediately.
     if (actions["redirect"]) {

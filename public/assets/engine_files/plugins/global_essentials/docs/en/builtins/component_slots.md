@@ -31,9 +31,9 @@ Each slot passes **context props** to registered components, giving them access 
 | `ability-card-header` | Inside ability card header | `abilityId`, `characterId` |
 | `ability-card-meta` | After ability cooldown/costs | `abilityId`, `characterId` |
 | `ability-card-footer` | Bottom of ability card | `abilityId`, `characterId` |
-| `abilities-viewer-header` | Before ability list | `character` |
+| `abilities-viewer-top` | Before ability list | `character` |
 | `abilities-viewer-list` | Inside ability list | `character` |
-| `abilities-viewer-footer` | Bottom of abilities viewer | `character` |
+| `abilities-viewer-bottom` | Bottom of abilities viewer | `character` |
 | `character-face` | Character face display | `character` |
 | `character-list-item` | Inside character face in party list (via `overlaySlot`) | `character` |
 | `character-sheet-top` | Top of character sheet (above stats) | |

@@ -210,6 +210,8 @@ export class CharacterSystem {
     character.actions = deepClone.actions || {};
     character.tags = deepClone.tags || [];
 
+    // Spine config is now set by reevaluate() via the core status (last-wins strategy)
+
     let coreStatus = reactive(new Status());
     coreStatus.id = "_core_status";
     coreStatus.isHidden = true;
@@ -473,14 +475,19 @@ export class CharacterSystem {
       // Parse "alice.trait.name=New Name, eleanor.resource.health<25.5" format
       const specs = data.split(',').map(s => s.trim());
       for (const spec of specs) {
-        // Match pattern: charId.type.key[operator]value
+        // Match pattern: charId.type.key[operator]value OR charId.type[operator]value (for keyless types like animation)
         const match = spec.match(/^([^.]+)\.([^.]+)\.([^=<>\s]+)\s*([=<>])\s*(.+)$/);
-        if (!match) {
-          gameLogger.error(`Invalid char format: "${spec}". Use "charId.type.key[=<>]value"`);
+        const match2 = !match ? spec.match(/^([^.]+)\.([^=<>\s]+)\s*([=<>])\s*(.+)$/) : null;
+        if (!match && !match2) {
+          gameLogger.error(`Invalid char format: "${spec}". Use "charId.type.key[=<>]value" or "charId.type[=<>]value"`);
           continue;
         }
 
-        const [, charId, type, key, operator, rawValue] = match;
+        const charId = match ? match[1] : match2![1];
+        const type = match ? match[2] : match2![2];
+        const key = match ? match[3] : '';
+        const operator = match ? match[4] : match2![3];
+        const rawValue = match ? match[5] : match2![4];
 
         // Parse value based on type
         let value: any = rawValue.trim();
@@ -593,6 +600,14 @@ export class CharacterSystem {
               // Remove: remove a style class
               character.removeSkinLayerStyle(op.key, op.value);
             }
+            break;
+
+          case 'animation':
+            if (op.operator !== '=') {
+              gameLogger.error(`Animation only supports "=" operator. Got "${op.operator}" for ${op.charId}.animation.${op.key}`);
+              continue;
+            }
+            character.setSpineAnimation(String(op.value));
             break;
 
           default:
