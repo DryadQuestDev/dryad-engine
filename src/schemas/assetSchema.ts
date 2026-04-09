@@ -63,17 +63,12 @@ export const AssetSchema = {
     },
     viewport: {
         type: 'schema',
-        tooltip: 'Viewport configuration for clipping the Spine animation to specific bounds.',
+        tooltip: 'Viewport adjustments for the Spine animation. Offsets and zoom applied on top of auto-calculated bounds.',
         show: { type: ['spine'] },
         objects: {
-            x: { type: 'number', tooltip: 'X position of viewport.', defaultValue: 500, step: 1 },
-            y: { type: 'number', tooltip: 'Y position of viewport.', defaultValue: 0, step: 1 },
-            width: { type: 'number', tooltip: 'Width of viewport.', defaultValue: 1050, step: 1 },
-            height: { type: 'number', tooltip: 'Height of viewport.', defaultValue: 1050, step: 1 },
-            pad_left: { type: 'number', tooltip: 'Left padding for clipping.', defaultValue: 90, step: 1 },
-            pad_right: { type: 'number', tooltip: 'Right padding for clipping.', defaultValue: 0, step: 1 },
-            pad_top: { type: 'number', tooltip: 'Top padding for clipping.', defaultValue: 0, step: 1 },
-            pad_bottom: { type: 'number', tooltip: 'Bottom padding for clipping.', defaultValue: 0, step: 1 },
+            dx: { type: 'number', tooltip: 'Horizontal offset from auto-calculated center.', defaultValue: 0, step: 1 },
+            dy: { type: 'number', tooltip: 'Vertical offset from auto-calculated center.', defaultValue: 0, step: 1 },
+            zoom: { type: 'number', tooltip: 'Scale multiplier. 1 = auto-fit, >1 = zoom in, <1 = zoom out.', defaultValue: 1, step: 0.05 },
         }
     },
     // spine specific properties end

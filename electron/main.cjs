@@ -1644,6 +1644,31 @@ ipcMain.handle("install-game-archive", async (event, zipFileName) => {
   });
 });
 
+// 📂 Copy Directory (Electron IPC)
+ipcMain.handle("copy-dir", async (_, src, dest) => {
+  const safeSrc = getSafeAbsolutePath(src);
+  const safeDest = getSafeAbsolutePath(dest);
+
+  if (!safeSrc) {
+    return { success: false, error: 'Invalid or unsafe source path.' };
+  }
+  if (!safeDest) {
+    return { success: false, error: 'Invalid or unsafe destination path.' };
+  }
+
+  try {
+    if (!fs.existsSync(safeSrc) || !fs.lstatSync(safeSrc).isDirectory()) {
+      return { success: false, error: 'Source path does not exist or is not a directory.' };
+    }
+
+    copyRecursive(safeSrc, safeDest);
+    return { success: true };
+  } catch (error) {
+    console.error('[copy-dir] Error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Helper function to copy directory recursively
 function copyRecursive(src, dest) {
   if (fs.lstatSync(src).isDirectory()) {

@@ -3,6 +3,7 @@ import { Game } from '../../game';
 import { ref, computed, reactive } from 'vue';
 import Select from 'primevue/select';
 import InputText from 'primevue/inputtext';
+import InputNumber from 'primevue/inputnumber';
 import Button from 'primevue/button';
 import FloatLabel from 'primevue/floatlabel';
 import Accordion from 'primevue/accordion';
@@ -17,6 +18,16 @@ const game = Game.getInstance();
 const selectedCharacter = ref<string | null>(null);
 const newCharacterId = ref<string>('');
 const selectedStatus = ref<string | null>(null);
+const selectedResource = ref<string | null>(null);
+const resourceAmount = ref<number>(10);
+
+const resourceStats = computed(() => {
+  const stats: string[] = [];
+  for (const [id, stat] of game.characterSystem.statsMap) {
+    if (stat.is_resource) stats.push(id);
+  }
+  return stats;
+});
 
 const characters = computed<Character[]>(() => {
   return Array.from(game.characterSystem.characters.value.values());
@@ -52,6 +63,12 @@ function addStatusToCharacter(character: Character, statusId: string | null) {
   character.addStatus(status);
 
   console.log(`Added status "${statusId}" to character "${character.id}"`);
+}
+
+function addResourceToCharacter(character: Character, statId: string | null, amount: number) {
+  if (!statId) return;
+  character.addResource(statId, amount);
+  console.log(`Added ${amount} "${statId}" to character "${character.id}"`);
 }
 
 function formatCharacterData(character: any) {
@@ -90,6 +107,15 @@ function formatCharacterData(character: any) {
                 <Select v-model="selectedStatus" :options="Array.from(game.characterSystem.statusesMap.keys())"
                   placeholder="Select status" class="status-select" />
                 <Button label="Add Status" @click="addStatusToCharacter(character, selectedStatus)" />
+              </div>
+
+              <h4>Add Resource</h4>
+              <div class="status-controls">
+                <Select v-model="selectedResource" :options="resourceStats"
+                  placeholder="Select resource" class="status-select" />
+                <!-- @vue-ignore -->
+                <InputNumber v-model="resourceAmount" class="resource-amount" />
+                <Button label="Add" @click="addResourceToCharacter(character, selectedResource, resourceAmount)" />
               </div>
             </div>
             <pre class="character-data">{{ formatCharacterData(character) }}</pre>

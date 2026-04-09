@@ -76,7 +76,7 @@ function navigateToNeighbor(neighborRoom: any) {
         <div v-if="getEncounterVisibleChoices(encounter).length > 0" class="text-dungeon-encounter-choices">
           <div v-for="choice in getEncounterVisibleChoices(encounter)" :key="choice.id" class="text-dungeon-choice"
             :class="{ unavailable: !choice.isAvailable }" @click.stop="handleEncounterChoice(choice)">
-            {{ choice.name }}
+            {{ choice.nameComputed || choice.name }}
           </div>
         </div>
       </div>

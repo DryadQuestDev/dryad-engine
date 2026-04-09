@@ -1,8 +1,10 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle } from './rpg-battle-state.mjs';
+import { currentRpgBattle, addFloatingText, pushLog } from './rpg-battle-state.mjs';
 import { initBattleTracking } from './rpg-battle-flow.mjs';
+import { getTokenStacks, removeTokenStacks, applyToken, getTokenDefinitions } from './rpg-battle-effects.mjs';
 import { RpgBattleScreen } from './components/RpgBattleScreen.mjs';
+import { RpgCombatStats } from './components/RpgCombatStats.mjs';
 import { RpgCharOverlay } from './components/RpgCharOverlay.mjs';
 import { RpgHealthOverlay } from './components/RpgHealthOverlay.mjs';
 import { RpgTokenBricks } from './components/RpgTokenBricks.mjs';
@@ -18,20 +20,42 @@ game.registerEmitter('battle_start');
 game.registerEmitter('battle_end');
 // Emitter: battle_turn_start — Fired at the start of a new round. Args: (battle, turnNumber).
 game.registerEmitter('battle_turn_start');
-// Emitter: battle_action_start — Fired before ability execution. Args: (battle, character, abilityId, targetId). Return false to skip.
+// Emitter: battle_action_start — Fired before ability execution. Args: (battle, caster, event).
+// event = { abilityId, targetId, power }. Mutate to redirect ability, change target, or adjust power. Return false to cancel.
 game.registerEmitter('battle_action_start');
-// Emitter: battle_action_end — Fired after ability effects resolve. Args: (battle, character, abilityId).
+// Emitter: battle_action_cast — Fired after ability is confirmed and costs deducted, before effects resolve.
+// Args: (battle, caster, abilityId). Use for on-cast side effects (rage generation, etc.).
+game.registerEmitter('battle_action_cast');
+// Emitter: battle_action_apply — Fired per-effect per-target after all math, before state mutation.
+// Args: (battle, caster, event). event = { effectId, targetId, damage, rawDamage, damageType, isCrit, isDodged, healing, tokenId, tokenStacks, tokenDuration, statusApply, statusRemove, cleanse, cooldownChange, chargesChange }.
+// Mutate any field. Return false to skip this effect on this target.
+game.registerEmitter('battle_action_apply');
+// Emitter: battle_action_applied — Fired per-effect per-target AFTER state mutations. Same args as battle_action_apply.
+// Use for reactive effects (rage-on-hit, counters, on-kill triggers). Not cancellable.
+game.registerEmitter('battle_action_applied');
+// Emitter: battle_action_end — Fired after ability effects resolve. Args: (battle, caster, abilityId, results).
 game.registerEmitter('battle_action_end');
-// Emitter: battle_damage_raw — Fired after raw damage calc, before defenses. Args: (battle, caster, target, event). Modify event.amount.
-game.registerEmitter('battle_damage_raw');
-// Emitter: battle_damage_final — Fired after defenses, before HP change. Args: (battle, caster, target, event). Return false to prevent.
-game.registerEmitter('battle_damage_final');
-// Emitter: battle_heal — Fired before healing applied. Args: (battle, caster, target, event). Modify event.amount.
-game.registerEmitter('battle_heal');
 // Emitter: battle_character_defeated — Fired when character reaches 0 HP. Args: (battle, characterId, side).
 game.registerEmitter('battle_character_defeated');
 
 game.registerState('rpg_battle_log_minimized', false);
+game.registerState('rpg_ability_tabs', {});
+game.registerState('rpg_defeated_battles', []);
+
+// ── Defeated battles ──
+
+function addDefeated(battleId) {
+  const defeated = game.getState('rpg_defeated_battles') || [];
+  if (!defeated.includes(battleId)) {
+    defeated.push(battleId);
+    game.setState('rpg_defeated_battles', defeated);
+  }
+}
+
+game.registerCondition('_defeated', (battleId) => {
+  const defeated = game.getState('rpg_defeated_battles') || [];
+  return defeated.includes(battleId);
+});
 
 // ── Party size helpers ──
 
@@ -46,6 +70,27 @@ game.registerService('rpg_party', {
 });
 
 game.registerCondition('_party_full', () => game.getParty().length >= getMaxPartySize());
+
+// ── Token service ──
+
+game.registerService('rpg_tokens', {
+  getStacks: getTokenStacks,
+  removeStacks: removeTokenStacks,
+  apply: applyToken,
+  getDefinitions: getTokenDefinitions,
+});
+
+// ── Floating text service ──
+
+game.registerService('rpg_floating_text', {
+  add: addFloatingText,
+});
+
+// ── Battle log service ──
+
+game.registerService('rpg_battle_log', {
+  push: pushLog,
+});
 
 // Register battle screen as game_state component
 game.addComponent({
@@ -77,6 +122,15 @@ game.addComponent({
   component: RpgTokenBricks,
 });
 
+// Register combat stats above ability list + export for game reuse
+game.addComponent({
+  id: 'rpg_combat_stats',
+  slot: 'rpg-ability-panel-top',
+  component: RpgCombatStats,
+  order: 10,
+});
+game.registerComponent('RpgCombatStats', RpgCombatStats);
+
 /**
  * Spawn enemies from a battle definition's enemy list.
  * @param {RpgBattleEntry[]} entries
@@ -100,32 +154,10 @@ function spawnEnemies(entries) {
   return ids;
 }
 
-/**
- * Build turn order by sorting all combatants by speed (descending).
- * Ties: player side goes first.
- * @param {string[]} playerParty
- * @param {string[]} enemyParty
- * @returns {string[]}
- */
-function buildTurnOrder(playerParty, enemyParty) {
-  const playerSet = new Set(playerParty);
-  const all = [...playerParty, ...enemyParty];
-  all.sort((a, b) => {
-    const charA = game.getCharacter(a);
-    const charB = game.getCharacter(b);
-    const speedA = charA?.getStat('speed') || 0;
-    const speedB = charB?.getStat('speed') || 0;
-    if (speedB !== speedA) return speedB - speedA;
-    if (playerSet.has(a) && !playerSet.has(b)) return -1;
-    if (!playerSet.has(a) && playerSet.has(b)) return 1;
-    return 0;
-  });
-  return all;
-}
 
-// ── Service: start_battle ──
+// ── Battle service ──
 
-game.registerService('start_battle', {
+game.registerService('rpg_battle', {
   /**
    * @param {StartRpgBattleParams} params
    */
@@ -167,38 +199,63 @@ game.registerService('start_battle', {
     }
 
     const enemyParty = spawnEnemies(enemyEntries);
-    const turnOrder = buildTurnOrder(params.playerParty, enemyParty);
+    const turnOrder = [...params.playerParty, ...enemyParty];
     const playerSet = new Set(params.playerParty);
 
     /** @type {RpgBattle} */
     const battle = {
       id: game.createUid(),
-      turn: 1,
+      battleId: params.battleId || null,
+      turn: 0,
       phase: 'active',
       playerParty: [...params.playerParty],
       enemyParty,
       turnOrder,
-      turnIndex: 0,
-      activeCharId: turnOrder[0] || null,
-      activeSide: playerSet.has(turnOrder[0]) ? 'player' : 'enemy',
+      actorTurn: -1,
+      activeCharId: null,
+      activeSide: 'player',
       result: null,
-      battlePhase: playerSet.has(turnOrder[0]) ? 'choosing_ability' : 'enemy_turn',
+      battlePhase: 'choosing_ability',
       selectedAbilityId: null,
       log: [],
       backgroundAssetId: background,
-      abilitiesState: {},
-      tokens: {},
-      defeatedPlayer: [],
-      defeatedEnemy: [],
+      charState: {},
       prevDisableSaves: game.getState('disable_saves'),
       prevBlockInventory: game.getState('block_party_inventory'),
       prevGameState: game.getState('game_state'),
       prevHideEvents: game.getState('hide_events'),
     };
 
+    // Initialize charState for all combatants
+    const allCombatants = [...battle.playerParty, ...battle.enemyParty];
+    for (const id of allCombatants) {
+      battle.charState[id] = {
+        side: playerSet.has(id) ? 'player' : 'enemy',
+        battleIndex: 0,
+        abilities: {},
+        tokens: {},
+        defeated: false,
+        bonusUsed: 0,
+      };
+    }
+
+    // Compute battle indices for duplicate names
+    const nameGroups = {};
+    for (const id of allCombatants) {
+      const name = game.getCharacter(id)?.getTrait('name') || id;
+      if (!nameGroups[name]) nameGroups[name] = [];
+      nameGroups[name].push(id);
+    }
+    for (const name in nameGroups) {
+      const ids = nameGroups[name];
+      if (ids.length > 1) {
+        ids.forEach((id, i) => { battle.charState[id].battleIndex = i + 1; });
+      }
+    }
+
     currentRpgBattle.value = battle;
 
-    // Initialize ability states, tokens from source stats
+    // Initialize ability states, tokens from source stats, sort turn order, start turn 1
     initBattleTracking();
 
     if (!game.trigger('battle_start', battle)) {
@@ -213,7 +270,15 @@ game.registerService('start_battle', {
     game.setMusic('battle');
 
     return { ok: true, battle };
-  }
+  },
+  /** @param {RpgBattleResult} result */
+  end(result) {
+    endRpgBattle(result);
+  },
+  /** @param {string} battleId */
+  addDefeated(battleId) {
+    addDefeated(battleId);
+  },
 });
 
 // ── Action: battle ──
@@ -223,9 +288,9 @@ game.registerAction('battle', {
   /** @param {StartBattleActionValue} value */
   action(value) {
     if (typeof value === 'string') {
-      game.getService('start_battle').start({ battleId: value });
+      game.getService('rpg_battle').start({ battleId: value });
     } else {
-      game.getService('start_battle').start(value);
+      game.getService('rpg_battle').start(value);
     }
   }
 });
@@ -242,6 +307,12 @@ export function endRpgBattle(result) {
 
   battle.result = result;
   battle.phase = 'finished';
+
+  // Track victory
+  if (result === 'victory' && battle.battleId) {
+    addDefeated(battle.battleId);
+  }
+
   game.trigger('battle_end', battle, result);
 
   // Remove battle-tagged statuses from all participants
@@ -272,11 +343,3 @@ export function endRpgBattle(result) {
   currentRpgBattle.value = null;
 }
 
-// ── Service: end_battle ──
-
-game.registerService('end_battle', {
-  /** @param {RpgBattleResult} result */
-  end(result) {
-    endRpgBattle(result);
-  }
-});

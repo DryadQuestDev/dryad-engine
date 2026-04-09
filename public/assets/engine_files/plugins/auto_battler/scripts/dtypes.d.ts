@@ -142,3 +142,42 @@ type StartBattleParams = {
   enemies: string[] | EnemyPosition[],
   noRetreat?: boolean,
 }
+
+type GridEntry = { characterId: string; row: number; col: number };
+
+// ── Service Types ──
+
+type CheckLeadershipService = {
+  check(): LeadershipCheck;
+};
+
+type BattleQueryService = {
+  getCurrentBattle(): Battle | null;
+  isAlive(characterId: string): boolean;
+  isActive(characterId: string): boolean;
+  getAliveOnSide(side: 'player' | 'enemy'): GridEntry[];
+  getAllOnSide(side: 'player' | 'enemy'): GridEntry[];
+  getAll(): GridEntry[];
+};
+
+type CheckFormationService = {
+  isEmpty(): boolean;
+};
+
+type CheckBattleReadyService = {
+  check(): { ready: boolean; empty: boolean; overflow: boolean };
+};
+
+type AutoBattleStartService = {
+  start(params: StartBattleParams): StartBattleResult;
+};
+
+// ── Service overloads (declaration merging) ──
+
+interface Game {
+  getService(id: 'check_leadership'): CheckLeadershipService;
+  getService(id: 'battle'): BattleQueryService;
+  getService(id: 'check_formation'): CheckFormationService;
+  getService(id: 'check_battle_ready'): CheckBattleReadyService;
+  getService(id: 'start_battle'): AutoBattleStartService;
+}

@@ -4,7 +4,7 @@ const { game, vue, gsap, components } = window.engine;
 const { computed, watch, nextTick, ref, reactive, defineComponent } = vue;
 const { CharacterFace } = components;
 
-import { currentRpgBattle } from '../rpg-battle-state.mjs';
+import { currentRpgBattle, getBattleDisplayName } from '../rpg-battle-state.mjs';
 import { getTokenDefinitions, getSide } from '../rpg-battle-effects.mjs';
 
 // @ts-ignore
@@ -94,7 +94,7 @@ export const RpgBattleLog = defineComponent({
         actorGroup = reactive({
           actorId,
           character: char,
-          name: char?.getTrait('name') || actorId,
+          name: getBattleDisplayName(actorId),
           side,
           lines: [],
           _insertAt: 0,
@@ -119,13 +119,16 @@ export const RpgBattleLog = defineComponent({
         const html = effectText(entry.effect);
         const targetChar = entry.effect.targetId ? game.getCharacter(entry.effect.targetId) : null;
         const targetSide = entry.effect.targetId ? getSide(entry.effect.targetId) : null;
-        const targetName = targetChar?.getTrait('name') || entry.effect.targetId || '';
+        const targetName = entry.effect.targetId ? getBattleDisplayName(entry.effect.targetId) : '';
         if (html) {
           actorGroup.lines.splice(actorGroup._insertAt, 0, { lid: lineIdCounter++, html, isAbility: false, targetChar, targetSide, targetName });
           actorGroup._insertAt++;
         }
       } else if (entry.text) {
-        actorGroup.lines.splice(actorGroup._insertAt, 0, { lid: lineIdCounter++, html: entry.text, isAbility: false, targetChar: null, targetSide: null });
+        const targetChar = entry.targetId ? game.getCharacter(entry.targetId) : null;
+        const targetSide = entry.targetId ? getSide(entry.targetId) : null;
+        const targetName = entry.targetId ? getBattleDisplayName(entry.targetId) : '';
+        actorGroup.lines.splice(actorGroup._insertAt, 0, { lid: lineIdCounter++, html: entry.text, isAbility: false, targetChar, targetSide, targetName });
         actorGroup._insertAt++;
       }
     }
@@ -198,6 +201,7 @@ export const RpgBattleLog = defineComponent({
             <CharacterFace v-if="actor.character"
               :character="actor.character" :size="40" :borderRadius="4"
               :borderColor="sideColor(actor.side)"
+              :static-face-force="true"
               style="cursor: pointer; pointer-events: auto"
               @click="onFaceClick(actor.actorId, actor.side)" />
             <span class="rpg-log-actor-name" v-html="getCharTurnText(actor.name)"></span>
@@ -210,6 +214,7 @@ export const RpgBattleLog = defineComponent({
               <CharacterFace v-if="line.targetChar"
                 :character="line.targetChar" :size="22" :borderRadius="3"
                 :borderColor="sideColor(line.targetSide || 'enemy')"
+                :static-face-force="true"
                 style="cursor: pointer; pointer-events: auto; flex-shrink: 0"
                 @click="onFaceClick(line.targetChar.id, line.targetSide || 'enemy')" />
               <span v-html="line.html"></span>

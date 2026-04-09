@@ -122,18 +122,17 @@ function selectCharacter(index: number) {
     flex: 1;
     min-height: 0;
     gap: 1rem;
+    container-type: size;
 }
 
 /* Match CharacterTab.vue layout for doll wrapper */
 .viewer-doll-wrapper {
-    width: 50vh;
+    width: 50cqh;
     flex-shrink: 0;
     height: 100%;
-    max-height: 100vh;
     position: relative;
     display: flex;
     align-items: center;
-    padding-bottom: 4vh;
 }
 
 .viewer-doll-wrapper :deep(.character-slot) {
@@ -157,7 +156,6 @@ function selectCharacter(index: number) {
 
 .viewer-sheet-wrapper {
     flex: 1;
-    min-width: 400px;
     overflow: hidden;
     min-height: 0;
     padding-right: 10px;

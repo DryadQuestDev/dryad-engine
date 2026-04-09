@@ -25,7 +25,7 @@ const expandedGalleries = ref<Set<string>>(new Set());
 const isFullscreen = ref(false);
 
 // Character tweaks state
-const characterTweaks = ref<Map<string, { attributes: Map<string, string>, skinLayers: Set<string>, skinLayerStyles: Map<string, string[]>, view: string, spineModel: string | null, spineAnimation: string | null, spineSkins: string[] }>>(new Map());
+const characterTweaks = ref<Map<string, { attributes: Map<string, string>, skinLayers: Set<string>, skinLayerStyles: Map<string, string[]>, view: string, spineModel: string | null, spineSkins: string[] }>>(new Map());
 
 // Asset tweaks state: Map<assetId, { animation: string | null, skins: string[] }>
 const assetTweaks = ref<Map<string, { animation: string | null, skins: string[] }>>(new Map());
@@ -198,7 +198,6 @@ const initializeCharacterTweaks = (templateId: string) => {
     skinLayerStyles: defaultSkinLayerStyles,
     view: '',
     spineModel: null,
-    spineAnimation: null,
     spineSkins: []
   });
 };
@@ -352,7 +351,6 @@ const updateView = (view: string) => {
   if (!currentCharacterTweaks.value) return;
   currentCharacterTweaks.value.view = view === VIEW_DEFAULT ? '' : view;
   currentCharacterTweaks.value.spineModel = null;
-  currentCharacterTweaks.value.spineAnimation = null;
   currentCharacterTweaks.value.spineSkins = [];
 };
 
@@ -383,7 +381,6 @@ const resolvedSpineModel = computed(() => {
 const updateSpineModel = (skeleton: string | null) => {
   if (!currentCharacterTweaks.value) return;
   currentCharacterTweaks.value.spineModel = skeleton;
-  currentCharacterTweaks.value.spineAnimation = null;
   currentCharacterTweaks.value.spineSkins = [];
 };
 
@@ -395,24 +392,6 @@ const currentSpineConfig = computed(() => {
   if (!skeleton) return null;
   return discoveredCharacterData.value.spineConfigs.find(c => c.view === view && c.skeleton === skeleton) ?? null;
 });
-
-// Computed: resolved spine animation (falls back to first discovered animation)
-const resolvedSpineAnimation = computed(() => {
-  if (currentCharacterTweaks.value?.spineAnimation) return currentCharacterTweaks.value.spineAnimation;
-  const cfg = currentSpineConfig.value;
-  return cfg?.animations[0] ?? null;
-});
-
-// Function: Get spine animation options for character dropdown
-const getCharacterAnimationOptions = () => {
-  const cfg = currentSpineConfig.value;
-  if (!cfg || cfg.animations.length === 0) return [];
-
-  return cfg.animations
-    .slice()
-    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-    .map(anim => ({ label: anim, value: anim }));
-};
 
 // Function: Get spine skin options for character multiselect
 const getCharacterSkinOptions = () => {
@@ -429,18 +408,6 @@ const getCharacterSkinOptions = () => {
 const updateCharacterSkins = (skins: string[]) => {
   if (!currentCharacterTweaks.value) return;
   currentCharacterTweaks.value.spineSkins = skins;
-};
-
-// Update spine animation for character
-const updateCharacterAnimation = (animation: string | null) => {
-  if (!currentCharacterTweaks.value) return;
-  currentCharacterTweaks.value.spineAnimation = animation;
-
-  const char = previewCharacterDiscovered.value;
-  const view = currentView.value;
-  if (char && animation) {
-    char.setSpineAnimation(animation, view);
-  }
 };
 
 // Computed: Preview character for undiscovered
@@ -471,11 +438,6 @@ const previewCharacterDiscovered = computed(() => {
     if (cfg) {
       char.spineViews.set(view, { atlas: cfg.atlas, skeleton: cfg.skeleton, animation: cfg.animations[0] || 'idle' });
     }
-  }
-
-  // Apply spine animation tweak if set
-  if (currentCharacterTweaks.value.spineAnimation && char.isSpineForView(view)) {
-    char.setSpineAnimation(currentCharacterTweaks.value.spineAnimation, view);
   }
 
   // Override spine skins if custom selection
@@ -747,21 +709,6 @@ onMounted(() => {
                       </div>
                     </div>
 
-                    <!-- Spine Animation Section (for spine characters) -->
-                    <div v-if="getCharacterAnimationOptions().length > 0" class="tweaks-section">
-                      <div class="tweaks-section-header">Animation</div>
-                      <div class="tweak-field tweak-field-full">
-                        <FloatLabel variant="on">
-                          <Select :model-value="resolvedSpineAnimation"
-                            @update:model-value="updateCharacterAnimation($event)"
-                            :options="getCharacterAnimationOptions()"
-                            optionLabel="label" optionValue="value" class="w-full"
-                            :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
-                          <label>Animation</label>
-                        </FloatLabel>
-                      </div>
-                    </div>
-
                     <!-- Spine Skins Section (for spine characters) -->
                     <div v-if="getCharacterSkinOptions().length > 0" class="tweaks-section">
                       <div class="tweaks-section-header">Skins</div>
@@ -864,8 +811,8 @@ onMounted(() => {
             <div v-if="!selectedItem.isDiscovered" class="undiscovered-asset">
               <p>This asset has not been discovered yet</p>
             </div>
-            <div v-else class="discovered-asset" @click="toggleFullscreen">
-              <BackgroundAsset v-if="previewAssetDiscovered" :asset="previewAssetDiscovered" />
+            <div v-else class="discovered-asset" @click="toggleFullscreen" v-show="!isFullscreen">
+              <BackgroundAsset v-if="previewAssetDiscovered" :key="selectedItemId ?? ''" :asset="previewAssetDiscovered" />
             </div>
           </template>
         </div>
@@ -885,7 +832,7 @@ onMounted(() => {
         </template>
         <template v-else-if="selectedItem.type === 'asset'">
           <div class="fullscreen-asset">
-            <BackgroundAsset v-if="previewAssetDiscovered" :asset="previewAssetDiscovered" />
+            <BackgroundAsset v-if="previewAssetDiscovered" :key="(selectedItemId ?? '') + '_fs'" :asset="previewAssetDiscovered" />
           </div>
         </template>
       </div>

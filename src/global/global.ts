@@ -1,6 +1,7 @@
 import { StorageService } from '../services/storage.interface';
 import { ElectronStorageService } from '../services/electron-storage.service';
 import { LocalhostStorageService } from '../services/localhost-storage.service';
+import { WebStorageService } from '../services/web-storage.service';
 import { mergeById, Identifiable, mergeObjectArraySequentially } from '../functions/mergeById';
 import { Game } from '../game/game';
 import { ManifestObject } from '../schemas/manifestSchema';
@@ -86,10 +87,25 @@ export const ARROWHEAD_SIZE = 4;
 
 export class Global {
   public engineState: Vue.Ref<EngineState> = Vue.ref('main_menu');
+  public isWebSite = import.meta.env.VITE_WEB_MODE === 'true' && !(window as any).Capacitor;
+  public nsfwEnabled = useStorage('nsfwEnabled', false);
+
+  public isNsfwAllowed(manifest: ManifestObject): boolean {
+    if (!this.isWebSite) return true;
+    if (!manifest.nsfw) return true;
+    return this.nsfwEnabled.value;
+  }
   private constructor() {
-    // Determine environment and instantiate the appropriate storage service directly
+    // Determine environment and instantiate the appropriate storage service
     if (window.electron) {
       this.storageService = new ElectronStorageService();
+    } else if (import.meta.env.VITE_WEB_MODE === 'true') {
+      this.storageService = new WebStorageService();
+      // In web mode, always clear dev mode state (no editor available)
+      localStorage.removeItem('devMode');
+      localStorage.removeItem('dev_mode_selected_game');
+      localStorage.removeItem('dev_mode_selected_mod');
+      localStorage.removeItem('returning_to_editor');
     } else {
       this.storageService = new LocalhostStorageService();
     }
@@ -491,6 +507,7 @@ export class Global {
     game.characterSystem.skillTreesMap = await this.fetchMapValues(gameId, `skill_trees`, modsIds);
     game.characterSystem.abilityDefinitionsMap = await this.fetchMapValues(gameId, `ability_definitions`, modsIds);
     game.characterSystem.abilityTemplatesMap = await this.fetchMapValues(gameId, `ability_templates`, modsIds);
+    game.characterSystem.abilityGroupsMap = await this.fetchMapValues(gameId, `ability_groups`, modsIds, 'order');
 
     // load object maps for item system
     game.itemSystem.itemTemplatesMap = await this.fetchMapValues(gameId, `item_templates`, modsIds);
@@ -1152,6 +1169,10 @@ export class Global {
 
   async createDir(path: string): Promise<void> {
     return this.storageService.createDir(path);
+  }
+
+  async copyDir(src: string, dest: string): Promise<{ success: boolean; error?: string }> {
+    return this.storageService.copyDir(src, dest);
   }
 
   async getFileSize(path: string): Promise<number> {

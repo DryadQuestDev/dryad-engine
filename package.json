@@ -1,6 +1,6 @@
 {
   "name": "dryad-engine",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "main": "electron/main.cjs",
   "description": "Dryad Engine - A Vue 3 and Electron based application for making modern 2D text-based games",
   "author": {
@@ -22,8 +22,8 @@
     "electron-dev-debug": "npm run build && cross-env DEBUG=true electron --no-sandbox ."
   },
   "dependencies": {
-    "@esotericsoftware/spine-pixi-v8": "^4.2.95",
-    "@esotericsoftware/spine-player": "^4.2.95",
+    "@esotericsoftware/spine-core": "^4.2.108",
+    "@esotericsoftware/spine-pixi-v8": "^4.2.108",
     "@floating-ui/vue": "^1.1.9",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",

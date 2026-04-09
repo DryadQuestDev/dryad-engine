@@ -1,17 +1,15 @@
-## Creating a New Game
+## Creating Your First Game
 
-You can create a new game in Dryad Engine directly from the editor – no manual setup needed.
+### 1. Create a New Game
+Open the **Editor** and go to **New → New Game**. You have two options:
 
-### 1. Start a New Game from the Editor
+**Quick Start (Recommended):** Click the **”Quick Start”** banner at the top. Pick a **Template**, enter your **Game Name**, **Author**, and **Starting Dungeon Name**, then press **”Create Game”**. You'll have a working game with a dungeon, rooms, and content ready to edit immediately.
 
-1. Open the **Editor**.  
-2. Go to **New → New Game**.  
-3. Fill in the form (game name, ID, description, etc.).  
-4. Press **“Save New Game”**.
+**From Scratch:** Fill in the manifest form below the banner (game name, ID, description, etc.) and press **”Save New Game”**.
 
 @en/images/new_game.png
 
-After you save, Dryad Engine will automatically create **two folders** inside `/assets` folder.
+Either way, Dryad Engine will automatically create **two folders** inside `/assets` folder.
 
 ### 2. Your Game Folders
 

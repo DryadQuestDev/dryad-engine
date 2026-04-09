@@ -1,6 +1,6 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle } from './rpg-battle-state.mjs';
+import { currentRpgBattle, parseFloatingText } from './rpg-battle-state.mjs';
 
 const { game } = window.engine;
 
@@ -8,13 +8,17 @@ const ELEMENTAL_TYPES = ['fire', 'water', 'air', 'earth', 'arcane', 'poison', 'l
 
 // ── Scaling ──
 
+/** @type {number|null} Power override set by resolveAbility from the action event. */
+let _actionPower = null;
+
 /**
  * All damage/healing in RPG battler scales from power.
+ * If an action-level power override is active (from battle_action_start event), uses that.
  * @param {Character} caster
  * @returns {number}
  */
 function getScalingStat(caster) {
-  return caster.getStat('power');
+  return _actionPower ?? caster.getStat('power');
 }
 
 // ── Token helpers ──
@@ -37,16 +41,27 @@ export function applyToken(characterId, tokenId, stacks, duration, source) {
   const battle = currentRpgBattle.value;
   const def = getTokenDefinitions().get(tokenId);
   if (!def || stacks <= 0) return null;
-  if (!battle.tokens[characterId]) battle.tokens[characterId] = {};
-  if (!battle.tokens[characterId][tokenId]) battle.tokens[characterId][tokenId] = [];
-  const instances = battle.tokens[characterId][tokenId];
+  if (!battle.charState[characterId].tokens) battle.charState[characterId].tokens = {};
+  if (!battle.charState[characterId].tokens[tokenId]) battle.charState[characterId].tokens[tokenId] = [];
+  const instances = battle.charState[characterId].tokens[tokenId];
   const max = def.max_stacks || Infinity;
   const total = instances.reduce((s, i) => s + i.stacks, 0);
   const allowed = Math.min(stacks, max - total);
   if (allowed <= 0) return null;
+
+  // Permanent tokens (no duration, 0, or negative) merge into a single instance
+  const isPermanent = !duration || duration <= 0;
+  if (isPermanent) {
+    const existing = instances.find(i => !i.duration || i.duration <= 0);
+    if (existing) {
+      existing.stacks += allowed;
+      return { applied: allowed, tokenName: def.name };
+    }
+  }
+
   /** @type {RpgTokenInstance} */
   const inst = { stacks: allowed, source: source || characterId };
-  if (duration != null) inst.duration = duration;
+  if (!isPermanent) inst.duration = duration;
   instances.push(inst);
   return { applied: allowed, tokenName: def.name };
 }
@@ -59,7 +74,7 @@ export function applyToken(characterId, tokenId, stacks, duration, source) {
  */
 export function removeTokenStacks(characterId, tokenId, stacks) {
   const battle = currentRpgBattle.value;
-  const instances = battle.tokens[characterId]?.[tokenId];
+  const instances = battle.charState[characterId].tokens?.[tokenId];
   if (!instances?.length) return;
   let remaining = stacks;
   while (remaining > 0 && instances.length > 0) {
@@ -72,12 +87,12 @@ export function removeTokenStacks(characterId, tokenId, stacks) {
       remaining = 0;
     }
   }
-  if (instances.length === 0) delete battle.tokens[characterId][tokenId];
+  if (instances.length === 0) delete battle.charState[characterId].tokens[tokenId];
 }
 
 /** Get total stacks of a token on a character. */
 export function getTokenStacks(characterId, tokenId) {
-  const instances = currentRpgBattle.value.tokens[characterId]?.[tokenId];
+  const instances = currentRpgBattle.value.charState[characterId]?.tokens[tokenId];
   if (!instances?.length) return 0;
   return instances.reduce((sum, i) => sum + i.stacks, 0);
 }
@@ -89,7 +104,7 @@ export function getTokenStacks(characterId, tokenId) {
  */
 export function processTokenEffects(characterId) {
   const battle = currentRpgBattle.value;
-  const charTokens = battle.tokens[characterId];
+  const charTokens = battle.charState[characterId].tokens;
   if (!charTokens) return [];
   const defs = getTokenDefinitions();
   const character = game.getCharacter(characterId);
@@ -186,6 +201,40 @@ export function isCharAlive(characterId) {
   return char && char.getResource('health') > 0;
 }
 
+// ── Splash (neighbor expansion) ──
+
+/**
+ * Expand a target list to include neighbors in the same party.
+ * @param {string} casterId
+ * @param {string[]} primaryTargets
+ * @param {number} maxNeighbors - Max neighbors to add per primary target
+ * @param {boolean} [splashOnly] - If true, exclude primary targets from result
+ * @returns {string[]}
+ */
+export function expandSplashTargets(casterId, primaryTargets, maxNeighbors, splashOnly) {
+  if (!primaryTargets.length) return primaryTargets;
+  const targetSide = getSide(primaryTargets[0]);
+  const casterSide = getSide(casterId);
+  const pool = targetSide === casterSide
+    ? getAliveAllies(casterId)
+    : getAliveEnemies(casterId);
+
+  const expanded = [...primaryTargets];
+  for (const tId of primaryTargets) {
+    const idx = pool.indexOf(tId);
+    if (idx === -1) continue;
+    let added = 0;
+    if (idx > 0 && !expanded.includes(pool[idx - 1]) && added < maxNeighbors) {
+      expanded.push(pool[idx - 1]); added++;
+    }
+    if (idx < pool.length - 1 && !expanded.includes(pool[idx + 1]) && added < maxNeighbors) {
+      expanded.push(pool[idx + 1]); added++;
+    }
+  }
+  if (splashOnly) return expanded.filter(id => !primaryTargets.includes(id));
+  return expanded;
+}
+
 // ── Damage pipeline ──
 
 /**
@@ -259,7 +308,7 @@ export function applyDamage(target, amount, damageType, casterId) {
   let thornsReflected = 0;
 
   const defs = getTokenDefinitions();
-  const charTokens = battle.tokens[target.id];
+  const charTokens = battle.charState[target.id]?.tokens;
   if (charTokens && damageType !== 'absolute') {
     for (const tokenId in charTokens) {
       const def = defs.get(tokenId);
@@ -351,13 +400,15 @@ export function resolveTargets(casterId, targetType, selectedTargetId) {
  * @param {string} casterId
  * @param {string} abilityId
  * @param {string} [targetId]
+ * @param {number} [power] - Power override from battle_action_start event
  * @returns {RpgEffectResult[]}
  */
-export function resolveAbility(casterId, abilityId, targetId) {
+export function resolveAbility(casterId, abilityId, targetId, power) {
+  _actionPower = power ?? null;
   const battle = currentRpgBattle.value;
   const caster = game.getCharacter(casterId);
   const ability = caster.getAbility(abilityId);
-  if (!ability) return [];
+  if (!ability) { _actionPower = null; return []; }
 
   const meta = ability.meta;
 
@@ -373,20 +424,10 @@ export function resolveAbility(casterId, abilityId, targetId) {
     removeTokenStacks(casterId, 'preparation', 1);
   }
 
+  game.trigger('battle_action_cast', battle, caster, abilityId);
+
   const targetType = meta.target || 'enemy';
   let targets = resolveTargets(casterId, targetType, targetId);
-
-  // Filter targets by health thresholds
-  if (meta.target_min_health || meta.target_max_health) {
-    targets = targets.filter(tId => {
-      const t = game.getCharacter(tId);
-      if (!t) return false;
-      const pct = t.getResourceRatio('health') * 100;
-      if (meta.target_min_health && pct > meta.target_min_health) return false;
-      if (meta.target_max_health && pct < meta.target_max_health) return false;
-      return true;
-    });
-  }
 
   /** @type {RpgEffectResult[]} */
   const allResults = [];
@@ -397,46 +438,100 @@ export function resolveAbility(casterId, abilityId, targetId) {
     // Roll chance
     if (aspects.chance !== undefined && Math.random() > aspects.chance) continue;
 
+    // Expand targets for splash
+    const effectTargets = aspects.splash
+      ? expandSplashTargets(casterId, targets, aspects.splash, aspects.splash_only)
+      : targets;
+
     let totalDamageDealt = 0;
 
-    for (const tId of targets) {
+    for (const tId of effectTargets) {
       const target = game.getCharacter(tId);
       if (!target || target.getResource('health') <= 0) continue;
 
-      // Combo gate
+      // Combo gate (pre-condition, not part of the apply event)
       if (aspects.combo) {
         const stacks = getTokenStacks(tId, 'combo');
         if (stacks <= 0) continue;
         removeTokenStacks(tId, 'combo', 1);
       }
 
-      // Damage
+      // ── Compute all math ──
+
+      let rawDamage = 0, finalDamage = 0, isCrit = false, isDodged = false;
+      let dmgType = aspects.damage_type || 'physical';
+
       if (aspects.damage) {
-        const dmgType = aspects.damage_type || 'physical';
-        const { raw, isCrit } = calculateRawDamage(caster, aspects, target);
+        const calc = calculateRawDamage(caster, aspects, target);
+        rawDamage = calc.raw;
+        isCrit = calc.isCrit;
 
-        // Dodge roll
         const dodgeChance = target.getStat('dodge') || 0;
-        const isDodged = dodgeChance > 0 && Math.random() * 100 < dodgeChance;
+        isDodged = dodgeChance > 0 && Math.random() * 100 < dodgeChance;
 
-        if (isDodged) {
-          allResults.push({ type: 'dodge', targetId: tId });
-          continue;
+        if (!isDodged) {
+          finalDamage = applyDefenses(rawDamage, dmgType, target);
         }
+      }
 
-        const rawEvent = { amount: raw, damageType: dmgType, ability: abilityId, isCrit };
-        if (!game.trigger('battle_damage_raw', battle, caster, target, rawEvent)) continue;
+      let healing = 0;
+      if (aspects.healing) {
+        const healAmp = caster.getStat('heal_amplification') || 0;
+        healing = Math.round(getScalingStat(caster) * (aspects.healing / 100) * ((100 + healAmp) / 100));
+      }
 
-        const finalDmg = applyDefenses(rawEvent.amount, dmgType, target);
-        const finalEvent = { amount: finalDmg, damageType: dmgType, ability: abilityId, isCrit };
-        if (!game.trigger('battle_damage_final', battle, caster, target, finalEvent)) continue;
+      let tokenStacks = 0;
+      if (aspects.token_apply) {
+        tokenStacks = aspects.token_stacks || 1;
+        const tokenDef = getTokenDefinitions().get(aspects.token_apply);
+        if (tokenDef?.power_scaling) tokenStacks = Math.round(getScalingStat(caster) * tokenStacks / 100);
+      }
 
-        const result = applyDamage(target, finalEvent.amount, dmgType, casterId);
+      // ── Build apply event ──
+
+      /** @type {RpgActionApplyEvent} */
+      const applyEvent = {
+        effectId,
+        targetId: tId,
+        damage: finalDamage,
+        rawDamage,
+        damageType: dmgType,
+        isCrit,
+        isDodged,
+        healing,
+        tokenId: aspects.token_apply || null,
+        tokenStacks,
+        tokenDuration: aspects.token_duration,
+        statusApply: aspects.status_apply ? [...aspects.status_apply] : [],
+        statusDuration: aspects.status_duration,
+        statusRemove: aspects.status_remove ? [...aspects.status_remove] : [],
+        cleanse: !!aspects.cleanse,
+        cooldownChange: aspects.cooldown_change || 0,
+        chargesChange: aspects.charges_change || 0,
+      };
+
+      if (!game.trigger('battle_action_apply', battle, caster, applyEvent)) continue;
+
+      // ── Apply state mutations from event ──
+      const resultStartIdx = allResults.length;
+
+      if (applyEvent.isDodged) {
+        /** @type {RpgEffectResult} */
+        const dodgeResult = { type: 'dodge', targetId: tId };
+        allResults.push(dodgeResult);
+        parseFloatingText(dodgeResult);
+        battle.log.push({ turn: battle.turn, actorId: casterId, effect: dodgeResult });
+        continue;
+      }
+
+      // Damage
+      if (applyEvent.damage > 0) {
+        const result = applyDamage(target, applyEvent.damage, applyEvent.damageType, casterId);
         totalDamageDealt += result.dealt;
         allResults.push({
           type: 'damage', targetId: tId, amount: result.dealt,
-          rawAmount: Math.round(rawEvent.amount), damageType: dmgType,
-          shieldAbsorbed: result.shieldAbsorbed, isCrit,
+          rawAmount: Math.round(applyEvent.rawDamage), damageType: applyEvent.damageType,
+          shieldAbsorbed: result.shieldAbsorbed, isCrit: applyEvent.isCrit,
           defeated: isLethallyDefeated(tId),
         });
         if (result.thornsReflected > 0) {
@@ -445,30 +540,27 @@ export function resolveAbility(casterId, abilityId, targetId) {
       }
 
       // Healing
-      if (aspects.healing) {
-        const healEvent = { amount: aspects.healing };
-        if (game.trigger('battle_heal', battle, caster, target, healEvent)) {
-          const { healed, raw } = applyHealing(caster, target, healEvent.amount);
-          allResults.push({ type: 'heal', targetId: tId, amount: healed, rawAmount: raw });
-        }
+      if (applyEvent.healing > 0) {
+        const healReceivedMult = target.getStat('heal_received_mult') || 0;
+        let healed = applyEvent.healing;
+        if (healReceivedMult) healed = Math.max(0, Math.round(healed * (1 + healReceivedMult / 100)));
+        target.addResource('health', healed);
+        allResults.push({ type: 'heal', targetId: tId, amount: healed, rawAmount: applyEvent.healing });
       }
 
       // Token apply to target
-      if (aspects.token_apply) {
-        let stacks = aspects.token_stacks || 1;
-        const tokenDef = getTokenDefinitions().get(aspects.token_apply);
-        if (tokenDef?.power_scaling) stacks = Math.round(getScalingStat(caster) * stacks / 100);
-        const result = applyToken(tId, aspects.token_apply, stacks, aspects.token_duration, casterId);
-        if (result) allResults.push({ type: 'token_apply', targetId: tId, tokenId: aspects.token_apply, stacks: result.applied, duration: aspects.token_duration || 0 });
+      if (applyEvent.tokenId && applyEvent.tokenStacks > 0) {
+        const result = applyToken(tId, applyEvent.tokenId, applyEvent.tokenStacks, applyEvent.tokenDuration, casterId);
+        if (result) allResults.push({ type: 'token_apply', targetId: tId, tokenId: applyEvent.tokenId, stacks: result.applied, duration: applyEvent.tokenDuration });
       }
 
       // Cleanse
-      if (aspects.cleanse) {
+      if (applyEvent.cleanse) {
         const casterSide = getSide(casterId);
         const tSide = getSide(tId);
         const removePolarity = (casterSide === tSide) ? 'negative' : 'positive';
         const defs = getTokenDefinitions();
-        const charTokens = battle.tokens[tId];
+        const charTokens = battle.charState[tId]?.tokens;
         if (charTokens) {
           for (const tkId in charTokens) {
             if (defs.get(tkId)?.polarity === removePolarity) {
@@ -480,46 +572,50 @@ export function resolveAbility(casterId, abilityId, targetId) {
       }
 
       // Status apply
-      if (aspects.status_apply) {
-        for (const statusId of aspects.status_apply) {
-          const status = game.createStatus(statusId);
-          if (status) {
-            target.addStatus(status);
-            allResults.push({ type: 'status_apply', targetId: tId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
-          }
+      for (const statusId of applyEvent.statusApply) {
+        const status = game.createStatus(statusId);
+        if (status) {
+          if (applyEvent.statusDuration !== undefined) status.duration = applyEvent.statusDuration;
+          target.addStatus(status);
+          allResults.push({ type: 'status_apply', targetId: tId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
         }
       }
 
       // Status remove
-      if (aspects.status_remove) {
-        for (const statusId of aspects.status_remove) {
-          const statusDefs = game.getData('character_statuses', true);
-          const sDef = statusDefs?.get(statusId);
-          target.removeStatus(statusId);
-          allResults.push({ type: 'status_remove', targetId: tId, statusId, statusName: sDef?.name || statusId });
-        }
+      for (const statusId of applyEvent.statusRemove) {
+        const statusDefs = game.getData('character_statuses', true);
+        const sDef = statusDefs?.get(statusId);
+        target.removeStatus(statusId);
+        allResults.push({ type: 'status_remove', targetId: tId, statusId, statusName: sDef?.name || statusId });
       }
 
       // Cooldown change on target
-      if (aspects.cooldown_change && battle.abilitiesState[tId]) {
-        for (const abId in battle.abilitiesState[tId]) {
-          const state = battle.abilitiesState[tId][abId];
-          state.cooldown = Math.max(0, state.cooldown + aspects.cooldown_change);
+      if (applyEvent.cooldownChange && battle.charState[tId]?.abilities) {
+        for (const abId in battle.charState[tId]?.abilities) {
+          const state = battle.charState[tId]?.abilities[abId];
+          state.cooldown = Math.max(0, state.cooldown + applyEvent.cooldownChange);
         }
       }
 
       // Charges change on target
-      if (aspects.charges_change && battle.abilitiesState[tId]) {
-        for (const abId in battle.abilitiesState[tId]) {
-          const state = battle.abilitiesState[tId][abId];
+      if (applyEvent.chargesChange && battle.charState[tId]?.abilities) {
+        for (const abId in battle.charState[tId]?.abilities) {
+          const state = battle.charState[tId]?.abilities[abId];
           if (state.charges !== -1) {
-            state.charges = Math.max(0, state.charges + aspects.charges_change);
+            state.charges = Math.max(0, state.charges + applyEvent.chargesChange);
           }
         }
       }
+
+      // Log all results from this target's mutations, then fire post-apply
+      for (let i = resultStartIdx; i < allResults.length; i++) {
+        parseFloatingText(allResults[i]);
+        battle.log.push({ turn: battle.turn, actorId: casterId, effect: allResults[i] });
+      }
+      game.trigger('battle_action_applied', battle, caster, applyEvent);
     }
 
-    // Lifesteal
+    // Lifesteal (derived from total damage, not part of per-target event)
     if (aspects.lifesteal && totalDamageDealt > 0) {
       const healed = Math.round(totalDamageDealt * (aspects.lifesteal / 100));
       if (healed > 0) {
@@ -528,34 +624,75 @@ export function resolveAbility(casterId, abilityId, targetId) {
       }
     }
 
-    // Token apply self
-    if (aspects.token_apply_self) {
-      let stacks = aspects.token_stacks_self || 1;
-      const tokenDef = getTokenDefinitions().get(aspects.token_apply_self);
-      if (tokenDef?.power_scaling) stacks = Math.round(getScalingStat(caster) * stacks / 100);
-      const result = applyToken(casterId, aspects.token_apply_self, stacks, aspects.token_duration_self, casterId);
-      if (result) allResults.push({ type: 'token_apply', targetId: casterId, tokenId: aspects.token_apply_self, stacks: result.applied, duration: aspects.token_duration_self || 0 });
-    }
+    // Self-effects — also fire battle_action_apply with targetId = casterId
+    if (aspects.token_apply_self || aspects.status_apply_self) {
+      let selfTokenStacks = 0;
+      if (aspects.token_apply_self) {
+        selfTokenStacks = aspects.token_stacks_self || 1;
+        const tokenDef = getTokenDefinitions().get(aspects.token_apply_self);
+        if (tokenDef?.power_scaling) selfTokenStacks = Math.round(getScalingStat(caster) * selfTokenStacks / 100);
+      }
 
-    // Status apply self
-    if (aspects.status_apply_self) {
-      for (const statusId of aspects.status_apply_self) {
-        const status = game.createStatus(statusId);
-        if (status) {
-          caster.addStatus(status);
-          allResults.push({ type: 'status_apply', targetId: casterId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
+      /** @type {RpgActionApplyEvent} */
+      const selfEvent = {
+        effectId,
+        targetId: casterId,
+        damage: 0, rawDamage: 0, damageType: 'physical', isCrit: false, isDodged: false,
+        healing: 0,
+        tokenId: aspects.token_apply_self || null,
+        tokenStacks: selfTokenStacks,
+        tokenDuration: aspects.token_duration_self,
+        statusApply: aspects.status_apply_self ? [...aspects.status_apply_self] : [],
+        statusDuration: aspects.status_duration_self,
+        statusRemove: [],
+        cleanse: false,
+        cooldownChange: 0,
+        chargesChange: 0,
+      };
+
+      if (game.trigger('battle_action_apply', battle, caster, selfEvent)) {
+        const selfStartIdx = allResults.length;
+        if (selfEvent.tokenId && selfEvent.tokenStacks > 0) {
+          const result = applyToken(casterId, selfEvent.tokenId, selfEvent.tokenStacks, selfEvent.tokenDuration, casterId);
+          if (result) allResults.push({ type: 'token_apply', targetId: casterId, tokenId: selfEvent.tokenId, stacks: result.applied, duration: selfEvent.tokenDuration });
         }
+        for (const statusId of selfEvent.statusApply) {
+          const status = game.createStatus(statusId);
+          if (status) {
+            if (selfEvent.statusDuration !== undefined) status.duration = selfEvent.statusDuration;
+            caster.addStatus(status);
+            allResults.push({ type: 'status_apply', targetId: casterId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
+          }
+        }
+        for (let i = selfStartIdx; i < allResults.length; i++) {
+          parseFloatingText(allResults[i]);
+          battle.log.push({ turn: battle.turn, actorId: casterId, effect: allResults[i] });
+        }
+        game.trigger('battle_action_applied', battle, caster, selfEvent);
       }
     }
   }
 
   // Set cooldown and consume charges
-  const abilityState = battle.abilitiesState[casterId]?.[abilityId];
+  const abilityState = battle.charState[casterId]?.abilities[abilityId];
   if (abilityState) {
     if (abilityState.charges > 0) abilityState.charges--;
     const cd = meta.cooldown || 0;
     if (cd > 0) abilityState.cooldown = cd;
+
+    // Shared cooldown group: put all abilities with same cd_group on cooldown
+    if (meta.cd_group && cd > 0) {
+      const charAbilities = caster.getAbilities();
+      for (const abId in charAbilities) {
+        if (abId === abilityId) continue;
+        if (charAbilities[abId].meta.cd_group === meta.cd_group) {
+          const state = battle.charState[casterId]?.abilities[abId];
+          if (state) state.cooldown = cd;
+        }
+      }
+    }
   }
 
+  _actionPower = null;
   return allResults;
 }

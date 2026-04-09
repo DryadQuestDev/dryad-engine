@@ -88,7 +88,7 @@ Column 1 (before `%`) plays on first visit. Column 2 (after `%`) plays on every 
 | `delete_character` | Delete a character | `{ id: "npc1" }` | |
 | `add_status` | Add status effect to character | `{ character: "alice", statusId: "poison" }` | |
 | `char` | Modify character property (`=` set, `>` add, `<` subtract) | `"alice.resource.health>10"` | |
-| | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle`, `animation` | `"mc.animation=idle"` | |
+| | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle` | `"mc.attribute.belly=2"` | |
 | `add_skin_layer` | Add skin layer to character | `"alice.armor"` | |
 | `remove_skin_layer` | Remove skin layer from character | `"alice.armor"` | |
 | `add_item_slot` | Add equipment slot to character | `"alice.ring"` | |

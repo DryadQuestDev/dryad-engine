@@ -1340,6 +1340,16 @@ interface Game {
   registerPlaceholder(id: string, func: Function): void;
 
   /**
+   * Returns the current resolve context passed to `resolveString()`. Use inside custom placeholder functions to access context like `character`.
+   * @example
+   * game.registerPlaceholder("hp", () => {
+   *   const char = game.getResolveContext().character;
+   *   return char ? String(char.getResource('health')) : "";
+   * });
+   */
+  getResolveContext(): Record<string, any>;
+
+  /**
    * Register a narrative state evaluator. States are defined in the editor
    * (Narrative > States). Each state has a mode: **gate** (hard filter — mismatch
    * eliminates the segment) or **identity** (soft preference — match adds specificity).
@@ -1458,7 +1468,7 @@ interface Game {
    * // Resolve a narrative slot
    * const text = game.resolveString("|@approach|").output;
    */
-  resolveString(input: string, noExecuteActions?: boolean): { output: string; actions: Record<string, any> };
+  resolveString(input: string, noExecuteActions?: boolean, context?: Record<string, any>): { output: string; actions: Record<string, any> };
 
   /**
    * Build auto-generated description lines for an ability's effects.
@@ -1893,14 +1903,14 @@ interface Character {
   isSpineForView(view: string): boolean;
 
   /** Get the default spine config (no view). Returns null if not defined. */
-  getDefaultSpine(): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null;
+  getDefaultSpine(): { atlas: string, skeleton: string, animation: string } | null;
 
   /**
    * Get spine config for a specific view. Returns null if no config exists for that view.
    * @param view - View name (e.g. "back", "side")
    * @returns Spine config or null
    */
-  getSpineForView(view: string): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null;
+  getSpineForView(view: string): { atlas: string, skeleton: string, animation: string } | null;
 
   /** Spine configs keyed by view ('' = default, 'back' = back view, etc.). Accumulated from statuses, last wins per view. */
   spineViews: Map<string, { atlas: string, skeleton: string, animation: string }>;
@@ -1921,17 +1931,6 @@ interface Character {
   getSpineSkins(): string[];
 
   /**
-   * Set the current Spine animation to play.
-   * @param animation - The animation name (must exist in the Spine skeleton)
-   * @param view - Optional view name (default: '' for default spine)
-   * @example
-   * character.setSpineAnimation('idle');
-   * character.setSpineAnimation('attack', 'back');
-   * character.setSpineAnimation('attack', 'back', 1); // play once then return to idle
-   */
-  setSpineAnimation(animation: string, view?: string, times?: number): void;
-
-  /**
    * Check if a spine animation name exists for the given view.
    * Populated by CharacterDollSpine on load. Returns false if spine hasn't loaded yet.
    * @param animation - Animation name to check (e.g. 'attack', 'hit', 'idle_wounded')
@@ -1940,7 +1939,17 @@ interface Character {
   hasSpineAnimation(animation: string, view?: string): boolean;
 
   /**
+   * Get the current track-to-animation mapping based on character attributes.
+   * Animations are grouped by underscore prefix (e.g. belly_0, face_idle).
+   * Track 0 = base animation (no underscore), Tracks 1+ = attribute-driven groups.
+   * @param view - Optional view name (default: '' for default spine)
+   * @returns Map of track number to animation name
+   */
+  getSpineTrackAnimations(view?: string): Map<number, string>;
+
+  /**
    * Register available spine animation names for a view. Called by CharacterDollSpine on load.
+   * Also builds animation groups for attribute-driven multi-track playback.
    * @param view - View name ('' for default)
    * @param names - Array of animation names from the skeleton data
    */
@@ -2145,6 +2154,13 @@ interface Character {
    * }
    */
   getAbility(abilityId: string): { meta: Record<string, any>; effects: Record<string, Record<string, any>> } | undefined;
+
+  /**
+   * Returns abilities organized by ability_groups data.
+   * If no abilities have a group assigned, returns useGroups: false with all ability IDs in a single flat group.
+   * If any ability has a group, returns useGroups: true with sorted groups and their ability IDs.
+   */
+  getGroupedAbilities(): { useGroups: boolean; groups: { id: string; name: string; abilityIds: string[] }[] };
 
   // ============================================
   // Item Slot Methods
@@ -3415,7 +3431,7 @@ declare global {
   type Asset = _Asset;
   type DungeonLine = _DungeonLine;
   type DungeonData = _DungeonData;
-  type Game = _Game;
+  interface Game extends _Game {}
   type CharacterSkinLayerObject = _CharacterSkinLayerObject;
   type Character = _Character;
   type Property = _Property;

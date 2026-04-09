@@ -7,6 +7,8 @@ import ManifestInfo from '../ManifestInfo.vue';
 import InstallGamesModal from './InstallGamesModal.vue';
 import { sortGamesByPlayOrder } from '../../../utility/game-order-tracker';
 import { checkManifestCompatibility } from '../../../utility/version-checker';
+import { showConfirm } from '../../../services/dialogService';
+import ToggleSwitch from 'primevue/toggleswitch';
 
 const global = Global.getInstance();
 //console.log('Accessing Global singleton:', global.test);
@@ -19,6 +21,7 @@ const selectedMod = ref<ManifestObject | null>(null);
 const activeMods = ref<ManifestObject[]>([]);
 const gamesLoaded = ref(false);
 const showInstallModal = ref(false);
+const isWebMode = import.meta.env.VITE_WEB_MODE === 'true';
 
 // Computed property for current manifest (game or mod)
 const currentManifest = computed(() => {
@@ -57,12 +60,29 @@ function getModWarning(mod: ManifestObject): string | undefined {
   return result.warningMessage;
 }
 
+// NSFW toggle
+async function toggleNsfw() {
+  if (!global.nsfwEnabled.value) {
+    const confirmed = await showConfirm({
+      message: 'This content is intended for adults only. Are you 18 or older?',
+      header: 'Age Verification',
+      acceptLabel: 'Yes, I am 18+',
+      rejectLabel: 'No'
+    });
+    if (!confirmed) return;
+    global.nsfwEnabled.value = true;
+  } else {
+    global.nsfwEnabled.value = false;
+  }
+  await loadGames();
+}
+
 // Methods
 async function loadGames() {
   try {
     const loadedGames = await global.getGamesList();
-    // Sort games by last played (played first, unplayed last)
-    games.value = sortGamesByPlayOrder(loadedGames);
+    // Sort games by last played (played first, unplayed last), filter NSFW
+    games.value = sortGamesByPlayOrder(loadedGames.filter(g => global.isNsfwAllowed(g)));
     if (games.value.length > 0) {
       await selectGame(games.value[0]); // await selection to load mods/saves
     } else {
@@ -90,8 +110,8 @@ async function handleInstallationComplete() {
 async function selectGame(game: ManifestObject) {
   selectedGame.value = game;
   try {
-    mods.value = await global.getModsList(game.id || '');
-    //console.log('Mods loaded for game', game.id, ':', mods.value);
+    const loadedMods = await global.getModsList(game.id || '');
+    mods.value = loadedMods.filter(m => global.isNsfwAllowed(m));
   } catch (error) {
     console.error('Failed to load mods for game', game.id, ':', error);
     mods.value = [];
@@ -166,16 +186,17 @@ function testGame() {
 
 // Lifecycle hooks
 onMounted(async () => {
-  // Automatically enable dev mode when running on localhost
-  const isLocalhost = window.location.hostname === 'localhost' ||
+  // Automatically enable dev mode when running in dev environment (not web builds)
+  const isLocalhost = !isWebMode && (
+    window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1'
-  // || window.location.hostname === '';
+  );
 
   if (isLocalhost) {
     localStorage.setItem('devMode', 'true');
     console.log('[MainScreen] Dev mode enabled automatically (localhost detected)');
   } else {
-    // Clear dev mode only when NOT on localhost
+    // Clear dev mode when not in dev environment
     localStorage.removeItem('devMode');
   }
 
@@ -192,7 +213,7 @@ onMounted(async () => {
   <div class="main_screen">
     <div class="main_header">
       <div class="header_left">
-        <div class="header_item install-button" @click="openInstallModal()" :class="{ 'disabled': !gamesLoaded }">
+        <div v-if="!isWebMode" class="header_item install-button" @click="openInstallModal()" :class="{ 'disabled': !gamesLoaded }">
           <i class="pi pi-download"></i>
           <span>Install</span>
         </div>
@@ -200,22 +221,19 @@ onMounted(async () => {
           <i class="pi pi-bars"></i>
           <span>Menu</span>
         </div>
-        <div class="header_item" @click="openEditor()">
+        <div v-if="global.isWebSite" class="nsfw-toggle" @click="toggleNsfw">
+          <span class="nsfw-label">18+</span>
+          <ToggleSwitch :modelValue="global.nsfwEnabled.value" class="nsfw-switch" />
+          <span class="nsfw-status">NSFW is {{ global.nsfwEnabled.value ? 'enabled' : 'disabled' }}</span>
+        </div>
+        <div v-if="!isWebMode" class="header_item" @click="openEditor()">
           <i class="pi pi-pencil"></i>
           <span>Editor</span>
         </div>
       </div>
       <div class="header_right">
-        <a href="https://discord.gg/3aAmjtesHU" target="_blank" class="promo_button">
-          <img src="/assets/engine_assets/ui/promo/discord_button.jpeg" alt="Discord" />
-        </a>
-        <a href="https://www.reddit.com/r/DryadEngine" target="_blank" class="promo_button">
-          <img src="/assets/engine_assets/ui/promo/reddit_button.png" alt="Reddit" />
-        </a>
-        <a href="https://github.com/DryadQuestDev/dryad-engine" target="_blank" class="promo_button">
-          <img src="/assets/engine_assets/ui/promo/github_button.png" alt="GitHub" />
-        </a>
-        <div class="engine_name" @click="global.setViewer('changelog')" style="cursor: pointer;">Dryad Engine v{{ global.engineVersion }}</div>
+        <!-- <div class="engine_name" @click="global.setViewer('changelog')" style="cursor: pointer;">Dryad Engine v{{ global.engineVersion }}</div> -->
+        <a href="https://dryadengine.com" target="_blank" class="engine_name">Dryad Engine v{{ global.engineVersion }}</a>
       </div>
     </div>
 
@@ -281,7 +299,7 @@ onMounted(async () => {
     <!-- Removed ng-template, conditional rendering handled by v-if directly -->
 
     <!-- Install Games Modal -->
-    <InstallGamesModal v-model:visible="showInstallModal" :games="games"
+    <InstallGamesModal v-if="!isWebMode" v-model:visible="showInstallModal" :games="games"
       @installation-complete="handleInstallationComplete" />
 
   </div>

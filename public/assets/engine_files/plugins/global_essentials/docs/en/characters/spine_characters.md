@@ -39,23 +39,22 @@ Use the `char` action with the `animation` type:
 {char: "mc.animation=idle"}
 ```
 
-Animation is a keyless type – no sub-key needed, just `charId.animation=value`.
+Animations are driven by character attributes. Name spine animations using `attributeKey_value` convention (e.g. `belly_0`, `face_ahegao`). When the attribute changes, the matching animation plays automatically on its own track.
 
 ### From Scripts
 
 ```javascript
 const mc = game.getCharacter('mc');
-mc.setSpineAnimation('idle');
 
-// One-shot animation (play once, return to idle)
-mc.setSpineAnimation('attack', '', 1);
+// Change belly animation (plays belly_2 on its dedicated track)
+mc.setAttribute('belly', '2');
 
-// One-shot on a specific view
-mc.setSpineAnimation('attack', 'back', 1);
+// Change face expression (plays face_ahegao on its dedicated track)
+mc.setAttribute('face', 'ahegao');
 
-// Check if animation exists before playing
-if (mc.hasSpineAnimation('hit', 'back')) {
-  mc.setSpineAnimation('hit', 'back', 1);
+// Check if animation exists
+if (mc.hasSpineAnimation('belly_2')) {
+  mc.setAttribute('belly', '2');
 }
 ```
 
@@ -67,10 +66,10 @@ if (mc.hasSpineAnimation('hit', 'back')) {
 |-------------------|-------------|
 | `character.isSpineCharacter()` | Returns `true` if spine atlas and skeleton are configured |
 | `character.isSpineForView(view)` | Returns `true` if spine exists for the given view (e.g. `"back"`) |
-| `character.setSpineAnimation(name, view?, times?)` | Switch animation. `times` = play count (omit for loop, `1` for one-shot) |
+| `character.getSpineTrackAnimations(view?)` | Get current track-to-animation map based on attributes |
 | `character.hasSpineAnimation(name, view?)` | Check if animation exists in the skeleton. Returns `false` if not loaded yet |
 | `character.getSpineSkins()` | Returns array of Spine skin names from current attributes |
-| `character.setAvailableSpineAnimations(view, names)` | Register animation names (called by engine on load) |
+| `character.setAvailableSpineAnimations(view, names)` | Register animation names and build groups (called by engine on load) |
 
 ---
 

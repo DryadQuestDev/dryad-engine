@@ -23,7 +23,7 @@ In the **Battles** tab, create battle definitions with:
 **From scripts:**
 
 ```js
-game.getService('start_battle').start({ battleId: 'forest_ambush' });
+game.getService('rpg_battle').start({ battleId: 'forest_ambush' });
 ```
 
 **From DryadScript:**
@@ -35,7 +35,7 @@ game.getService('start_battle').start({ battleId: 'forest_ambush' });
 You can also pass enemies directly instead of referencing a battle definition:
 
 ```js
-game.getService('start_battle').start({
+game.getService('rpg_battle').start({
     enemies: [
         { character_id: 'goblin_warrior', amount: 2 },
         { character_id: 'goblin_shaman', amount: 1 }

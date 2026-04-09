@@ -4,7 +4,7 @@ const { game, vue, components } = window.engine;
 const { computed, defineComponent } = vue;
 const { ProgressBar, CustomComponentContainer } = components;
 
-import { currentRpgBattle } from '../rpg-battle-state.mjs';
+import { currentRpgBattle, getBattleDisplayName } from '../rpg-battle-state.mjs';
 import { getTokenDefinitions } from '../rpg-battle-effects.mjs';
 
 // @ts-ignore
@@ -13,7 +13,7 @@ export const RpgCharOverlay = defineComponent({
   props: ['character', 'slotScale'],
   setup(/** @type {{ character: Character, slotScale: number }} */ props) {
     const battle = computed(() => currentRpgBattle.value);
-    const name = computed(() => props.character?.getTrait('name') || '');
+    const name = computed(() => props.character ? getBattleDisplayName(props.character.id) : '');
     const health = computed(() => props.character?.getResource('health') || 0);
     const maxHealth = computed(() => props.character?.getStat('health') || 1);
 
@@ -55,7 +55,7 @@ export const RpgCharOverlay = defineComponent({
     const tokens = computed(() => {
       const b = battle.value;
       if (!b || !props.character) return [];
-      const charTokens = b.tokens?.[props.character.id];
+      const charTokens = b.charState?.[props.character.id]?.tokens;
       if (!charTokens) return [];
       const defs = getTokenDefinitions();
       const result = [];
@@ -86,12 +86,11 @@ export const RpgCharOverlay = defineComponent({
       <ProgressBar :current="health" :max="maxHealth" :barColor="healthColor"
         bgColor="rgba(0,0,0,0.5)" width="120px" height="18px" :hideMax="true" />
       <div v-if="battleStatuses.length || tokens.length" class="rpg-char-tokens">
-        <div v-for="s in battleStatuses" :key="'s_' + s.id" class="rpg-token" :class="[s.polarity]" :title="s.name">
+        <div v-for="s in battleStatuses" :key="'s_' + s.id" class="rpg-token" :class="[s.polarity]">
           <img v-if="s.image" :src="s.image" class="rpg-token-icon" />
           <span v-if="s.stacks > 0" class="rpg-token-stacks">{{ s.stacks }}</span>
         </div>
-        <div v-for="t in tokens" :key="'t_' + t.id" class="rpg-token" :class="[t.polarity]"
-          :title="t.name + ' x' + t.stacks">
+        <div v-for="t in tokens" :key="'t_' + t.id" class="rpg-token" :class="[t.polarity]">
           <img v-if="t.icon" :src="t.icon" class="rpg-token-icon" />
           <span class="rpg-token-stacks">{{ t.stacks }}</span>
         </div>

@@ -1,19 +1,23 @@
 # Services
 
-The plugin registers three services:
+The plugin registers the following services:
 
-## `start_battle`
+## `rpg_battle`
 
-Starts a battle. Accepts a battle definition ID or inline enemy configuration. Returns `{ ok, battle? }` on success or `{ ok: false, reason }` on failure.
+Start and end battles.
+
+### `start(params)`
+
+Accepts a battle definition ID or inline enemy configuration. Returns `{ ok, battle? }` on success or `{ ok: false, reason }` on failure.
 
 ```js
+const battle = game.getService('rpg_battle');
+
 // Start a predefined battle
-const result = game.getService('start_battle').start({
-    battleId: 'forest_ambush'
-});
+const result = battle.start({ battleId: 'forest_ambush' });
 
 // Start with inline enemies
-const result = game.getService('start_battle').start({
+const result = battle.start({
     enemies: [
         { character_id: 'goblin_warrior', amount: 2 },
         { character_id: 'goblin_shaman', amount: 1, is_live_instance: false }
@@ -22,7 +26,7 @@ const result = game.getService('start_battle').start({
 });
 
 // Start with a specific player party
-const result = game.getService('start_battle').start({
+const result = battle.start({
     battleId: 'boss_fight',
     playerParty: ['hero_knight', 'hero_mage']
 });
@@ -47,16 +51,14 @@ const result = game.getService('start_battle').start({
 
 **Failure reasons:** `not_found`, `no_enemies`, `no_party`, `prevented` (emitter returned false).
 
-## `end_battle`
+### `end(result)`
 
 End the current battle and restore previous game state.
 
 ```js
-game.getService('end_battle').end('victory');
-game.getService('end_battle').end('defeat');
+game.getService('rpg_battle').end('victory');
+game.getService('rpg_battle').end('defeat');
 ```
-
-**Parameters:**
 
 | Field | Type | Description |
 |---|---|---|
@@ -69,6 +71,16 @@ When called:
 3. Spawned enemies are deleted
 4. Saves and inventory are re-enabled
 5. The previous game state is restored
+
+### `addDefeated(battleId)`
+
+Manually mark a battle definition as defeated. Useful for scripted victories or debug.
+
+```js
+game.getService('rpg_battle').addDefeated('forest_ambush');
+```
+
+Victories from `end('victory')` are tracked automatically -- this is for cases where you want to mark a battle defeated without fighting it.
 
 ## `rpg_party`
 
@@ -85,3 +97,50 @@ const isFull = svc.isPartyFull();       // true if current party >= max size
 |---|---|---|
 | `getMaxPartySize()` | number | Maximum party size from plugin config |
 | `isPartyFull()` | boolean | Whether the current party has reached max size |
+
+## `rpg_battle_log`
+
+Push entries to the battle log from game scripts. Turn number is auto-filled from the current battle.
+
+```js
+const log = game.getService('rpg_battle_log');
+
+// Log a text entry grouped under the active character's action
+log.push(casterId, 'generates <b>20</b> Rage');
+
+// Show a different character's face icon (e.g., target takes damage, generates rage)
+log.push(attackerId, game.getLine('log_rage_gen', { amount: 20 }), targetId);
+
+// Use with locale
+log.push(character.id, game.getLine('log_rage_gen', { amount: 20 }));
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `actorId` | string | Character whose action block this entry groups with |
+| `text` | string | HTML text for the log entry |
+| `targetId` | string? | Optional -- shows this character's face icon next to the text |
+
+## `rpg_floating_text`
+
+Show floating text popups above characters during battle.
+
+```js
+const floats = game.getService('rpg_floating_text');
+
+// Show "+20" in red above a character
+floats.add({ characterId: 'hero', text: '+20', cssClass: 'rage', color: 'e04040' });
+
+// Show text with an icon
+floats.add({ characterId: 'hero', text: 'Shielded!', cssClass: 'shield', icon: 'path/to/icon.webp' });
+```
+
+**Fields (`RpgFloatingTextOpts`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `characterId` | string | Character to show the float above |
+| `text` | string | Text to display |
+| `cssClass` | string | CSS class appended to `rpg-floating-text` for styling |
+| `icon` | string\|null | Optional icon image path |
+| `color` | string | Optional hex color (without `#`), sets `--float-color` CSS variable |

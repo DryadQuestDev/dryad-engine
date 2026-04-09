@@ -84,7 +84,9 @@ export const InitiativeBar = defineComponent({
           @click="$emit('select', entry)">
           <CharacterFace v-if="entry.character" :character="entry.character"
             :size="entry.isCurrent ? 60 : 48" :borderRadius="6" :showName="true" nameStyle="overlay"
-            :borderColor="entry.side === 'player' ? 'rgba(66, 185, 131, 0.6)' : 'rgba(239, 68, 68, 0.6)'" />
+            :borderColor="entry.side === 'player' ? 'rgba(66, 185, 131, 0.6)' : 'rgba(239, 68, 68, 0.6)'"
+            :static-face-force="true"
+            />
         </div>
       </template>
     </div>

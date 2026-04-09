@@ -13,6 +13,7 @@ import { gameLogger } from "../../utils/logger";
 import { Inventory } from "./inventory";
 import { PARTY_INVENTORY_ID } from "../../systems/itemSystem";
 import { mergeTrait } from "../../../functions/mergeTrait";
+import { buildAnimationGroups, type AnimationGroupData } from "../../utils/spineAnimationGroups";
 import ShortUniqueId from "short-unique-id";
 
 export type learnedSkill = {
@@ -78,10 +79,15 @@ export class Character {
   public actions: any = {};
 
   // Spine configs keyed by view ('' = default, 'back' = back view, etc.)
-  public spineViews: Map<string, { atlas: string, skeleton: string, animation: string, animationTimes?: number }> = new Map();
+  public spineViews: Map<string, { atlas: string, skeleton: string, animation: string }> = new Map();
 
   // Available spine animation names per view, populated by CharacterDollSpine on load
+  @Skip()
   public spineAnimationsAvailable: Map<string, Set<string>> = new Map();
+
+  // Animation groups per view, populated by setAvailableSpineAnimations()
+  @Skip()
+  public spineAnimationGroups: Map<string, AnimationGroupData> = new Map();
 
   // Skills Logic
   public skillTrees: Set<string> = new Set();
@@ -384,6 +390,51 @@ export class Character {
     return this.computeFinalAbilities()[abilityId];
   }
 
+  /**
+   * Returns abilities organized by ability_groups.
+   * If no abilities have a group assigned, returns useGroups: false with all ability IDs flat.
+   * If any ability has a group, returns useGroups: true with sorted groups + their ability IDs.
+   * Ungrouped abilities are logged as warnings and excluded.
+   */
+  public getGroupedAbilities(): { useGroups: boolean; groups: { id: string; name: string; abilityIds: string[] }[] } {
+    const game = Game.getInstance();
+    const abilities = this.computeFinalAbilities();
+    const abilityIds = Object.keys(abilities).filter(id => !abilities[id]?.meta?.is_hidden);
+
+    // Check if any ability has a group
+    const hasAnyGroup = abilityIds.some(id => abilities[id]?.meta?.group);
+    if (!hasAnyGroup) {
+      return { useGroups: false, groups: [{ id: '_all', name: '', abilityIds }] };
+    }
+
+    // Load group definitions from characterSystem (pre-loaded, sorted by order)
+    const groupsMap = game.characterSystem.abilityGroupsMap;
+    const groupDefs: { id: string; name: string }[] = [];
+    if (groupsMap) {
+      for (const [id, def] of groupsMap) {
+        groupDefs.push({ id, name: def.name || id });
+      }
+    }
+
+    // Build groups with their ability IDs
+    const groups = groupDefs
+      .map(g => ({
+        id: g.id,
+        name: g.name,
+        abilityIds: abilityIds.filter(aId => abilities[aId]?.meta?.group === g.id),
+      }))
+      .filter(g => g.abilityIds.length > 0);
+
+    // Warn about ungrouped abilities
+    for (const id of abilityIds) {
+      if (!abilities[id]?.meta?.group) {
+        console.warn(`[ability_groups] Ability '${id}' has no group assigned`);
+      }
+    }
+
+    return { useGroups: true, groups };
+  }
+
   public getSkinLayers(): Set<string> {
     return this.skinLayers;
   }
@@ -463,7 +514,7 @@ export class Character {
   }
 
   /** Get the default spine config (no view). Returns null if not defined. */
-  public getDefaultSpine(): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null {
+  public getDefaultSpine(): { atlas: string, skeleton: string, animation: string } | null {
     return this.spineViews.get('') || null;
   }
 
@@ -471,7 +522,7 @@ export class Character {
    * Get spine config for a specific view (e.g. "back", "side").
    * Returns null if no spine view is defined for that view.
    */
-  public getSpineForView(view: string): { atlas: string, skeleton: string, animation: string, animationTimes?: number } | null {
+  public getSpineForView(view: string): { atlas: string, skeleton: string, animation: string } | null {
     return this.spineViews.get(view) || null;
   }
 
@@ -544,14 +595,6 @@ export class Character {
     return skins;
   }
 
-  public setSpineAnimation(animation: string, view: string = '', times?: number): void {
-    const config = this.spineViews.get(view);
-    if (config) {
-      config.animation = animation;
-      config.animationTimes = times;
-    }
-  }
-
   public hasSpineAnimation(animation: string, view: string = ''): boolean {
     const anims = this.spineAnimationsAvailable.get(view);
     return anims ? anims.has(animation) : false;
@@ -559,6 +602,40 @@ export class Character {
 
   public setAvailableSpineAnimations(view: string, names: string[]): void {
     this.spineAnimationsAvailable.set(view, new Set(names));
+    this.spineAnimationGroups.set(view, buildAnimationGroups(names));
+  }
+
+  /**
+   * Get the current track-to-animation mapping based on character attributes.
+   * Track 0 = base animation (no underscore), Tracks 1+ = grouped by attribute key.
+   */
+  public getSpineTrackAnimations(view: string = ''): Map<number, string> {
+    const result = new Map<number, string>();
+    const groups = this.spineAnimationGroups.get(view);
+    if (!groups) return result;
+
+    // Track 0: base animation (or fall back to config's default_animation)
+    if (groups.baseAnimations.length > 0) {
+      result.set(0, groups.baseAnimations[0]);
+    } else {
+      const config = this.spineViews.get(view);
+      if (config?.animation) result.set(0, config.animation);
+    }
+
+    // Tracks 1+: attribute-driven groups
+    const available = this.spineAnimationsAvailable.get(view);
+    for (const groupName in groups.groups) {
+      const group = groups.groups[groupName];
+      const attrValue = this.attributes[groupName];
+      if (attrValue) {
+        const animName = `${groupName}_${attrValue}`;
+        if (available?.has(animName)) {
+          result.set(group.track, animName);
+        }
+      }
+    }
+
+    return result;
   }
 
   // ignore types
@@ -569,7 +646,7 @@ export class Character {
     const newSkinLayers = new Set<string>();
     const newAbilities = new Set<string>();
     const newStatIds = new Set<string>();
-    const newSpineViews = new Map<string, { atlas: string, skeleton: string, animation: string, animationTimes?: number }>();
+    const newSpineViews = new Map<string, { atlas: string, skeleton: string, animation: string }>();
 
     for (const status of this.statuses.values()) {
       // Properties: latest status overwrites (unless is_merge)
@@ -601,10 +678,12 @@ export class Character {
         }
       }
 
-      // Abilities: accumulate
+      // Abilities: accumulate (check requires_status on the template)
       if (status.abilities) {
-        for (const ability of status.abilities) {
-          newAbilities.add(ability);
+        for (const abilityId of status.abilities) {
+          const abTemplate = game.characterSystem.abilityTemplatesMap.get(abilityId);
+          if (abTemplate?.requires_status && !this.statuses.has(abTemplate.requires_status as string)) continue;
+          newAbilities.add(abilityId);
         }
       }
 
@@ -632,6 +711,8 @@ export class Character {
         for (const modifier of status.abilityModifiers) {
           const abilityId = modifier.ability_id;
           if (!abilityId) continue;
+          // Skip if requires_status is set but the character doesn't have it
+          if (modifier.requires_status && !this.statuses.has(modifier.requires_status)) continue;
           if (!collectedModifiers[abilityId]) {
             collectedModifiers[abilityId] = [];
           }
@@ -730,7 +811,15 @@ export class Character {
       }
     }
 
-    return result;
+    // Sort by order, then cooldown
+    const sorted = Object.entries(result).sort(([, a], [, b]) => {
+      const orderDiff = (a.meta.order ?? 0) - (b.meta.order ?? 0);
+      if (orderDiff !== 0) return orderDiff;
+      return (a.meta.cooldown ?? 0) - (b.meta.cooldown ?? 0);
+    });
+    const sortedResult: FinalAbilities = {};
+    for (const [id, ab] of sorted) sortedResult[id] = ab;
+    return sortedResult;
   }
 
   // ignore types
@@ -1478,7 +1567,7 @@ export class Character {
     // consume choice
     if (item.is_consumable && !item.isEquipped) {
       const params = {
-        consumeItem: {
+        consume_item: {
           itemUid: item.uid,
           characterId: this.id,
         }

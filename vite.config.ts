@@ -42,7 +42,8 @@ export default defineConfig(() => {
     },
     // Define environment variables
     define: {
-      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion)
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+      'import.meta.env.VITE_WEB_MODE': JSON.stringify(process.env.VITE_WEB_MODE || '')
     },
     css: {
       devSourcemap: true

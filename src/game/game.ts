@@ -482,6 +482,11 @@ export class Game {
     this.logicSystem.registerPlaceholder(id, func);
   }
 
+  /** Returns the current resolve context set by `resolveString(input, noExecute, context)`. Use inside custom placeholders. */
+  public getResolveContext(): Record<string, any> {
+    return this.logicSystem.resolveContext;
+  }
+
   // ============================================
   // PUBLIC API: Narrative System
   // ============================================
@@ -510,8 +515,8 @@ export class Game {
     return this.logicSystem.createCustomChoice(params);
   }
 
-  public resolveString(input: string, noExecuteActions: boolean = false): { output: string; actions: Record<string, any> } {
-    return this.logicSystem.resolveString(input, noExecuteActions);
+  public resolveString(input: string, noExecuteActions: boolean = false, context?: Record<string, any>): { output: string; actions: Record<string, any> } {
+    return this.logicSystem.resolveString(input, noExecuteActions, context);
   }
 
   public buildAbilityEffectsDescription(

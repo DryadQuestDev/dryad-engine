@@ -59,7 +59,7 @@ function handleCancel() {
 
 <template>
   <Dialog :visible="visible" @update:visible="(val) => !val && handleCancel()" modal
-    :header="customComponent?.name || 'Custom Popup'" :style="{ width: '80vw', maxHeight: '95vh' }">
+    :header="customComponent?.name || 'Custom Popup'" :style="{ width: '80vw', height: '95vh' }">
     <div class="custom-popup-content">
       <!-- Render the custom component -->
       <component v-if="customComponent && localItem" :is="customComponent.component" v-model:item="localItem"
@@ -82,13 +82,18 @@ function handleCancel() {
 <style scoped>
 .custom-popup-content {
   padding: 1rem 0;
-  min-height: 200px;
-  max-height: calc(90vh - 150px);
-  /* Account for dialog header and footer */
-  /*overflow: hidden;*/
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
+
+.custom-popup-content > * {
+  flex: 1;
+  min-height: 0;
+}
+
 
 .error-message {
   color: #f44336;
@@ -101,5 +106,20 @@ function handleCancel() {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+</style>
+
+<style>
+/* Global styles for PrimeVue Dialog — teleported to body, scoped styles don't reach */
+.p-dialog {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.p-dialog-content {
+  flex: 1 !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
 </style>

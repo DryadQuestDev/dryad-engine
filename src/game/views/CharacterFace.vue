@@ -13,6 +13,7 @@ const props = defineProps<{
   borderColor?: string;
   noWrapper?: boolean;
   overlaySlot?: string;
+  staticFaceForce?: boolean;
 }>();
 
 const characterName = computed(() => props.character?.getTrait('name') || '');
@@ -32,6 +33,18 @@ const DEBUG_MODE = false;
 
 const hasFaceStatic = computed(() => !!props.character?.getTrait('face_static'));
 const faceStaticPath = computed(() => props.character?.getTrait('face_static'));
+
+// Use static face when:
+// 1. staticFaceForce + spine character: forced static to avoid expensive spine rendering (logs, sidebar)
+// 2. face_static_precedence trait is true: per-character opt-in to prefer face_static over crop
+// 3. Non-spine character with face_static: original behavior (face_static always wins)
+const useStaticFace = computed(() => {
+  if (!hasFaceStatic.value) return false;
+  if (props.staticFaceForce && props.character?.isSpineCharacter()) return true;
+  if (props.character?.getTrait('face_static_precedence') === true) return true;
+  if (!props.character?.isSpineCharacter()) return true;
+  return false;
+});
 
 // Properties for positioning the character doll face
 // face_shift_x/y are percentages (0-100) of the image dimensions
@@ -57,7 +70,7 @@ const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) +
   <div class="character-face-wrapper" v-if="character && !noWrapper">
     <div class="character-face">
       <!-- Static face image if available -->
-      <img v-if="hasFaceStatic" :src="faceStaticPath" class="character-face-image" />
+      <img v-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
 
       <!-- Fallback to CharacterDoll if no static face -->
       <div v-else class="character-face-doll-container">
@@ -80,7 +93,7 @@ const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) +
 
   <!-- No-wrapper mode: just the face, no column layout -->
   <div class="character-face" v-else-if="character && noWrapper">
-    <img v-if="hasFaceStatic" :src="faceStaticPath" class="character-face-image" />
+    <img v-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
     <div v-else class="character-face-doll-container">
       <CharacterDoll :character="character" />
     </div>
@@ -178,7 +191,7 @@ const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) +
   transform-origin: top left;
 }
 
-/* Spine character face crop — dimensions must match FacePickerPopup's .spine-preview-container */
+/* Spine character face crop — spine renders oversized, then translate+scale crops to face region */
 .character-face-doll-container :deep(.character-doll-spine) {
   position: absolute;
   width: 500px;

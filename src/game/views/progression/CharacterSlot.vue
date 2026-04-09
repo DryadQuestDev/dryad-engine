@@ -15,7 +15,7 @@ const props = defineProps<{
   showItemSlots?: boolean;
   enableAppear?: boolean; // Enable appear animations for CharacterDoll
   disableItemInteraction?: boolean; // Disable item click/drag while keeping hover tooltips
-  view?: string; // Character view overrides (e.g. ['back'])
+  view?: string; // Character view overrides (e.g. 'back')
   interactive?: boolean; // Enable pointer-events for click handling
   overlaySlot?: string; // Optional slot name for overlay injection (same pattern as CharacterFace)
   instantLayers?: boolean; // Disable fade transition on layer changes (for combat animations)
@@ -28,6 +28,9 @@ const animationControls = useCharacterAnimation({
   slot: props.slot,
   skipAutoPlay: false // Let it auto-play in game context
 });
+
+// Disable scale transition on mount to prevent initial animation
+const scaleTransitionEnabled = ref(false);
 
 // Element refs
 const characterRef = animationControls.elementRef;
@@ -144,6 +147,9 @@ const contentTransformOrigin = computed(() => {
 
 // Apply animations on mount
 onMounted(() => {
+  // Enable scale transition after first frame (prevents animation on initial mount)
+  requestAnimationFrame(() => { scaleTransitionEnabled.value = true; });
+
   if (characterRef.value) {
     // Skip enter animations if loading from save
     const shouldPlayEnter = !game.dungeonSystem.isLoadingSave.value;
@@ -240,7 +246,8 @@ const onLeave = (_el: Element, done: () => void) => {
   <transition name="character-exit" @before-leave="onBeforeLeave" @leave="onLeave">
     <div ref="characterRef" class="character-slot" :style="{ zIndex: zindex }">
       <div class="character-slot-positioner">
-        <div ref="scaleWrapperRef" class="character-slot-scale-wrapper">
+        <div ref="scaleWrapperRef" class="character-slot-scale-wrapper"
+          :class="{ 'scale-animated': scaleTransitionEnabled }">
           <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper">
             <div ref="contentRef" class="character-content">
               <div class="character-doll-wrapper">
@@ -288,7 +295,10 @@ const onLeave = (_el: Element, done: () => void) => {
   height: 100%;
   transform: v-bind("scaleWrapperTransform");
   transform-origin: 50% 50%;
-  /* Always centered for scale */
+}
+
+.character-slot-scale-wrapper.scale-animated {
+  transition: transform 0.5s cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 .character-slot-rotation-wrapper {
@@ -310,8 +320,6 @@ const onLeave = (_el: Element, done: () => void) => {
   left: 0;
   width: 100%;
   height: 100%;
-  transform: translate(v-bind("artDx"), v-bind("artDy")) scale(v-bind("finalScale"));
-  transform-origin: 50% 50%;
   pointer-events: none;
 }
 

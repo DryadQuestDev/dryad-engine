@@ -55,6 +55,8 @@ function test() {
   game.getProperty('lewds')?.addCurrentValue(1);
 }
 
+const isWebMode = import.meta.env.VITE_WEB_MODE === 'true';
+
 async function backToEditor() {
 
   try {

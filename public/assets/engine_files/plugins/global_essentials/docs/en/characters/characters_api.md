@@ -584,6 +584,26 @@ for (const effectId in fireball.effects) {
 }
 ```
 
+### getGroupedAbilities()
+
+Get abilities organized by ability groups. Returns `{ useGroups, groups }`.
+
+- If no abilities have a `group` meta assigned, `useGroups` is `false` and all ability IDs are in a single flat group.
+- If any ability has a group, `useGroups` is `true` and `groups` contains sorted groups with their ability IDs. Ungrouped abilities are logged as warnings and excluded.
+
+```js
+const { useGroups, groups } = character.getGroupedAbilities();
+
+if (useGroups) {
+  for (const group of groups) {
+    console.log(group.name, group.abilityIds);
+  }
+} else {
+  // Flat list — all abilities in groups[0].abilityIds
+  console.log(groups[0].abilityIds);
+}
+```
+
 ---
 
 ## Utility Methods
@@ -604,25 +624,27 @@ character.update({
 
 ## Spine Animation Methods
 
-### setSpineAnimation(animation, view?, times?)
+### getSpineTrackAnimations(view?)
 
-Change the playing spine animation.
+Get the current track-to-animation mapping based on character attributes. Animations are grouped by underscore prefix — each group plays on its own Spine track, driven by the matching attribute.
 
 ```js
-character.setSpineAnimation('idle');               // Loop idle on default view
-character.setSpineAnimation('attack', 'back');     // Loop attack on back view
-character.setSpineAnimation('attack', 'back', 1);  // Play attack once, return to previous idle
-```
+// Spine has animations: "body", "belly_0", "belly_1", "face_idle", "face_ahegao"
+// Character attributes: belly = "1", face = "idle"
+// Result: { 0: "body", 1: "belly_1", 2: "face_idle" }
+const trackMap = character.getSpineTrackAnimations();
 
-- `times` — number of times to play. Omit for infinite loop. `1` = play once then return to previous animation.
+// Change belly animation by setting the attribute:
+character.setAttribute('belly', '2'); // automatically plays belly_2 on track 1
+```
 
 ### hasSpineAnimation(animation, view?)
 
 Check if a spine animation exists for the given view. Returns `false` if spine hasn't loaded yet.
 
 ```js
-if (character.hasSpineAnimation('attack', 'back')) {
-  character.setSpineAnimation('attack', 'back', 1);
+if (character.hasSpineAnimation('belly_2', '')) {
+  character.setAttribute('belly', '2');
 }
 ```
 

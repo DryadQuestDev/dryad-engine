@@ -59,7 +59,9 @@ export const GridActor = defineComponent({
     <div class="grid-actor" :class="{ active: isActive, dead: isDead }">
       <CharacterFace :character="character"
         :size="100" :showName="true" nameStyle="overlay" :borderRadius="8"
-        :borderColor="borderColor" />
+        :borderColor="borderColor"
+        :static-face-force="true"
+        />
       <div class="grid-actor-overlay">
         <div class="grid-actor-health">
           <ProgressBar :current="health" :max="maxHealth"

@@ -336,18 +336,9 @@ export function useCharacterAnimation(
       currentAnimation.value = null;
     };
 
-    // Simple ease animation: scale down slightly during move
+    // Animate position only — no scale dip (avoids exposing cropped edges during zoom transitions)
     const timeline = gsap.timeline({ onComplete });
 
-    // Animate to mid-state with slight scale
-    timeline.to(element, {
-      scale: 0.95,
-      transformOrigin: transformOrigin.value,
-      duration: duration / 2,
-      ease
-    });
-
-    // Simultaneously animate position (animate each ref separately)
     timeline.to(animatedX, {
       value: targetX,
       duration,
@@ -359,14 +350,6 @@ export function useCharacterAnimation(
       duration,
       ease
     }, 0);
-
-    // Animate back to normal scale
-    timeline.to(element, {
-      scale: 1,
-      transformOrigin: transformOrigin.value,
-      duration: duration / 2,
-      ease
-    }, duration / 2);
   };
 
   /**

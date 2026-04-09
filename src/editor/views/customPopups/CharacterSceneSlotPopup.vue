@@ -8,8 +8,8 @@ import { useCharacterAnimation } from '../../../composables/useCharacterAnimatio
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import type { CharacterSceneSlotObject } from '../../../schemas/characterSceneSlotSchema';
 import { CharacterSceneSlotSchema } from '../../../schemas/characterSceneSlotSchema';
-import { SpinePlayer } from '@esotericsoftware/spine-player';
-import '@esotericsoftware/spine-player/dist/spine-player.css';
+import { spineRenderer } from '../../../game/utils/spineRenderer';
+import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import Button from 'primevue/button';
 import Dropdown from 'primevue/dropdown';
 import Slider from 'primevue/slider';
@@ -79,7 +79,7 @@ const isSpineCharacter = computed(() => {
   return !!(defaultSpine?.atlas && defaultSpine?.skeleton);
 });
 
-// Computed character images (static only — spine renders via SpinePlayer)
+// Computed character images (static only — spine renders via spineRenderer)
 const characterImages = computed(() => {
   if (isSpineCharacter.value) return [];
   if (!selectedCharacterId.value) return [];
@@ -105,9 +105,10 @@ const characterArtOffset = computed(() => {
 // ============================================
 
 const spineContainerRef = ref<HTMLDivElement | null>(null);
-let spinePlayer: SpinePlayer | null = null;
+let spineInstance: Spine | null = null;
+let spineSlotId = '';
 
-function initSpinePlayer() {
+async function initSpinePlayer() {
   const char = selectedCharacter.value;
   if (!spineContainerRef.value || !Array.isArray(char?.spine)) return;
   const defaultSpine = char.spine.find((s: any) => !s.view);
@@ -115,57 +116,37 @@ function initSpinePlayer() {
   disposeSpinePlayer();
 
   try {
-    spinePlayer = new SpinePlayer(spineContainerRef.value, {
-      jsonUrl: defaultSpine.skeleton,
+    spineSlotId = `scene_slot_${Date.now()}`;
+    const attributes = char.attributes || {};
+
+    const spine = await spineRenderer.register(spineSlotId, spineContainerRef.value, {
+      skeletonUrl: defaultSpine.skeleton,
       atlasUrl: defaultSpine.atlas,
       animation: defaultSpine.default_animation || undefined,
-      skin: 'default',
-      backgroundColor: '#00000000',
-      alpha: true,
-      preserveDrawingBuffer: false,
-      premultipliedAlpha: true,
-      showControls: false,
-      success: (player: SpinePlayer) => {
-        if (!player.skeleton) return;
-
-        const attributes = char.attributes || {};
-        const skeletonData = player.skeleton.data;
-        const skins = Object.values(attributes).filter(
-          (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-        );
-
-        if (skins.length > 0) {
-          if (skins.length === 1) {
-            player.skeleton.setSkinByName(skins[0]);
-          } else {
-            const firstSkinData = skeletonData.skins[0];
-            if (firstSkinData) {
-              const SkinConstructor = firstSkinData.constructor as any;
-              const combinedSkin = new SkinConstructor('combined-skin');
-              skins.forEach(name => {
-                const skin = skeletonData.skins.find((s: any) => s.name === name);
-                if (skin) combinedSkin.addSkin(skin);
-              });
-              player.skeleton.setSkin(combinedSkin);
-            }
-          }
-          player.skeleton.setSlotsToSetupPose();
-        }
-      },
-      error: (_player: SpinePlayer, error: string) => {
-        console.error('Spine preview error:', error);
-      }
     });
+
+    if (!spine) return;
+    spineInstance = spine;
+
+    // Apply skins from attributes
+    const skeletonData = spine.skeleton.data;
+    const skins = Object.values(attributes).filter(
+      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
+    );
+    if (skins.length > 0) {
+      spineRenderer.applySkins(spine, skins);
+    }
   } catch (error) {
     console.error('Failed to initialize Spine preview:', error);
   }
 }
 
 function disposeSpinePlayer() {
-  if (spinePlayer) {
-    spinePlayer.dispose();
-    spinePlayer = null;
+  if (spineSlotId) {
+    spineRenderer.unregister(spineSlotId);
+    spineSlotId = '';
   }
+  spineInstance = null;
 }
 
 // Init/reinit spine when character selection changes
@@ -1375,7 +1356,4 @@ onBeforeUnmount(() => {
   aspect-ratio: 5 / 7;
 }
 
-.spine-preview-container :deep(.spine-player-controls) {
-  display: none !important;
-}
 </style>

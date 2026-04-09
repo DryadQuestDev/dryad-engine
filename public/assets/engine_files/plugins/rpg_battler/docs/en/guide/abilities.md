@@ -38,6 +38,7 @@ These fields control **when** an ability can be used:
 | `cooldown` | number | Turns of cooldown after use. Defined in global_essentials. |
 | `charges` | number | Maximum uses per battle. 0 = unlimited (cooldown only). Resets between battles. |
 | `cd_on_battle_start` | number | Initial cooldown applied when battle starts (delays first use). |
+| `cd_group` | string | Shared cooldown group. When cast, all abilities with the same `cd_group` on this character also go on cooldown (using the cast ability's cooldown value). |
 | `base_weight` | number | AI priority weight. Higher values make the AI prefer this ability. |
 | `order` | number | Sort order in the ability panel. Lower values appear first. |
 | `is_hidden` | boolean | If true, ability is hidden from the ability panel and usability checks. |
@@ -88,6 +89,8 @@ These fields define **what** the ability does. An ability can have multiple effe
 |---|---|---|
 | `combo` | boolean | Requires and consumes 1 Combo token stack per target. Targets without combo stacks are skipped. |
 | `cleanse` | boolean | Remove cleansable tokens. Ally target: removes negative tokens. Enemy target: removes positive tokens. |
+| `splash` | number | Also hits up to N neighbors of the primary target in their party lineup. Works for both enemy and ally targets. |
+| `splash_only` | boolean | Excludes the primary target from this effect -- only splash neighbors are hit. Requires `splash`. |
 
 ## Cooldowns & Charges
 

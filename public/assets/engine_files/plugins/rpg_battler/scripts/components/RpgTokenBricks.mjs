@@ -14,7 +14,7 @@ export const RpgTokenBricks = defineComponent({
     const tokenInstances = computed(() => {
       const battle = currentRpgBattle.value;
       if (!battle || !props.character) return [];
-      const charTokens = battle.tokens[props.character.id];
+      const charTokens = battle.charState[props.character.id]?.tokens;
       if (!charTokens) return [];
       const defs = getTokenDefinitions();
       const result = [];
@@ -27,7 +27,7 @@ export const RpgTokenBricks = defineComponent({
           result.push({
             tokenId,
             name: def.name,
-            description: def.description || '',
+            description: def.description ? game.resolveString(def.description, true, { character: props.character }).output : '',
             icon: def.icon || '',
             polarity: def.polarity || 'neutral',
             stacks: Math.round(inst.stacks),

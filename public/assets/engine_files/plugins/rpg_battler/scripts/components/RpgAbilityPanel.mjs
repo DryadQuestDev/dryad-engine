@@ -1,8 +1,9 @@
 /// <reference path="../dtypes.d.ts" />
 
-const { game, vue, components } = window.engine;
+const { game, vue, components, floatingUi } = window.engine;
 const { computed, ref, watch, defineComponent } = vue;
 const { AbilityCard, CustomComponentContainer } = components;
+const { useFloating, offset, flip, shift, autoUpdate } = floatingUi;
 
 import { currentRpgBattle } from '../rpg-battle-state.mjs';
 import { canUseAbility } from '../rpg-battle-flow.mjs';
@@ -11,13 +12,56 @@ import { canUseAbility } from '../rpg-battle-flow.mjs';
 export const RpgAbilityPanel = defineComponent({
   components: { AbilityCard, CustomComponentContainer },
   props: ['battle', 'activeChar', 'isPlayerTurn'],
-  emits: ['select-ability', 'end-turn'],
+  emits: ['select-ability'],
   setup(props, { emit }) {
     const abilityPanelRef = ref(null);
     const panelAnimKey = ref(0);
     const panelVisible = ref(false);
     const panelExiting = ref(false);
     const hoveredAbilityId = ref(null);
+    const activeTab = ref('');
+
+    // ── Floating tooltip ──
+    const hoveredSlotRef = ref(null);
+    const tooltipRef = ref(null);
+    let clearHoverTimeout = null;
+
+    const { floatingStyles } = useFloating(hoveredSlotRef, tooltipRef, {
+      placement: 'right-start',
+      strategy: 'fixed',
+      middleware: [
+        offset(8),
+        flip({ padding: 8 }),
+        shift({ padding: 8 }),
+      ],
+      whileElementsMounted: autoUpdate,
+    });
+
+    const showTooltip = computed(() => hoveredAbilityId.value && hoveredSlotRef.value);
+
+    function onAbilityHover(abilityId, event) {
+      if (clearHoverTimeout) { clearTimeout(clearHoverTimeout); clearHoverTimeout = null; }
+      hoveredAbilityId.value = abilityId;
+      hoveredSlotRef.value = event.currentTarget;
+    }
+
+    function onAbilityLeave() {
+      clearHoverTimeout = setTimeout(() => {
+        hoveredAbilityId.value = null;
+        hoveredSlotRef.value = null;
+      }, 80);
+    }
+
+    function onTooltipEnter() {
+      if (clearHoverTimeout) { clearTimeout(clearHoverTimeout); clearHoverTimeout = null; }
+    }
+
+    function onTooltipLeave() {
+      hoveredAbilityId.value = null;
+      hoveredSlotRef.value = null;
+    }
+
+    // ── Abilities ──
 
     const activeAbilities = computed(() => {
       if (props.battle?.activeSide !== 'player') return [];
@@ -31,7 +75,7 @@ export const RpgAbilityPanel = defineComponent({
         const ab = abilities[id];
         if (ab.meta.is_hidden) continue;
         const usable = canUseAbility(charId, id);
-        const state = props.battle?.abilitiesState?.[charId]?.[id];
+        const state = props.battle?.charState?.[charId]?.abilities[id];
         const costs = [];
         if (ab.meta.costs) {
           for (const statId in ab.meta.costs) {
@@ -53,16 +97,70 @@ export const RpgAbilityPanel = defineComponent({
           meta: ab.meta,
           effects: ab.effects,
           usable,
+          isBonus: !!ab.meta.bonus_action,
           cooldown: state?.cooldown || 0,
           charges: state?.charges ?? -1,
           costs,
         });
       }
-      list.sort((a, b) => (a.meta.order ?? 0) - (b.meta.order ?? 0));
       return list;
     });
 
+    // ── Data-driven ability groups (from Character.getGroupedAbilities) ──
+
+    const grouped = computed(() => {
+      /** @type {Character} */
+      const char = props.activeChar;
+      if (!char) return { useGroups: false, groups: [] };
+      return char.getGroupedAbilities();
+    });
+
+    const useGroups = computed(() => grouped.value.useGroups);
+
+    const availableGroups = computed(() => {
+      if (!useGroups.value) return [];
+      return grouped.value.groups;
+    });
+
+    const displayedAbilities = computed(() => {
+      const abs = activeAbilities.value;
+      if (!useGroups.value) return abs;
+      const currentGroup = grouped.value.groups.find(g => g.id === activeTab.value);
+      if (!currentGroup) return abs;
+      const groupIds = new Set(currentGroup.abilityIds);
+      return abs.filter(a => groupIds.has(a.id));
+    });
+
     const isPlayerTurn = computed(() => props.isPlayerTurn);
+
+    function getTabPrefs() {
+      return game.getState('rpg_ability_tabs') || {};
+    }
+
+    function setTab(tab) {
+      activeTab.value = tab;
+      const charId = props.activeChar?.id;
+      if (charId) {
+        const prefs = { ...getTabPrefs(), [charId]: tab };
+        game.setState('rpg_ability_tabs', prefs);
+      }
+    }
+
+    function restoreTab() {
+      const charId = props.activeChar?.id;
+      const preferred = charId ? getTabPrefs()[charId] : '';
+      const groups = availableGroups.value;
+      if (preferred && groups.some(g => g.id === preferred)) {
+        activeTab.value = preferred;
+      } else if (groups.length > 0) {
+        activeTab.value = groups[0].id;
+      }
+    }
+
+    // Restore tab whenever the active character or their groups change
+    watch([() => props.activeChar?.id, availableGroups], () => {
+      if (availableGroups.value.length > 0) restoreTab();
+    }, { immediate: true });
 
     watch(isPlayerTurn, (val) => {
       if (val && !panelVisible.value) show();
@@ -77,9 +175,11 @@ export const RpgAbilityPanel = defineComponent({
     function hide(cb) {
       if (!panelVisible.value) { if (cb) cb(); return; }
       panelExiting.value = true;
+      hoveredAbilityId.value = null;
+      hoveredSlotRef.value = null;
       const panel = abilityPanelRef.value;
       if (!panel) { panelVisible.value = false; if (cb) cb(); return; }
-      const items = panel.querySelectorAll('.rpg-ability-item, .rpg-btn-end-turn');
+      const items = panel.querySelectorAll('.rpg-ability-item');
       const maxDelay = items.length * 30 + 250;
       setTimeout(() => {
         panelVisible.value = false;
@@ -94,14 +194,13 @@ export const RpgAbilityPanel = defineComponent({
       emit('select-ability', abilityId, hide);
     }
 
-    function onEndTurn() {
-      emit('end-turn', hide);
-    }
-
     return {
-      game, activeAbilities, hoveredAbilityId,
+      game, activeAbilities, displayedAbilities,
+      hoveredAbilityId, showTooltip, tooltipRef, floatingStyles,
       abilityPanelRef, panelAnimKey, panelVisible, panelExiting,
-      show, hide, onSelectAbility, onEndTurn,
+      activeTab, useGroups, availableGroups,
+      show, hide, onSelectAbility, setTab,
+      onAbilityHover, onAbilityLeave, onTooltipEnter, onTooltipLeave,
     };
   },
   template: /*html*/`
@@ -109,12 +208,17 @@ export const RpgAbilityPanel = defineComponent({
       <div :key="panelAnimKey" ref="abilityPanelRef"
         class="rpg-ability-panel" :class="{ 'panel-exit': panelExiting }">
         <CustomComponentContainer :slot="'rpg-ability-panel-top'" :context="{ character: activeChar }" />
-        <div v-for="(ab, idx) in activeAbilities" :key="ab.id"
+        <div v-if="useGroups" class="rpg-ability-tabs">
+          <button v-for="g in availableGroups" :key="g.id"
+            class="rpg-ability-tab" :class="{ active: activeTab === g.id }"
+            @click="setTab(g.id)">{{ g.name }}</button>
+        </div>
+        <div v-for="(ab, idx) in displayedAbilities" :key="ab.id"
           class="rpg-ability-item" :class="{ disabled: !ab.usable, 'on-cooldown': ab.cooldown > 0, 'no-charges': ab.charges === 0 }"
           :style="{ '--i': idx }"
           @click="onSelectAbility(ab.id)"
-          @mouseenter="hoveredAbilityId = ab.id"
-          @mouseleave="hoveredAbilityId = null">
+          @mouseenter="onAbilityHover(ab.id, $event)"
+          @mouseleave="onAbilityLeave()">
           <img v-if="ab.meta.icon" :src="ab.meta.icon" class="rpg-ability-icon" />
           <span class="rpg-ability-name">{{ ab.meta.name || ab.id }}</span>
           <span class="rpg-ability-badges">
@@ -123,15 +227,16 @@ export const RpgAbilityPanel = defineComponent({
           </span>
           <span v-if="ab.costs.length" class="rpg-ability-costs">
             <span v-for="c in ab.costs" :key="c.statId" class="rpg-ability-cost" :class="{ insufficient: c.insufficient }" :style="!c.insufficient && c.color ? { color: c.color } : {}">
-              {{ c.amount }}<img v-if="c.icon" :src="c.icon" class="rpg-cost-icon" /><template v-else>{{ c.name }}</template>
+              {{ c.amount }}<img v-if="c.icon" :src="c.icon" class="rpg-cost-icon" /><template v-else>&nbsp;{{ c.name }}</template>
             </span>
           </span>
         </div>
-        <button class="rpg-btn rpg-btn-end-turn" :style="{ '--i': activeAbilities.length }" @click="onEndTurn">{{ game.getLine('ui_end_turn') }}</button>
         <CustomComponentContainer :slot="'rpg-ability-panel-bottom'" :context="{ character: activeChar }" />
-        <div v-if="hoveredAbilityId" class="rpg-ability-tooltip">
-          <AbilityCard :abilityId="hoveredAbilityId" :characterId="battle?.activeCharId" />
-        </div>
+      </div>
+      <div v-if="showTooltip" ref="tooltipRef" class="rpg-ability-tooltip"
+        :style="floatingStyles"
+        @mouseenter="onTooltipEnter" @mouseleave="onTooltipLeave">
+        <AbilityCard :abilityId="hoveredAbilityId" :characterId="battle?.activeCharId" />
       </div>
     </template>
   `

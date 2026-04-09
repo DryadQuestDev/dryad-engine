@@ -305,6 +305,7 @@ export const BattleLog = defineComponent({
                   :showName="true" nameStyle="overlay" :borderRadius="0" :size="80"
                   :class="{ defeated: isDefeated(block.actorId), retreated: isRetreated(block.actorId) }"
                   :borderColor="getActorSide(block.actorId) === 'player' ? 'rgba(66, 185, 131, 0.6)' : 'rgba(239, 68, 68, 0.6)'"
+                  :static-face-force="true"
                   style="cursor: pointer" @click="selectCharacter(block.actorId)" />
                 <div class="log-actor-chips">
                   <div v-for="ab in block.snapshot" :key="ab.id"
@@ -326,6 +327,7 @@ export const BattleLog = defineComponent({
                       :character="getCharacter(getEffectTargetId(effect))" :size="40" :borderRadius="4"
                       :class="{ defeated: isDefeated(getEffectTargetId(effect)), retreated: isRetreated(getEffectTargetId(effect)) }"
                       :borderColor="getActorSide(getEffectTargetId(effect)) === 'player' ? 'rgba(66,185,131,0.6)' : 'rgba(239,68,68,0.6)'"
+                      :static-face-force="true"
                       style="cursor: pointer" @click="selectCharacter(getEffectTargetId(effect))" />
                     <span v-html="effectText(effect)"></span>
                   </div>

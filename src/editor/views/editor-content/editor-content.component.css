@@ -77,3 +77,55 @@
   box-shadow: none;
   /* Remove default PrimeVue focus shadow if desired */
 }
+
+/* ── Template Wizard Banner ── */
+
+.template-wizard-trigger {
+  padding: 0.75rem 1rem;
+}
+
+.template-wizard-banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, #1a3a5c, #1a4a3c);
+  border: 1px solid #2a6a4a;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.template-wizard-banner:hover {
+  background: linear-gradient(135deg, #1e4570, #1e5a48);
+  border-color: #3a8a5a;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.template-wizard-banner > .pi-bolt {
+  font-size: 1.5rem;
+  color: #4ae68a;
+}
+
+.template-wizard-banner > .pi-chevron-right {
+  margin-left: auto;
+  color: #6aa;
+  font-size: 0.9rem;
+}
+
+.template-wizard-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.template-wizard-text strong {
+  font-size: 1rem;
+  color: #e0f0e8;
+}
+
+.template-wizard-text span {
+  font-size: 0.85rem;
+  color: #8ab8a0;
+}

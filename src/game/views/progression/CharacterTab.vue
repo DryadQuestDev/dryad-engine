@@ -69,18 +69,17 @@ function selectTab(tabId: string) {
   gap: 0.5rem;
   width: 100%;
   height: 100%;
+  container-type: size;
+  padding-bottom: 1cqh;
 }
 
 .character-doll-wrapper {
-  /*width: 600px;*/
-  width: 50vh;
+  width: 50cqh;
   flex-shrink: 0;
   height: 100%;
   position: relative;
   display: flex;
-  /*justify-content: center;*/
   align-items: center;
-  padding-bottom: 4vh;
 }
 
 .character-doll-wrapper :deep(.character-slot) {

@@ -285,6 +285,37 @@ app.post('/engine/create-dir', (req, res) => {
   }
 });
 
+// POST /engine/copy-dir
+app.post('/engine/copy-dir', (req, res) => {
+  const { src, dest } = req.body;
+
+  if (!src || !dest) {
+    return res.status(400).json({ success: false, error: 'Missing "src" or "dest" in request body.' });
+  }
+
+  const safeSrc = getSafePath(src);
+  const safeDest = getSafePath(dest);
+
+  if (!safeSrc) {
+    return res.status(400).json({ success: false, error: 'Invalid or forbidden source path.' });
+  }
+  if (!safeDest) {
+    return res.status(400).json({ success: false, error: 'Invalid or forbidden destination path.' });
+  }
+
+  try {
+    if (!fs.existsSync(safeSrc) || !fs.lstatSync(safeSrc).isDirectory()) {
+      return res.status(404).json({ success: false, error: 'Source path does not exist or is not a directory.' });
+    }
+
+    fs.cpSync(safeSrc, safeDest, { recursive: true });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[copy-dir] Error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // GET /engine/list-files-recursively?path=...&assetFolders=...&ignoreEngineAssets=...
 app.get('/engine/list-files-recursively', (req, res) => {
   const relativeStartDirPath = req.query.path || '.';

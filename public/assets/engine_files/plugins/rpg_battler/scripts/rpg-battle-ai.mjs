@@ -1,9 +1,9 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle } from './rpg-battle-state.mjs';
+import { currentRpgBattle, getBattleDisplayName } from './rpg-battle-state.mjs';
 import {
   calculateRawDamage, applyDefenses, getTokenStacks, getTokenDefinitions,
-  getSide, getAliveEnemies, getAliveAllies, isCharAlive,
+  getSide, getAliveEnemies, getAliveAllies, isCharAlive, expandSplashTargets,
 } from './rpg-battle-effects.mjs';
 import { getUsableAbilities, canUseAbility } from './rpg-battle-flow.mjs';
 
@@ -47,10 +47,9 @@ export function decideAction(characterId) {
 
   if (game.isDevMode() && bestAction) {
     const character = game.getCharacter(characterId);
-    const name = character?.getTrait('name') || characterId;
+    const name = getBattleDisplayName(characterId);
     const ability = character?.getAbility(bestAction.abilityId);
-    const targetChar = game.getCharacter(bestAction.targetId);
-    const targetName = targetChar?.getTrait('name') || bestAction.targetId;
+    const targetName = getBattleDisplayName(bestAction.targetId);
     console.log(`[RPG AI] ${name} → ${ability?.meta?.name || bestAction.abilityId} on ${targetName} (score: ${bestScore.toFixed(1)})`);
   }
 
@@ -111,6 +110,19 @@ export function getValidTargets(characterId, abilityId) {
     }
   }
 
+  // Health threshold filtering
+  const meta = ability.meta;
+  if (meta.target_min_health || meta.target_max_health) {
+    targets = targets.filter(id => {
+      const t = game.getCharacter(id);
+      if (!t) return false;
+      const pct = t.getResourceRatio('health') * 100;
+      if (meta.target_min_health && pct > meta.target_min_health) return false;
+      if (meta.target_max_health && pct < meta.target_max_health) return false;
+      return true;
+    });
+  }
+
   return targets;
 }
 
@@ -139,15 +151,20 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
   for (const effectId in ability.effects) {
     const aspects = ability.effects[effectId];
 
+    // Expand for splash scoring
+    const scoreTargets = aspects.splash
+      ? expandSplashTargets(characterId, effectTargetIds, aspects.splash, aspects.splash_only)
+      : effectTargetIds;
+
     // AoE bonus
-    if (effectTargetIds.length > 1) {
-      score += WEIGHTS.AOE_PER_TARGET * (effectTargetIds.length - 1);
+    if (scoreTargets.length > 1) {
+      score += WEIGHTS.AOE_PER_TARGET * (scoreTargets.length - 1);
     }
 
     // Score damage
     if (aspects.damage) {
       let totalDmg = 0;
-      for (const tId of effectTargetIds) {
+      for (const tId of scoreTargets) {
         const target = game.getCharacter(tId);
         if (!target || !isCharAlive(tId)) continue;
 
@@ -167,7 +184,7 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
 
     // Score healing
     if (aspects.healing) {
-      for (const tId of effectTargetIds) {
+      for (const tId of scoreTargets) {
         const target = game.getCharacter(tId);
         if (!target || !isCharAlive(tId)) continue;
 
@@ -188,7 +205,7 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
     // Score token apply
     if (aspects.token_apply) {
       const stacks = aspects.token_stacks || 1;
-      score += WEIGHTS.SHIELD * stacks * effectTargetIds.length;
+      score += WEIGHTS.SHIELD * stacks * scoreTargets.length;
     }
     if (aspects.token_apply_self) {
       const stacks = aspects.token_stacks_self || 1;
@@ -216,10 +233,10 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
     if (aspects.cleanse) {
       const defs = getTokenDefinitions();
       const cSide = getSide(characterId);
-      for (const tId of effectTargetIds) {
+      for (const tId of scoreTargets) {
         const tSide = getSide(tId);
         const removePolarity = (cSide === tSide) ? 'negative' : 'positive';
-        const charTokens = battle.tokens[tId];
+        const charTokens = battle.charState[tId]?.tokens;
         if (charTokens) {
           for (const tokenId in charTokens) {
             if (defs.get(tokenId)?.polarity === removePolarity && charTokens[tokenId].length > 0) {
@@ -232,7 +249,7 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
 
     // Cooldown refresh scoring
     if (aspects.cooldown_change && aspects.cooldown_change < 0) {
-      const states = battle.abilitiesState[characterId];
+      const states = battle.charState[characterId]?.abilities;
       if (states) {
         let onCd = 0;
         for (const abId in states) {

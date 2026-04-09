@@ -50,11 +50,18 @@
   letter-spacing: 0.5px;
   padding: 6px 14px;
   background: linear-gradient(135deg, #6a4c93, #9b7ec4);
-  /* Purple gradient theme */
   border-radius: 4px;
   border: 1px solid #7d5ba6;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  color: #fff;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.engine_name:hover {
+  opacity: 0.85;
 }
 
 .save_list_container {
@@ -126,39 +133,30 @@
   opacity: 0.6;
 }
 
-.promo_button {
+.nsfw-toggle {
   display: flex;
   align-items: center;
-  justify-content: center;
-  height: 30px;
-  padding: 0;
-  border-radius: 4px;
-  overflow: hidden;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  text-decoration: none;
+  gap: 8px;
+  cursor: pointer;
+  padding: 6px 12px;
+  user-select: none;
 }
 
-.promo_button img {
-  height: 100%;
-  width: auto;
-  display: block;
+.nsfw-label {
+  font-size: 0.85em;
+  color: #aaa;
+  font-weight: 600;
 }
 
-.promo_button:hover {
-  opacity: 0.8;
-  transform: scale(1.05);
+.nsfw-toggle .nsfw-switch {
+  pointer-events: none;
 }
 
-/* GitHub button specific styling */
-.promo_button[href*="github"] {
-  background-color: #2a2a2a;
-  /* Dark background for GitHub button */
+.nsfw-status {
+  font-size: 0.8em;
+  color: #888;
 }
 
-.promo_button[href*="github"] img {
-  filter: brightness(0) invert(1);
-  /* Make GitHub image white */
-}
 
 /* Main content area styling */
 .main_content {

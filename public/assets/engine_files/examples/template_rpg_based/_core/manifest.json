@@ -1,0 +1,13 @@
+{
+  "load_order": -9999999,
+  "plugins": [
+    "global_essentials"
+  ],
+  "starting_state": "exploration",
+  "id": "template_rpg_based",
+  "name": "RPG Based Template",
+  "version": "0.0.1",
+  "description": "<p>Template game.</p>",
+  "starting_dungeon_room_id": "1",
+  "starting_dungeon_id": "template"
+}

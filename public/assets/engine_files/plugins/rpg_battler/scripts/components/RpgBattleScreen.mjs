@@ -4,11 +4,11 @@ const { game, vue, components } = window.engine;
 const { computed, ref, watch, defineComponent } = vue;
 const { CharacterSlot, BackgroundAsset, CharacterViewerPopup, CustomComponentContainer } = components;
 
-import { currentRpgBattle, getSpeedMult } from '../rpg-battle-state.mjs';
+import { currentRpgBattle, getSpeedMult, getBattleDisplayName } from '../rpg-battle-state.mjs';
 import { endRpgBattle } from '../main.mjs';
 import { executeAction, advanceToNextTurn, canUseAbility, processDeaths } from '../rpg-battle-flow.mjs';
-import { isCharAlive, getTokenStacks } from '../rpg-battle-effects.mjs';
-import { decideAction } from '../rpg-battle-ai.mjs';
+import { isCharAlive, getTokenStacks, expandSplashTargets } from '../rpg-battle-effects.mjs';
+import { decideAction, getValidTargets } from '../rpg-battle-ai.mjs';
 import { animateCaster, animateEffects, setIdleState } from '../rpg-battle-anims.mjs';
 /** @param {RpgBattle} b */
 function isBattleFinished(b) { return b.phase === 'finished'; }
@@ -78,15 +78,46 @@ export const RpgBattleScreen = defineComponent({
       return t === 'self_and_ally' || t === 'any';
     });
 
-    // Taunt: if any alive enemy has taunt, only those are targetable
-    const tauntedEnemyIds = computed(() => {
-      if (!battle.value) return [];
-      return aliveEnemies.value.filter(id => getTokenStacks(id, 'taunt') > 0);
+    // Splash preview: highlight neighbors when hovering a target
+    const hoveredTargetId = ref(null);
+
+    const maxSplash = computed(() => {
+      const id = selectedAbilityId.value;
+      if (!id) return 0;
+      const char = activeChar.value;
+      if (!char) return 0;
+      const ab = char.getAbility(id);
+      if (!ab?.effects) return 0;
+      let max = 0;
+      for (const effectId in ab.effects) {
+        const s = ab.effects[effectId].splash;
+        if (s > max) max = s;
+      }
+      return max;
+    });
+
+    const splashTargetIds = computed(() => {
+      const hovered = hoveredTargetId.value;
+      const splash = maxSplash.value;
+      if (!hovered || !splash || !battle.value?.activeCharId) return [];
+      const expanded = expandSplashTargets(battle.value.activeCharId, [hovered], splash);
+      return expanded.filter(id => id !== hovered);
+    });
+
+    function isSplashTarget(charId) {
+      return splashTargetIds.value.includes(charId);
+    }
+
+    // Valid targets for the selected ability (respects taunt, health thresholds, etc.)
+    const validTargetIds = computed(() => {
+      const abId = selectedAbilityId.value;
+      const charId = activeChar.value?.id;
+      if (!abId || !charId) return [];
+      return getValidTargets(charId, abId);
     });
 
     function isEnemyTargetable(charId) {
-      if (tauntedEnemyIds.value.length === 0) return true;
-      return tauntedEnemyIds.value.includes(charId);
+      return validTargetIds.value.includes(charId);
     }
 
     const selectedAbilityName = computed(() => {
@@ -113,13 +144,13 @@ export const RpgBattleScreen = defineComponent({
     const aliveEnemies = computed(() => {
       const b = battle.value;
       if (!b) return [];
-      return b.enemyParty.filter(id => !b.defeatedEnemy.includes(id));
+      return b.enemyParty.filter(id => !b.charState[id]?.defeated);
     });
 
     const alivePlayers = computed(() => {
       const b = battle.value;
       if (!b) return [];
-      return b.playerParty.filter(id => !b.defeatedPlayer.includes(id));
+      return b.playerParty.filter(id => !b.charState[id]?.defeated);
     });
 
     // ── Slot generation ──
@@ -170,6 +201,24 @@ export const RpgBattleScreen = defineComponent({
       });
     });
 
+    // ── Ability resolution helpers ──
+
+    /** Check if an ability is a bonus action. */
+    function isBonusAction(abilityId) {
+      const char = activeChar.value;
+      return char?.getAbility(abilityId)?.meta?.bonus_action === true;
+    }
+
+    /** After ability resolves: bonus → stay, main → end turn. */
+    function handlePostResolve(b, abilityId) {
+      if (isBonusAction(abilityId)) {
+        b.charState[b.activeCharId].bonusUsed++;
+        b.battlePhase = 'choosing_ability';
+      } else {
+        onEndTurn(null);
+      }
+    }
+
     // ── Ability panel events ──
 
     function onSelectAbility(abilityId, hidePanel) {
@@ -196,7 +245,7 @@ export const RpgBattleScreen = defineComponent({
           processDeaths();
           if (!isBattleFinished(b)) {
             if (!isCharAlive(b.activeCharId)) { onEndTurn(null); return; }
-            b.battlePhase = 'choosing_ability';
+            handlePostResolve(b, abilityId);
           }
         })();
         return;
@@ -221,7 +270,18 @@ export const RpgBattleScreen = defineComponent({
 
     function onEnemyTargetClick(charId) {
       if (!isEnemyTargetable(charId)) {
-        game.showNotification(game.getLine('ui_taunt_blocked'));
+        // Determine reason for invalid target
+        const abId = selectedAbilityId.value;
+        const char = activeChar.value;
+        const ab = char?.getAbility(abId);
+        const taunters = aliveEnemies.value.filter(id => getTokenStacks(id, 'taunt') > 0);
+        if (taunters.length > 0 && !taunters.includes(charId)) {
+          game.showNotification(game.getLine('ui_taunt_blocked'));
+        } else if (ab?.meta?.target_min_health) {
+          game.showNotification(game.getLine('ui_target_hp_too_high'));
+        } else if (ab?.meta?.target_max_health) {
+          game.showNotification(game.getLine('ui_target_hp_too_low'));
+        }
         return;
       }
       selectTarget(charId);
@@ -251,9 +311,9 @@ export const RpgBattleScreen = defineComponent({
           if (!isCharAlive(b.activeCharId)) { onEndTurn(null); return; }
           const delay = forceZoomOut.value ? getActionDelay() : 0;
           setTimeout(() => {
-            b.battlePhase = 'choosing_ability';
             forceZoomOut.value = false;
-            abilityPanelRef.value?.show();
+            handlePostResolve(b, abilityId);
+            if (b.battlePhase === 'choosing_ability') abilityPanelRef.value?.show();
           }, delay);
         }
       })();
@@ -274,8 +334,12 @@ export const RpgBattleScreen = defineComponent({
       const b = battle.value;
       if (!b || isBattleFinished(b)) return;
 
-      const doAdvance = () => {
-        const nextId = advanceToNextTurn();
+      const doAdvance = async () => {
+        const { charId: nextId, dotResults } = advanceToNextTurn();
+        if (dotResults.length > 0) {
+          await animateEffects(dotResults);
+        }
+        processDeaths();
         if (!nextId || isBattleFinished(b)) return;
 
         if (b.activeSide === 'player') {
@@ -294,33 +358,7 @@ export const RpgBattleScreen = defineComponent({
       }
     }
 
-    function nextTurnSidebar() {
-      const b = battle.value;
-      if (!b || isBattleFinished(b)) return;
 
-      const panel = abilityPanelRef.value;
-      if (panel && isPlayerTurn.value) {
-        panel.hide(() => {
-          const nextId = advanceToNextTurn();
-          if (!nextId || isBattleFinished(b)) return;
-          if (b.activeSide === 'player') {
-            forceZoomOut.value = false;
-            abilityPanelRef.value?.show();
-          } else {
-            runEnemyTurns();
-          }
-        });
-      } else {
-        const nextId = advanceToNextTurn();
-        if (!nextId || isBattleFinished(b)) return;
-        if (b.activeSide === 'player') {
-          forceZoomOut.value = false;
-          abilityPanelRef.value?.show();
-        } else {
-          runEnemyTurns();
-        }
-      }
-    }
 
     // ── Enemy AI ──
 
@@ -353,6 +391,14 @@ export const RpgBattleScreen = defineComponent({
           const results = executeAction(action.abilityId, action.targetId);
           await animateEffects(results);
           processDeaths();
+
+          // Bonus action: loop back for another action
+          if (ability?.meta?.bonus_action && !isBattleFinished(b) && isCharAlive(charId)) {
+            b.charState[charId].bonusUsed++;
+            await new Promise(resolve => setTimeout(resolve, getChainDelay()));
+            setTimeout(step, 0);
+            return;
+          }
         }
 
         if (isBattleFinished(b)) {
@@ -363,7 +409,11 @@ export const RpgBattleScreen = defineComponent({
         // Wait for floating text before advancing
         await new Promise(resolve => setTimeout(resolve, getActionDelay()));
 
-        const nextId = advanceToNextTurn();
+        const { charId: nextId, dotResults } = advanceToNextTurn();
+        if (dotResults.length > 0) {
+          await animateEffects(dotResults);
+        }
+        processDeaths();
         if (!nextId || isBattleFinished(b)) {
           enemyTurnRunning.value = false;
           return;
@@ -454,14 +504,15 @@ export const RpgBattleScreen = defineComponent({
     }
 
     return {
-      battle, activeChar, backgroundAsset, enemySlots, playerSlots, overlayX, OVERLAY_Y_OFFSET,
+      battle, activeChar, backgroundAsset, enemySlots, playerSlots, overlayX, OVERLAY_Y_OFFSET, getBattleDisplayName,
       zoomedIn, isPlayerTurn, forceZoomOut, showZone,
       battlePhase, selectedAbilityName, activeBattleState, isBattleOver,
       isTargeting, targetsEnemies, targetsAllies, targetIncludesSelf,
+      hoveredTargetId, isSplashTarget, maxSplash,
       abilityPanelRef, viewerCharacters, viewerInitialIndex,
       isEnemyTargetable, onEnemyTargetClick,
       onSelectAbility, selectTarget, cancelTarget, onSlotClick, closeViewer,
-      winBattle, onEndTurn, nextTurnSidebar, toggleZoom, cycleBattleState, game,
+      winBattle, onEndTurn, toggleZoom, cycleBattleState, game,
     };
   },
   template: /*html*/`
@@ -479,7 +530,12 @@ export const RpgBattleScreen = defineComponent({
               <CharacterSlot
                 :character="game.getCharacter(es.charId)" :slot="es.slot"
                 :interactive="true" :instantLayers="true"
-                :class="{ 'rpg-targetable-hostile': isTargeting && targetsEnemies && isEnemyTargetable(es.charId) }"
+                :class="{
+                  'rpg-targetable-hostile': isTargeting && targetsEnemies && isEnemyTargetable(es.charId),
+                  'rpg-splash-highlight': isTargeting && isSplashTarget(es.charId),
+                }"
+                @mouseenter="isTargeting && targetsEnemies && maxSplash ? hoveredTargetId = es.charId : null"
+                @mouseleave="hoveredTargetId = null"
                 @click="isTargeting && targetsEnemies ? onEnemyTargetClick(es.charId) : onSlotClick(es.charId, 'enemy')" />
             </div>
 
@@ -489,7 +545,12 @@ export const RpgBattleScreen = defineComponent({
               <CharacterSlot
                 :character="game.getCharacter(ps.charId)" :slot="ps.slot" view="back"
                 :interactive="true" :instantLayers="true"
-                :class="{ 'rpg-targetable-friendly': isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId) }"
+                :class="{
+                  'rpg-targetable-friendly': isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId),
+                  'rpg-splash-highlight': isTargeting && isSplashTarget(ps.charId),
+                }"
+                @mouseenter="isTargeting && targetsAllies && maxSplash ? hoveredTargetId = ps.charId : null"
+                @mouseleave="hoveredTargetId = null"
                 @click="isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId) ? selectTarget(ps.charId) : onSlotClick(ps.charId, 'player')" />
             </div>
 
@@ -513,7 +574,7 @@ export const RpgBattleScreen = defineComponent({
             <!-- Ability panel -->
             <RpgAbilityPanel ref="abilityPanelRef"
               :battle="battle" :activeChar="activeChar" :isPlayerTurn="isPlayerTurn"
-              @select-ability="onSelectAbility" @end-turn="onEndTurn" />
+              @select-ability="onSelectAbility" />
 
             <!-- Target selection overlay -->
             <div v-if="battlePhase === 'choosing_target'" class="rpg-target-overlay">
@@ -532,12 +593,11 @@ export const RpgBattleScreen = defineComponent({
           <CustomComponentContainer :slot="'rpg-sidebar-top'" :context="{ character: activeChar }" />
           <div v-if="game.isDevMode()" class="rpg-battle-info">
             <span>{{ game.getLine('ui_turn') }} {{ battle.turn }}</span>
-            <div v-if="activeChar" class="rpg-active-name">{{ activeChar.getTrait('name') || activeChar.id }}</div>
+            <div v-if="activeChar" class="rpg-active-name">{{ getBattleDisplayName(activeChar.id) }}</div>
             <div class="rpg-zoom-label">{{ zoomedIn ? 'Zoomed In' : 'Zoomed Out' }}</div>
           </div>
 
           <div v-if="game.isDevMode()" class="rpg-battle-controls">
-            <button class="rpg-btn" @click="nextTurnSidebar">Next Turn</button>
             <button class="rpg-btn rpg-btn-win" @click="winBattle">{{ game.getLine('ui_win_battle') }}</button>
             <button v-if="isPlayerTurn" class="rpg-btn rpg-btn-zoom" @click="toggleZoom">
               {{ forceZoomOut ? 'Zoom In' : 'Zoom Out' }}

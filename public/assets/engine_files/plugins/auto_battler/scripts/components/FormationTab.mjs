@@ -161,7 +161,7 @@ export const FormationTab = defineComponent({
             :class="{ selected: selectedCharId === char.id }"
             @click="selectCharacter(char.id)">
             <div class="pool-character-inner">
-              <CharacterFace :character="char" :showName="true" />
+              <CharacterFace :character="char" :showName="true" :static-face-force="true" />
               <div v-if="getLeadershipCost(char)" class="leadership-cost-overlay">
                 {{ getLeadershipCost(char) }}
               </div>
@@ -189,7 +189,7 @@ export const FormationTab = defineComponent({
                 class="cell-character"
                 :class="{ selected: selectedCharId === cell.character.id }">
                 <div class="cell-character-inner">
-                  <CharacterFace :character="cell.character" :showName="true" :borderRadius="8" nameStyle="overlay" />
+                  <CharacterFace :character="cell.character" :showName="true" :borderRadius="8" nameStyle="overlay" :static-face-force="true" />
                   <div v-if="getLeadershipCost(cell.character)" class="leadership-cost-overlay">
                     {{ getLeadershipCost(cell.character) }}
                   </div>

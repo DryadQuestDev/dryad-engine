@@ -1,0 +1,12 @@
+{
+  "id": "template",
+  "dungeon_type": "map",
+  "gdoc_id": "https://docs.google.com/document/d/1ghVNkyM0YWOWDR1mggddE0gJJk8wUuFZwOzE7Jf1G9s/edit?tab=t.0",
+  "dungeon_content": "$dungeon_name\nMy Dungeon Name\n^1\n@description\nRoom1 Description\n\n@encounter1\n!choice1\nTest Encounter\n\n#encounter1~choice1\n1\n%\nTest interaction\n^2\n@description\nRoom2 Description\n^3\n@description\nRoom3 Description",
+  "music": "music_track1",
+  "image": "assets/games_assets/tutorial/_core/maps/riko_map.webp",
+  "fog_default": 200,
+  "fog_shadow_coef": 1.5,
+  "image_scaling": 0.5,
+  "padding": 150
+}

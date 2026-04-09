@@ -5,6 +5,7 @@ import { Game } from '../../game';
 import { Status } from '../../core/character/status';
 import { Item } from '../../core/character/item';
 import StatusObjectDisplay from './StatusObjectDisplay.vue';
+import CustomComponentContainer from '../CustomComponentContainer.vue';
 import ItemCard from './ItemCard.vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 
@@ -157,8 +158,7 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
   <div class="character-statuses" v-if="hasContent">
     <div class="status-list">
       <!-- Top slot -->
-      <component v-for="cm in topSlot" :key="cm.id" :is="cm.component"
-        :character="character" v-bind="cm.props" />
+      <CustomComponentContainer slot="character-statuses-top" :context="{ character }" />
 
       <!-- Equipped item bricks -->
       <div v-for="item in equippedItems" :key="'item_' + item.uid" class="item-brick"
@@ -193,8 +193,7 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
         </span>
       </div>
       <!-- Bottom slot -->
-      <component v-for="cm in bottomSlot" :key="cm.id" :is="cm.component"
-        :character="character" v-bind="cm.props" />
+      <CustomComponentContainer slot="character-statuses-bottom" :context="{ character }" />
     </div>
 
     <!-- Status Popup -->
@@ -214,7 +213,8 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
           </div>
           <StatusObjectDisplay
             :data="{ stats: hoveredStatusStats, abilities: [...hoveredStatus.abilities], ability_modifiers: hoveredStatus.abilityModifiers }"
-            :stacks="hoveredStatus.currentStacks" />
+            :stacks="hoveredStatus.currentStacks"
+            :character-id="character.id" />
         </div>
       </div>
     </Teleport>

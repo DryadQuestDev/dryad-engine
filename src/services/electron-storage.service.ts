@@ -90,6 +90,10 @@ export class ElectronStorageService implements StorageService {
         await this.invokeElectron('create-dir', dirPath);
     }
 
+    async copyDir(src: string, dest: string): Promise<{ success: boolean; error?: string }> {
+        return this.invokeElectron('copy-dir', src, dest);
+    }
+
     async getGamesList(): Promise<ManifestObject[]> {
         let gameFolders = await this.listFolders('games_files');
         let games: ManifestObject[] = [];

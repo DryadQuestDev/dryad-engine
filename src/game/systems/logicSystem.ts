@@ -4,7 +4,6 @@ import { Game } from "../game";
 import { computed, ComputedRef } from "vue";
 import { gameLogger } from "../utils/logger";
 import { CustomChoiceObject } from "../../schemas/customChoiceSchema";
-import { Skip } from "../../utility/save-system";
 import { PoolDefinitionObject } from "../../schemas/poolDefinitionSchema";
 import { PoolEntryObject } from "../../schemas/poolEntrySchema";
 
@@ -32,9 +31,9 @@ export class LogicSystem {
     conditionRegistry = new Map<string, Function>();
 
     placeholderRegistry = new Map<string, Function>();
+    public resolveContext: Record<string, any> = {};
     actionRegistry = new Map<string, ActionObject>(); // make it an object {func: Function}
 
-    @Skip()
     public customChoiceMap = new Map<string, CustomChoiceObject>();
 
     public registerCondition(id: string, func: Function) {
@@ -409,7 +408,10 @@ export class LogicSystem {
 
 
 
-    public resolveString(input: string, noExecuteActions: boolean = false): { output: string, actions: Record<string, any> } {
+    public resolveString(input: string, noExecuteActions: boolean = false, context?: Record<string, any>): { output: string, actions: Record<string, any> } {
+        const prevContext = this.resolveContext;
+        if (context) this.resolveContext = context;
+
         // todo: [code]some content with actions, placeholders etc that should be ignored in the resolvers[/code]
         let output = this.resolveCode(input);
 
@@ -436,6 +438,7 @@ export class LogicSystem {
         // bold * and italic **
         output = this.resolveTextStyles(output);
 
+        this.resolveContext = prevContext;
         return { output: output, actions: resultActions };
     }
 
@@ -1443,6 +1446,7 @@ export class LogicSystem {
         for (const fieldId of fieldIds) {
             const definition = definitionsMap.get(fieldId);
             if (!definition || !definition.ingame_description) continue;
+            if (definition.ingame_hide) continue;
             if (roleFilter && definition.role !== roleFilter) continue;
 
             let line = definition.ingame_description as string;
@@ -1450,13 +1454,17 @@ export class LogicSystem {
             line = line.replace(/\[([a-zA-Z0-9_]+)(?::id)?\]/g, (match: string, siblingId: string) => {
                 if (siblingId === 'v') return match;
                 const value = fields[siblingId] ?? fallbackFields?.[siblingId];
-                if (value !== undefined) {
-                    if (match.endsWith(':id]')) return String(value);
-                    const sibDef = definitionsMap.get(siblingId);
-                    return `<b>${this.resolveAspectValue(value, sibDef)}</b>`;
+                if (value === undefined) return '';
+                if (match.endsWith(':id]')) return String(value);
+                const sibDef = definitionsMap.get(siblingId);
+                // If sibling has its own ingame_description, render that template instead of raw value
+                if (sibDef?.ingame_description) {
+                    return (sibDef.ingame_description as string).replace(/\[v\]/g, `<b>${this.resolveAspectValue(value, sibDef)}</b>`);
                 }
-                return match;
+                return `<b>${this.resolveAspectValue(value, sibDef)}</b>`;
             });
+            // Clean up extra whitespace from removed siblings
+            line = line.replace(/\s{2,}/g, ' ').trim();
             lines.push(line);
         }
         return lines;

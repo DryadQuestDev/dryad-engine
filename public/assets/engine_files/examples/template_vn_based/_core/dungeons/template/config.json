@@ -1,0 +1,8 @@
+{
+  "id": "template",
+  "dungeon_type": "screen",
+  "gdoc_id": "https://docs.google.com/document/d/1wCTCV1QgscSP31zFoyQYfn1GTUQpR64s1wk2xpW6JLg",
+  "dungeon_content": "$dungeon_name\nMy Dungeon Name\n^main\n@description\nScreen Description\n\n#greetings{if: true}\n1\n%\nriko: Hi, I’m Riko!\n{actor: “riko->left”}\n\nriko: Nice to meet you!\n\n@encounter1\n!choice1\nTest Encounter\n\n#encounter1~choice1\n1\n%\nTest interaction",
+  "music": "music_track1",
+  "image": "assets/games_assets/tutorial/_core/bgs/rikomap_floor2.webp"
+}

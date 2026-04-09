@@ -4,6 +4,7 @@
     gap: 0.75rem;
     padding: 0.5rem;
     user-select: none;
+    height: 100%;
 }
 
 .tuner-controls {
@@ -62,13 +63,12 @@
 
 .tuner-preview {
     position: relative;
-    height: 500px;
+    flex: 1;
+    min-height: 0;
     background: #1a1a1a;
+    container-type: size;
     border-radius: 4px;
     overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
 .tuner-no-art {
@@ -77,8 +77,12 @@
 }
 
 .tuner-art-wrapper {
-    position: relative;
-    height: 80%;
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 50cqh;
+    height: 75%;
 }
 
 .tuner-art {

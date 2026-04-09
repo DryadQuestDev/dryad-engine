@@ -1,0 +1,51 @@
+[
+  {
+    "id": "base",
+    "values": [
+      "1"
+    ],
+    "uid": "ZAaCIdOpvFOg"
+  },
+  {
+    "id": "hairstyle",
+    "values": [
+      "1",
+      "2",
+      "3"
+    ],
+    "uid": "AE7C5gltEMqN"
+  },
+  {
+    "id": "mood",
+    "values": [
+      "normal",
+      "anxious",
+      "blush",
+      "confused"
+    ],
+    "uid": "L1AWsxdbP3aq"
+  },
+  {
+    "id": "riko_boots",
+    "uid": "Sc6BGgf9Y7Fn",
+    "values": [
+      "1"
+    ]
+  },
+  {
+    "id": "riko_outfit",
+    "uid": "eLMFQ5a1D8k8",
+    "values": [
+      "0",
+      "1"
+    ]
+  },
+  {
+    "id": "riko_underwear",
+    "values": [
+      "0",
+      "1"
+    ],
+    "uid": "YtsyotMTANFo"
+  }
+]

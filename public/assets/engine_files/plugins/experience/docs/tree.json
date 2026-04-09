@@ -1,0 +1,12 @@
+{
+  "guide": [
+    "overview",
+    "xp_formulas"
+  ],
+  "reference": [
+    "actions",
+    "services",
+    "conditions",
+    "emitters"
+  ]
+}

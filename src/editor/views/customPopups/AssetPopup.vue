@@ -52,6 +52,23 @@ const isImageAsset = computed(() => (localItem.value.type ?? 'image') === 'image
 const isVideoAsset = computed(() => localItem.value.type === 'video');
 const isSpineAsset = computed(() => localItem.value.type === 'spine');
 
+// Spine viewport with defaults matching schema
+const spineViewport = computed(() => ({
+  dx: localItem.value.viewport?.dx ?? 0,
+  dy: localItem.value.viewport?.dy ?? 0,
+  zoom: localItem.value.viewport?.zoom ?? 1,
+}));
+
+function updateViewport(field: string, value: number | number[]) {
+  const v = Array.isArray(value) ? value[0] : value;
+  if (!localItem.value.viewport) {
+    localItem.value.viewport = { ...spineViewport.value };
+  }
+  (localItem.value.viewport as any)[field] = v;
+  // Remount to apply viewport change
+  componentKey.value++;
+}
+
 // Create preview asset with controlled animation state
 const previewAsset = computed<AssetObject>(() => ({
   ...localItem.value,
@@ -251,13 +268,8 @@ onBeforeUnmount(() => {
         <div class="preview-canvas-container">
           <div ref="canvasRef" class="preview-canvas" @mousedown="handleMouseDown">
             <!-- Asset Preview using BackgroundAsset component -->
-            <div v-if="assetPath" class="asset-wrapper">
+            <div v-if="assetPath || isSpineAsset" class="asset-wrapper">
               <BackgroundAsset :key="componentKey" :asset="previewAsset" />
-            </div>
-
-            <!-- Spine asset placeholder -->
-            <div v-else-if="isSpineAsset" class="asset-spine">
-              <p style="color: white;">Spine preview not available in editor</p>
             </div>
 
             <!-- No Asset Message -->
@@ -270,6 +282,26 @@ onBeforeUnmount(() => {
 
       <!-- Right: Controls Panel -->
       <div class="controls-section">
+        <!-- Spine Viewport Controls -->
+        <div class="control-group" v-if="isSpineAsset">
+          <h4>Viewport</h4>
+          <div class="control-item">
+            <label>Offset X: {{ spineViewport.dx }}</label>
+            <Slider :modelValue="spineViewport.dx"
+              @update:modelValue="(v) => updateViewport('dx', v)" :min="-500" :max="500" :step="1" />
+          </div>
+          <div class="control-item">
+            <label>Offset Y: {{ spineViewport.dy }}</label>
+            <Slider :modelValue="spineViewport.dy"
+              @update:modelValue="(v) => updateViewport('dy', v)" :min="-500" :max="500" :step="1" />
+          </div>
+          <div class="control-item">
+            <label>Zoom: {{ spineViewport.zoom.toFixed(2) }}</label>
+            <Slider :modelValue="spineViewport.zoom"
+              @update:modelValue="(v) => updateViewport('zoom', v)" :min="0.1" :max="5" :step="0.05" />
+          </div>
+        </div>
+
         <!-- Animation Controls -->
         <div class="control-group">
           <h4>Animation Preview</h4>
@@ -511,6 +543,7 @@ onBeforeUnmount(() => {
               @update:modelValue="(v) => localItem.blur = Array.isArray(v) ? v[0] : v" :min="0" :max="20" :step="1" />
           </div>
         </div>
+
       </div>
     </div>
   </div>

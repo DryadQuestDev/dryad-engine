@@ -15,16 +15,33 @@ const props = withDefaults(defineProps<{
 const game = Game.getInstance();
 
 const selectedAbilityId = ref<string | null>(null);
+const activeTab = ref<string>('');
 
-const abilityIds = computed(() => {
-  return Array.from(props.character.abilities).filter(id => {
-    const ab = props.character.getAbility(id);
-    return !ab?.meta?.is_hidden;
-  });
+const grouped = computed(() => props.character.getGroupedAbilities());
+const useGroups = computed(() => grouped.value.useGroups);
+const availableGroups = computed(() => grouped.value.groups);
+
+const displayedAbilityIds = computed(() => {
+  if (!useGroups.value) {
+    return grouped.value.groups[0]?.abilityIds || [];
+  }
+  const group = grouped.value.groups.find(g => g.id === activeTab.value);
+  return group?.abilityIds || [];
 });
 
-// Auto-select first ability when abilities change or on mount
-watch(abilityIds, (ids) => {
+function setTab(tab: string) {
+  activeTab.value = tab;
+}
+
+// Reset tab when groups change
+watch(availableGroups, (groups) => {
+  if (groups.length > 0 && !groups.some(g => g.id === activeTab.value)) {
+    activeTab.value = groups[0].id;
+  }
+}, { immediate: true });
+
+// Auto-select first ability when displayed abilities change
+watch(displayedAbilityIds, (ids) => {
   if (ids.length > 0 && (!selectedAbilityId.value || !ids.includes(selectedAbilityId.value))) {
     selectedAbilityId.value = ids[0];
   } else if (ids.length === 0) {
@@ -48,7 +65,7 @@ function selectAbility(abilityId: string) {
   <div class="abilities-viewer">
     <CustomComponentContainer slot="abilities-viewer-top" :context="{ character }" />
 
-    <div v-if="abilityIds.length === 0" class="empty-state">
+    <div v-if="displayedAbilityIds.length === 0 && !useGroups" class="empty-state">
       No abilities
     </div>
 
@@ -57,14 +74,22 @@ function selectAbility(abilityId: string) {
         <AbilityCard :abilityId="selectedAbilityId" :characterId="character.id" :showDelta="showDelta" />
       </div>
 
-      <div class="ability-list">
-        <div v-for="abilityId in abilityIds" :key="abilityId" class="ability-item"
-          :class="{ selected: selectedAbilityId === abilityId }" @click="selectAbility(abilityId)">
-          <img v-if="getAbilityMeta(abilityId).icon" :src="getAbilityMeta(abilityId).icon" class="ability-icon"
-            @error="(e) => (e.target as HTMLImageElement).style.display = 'none'" />
-          <span class="ability-name">{{ getAbilityMeta(abilityId).name || abilityId }}</span>
+      <div class="ability-list-wrapper">
+        <div v-if="useGroups" class="ability-group-tabs">
+          <button v-for="g in availableGroups" :key="g.id"
+            class="ability-group-tab" :class="{ active: activeTab === g.id }"
+            @click="setTab(g.id)">{{ g.name }}</button>
         </div>
-        <CustomComponentContainer slot="abilities-viewer-list" :context="{ character }" />
+
+        <div class="ability-list">
+          <div v-for="abilityId in displayedAbilityIds" :key="abilityId" class="ability-item"
+            :class="{ selected: selectedAbilityId === abilityId }" @click="selectAbility(abilityId)">
+            <img v-if="getAbilityMeta(abilityId).icon" :src="getAbilityMeta(abilityId).icon" class="ability-icon"
+              @error="(e: Event) => ((e.target as HTMLImageElement).style.display = 'none')" />
+            <span class="ability-name">{{ getAbilityMeta(abilityId).name || abilityId }}</span>
+          </div>
+          <CustomComponentContainer slot="abilities-viewer-list" :context="{ character }" />
+        </div>
       </div>
     </div>
 
@@ -96,12 +121,43 @@ function selectAbility(abilityId: string) {
   flex: 0 0 auto;
 }
 
+.ability-list-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.ability-group-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.ability-group-tab {
+  padding: 4px 12px;
+  background: rgba(40, 40, 40, 0.8);
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ability-group-tab:hover {
+  color: #ddd;
+  border-color: #666;
+}
+
+.ability-group-tab.active {
+  color: #42b983;
+  border-color: #42b983;
+}
+
 .ability-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-content: flex-start;
-  flex: 1;
 }
 
 .ability-item {

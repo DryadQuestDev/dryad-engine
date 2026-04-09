@@ -1,0 +1,24 @@
+[
+  {
+    "id": "endurance",
+    "name": "Endurance",
+    "uid": "Dor3b1UnqWgy",
+    "ingame_description": "<p>Stamina for physical effort and resisting fatigue.&nbsp;Determines how long you can keep going,&nbsp;in or out of battle.</p>",
+    "description": "Endurance is checked against Endurance-based events"
+  },
+  {
+    "id": "fashion",
+    "name": "Fashion",
+    "description": "How fashionable the character is",
+    "uid": "IueQ18YuedSD",
+    "ingame_description": "<p>Your sense of style and how well your outfit plays with the current vibe.&nbsp;Sometimes,&nbsp;looking sharp&nbsp;<em>is</em>&nbsp;the key.</p>"
+  },
+  {
+    "id": "stamina",
+    "name": "Stamina",
+    "description": "How much energy the character has",
+    "ingame_description": "<p><span style=\"color: rgb(153, 51, 255);\">Your short-term energy reserve.&nbsp;Fuels actions like sprinting,&nbsp;dodging,&nbsp;or…&nbsp;other vigorous activities.&nbsp;Recoverable,&nbsp;but not infinite.</span></p>",
+    "is_resource": true,
+    "uid": "LKuQF6Alrv6P"
+  }
+]

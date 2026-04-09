@@ -111,6 +111,13 @@ export const PluginSchema = {
             },
         }
     },
+    data: {
+        type: 'schema[]', tooltip: 'Additional data files to inject into the game', objects: {
+            uid: { type: 'uid', required: true },
+            fileName: { type: 'string', tooltip: 'Target file path (e.g., "character_traits")' },
+            fileData: { type: 'textarea', tooltip: 'JSON data to inject (array for array files, object for single files)' },
+        }
+    },
     editor_popups: {
         type: 'schema[]', tooltip: 'Custom popup components injected into editor tabs', objects: {
             uid: { type: 'uid', required: true },
@@ -120,15 +127,7 @@ export const PluginSchema = {
             script: { type: 'string', tooltip: 'Component .mjs file relative to plugin folder (e.g., "scripts/editor/MyPopup.mjs")' },
             css: { type: 'string', tooltip: 'Optional CSS file relative to plugin folder (e.g., "scripts/editor/MyPopup.css")' },
         }
-    },
-    data: {
-        type: 'schema[]', tooltip: 'Additional data files to inject into the game', objects: {
-            uid: { type: 'uid', required: true },
-            fileName: { type: 'string', tooltip: 'Target file path (e.g., "character_traits")' },
-            fileData: { type: 'textarea', tooltip: 'JSON data to inject (array for array files, object for single files)' },
-        }
-    },
-
+    }
 } as const satisfies Schema;
 
 export type PluginObject = SchemaToType<typeof PluginSchema>;

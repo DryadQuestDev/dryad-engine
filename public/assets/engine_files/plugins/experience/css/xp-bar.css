@@ -1,0 +1,43 @@
+.xp-bar-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+}
+
+.xp-level-badge {
+    font-weight: 700;
+    color: #f0c040;
+    font-size: 16px;
+    white-space: nowrap;
+}
+
+.xp-bar-track {
+    position: relative;
+    flex: 1;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9px;
+    overflow: hidden;
+}
+
+.xp-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #d4a020, #f0c040);
+    border-radius: 9px;
+    transition: width 0.4s ease;
+}
+
+.xp-bar-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}

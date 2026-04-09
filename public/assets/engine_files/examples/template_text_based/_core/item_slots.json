@@ -1,0 +1,38 @@
+[
+  {
+    "id": "mc_boots",
+    "name": "Boots",
+    "image": "assets/games_assets/tutorial/_core/item_slots/footwear.webp",
+    "uid": "fSCLZEHHuGot"
+  },
+  {
+    "id": "mc_outfit",
+    "name": "Outfit",
+    "image": "assets/games_assets/tutorial/_core/item_slots/outfit.webp",
+    "uid": "TPlnkid1ZxiG"
+  },
+  {
+    "id": "mc_underwear",
+    "name": "Underwear",
+    "image": "assets/games_assets/tutorial/_core/item_slots/underwear.webp",
+    "uid": "XyKVUu97md7U"
+  },
+  {
+    "id": "riko_boots",
+    "name": "Boots",
+    "image": "assets/games_assets/tutorial/_core/item_slots/footwear.webp",
+    "uid": "rEaEZ2oeRhXA"
+  },
+  {
+    "id": "riko_outfit",
+    "name": "Outfit",
+    "image": "assets/games_assets/tutorial/_core/item_slots/outfit.webp",
+    "uid": "jT0LhYPRm6t5"
+  },
+  {
+    "id": "riko_underwear",
+    "name": "Underwear",
+    "image": "assets/games_assets/tutorial/_core/item_slots/underwear.webp",
+    "uid": "kidbn3KWwYij"
+  }
+]

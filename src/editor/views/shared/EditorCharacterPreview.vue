@@ -2,8 +2,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Editor } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
-import { SpinePlayer } from '@esotericsoftware/spine-player';
-import '@esotericsoftware/spine-player/dist/spine-player.css';
+import { spineRenderer } from '../../../game/utils/spineRenderer';
+import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 const props = defineProps<{
   /** Character template object (with skin_layers, attributes, spine, traits) */
@@ -24,7 +24,8 @@ const imageLayers = computed(() => {
 
 // ── Spine support ──
 const spineContainerRef = ref<HTMLDivElement | null>(null);
-let spinePlayer: SpinePlayer | null = null;
+let spineInstance: Spine | null = null;
+let spineSlotId = '';
 
 function findSpineForView(spineArray: any, view?: string | null) {
   if (!Array.isArray(spineArray)) return null;
@@ -50,61 +51,42 @@ const spineConfig = computed(() => {
 const isSpine = computed(() => !!(spineConfig.value.atlas && spineConfig.value.skeleton));
 const hasContent = computed(() => isSpine.value || imageLayers.value.length > 0);
 
-function initSpinePlayer() {
+async function initSpinePlayer() {
   if (!spineContainerRef.value || !spineConfig.value.atlas || !spineConfig.value.skeleton) return;
   disposeSpinePlayer();
 
   try {
-    spinePlayer = new SpinePlayer(spineContainerRef.value, {
-      jsonUrl: spineConfig.value.skeleton,
+    spineSlotId = `editor_preview_${Date.now()}`;
+    const attributes = props.character?.attributes || {};
+
+    const spine = await spineRenderer.register(spineSlotId, spineContainerRef.value, {
+      skeletonUrl: spineConfig.value.skeleton,
       atlasUrl: spineConfig.value.atlas,
       animation: spineConfig.value.animation || undefined,
-      skin: 'default',
-      backgroundColor: '#00000000',
-      alpha: true,
-      preserveDrawingBuffer: false,
-      premultipliedAlpha: true,
-      showControls: false,
-      success: (player: SpinePlayer) => {
-        if (!player.skeleton) return;
-        // Apply skins from attributes
-        const attributes = props.character?.attributes || {};
-        const skeletonData = player.skeleton.data;
-        const skins = Object.values(attributes).filter(
-          (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-        );
-        if (skins.length > 0) {
-          if (skins.length === 1) {
-            player.skeleton.setSkinByName(skins[0]);
-          } else {
-            const firstSkinData = skeletonData.skins[0];
-            if (firstSkinData) {
-              const SkinConstructor = firstSkinData.constructor as any;
-              const combinedSkin = new SkinConstructor('combined-skin');
-              skins.forEach(name => {
-                const skin = skeletonData.skins.find((s: any) => s.name === name);
-                if (skin) combinedSkin.addSkin(skin);
-              });
-              player.skeleton.setSkin(combinedSkin);
-            }
-          }
-          player.skeleton.setSlotsToSetupPose();
-        }
-      },
-      error: (_player: SpinePlayer, error: string) => {
-        console.error('EditorCharacterPreview spine error:', error);
-      }
     });
+
+    if (!spine) return;
+    spineInstance = spine;
+
+    // Apply skins from attributes
+    const skeletonData = spine.skeleton.data;
+    const skins = Object.values(attributes).filter(
+      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
+    );
+    if (skins.length > 0) {
+      spineRenderer.applySkins(spine, skins);
+    }
   } catch (error) {
     console.error('EditorCharacterPreview failed to init spine:', error);
   }
 }
 
 function disposeSpinePlayer() {
-  if (spinePlayer) {
-    spinePlayer.dispose();
-    spinePlayer = null;
+  if (spineSlotId) {
+    spineRenderer.unregister(spineSlotId);
+    spineSlotId = '';
   }
+  spineInstance = null;
 }
 
 // Load skin layers data

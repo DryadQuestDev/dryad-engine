@@ -1,0 +1,46 @@
+[
+  {
+    "id": "_config_",
+    "params": {
+      "id": "template",
+      "dungeon_type": "map",
+      "gdoc_id": "https://docs.google.com/document/d/1ghVNkyM0YWOWDR1mggddE0gJJk8wUuFZwOzE7Jf1G9s/edit?tab=t.0",
+      "music": "music_track1",
+      "image": "assets/games_assets/tutorial/_core/maps/riko_map.webp",
+      "fog_default": 200,
+      "fog_shadow_coef": 1.5,
+      "image_scaling": 0.5,
+      "padding": 150,
+      "map_width": 1675,
+      "map_height": 3209
+    }
+  },
+  {
+    "id": "$dungeon_name",
+    "val": "My Dungeon Name"
+  },
+  {
+    "id": "@1.description",
+    "val": "Room1 Description"
+  },
+  {
+    "id": "@1.encounter1",
+    "val": "Test Encounter"
+  },
+  {
+    "id": "!1.encounter1.choice1",
+    "val": "__Default__:choice1"
+  },
+  {
+    "id": "#1.encounter1~choice1.1.1.1",
+    "val": "Test interaction"
+  },
+  {
+    "id": "@2.description",
+    "val": "Room2 Description"
+  },
+  {
+    "id": "@3.description",
+    "val": "Room3 Description"
+  }
+]

@@ -45,12 +45,6 @@ export const ActiveActor = defineComponent({
         });
       }
 
-      result.sort((a, b) => {
-        const cdA = abilitiesMap[a.id]?.meta?.cooldown || 0;
-        const cdB = abilitiesMap[b.id]?.meta?.cooldown || 0;
-        return cdA - cdB;
-      });
-
       return result;
     });
 

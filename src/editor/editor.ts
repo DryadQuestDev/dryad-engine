@@ -1308,6 +1308,97 @@ export class Editor {
       this.global.addNotificationId("create_error"); // Use a general error notification
     }
   }
+
+  async createGameFromTemplate(templateId: string, gameId: string, gameName: string, author: string, dungeonId: string): Promise<boolean> {
+    try {
+      // Check if game already exists
+      const exists = await this.global.pathExists(`games_files/${gameId}`);
+      if (exists) {
+        this.global.addNotification(`Game "${gameId}" already exists.`);
+        return false;
+      }
+
+      // Copy entire template folder
+      const result = await this.global.copyDir(
+        `engine_files/examples/${templateId}`,
+        `games_files/${gameId}`
+      );
+      if (!result.success) {
+        this.global.addNotification(`Failed to copy template: ${result.error}`);
+        return false;
+      }
+
+      // Read and patch the manifest
+      const manifestPath = `games_files/${gameId}/_core/manifest.json`;
+      const manifest = await this.global.readJson(manifestPath) as ManifestObject;
+
+      const oldDungeonId = manifest.starting_dungeon_id;
+      manifest.id = gameId;
+      manifest.name = gameName;
+      manifest.author = author;
+      manifest.starting_dungeon_id = dungeonId;
+      manifest.version = '0.1.0';
+
+      await this.global.writeJson(manifestPath, manifest);
+
+      // Rename dungeon folder if needed
+      if (oldDungeonId && oldDungeonId !== dungeonId) {
+        const dungeonBasePath = `games_files/${gameId}/_core/dungeons`;
+        const oldDungeonExists = await this.global.pathExists(`${dungeonBasePath}/${oldDungeonId}`);
+        if (oldDungeonExists) {
+          await this.global.copyDir(`${dungeonBasePath}/${oldDungeonId}`, `${dungeonBasePath}/${dungeonId}`);
+          await this.global.deleteFile(`${dungeonBasePath}/${oldDungeonId}`, true);
+
+          // Patch dungeon config.json
+          const configPath = `${dungeonBasePath}/${dungeonId}/config.json`;
+          const config = await this.global.readJson(configPath);
+          config.id = dungeonId;
+          await this.global.writeJson(configPath, config);
+
+          // Patch content_parsed.json _config_ entry
+          const contentPath = `${dungeonBasePath}/${dungeonId}/content_parsed.json`;
+          const content = await this.global.readJson(contentPath);
+          const configEntry = content?.find((e: any) => e.id === '_config_');
+          if (configEntry?.params) configEntry.params.id = dungeonId;
+          await this.global.writeJson(contentPath, content);
+        }
+      }
+
+      // Create empty assets folder
+      await this.global.createDir(`games_assets/${gameId}/_core`);
+
+      // Update dev_settings with correct asset_folders
+      const devSettingsPath = `games_files/${gameId}/_core/dev/dev_settings.json`;
+      const devSettingsExists = await this.global.pathExists(devSettingsPath);
+      if (devSettingsExists) {
+        const devSettings = await this.global.readJson(devSettingsPath);
+        devSettings.asset_folders = [`${gameId}/_core`];
+        await this.global.writeJson(devSettingsPath, devSettings);
+      } else {
+        await this.global.createDir(`games_files/${gameId}/_core/dev`);
+        await this.global.writeJson(devSettingsPath, {
+          uid: `${gameId}_core_dev_settings`,
+          asset_folders: [`${gameId}/_core`]
+        });
+      }
+
+      // Update editor state
+      this.addGame(manifest);
+      this.global.addNotificationId("game_created");
+
+      // Navigate to General → Manifest
+      await this.setMainTab('general');
+      this.hasUnsavedChanges.value = false;
+
+      return true;
+
+    } catch (error) {
+      console.error("Error creating game from template:", error);
+      this.global.addNotificationId("create_error");
+      return false;
+    }
+  }
+
   private async createMod(): Promise<void> {
     let data = this.activeObject.value;
     console.log("[Debug Dform] Create mod  active.");

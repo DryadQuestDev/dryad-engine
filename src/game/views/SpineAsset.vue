@@ -1,120 +1,67 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch, onUnmounted } from 'vue';
 import { AssetObject } from '../../schemas/assetSchema';
-import { SpinePlayer } from '@esotericsoftware/spine-player';
-import '@esotericsoftware/spine-player/dist/spine-player.css';
+import { spineRenderer } from '../utils/spineRenderer';
+import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 const props = defineProps<{
   asset: AssetObject;
 }>();
 
 const spineContainerRef = ref<HTMLDivElement | null>(null);
+let spineInstance: Spine | null = null;
+let slotId = '';
 
-// Spine Player reference
-let spinePlayer: SpinePlayer | null = null;
-
-// Spine file paths
 const spineAtlasPath = computed(() => props.asset.file_spine_atlas ?? undefined);
 const spineSkeletonPath = computed(() => props.asset.file_spine_skeleton ?? undefined);
-
 const zindex = computed(() => props.asset.z ?? 0);
 
-// Spine viewport dimensions for clipping
-const spineViewportWidth = computed(() => props.asset.viewport?.width ?? null);
-const spineViewportHeight = computed(() => props.asset.viewport?.height ?? null);
 
-// Helper to apply skins to the player
-const applySkins = (player: SpinePlayer, skins: string[] | undefined) => {
-  if (!player.skeleton || !skins || skins.length === 0) return;
+const makeSlotId = () => `spine_asset_${props.asset.id || ''}_${Date.now()}`;
 
-  const skeletonData = player.skeleton.data;
-
-  if (skins.length === 1) {
-    player.skeleton.setSkinByName(skins[0]);
-  } else {
-    // Multiple skins - combine them
-    const firstSkinData = skeletonData.skins[0];
-    if (firstSkinData) {
-      const SkinConstructor = firstSkinData.constructor as any;
-      const combinedSkin = new SkinConstructor('combined-skin');
-
-      skins.forEach((skinName: string) => {
-        const skin = skeletonData.skins.find((s: any) => s.name === skinName);
-        if (skin) {
-          combinedSkin.addSkin(skin);
-        }
-      });
-
-      player.skeleton.setSkin(combinedSkin);
-    }
-  }
-
-  player.skeleton.setSlotsToSetupPose();
-};
-
-// Spine Player initialization
-const initSpine = () => {
-  if (!spineContainerRef.value || !spineAtlasPath.value || !spineSkeletonPath.value) {
-    return;
-  }
+const initSpine = async () => {
+  if (!spineContainerRef.value || !spineAtlasPath.value || !spineSkeletonPath.value) return;
 
   try {
-    const devMode = localStorage.getItem('devMode') === 'true';
+    slotId = makeSlotId();
 
-    // Configure Spine Player with viewport for clipping
-    // Spine Player automatically detects JSON (.json) or binary (.skel) skeleton format
-    const viewport = props.asset.viewport;
-    const config = {
-      skelUrl: spineSkeletonPath.value,
+    const vp = props.asset.viewport;
+    const result = await spineRenderer.register(slotId, spineContainerRef.value, {
       atlasUrl: spineAtlasPath.value,
+      skeletonUrl: spineSkeletonPath.value,
+      skins: props.asset.skins,
       animation: props.asset.animation != null ? String(props.asset.animation) : undefined,
-      skin: props.asset.skins?.[0] || undefined,
       loop: props.asset.loop ?? true,
-      backgroundColor: '#00000000',
-      alpha: true,
-      preserveDrawingBuffer: false,
-      premultipliedAlpha: true,
-      showControls: false,
-      viewport: viewport ? {
-        padLeft: viewport.pad_left ?? 0,
-        padRight: viewport.pad_right ?? 0,
-        padTop: viewport.pad_top ?? 0,
-        padBottom: viewport.pad_bottom ?? 0,
-        x: viewport.x ?? 0,
-        y: viewport.y ?? 0,
-        width: viewport.width ?? 1050,
-        height: viewport.height ?? 1050,
-      } : undefined,
-      success: (player: SpinePlayer) => {
-        if (!player.skeleton) return;
+      viewport: vp ? { dx: vp.dx, dy: vp.dy, zoom: vp.zoom } : undefined,
+    });
 
-        if (devMode) {
-          console.log('🦴 Spine Player loaded:', {
-            assetId: props.asset.id,
-            animations: player.skeleton.data.animations.map((a: any) => a.name),
-            skins: player.skeleton.data.skins.map((s: any) => s.name),
-            width: player.skeleton.data.width,
-            height: player.skeleton.data.height,
-          });
-        }
+    if (!result) return;
+    spineInstance = result;
 
-        // Apply multiple skins if specified
-        applySkins(player, props.asset.skins);
+    if (localStorage.getItem('devMode') === 'true') {
+      console.log('🎬 SpineAsset rendered:', {
+        id: props.asset.id,
+        requestedSkins: props.asset.skins,
+        requestedAnimation: props.asset.animation,
+        loop: props.asset.loop,
+        timescale: props.asset.timescale,
+      });
+    }
 
-        // Apply timescale
-        if (props.asset.timescale !== undefined && player.animationState) {
-          player.animationState.timeScale = props.asset.timescale;
-        }
-      },
-      error: (_player: SpinePlayer, error: string) => {
-        console.error('Spine Player error:', error);
-      }
-    };
-
-    // Create Spine Player
-    spinePlayer = new SpinePlayer(spineContainerRef.value, config);
+    // Apply timescale
+    if (props.asset.timescale !== undefined && spineInstance.state) {
+      spineInstance.state.timeScale = props.asset.timescale;
+    }
   } catch (error) {
-    console.error('Failed to initialize Spine Player:', error);
+    console.error('Failed to initialize Spine Asset:', error);
+  }
+};
+
+const cleanupSpine = () => {
+  if (slotId) {
+    spineRenderer.unregister(slotId);
+    spineInstance = null;
+    slotId = '';
   }
 };
 
@@ -122,52 +69,49 @@ onMounted(() => {
   initSpine();
 });
 
-// Cleanup on unmount
 onUnmounted(() => {
-  if (spinePlayer) {
-    spinePlayer.dispose();
-    spinePlayer = null;
-  }
+  cleanupSpine();
 });
 
-// Watch for skeleton/atlas file changes - requires full reinit
-watch([spineAtlasPath, spineSkeletonPath], () => {
-  if (spinePlayer) {
-    spinePlayer.dispose();
-    spinePlayer = null;
-  }
-  requestAnimationFrame(() => {
-    initSpine();
-  });
+// Watch for skeleton/atlas file changes — full reinit only when URLs actually change
+watch([spineAtlasPath, spineSkeletonPath], ([newAtlas, newSkel], [oldAtlas, oldSkel]) => {
+  if (newAtlas === oldAtlas && newSkel === oldSkel) return;
+  cleanupSpine();
+  requestAnimationFrame(() => initSpine());
 });
 
 // Watch for animation changes
 watch(() => props.asset.animation, (newAnimation) => {
-  if (!spinePlayer?.animationState || !spinePlayer?.skeleton) return;
-
-  if (newAnimation != null) {
-    const loop = props.asset.loop ?? true;
-    spinePlayer.animationState.setAnimation(0, String(newAnimation), loop);
-  }
+  if (!spineInstance?.state || !spineInstance?.skeleton || newAnimation == null) return;
+  spineInstance.state.setAnimation(0, String(newAnimation), props.asset.loop ?? true);
 });
 
 // Watch for skins changes
-watch(() => props.asset.skins, (newSkins) => {
-  if (!spinePlayer?.skeleton) return;
-  applySkins(spinePlayer, newSkins);
-}, { deep: true });
+watch(() => JSON.stringify(props.asset.skins), (newVal, oldVal) => {
+  if (newVal === oldVal || !spineInstance) return;
+  const skins = props.asset.skins;
+  if (skins && skins.length > 0) {
+    spineRenderer.applySkins(spineInstance, skins);
+  }
+});
 
 // Watch for timescale changes
 watch(() => props.asset.timescale, (newTimescale) => {
-  if (!spinePlayer?.animationState) return;
-  spinePlayer.animationState.timeScale = newTimescale ?? 1;
+  if (!spineInstance?.state) return;
+  spineInstance.state.timeScale = newTimescale ?? 1;
 });
 
 // Watch for loop changes
 watch(() => props.asset.loop, (newLoop) => {
-  if (!spinePlayer?.animationState || props.asset.animation == null) return;
-  // Re-set current animation with new loop setting
-  spinePlayer.animationState.setAnimation(0, String(props.asset.animation), newLoop ?? true);
+  if (!spineInstance?.state || props.asset.animation == null) return;
+  spineInstance.state.setAnimation(0, String(props.asset.animation), newLoop ?? true);
+});
+
+// Watch for viewport changes — full reinit only when values actually change
+watch(() => JSON.stringify(props.asset.viewport), (newVp, oldVp) => {
+  if (newVp === oldVp) return;
+  cleanupSpine();
+  requestAnimationFrame(() => initSpine());
 });
 </script>
 
@@ -200,20 +144,14 @@ watch(() => props.asset.loop, (newLoop) => {
 
 .spine-wrapper {
   overflow: hidden;
-  width: v-bind("spineViewportWidth ? spineViewportWidth + 'px' : '100%'");
-  height: v-bind("spineViewportHeight ? spineViewportHeight + 'px' : '100%'");
+  width: 100%;
+  height: 100%;
   margin: auto;
   position: relative;
 }
 
 .spine-container {
-  /* Spine Player creates its own canvas inside this container */
   width: 100%;
   height: 100%;
-}
-
-/* Hide Spine Player controls */
-.spine-wrapper :deep(.spine-player-controls) {
-  display: none !important;
 }
 </style>

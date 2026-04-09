@@ -225,6 +225,54 @@ Plugin scripts load before game scripts, so services registered by plugins are a
 
 ---
 
+## Typed Services
+
+Plugins can expose typed service APIs so that game scripts get autocomplete and typo protection on `game.getService()` calls. This uses TypeScript declaration merging on the `Game` interface.
+
+### 1. Define service types in the plugin's `dtypes.d.ts`
+
+```
+plugins/my_plugin/
+├── plugin.json
+├── scripts/
+│   ├── main.mjs
+│   └── dtypes.d.ts     <- Service types defined here
+```
+
+In `scripts/dtypes.d.ts`, define a type for each service and add a `getService` overload via declaration merging:
+
+```ts
+// Service type
+type MyPluginService = {
+  resolvePronouns(charId: string): { he: string; him: string; his: string };
+};
+
+// Declaration merging — adds typed overload to Game.getService()
+interface Game {
+  getService(id: 'gender_pov'): MyPluginService;
+}
+```
+
+### 2. Reference plugin types from the game's `dtypes.d.ts`
+
+Each game has its own `dtypes.d.ts` (in `games_assets/{game}/_core/scripts/`). Add a single reference to the plugin's types:
+
+```ts
+/// <reference path="../../../../games_files/{game}/_core/plugins/my_plugin/scripts/dtypes.d.ts" />
+```
+
+Every game script already references the game's `dtypes.d.ts`, so plugin types cascade to all scripts automatically.
+
+### 3. Use in game scripts
+
+```js
+// Autocomplete works — no manual cast needed
+const pronouns = game.getService('gender_pov').resolvePronouns(charId);
+
+// Typos are caught at compile time
+game.getService('gender_pvo'); // Error: no overload matches
+```
+
 ## Global vs Game Plugins
 
 **Global plugins** come bundled with the engine in `engine_files/plugins/`. These provide optional features that any game can enable (like `global_essentials`).

@@ -1,0 +1,7 @@
+[
+  {
+    "id": "tutorial",
+    "source": "production/dryad-engine-linux/assets",
+    "mods": ["_core", "lewd"]
+  }
+]

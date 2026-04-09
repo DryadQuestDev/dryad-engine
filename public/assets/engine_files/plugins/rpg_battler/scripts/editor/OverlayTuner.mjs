@@ -1,4 +1,6 @@
+// @ts-ignore — editor globals not typed
 const { ref, computed, watch, defineComponent } = window.__editorVue;
+// @ts-ignore
 const { EditorCharacterPreview } = window.__editorUtils;
 
 export default defineComponent({
@@ -25,7 +27,7 @@ export default defineComponent({
     const artDy = computed(() => side.value === 'enemy' ? trait('art_dy', 0) : 0);
     const artScale = computed(() => side.value === 'enemy' ? trait('art_scale', 1) : 1);
     const artTransform = computed(() =>
-      `scale(${artScale.value}) translate(${artDx.value}%, ${artDy.value}%)`
+      `scale(${artScale.value}) translate(${artDx.value}cqh, ${artDy.value}cqh)`
     );
 
     // Global overlay offsets (must match RpgBattleScreen constants)
@@ -36,9 +38,14 @@ export default defineComponent({
     const overlayDx = computed(() => localItem.value.traits?.battle_overlay_x_offset || 0);
     const overlayDy = computed(() => localItem.value.traits?.battle_overlay_y_offset || 0);
 
+    // Position overlay relative to the preview container (simulating viewport).
+    // The art wrapper is at bottom: 0, height: 75%, centered horizontally.
+    // At scale=1, the game's overlay Y = slot.y + OVERLAY_Y_OFFSET + trait.
+    // In the tuner: art wrapper top = 25% of preview, so overlay at 25% + offset.
+    // X: preview center (50%) + offset.
     const overlayStyle = computed(() => ({
       left: `calc(50% + ${OVERLAY_X_OFFSET + overlayDx.value}%)`,
-      top: `${OVERLAY_Y_OFFSET + overlayDy.value}%`,
+      top: `calc(25% + ${OVERLAY_Y_OFFSET + overlayDy.value}%)`,
     }));
 
     function updateTrait(key, value) {
@@ -57,6 +64,7 @@ export default defineComponent({
       if (!isDragging.value || !artWrapperRef.value) return;
       const rect = artWrapperRef.value.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
+      // Convert mouse delta to % of wrapper (matching overlayStyle % units)
       const dx = (e.movementX / rect.width) * 100;
       const dy = (e.movementY / rect.height) * 100;
       updateTrait('battle_overlay_x_offset', overlayDx.value + dx);
@@ -85,17 +93,17 @@ export default defineComponent({
         <button class="tuner-reset" @click="updateTrait('battle_overlay_x_offset', 0); updateTrait('battle_overlay_y_offset', 0)">Reset</button>
       </div>
 
-      <div class="tuner-preview">
-        <div class="tuner-art-wrapper" ref="artWrapperRef">
+      <div class="tuner-preview" ref="artWrapperRef">
+        <div class="tuner-art-wrapper">
           <div class="tuner-art" :style="{ transform: artTransform, transformOrigin: 'center center' }">
             <EditorCharacterPreview
               :character="localItem" :coreCharacter="coreItem"
               :view="viewName" />
           </div>
-          <div class="tuner-overlay-rect" :style="overlayStyle"
-            @mousedown="onOverlayMouseDown" :class="{ 'is-dragging': isDragging }">
-            <div class="tuner-overlay-label">OVERLAY</div>
-          </div>
+        </div>
+        <div class="tuner-overlay-rect" :style="overlayStyle"
+          @mousedown="onOverlayMouseDown" :class="{ 'is-dragging': isDragging }">
+          <div class="tuner-overlay-label">OVERLAY</div>
         </div>
       </div>
     </div>

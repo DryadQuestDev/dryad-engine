@@ -701,6 +701,14 @@ export class InitSystem {
             return String(value);
         });
 
+        // Usage: |stat(statId)| — requires context.character passed to resolveString
+        this.game.registerPlaceholder("stat", (statId: string) => {
+            const char = this.game.getResolveContext()?.character;
+            if (!char) return "";
+            const val = char.getStat(statId);
+            return val != null ? String(val) : "";
+        });
+
         // Shared: parse key->value args, resolve a locale entry through the full pipeline
         const resolveLocale = (localeId: string, args: string[]): string => {
             const params: Record<string, any> = {};

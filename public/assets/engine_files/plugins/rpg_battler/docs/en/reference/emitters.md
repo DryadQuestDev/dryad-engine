@@ -12,34 +12,61 @@
 
 | Emitter | Args | Cancellable | Description |
 |---|---|---|---|
-| `battle_action_start` | `(battle, character, abilityId, targetId)` | Yes | Before ability execution. Return false to skip the action |
-| `battle_action_end` | `(battle, character, abilityId)` | No | After ability effects have fully resolved |
+| `battle_action_start` | `(battle, caster, event)` | Yes | Before ability execution. `event`: `{ abilityId, targetId, power }`. Mutate to redirect ability, change target, or adjust power. Return false to cancel |
+| `battle_action_cast` | `(battle, caster, abilityId)` | No | After ability is confirmed and costs deducted, before effects resolve. Use for on-cast side effects (resource generation, etc.) |
+| `battle_action_apply` | `(battle, caster, event)` | Yes | Per-effect per-target, after all math, before state mutation. See event fields below. Return false to skip this effect on this target |
+| `battle_action_applied` | `(battle, caster, event)` | No | Per-effect per-target, AFTER state mutations. Same event fields as `battle_action_apply`. Use for reactive effects (rage-on-hit, counters, on-kill triggers) |
+| `battle_action_end` | `(battle, caster, abilityId, results)` | No | After ability effects have fully resolved. `results`: array of `RpgEffectResult` objects |
 
-## Combat
+### `battle_action_apply` event fields
+
+| Field | Type | Description |
+|---|---|---|
+| `effectId` | `string` | Which effect of the ability |
+| `targetId` | `string` | Target character id |
+| `damage` | `number` | Final damage after defenses (0 if no damage) |
+| `rawDamage` | `number` | Raw damage before defenses |
+| `damageType` | `string` | `"physical"`, `"fire"`, `"absolute"`, etc. |
+| `isCrit` | `boolean` | Whether the hit is a critical strike |
+| `isDodged` | `boolean` | Whether the target dodged (set false to override) |
+| `healing` | `number` | Computed heal amount (0 if no healing) |
+| `tokenId` | `string\|null` | Token to apply on target |
+| `tokenStacks` | `number` | Computed token stacks |
+| `tokenDuration` | `number` | Token duration in turns |
+| `statusApply` | `string[]` | Status ids to apply |
+| `statusRemove` | `string[]` | Status ids to remove |
+| `cleanse` | `boolean` | Whether to cleanse tokens |
+| `cooldownChange` | `number` | Cooldown adjustment on target's abilities |
+| `chargesChange` | `number` | Charges adjustment on target's abilities |
+
+## Other
 
 | Emitter | Args | Cancellable | Description |
 |---|---|---|---|
-| `battle_damage_raw` | `(battle, caster, target, event)` | Yes | After raw damage calculation, before defenses. `event`: `{ amount, damageType, ability, isCrit }`. Modify `event.amount` to change raw damage. Return false to prevent damage |
-| `battle_damage_final` | `(battle, caster, target, event)` | Yes | After defense reduction, before HP change. Same event shape. Modify `event.amount` to change final damage. Return false to prevent damage |
-| `battle_heal` | `(battle, caster, target, event)` | Yes | Before healing is applied. `event`: `{ amount }`. Modify `event.amount` to change heal amount. Return false to prevent healing |
 | `battle_character_defeated` | `(battle, characterId, side)` | No | When a character reaches 0 HP (after death defiance check). `side`: `"player"` or `"enemy"` |
 
 ## Example
 
 ```js
-// Double all damage to targets below 25% HP
-game.on('battle_damage_final', (battle, caster, target, event) => {
-    if (target.getResourceRatio('health') < 0.25) {
-        event.amount *= 2;
+// Boost power for semen-costing abilities based on potency
+game.on('battle_action_start', (battle, caster, event) => {
+    const ability = caster.getAbility(event.abilityId);
+    if (ability?.meta?.costs?.semen) {
+        event.power += caster.getStat('potency');
     }
 });
 
-// Grant a shield token when battle starts
-game.on('battle_start', (battle) => {
-    for (const charId of battle.playerParty) {
-        const svc = game.getService('start_battle');
-        // Token application happens through the battle system
+// Double damage to targets below 25% HP
+game.on('battle_action_apply', (battle, caster, event) => {
+    const target = game.getCharacter(event.targetId);
+    if (target.getResourceRatio('health') < 0.25) {
+        event.damage *= 2;
     }
+});
+
+// Override a dodge (target can't dodge this turn)
+game.on('battle_action_apply', (battle, caster, event) => {
+    if (someCondition) event.isDodged = false;
 });
 
 // Log when any character is defeated

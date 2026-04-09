@@ -27,7 +27,8 @@ onMounted(async () => {
   }
 
   try {
-    availableMods.value = await global.getModsList(gameId);
+    const loadedMods = await global.getModsList(gameId);
+    availableMods.value = loadedMods.filter(m => global.isNsfwAllowed(m));
 
     // Pre-select currently active mods
     const currentModList = game.coreSystem.modList || [];

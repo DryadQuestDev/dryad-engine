@@ -67,8 +67,8 @@ const itemSlotsWithItems = computed(() => {
 <template>
   <div class="item-slots-overlay">
     <div v-for="slotData in itemSlotsWithItems" :key="slotData.key" class="item-slot-wrapper" :style="{
-      left: slotData.slot.x + '%',
-      top: slotData.slot.y + '%'
+      left: slotData.slot.x + 'cqh',
+      top: slotData.slot.y + 'cqh'
     }">
       <ItemSlot v-if="slotData.item" :item="slotData.item" :disabled="props.disabled === true" class="equipped-item" @hover="handleItemHover" />
       <div v-else class="empty-slot">
@@ -89,7 +89,7 @@ const itemSlotsWithItems = computed(() => {
 
         <!-- ItemCard below ItemChoices -->
         <div class="item-card-wrapper">
-          <ItemCard :item="displayedItem!" />
+          <ItemCard :item="displayedItem!" :character-id="character.id" />
         </div>
       </div>
     </Teleport>
@@ -108,7 +108,7 @@ const itemSlotsWithItems = computed(() => {
 
 .item-slot-wrapper {
   position: absolute;
-  width: v-bind("(ITEM_SLOT_SIZE_PERCENT * 100) + '%'");
+  width: v-bind("(ITEM_SLOT_SIZE_PERCENT * 100) + 'cqh'");
   aspect-ratio: 1 / 1;
   pointer-events: auto;
 }

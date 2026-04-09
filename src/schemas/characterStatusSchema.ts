@@ -31,6 +31,7 @@ export const CharacterStatusSchema = {
     duration: { type: 'number', tooltip: 'How long the status lasts. -1 = permanent (default). Interpretation depends on the game/plugin (e.g. clock turns in battle).' },
     image: { type: 'file', fileType: 'image', tooltip: 'Image to display for the status effect.' },
     polarity: { type: 'chooseOne', options: ['positive', 'neutral', 'negative'], tooltip: 'Visual indicator for the status: positive (green), neutral (gray), negative (red).' },
+    is_hidden: { type: 'boolean', tooltip: 'If true, this status is hidden from the UI but still exists in data.' },
     ...BaseStatusSchema,
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
 } as const satisfies Schema;

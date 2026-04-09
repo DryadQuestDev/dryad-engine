@@ -6,6 +6,7 @@ import EditorMap from '../editor-map/EditorMap.vue';
 import EditorDocument from '../EditorDocument.vue';
 import AnalyserComponent from '../AnalyserComponent.vue';
 import DevPanel from '../DevPanel.vue';
+import NewGameWizard from './NewGameWizard.vue';
 import Button from 'primevue/button';
 import { Editor } from '../../editor';
 
@@ -127,6 +128,9 @@ function toggleLeftColumn() {
 
 const componentName = ref('EditorContent');
 
+// --- New Game Wizard ---
+const showWizard = ref(false);
+
 // Lifecycle hooks
 onMounted(() => {
   console.log(`${componentName.value} component mounted.`);
@@ -142,12 +146,8 @@ onMounted(() => {
 
     <!-- Left Column (Bookmarks) -->
     <div class="column editor-left" v-if="isLeftColumnVisible">
-      <Dbookmarks
-        :items="filteredItems"
-        :isFilterActive="isFilterFormDirty"
-        :paginationData="paginationData"
-        @clear-requested="requestClearFilters"
-        @bookmark-click="handleBookmarkClick" />
+      <Dbookmarks :items="filteredItems" :isFilterActive="isFilterFormDirty" :paginationData="paginationData"
+        @clear-requested="requestClearFilters" @bookmark-click="handleBookmarkClick" />
     </div>
 
     <!-- Right Column (Form/Map) -->
@@ -157,12 +157,20 @@ onMounted(() => {
       <EditorDocument v-if="editor.secondaryTab === 'config'" />
       <AnalyserComponent v-if="editor.secondaryTab === 'config'" />
       <DevPanel v-if="editor.secondaryTab === 'dev_settings'" />
-      <Dform
-        :items="filteredItems"
-        :triggerClear="clearTriggerCount"
-        :scrollToBookmarkId="scrollToBookmarkId"
-        @filtered-update="handleFilteredUpdate"
-        @update:isDirty="handleIsDirtyUpdate"
+      <!-- Create from Template button (shown in new_game tab) -->
+      <div v-if="editor.secondaryTab === 'new_game'" class="template-wizard-trigger">
+        <div class="template-wizard-banner" @click="showWizard = true">
+          <i class="pi pi-bolt"></i>
+          <div class="template-wizard-text">
+            <strong>Quick Start</strong>
+            <span>Create a game from a pre-made template</span>
+          </div>
+          <i class="pi pi-chevron-right"></i>
+        </div>
+      </div>
+      <NewGameWizard v-model:visible="showWizard" @game-created="showWizard = false" />
+      <Dform :items="filteredItems" :triggerClear="clearTriggerCount" :scrollToBookmarkId="scrollToBookmarkId"
+        @filtered-update="handleFilteredUpdate" @update:isDirty="handleIsDirtyUpdate"
         @pagination-update="handlePaginationUpdate" />
     </div>
 

@@ -13,7 +13,18 @@ const props = defineProps<{
   showDelta?: boolean;
   improvementData?: { meta: Record<string, any>, effects: Record<string, Record<string, any>> };
   isGranted?: boolean;
+  isInactive?: boolean;
 }>();
+
+// Auto-detect inactive state from requires_status on the ability template
+const isEffectivelyInactive = computed(() => {
+  if (props.isInactive !== undefined) return props.isInactive;
+  const template = game.characterSystem.abilityTemplatesMap.get(props.abilityId);
+  if (!template?.requires_status || !props.characterId) return false;
+  const char = game.getCharacter(props.characterId);
+  if (!char) return false;
+  return !char.getStatuses().some((s: any) => s.id === template.requires_status);
+});
 
 // Get ability meta (name, icon, description)
 const abilityMeta = computed((): Record<string, any> | undefined => {
@@ -68,10 +79,9 @@ function getBaseTemplate(): { baseMeta: Record<string, any>, baseEffects: Record
   const baseEffects: Record<string, Record<string, any>> = {};
   if (Array.isArray(template.effects)) {
     for (const e of template.effects) {
-      if (e.id) {
-        baseEffects[e.id] = { ...(e.aspects || {}) };
-        if (e.name) baseEffects[e.id].__name = e.name;
-      }
+      const key = e.id || 'undefined';
+      baseEffects[key] = { ...(e.aspects || {}) };
+      if (e.name) baseEffects[key].__name = e.name;
     }
   } else if (template.effects) {
     const effs = template.effects as any;
@@ -270,10 +280,11 @@ function getStatIcon(statId: string): string | undefined {
       <img v-if="abilityMeta.icon" :src="abilityMeta.icon" class="ability-icon"
         @error="(e) => (e.target as HTMLImageElement).style.display = 'none'" />
       <h3 class="ability-name">{{ abilityMeta.name || abilityId }}</h3>
-      <div v-if="isGranted || improvementData" class="ability-labels">
+      <div v-if="isGranted || improvementData || isEffectivelyInactive" class="ability-labels">
         <span v-if="isGranted" class="ability-label granted">{{ global.getString('ability_tag.granted') }}</span>
         <span v-if="improvementData" class="ability-label modified">{{ global.getString('ability_tag.modified')
           }}</span>
+        <span v-if="isEffectivelyInactive" class="ability-label inactive">{{ global.getString('ability_tag.inactive') }}</span>
       </div>
       <CustomComponentContainer slot="ability-card-header" :context="{ abilityId, characterId }" />
     </div>
@@ -481,4 +492,11 @@ function getStatIcon(statId: string): string | undefined {
   background: rgba(240, 198, 116, 0.15);
   border: 1px solid rgba(240, 198, 116, 0.3);
 }
+
+.ability-label.inactive {
+  color: #888;
+  background: rgba(136, 136, 136, 0.15);
+  border: 1px solid rgba(136, 136, 136, 0.3);
+}
+
 </style>

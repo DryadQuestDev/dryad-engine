@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
   stacks?: number;
   multiplier?: number;
   isActive?: boolean;
+  characterId?: string;
 }>(), {
   isActive: true
 });
@@ -51,11 +52,18 @@ function normalizeModifier(modifier: any): { meta: Record<string, any>, effects:
   return { meta: modifier.meta || {}, effects };
 }
 
+function checkInactive(template: any): boolean {
+  if (!template?.requires_status || !props.characterId) return false;
+  const char = game.getCharacter(props.characterId);
+  return !char?.getStatuses().some((s: any) => s.id === template.requires_status);
+}
+
 // Build ability entries: granted abilities + modifier-only improvements
 const abilityEntries = computed((): Array<{
   abilityId: string;
   isGranted: boolean;
   improvementData: { meta: Record<string, any>, effects: Record<string, Record<string, any>> } | null;
+  isInactive: boolean;
 }> => {
   const abilities = props.data.abilities || [];
   const rawMods: any[] = props.data.ability_modifiers || [];
@@ -78,10 +86,12 @@ const abilityEntries = computed((): Array<{
   for (const abilityId of abilities) {
     seen.add(abilityId);
     const mod = modifiersByAbility.get(abilityId) || null;
+    const template = game.characterSystem.abilityTemplatesMap.get(abilityId);
     entries.push({
       abilityId,
       isGranted: true,
       improvementData: mod ? normalizeModifier(mod) : null,
+      isInactive: checkInactive(template),
     });
   }
 
@@ -93,6 +103,7 @@ const abilityEntries = computed((): Array<{
         abilityId,
         isGranted: false,
         improvementData: normalizeModifier(mod),
+        isInactive: checkInactive(mod),
       });
     }
   }
@@ -116,8 +127,10 @@ const abilityEntries = computed((): Array<{
     <div v-if="abilityEntries.length" class="popup-abilities">
       <div v-for="entry in abilityEntries" :key="entry.abilityId" class="ability-entry">
         <AbilityCard :ability-id="entry.abilityId"
+          :character-id="characterId"
           :improvement-data="entry.improvementData || undefined"
-          :is-granted="entry.isGranted" />
+          :is-granted="entry.isGranted"
+          :is-inactive="entry.isInactive" />
       </div>
     </div>
   </div>

@@ -33,17 +33,12 @@ function getCenter(el) {
  * @param {string} [view] - spine view to check/trigger (default: 'back' for battle)
  * @param {number} [times] - spine animation play count (1 = one-shot)
  */
-function setBattleState(characterId, state, view = 'back', times) {
+function setBattleState(characterId, state) {
   const char = game.getCharacter(characterId);
   if (!char) return;
 
-  // Set attribute (triggers skin layer swap for static dolls)
+  // Set attribute (triggers skin layer swap for static dolls + spine track animation)
   char.setAttribute('battle_state', state);
-
-  // Trigger spine animation if available
-  if (times !== undefined && char.isSpineForView(view) && char.hasSpineAnimation(state, view)) {
-    char.setSpineAnimation(state, view, times);
-  }
 }
 
 /**
@@ -76,18 +71,11 @@ export function setIdleState(characterId) {
  * @returns {Promise<void>}
  */
 export function animateAttack(casterId, targetId) {
-  const char = game.getCharacter(casterId);
-  const useSpine = char?.isSpineForView('back') && char.hasSpineAnimation('attack', 'back');
-
-  setBattleState(casterId, 'attack', 'back', useSpine ? 1 : undefined);
+  setBattleState(casterId, 'attack');
 
   const m = getSpeedMult();
 
-  if (useSpine) {
-    return new Promise(resolve => setTimeout(resolve, 600 * m));
-  }
-
-  // GSAP fallback: lunge toward target
+  // GSAP: lunge toward target
   return new Promise(resolve => {
     const casterEl = getCharEl(casterId);
     const targetEl = getCharEl(targetId);
@@ -123,18 +111,11 @@ export function animateAttack(casterId, targetId) {
  * @returns {Promise<void>}
  */
 export function animateSelfCast(casterId) {
-  const char = game.getCharacter(casterId);
-  const useSpine = char?.isSpineForView('back') && char.hasSpineAnimation('cast', 'back');
-
-  setBattleState(casterId, 'cast', 'back', useSpine ? 1 : undefined);
+  setBattleState(casterId, 'cast');
 
   const m = getSpeedMult();
 
-  if (useSpine) {
-    return new Promise(resolve => setTimeout(resolve, 500 * m));
-  }
-
-  // GSAP fallback: rotation wiggle
+  // GSAP: rotation wiggle
   return new Promise(resolve => {
     const el = getCharEl(casterId);
     if (!el) { resolve(); return; }
@@ -159,7 +140,7 @@ export function animateSelfCast(casterId) {
  * @returns {Promise<void>}
  */
 export function animateBump(casterId, targetId) {
-  setBattleState(casterId, 'cast', 'back', 1);
+  setBattleState(casterId, 'cast');
   const m = getSpeedMult();
 
   return new Promise(resolve => {
@@ -200,11 +181,9 @@ export function animateBump(casterId, targetId) {
  * @returns {Promise<void>}
  */
 export function animateHit(targetId) {
-  const char = game.getCharacter(targetId);
-  const useSpine = char?.isSpineForView('back') && char.hasSpineAnimation('hit', 'back');
   const m = getSpeedMult();
 
-  setBattleState(targetId, 'hit', 'back', useSpine ? 1 : undefined);
+  setBattleState(targetId, 'hit');
 
   return new Promise(resolve => {
     const el = getCharEl(targetId);
@@ -213,13 +192,11 @@ export function animateHit(targetId) {
     const wrapper = el.closest('[data-rpg-char-id]');
     if (wrapper) wrapper.classList.add('rpg-hit-flash');
 
-    if (!useSpine) {
-      gsap.to(el, {
-        x: -4, duration: 0.05 * m, ease: 'power1.inOut',
-        yoyo: true, repeat: 5,
-        onComplete: () => { gsap.set(el, { x: 0 }); },
-      });
-    }
+    gsap.to(el, {
+      x: -4, duration: 0.05 * m, ease: 'power1.inOut',
+      yoyo: true, repeat: 5,
+      onComplete: () => { gsap.set(el, { x: 0 }); },
+    });
 
     setTimeout(() => {
       if (wrapper) wrapper.classList.remove('rpg-hit-flash');
@@ -257,7 +234,7 @@ export function animateHeal(targetId) {
  * @returns {Promise<void>}
  */
 export function animateDeath(characterId) {
-  setBattleState(characterId, 'death', 'back', 1);
+  setBattleState(characterId, 'death');
   const m = getSpeedMult();
 
   return new Promise(resolve => {
@@ -303,12 +280,9 @@ export async function animateEffects(results) {
 
   for (const r of results) {
     if (!r.targetId) continue;
-    if (r.type === 'damage') {
-      animateHit(r.targetId);
-      if (r.defeated) deathQueue.push(r.targetId);
-    } else if (r.type === 'heal' || r.type === 'steal') {
-      animateHeal(r.targetId);
-    }
+    if (r.amount > 0 && r.damageType) animateHit(r.targetId);
+    else if (r.type === 'heal' || r.type === 'steal' || r.type === 'token_hot') animateHeal(r.targetId);
+    if (r.defeated) deathQueue.push(r.targetId);
   }
 
   // Wait for hit/heal animations

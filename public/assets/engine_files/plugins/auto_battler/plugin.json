@@ -3,7 +3,7 @@
   "name": "Auto Battler",
   "description": "Auto Battle Grid System",
   "author": "Nekon",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "order": -10,
   "asset_folders": [],
   "scripts": [

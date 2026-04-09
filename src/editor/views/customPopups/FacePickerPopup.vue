@@ -3,8 +3,8 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
-import { SpinePlayer } from '@esotericsoftware/spine-player';
-import '@esotericsoftware/spine-player/dist/spine-player.css';
+import { spineRenderer } from '../../../game/utils/spineRenderer';
+import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import Slider from 'primevue/slider';
 import Select from 'primevue/select';
 
@@ -61,24 +61,6 @@ const localArtDx = ref(0);
 const localArtDy = ref(0);
 const localArtScale = ref(1);
 
-// Effective preview height: use rendered image height for static, spine container height for spine
-const effectivePreviewHeight = computed(() => {
-  if (renderedImageHeight.value > 0) return renderedImageHeight.value;
-  if (spineContainerRef.value) return spineContainerRef.value.offsetHeight;
-  return 0;
-});
-
-// Margin left scaled to preview height (game has 120px padding at ~1000px image height)
-const dollMarginLeft = computed(() => {
-  if (effectivePreviewHeight.value === 0) return '0px';
-  return (effectivePreviewHeight.value * 0.12) + 'px';
-});
-
-// Character-sheet start position (game: 120px padding + 50vh doll wrapper ≈ 62% of image height)
-const sheetStartLeft = computed(() => {
-  if (effectivePreviewHeight.value === 0) return '0px';
-  return (effectivePreviewHeight.value * 0.7) + 'px';
-});
 
 // Compute the scale factor between actual and rendered image
 const imageScaleFactor = computed(() => {
@@ -371,73 +353,56 @@ function initializeSpineRefs(view?: string | null) {
 }
 
 const spineContainerRef = ref<HTMLDivElement | null>(null);
-let spinePlayer: SpinePlayer | null = null;
+let spineInstance: Spine | null = null;
+let spineSlotId = '';
 
-function initSpinePlayer() {
+async function initSpinePlayer() {
   if (!spineContainerRef.value || !spineAtlasRef.value || !spineSkeletonRef.value) return;
   // Prevent double init — dispose first if already created
   disposeSpinePlayer();
 
   try {
-    spinePlayer = new SpinePlayer(spineContainerRef.value, {
-      jsonUrl: spineSkeletonRef.value,
+    spineSlotId = `face_picker_${Date.now()}`;
+    const attributes = localItem.value.attributes || {};
+
+    const spine = await spineRenderer.register(spineSlotId, spineContainerRef.value, {
+      skeletonUrl: spineSkeletonRef.value,
       atlasUrl: spineAtlasRef.value,
       animation: spineAnimationRef.value || undefined,
-      skin: 'default',
-      backgroundColor: '#00000000',
-      alpha: true,
-      preserveDrawingBuffer: false,
-      premultipliedAlpha: true,
-      showControls: false,
-      success: (player: SpinePlayer) => {
-        if (!player.skeleton) return;
-
-        // Apply skins from attributes (convention-based: attribute values = Spine skin names)
-        const attributes = localItem.value.attributes || {};
-        const skeletonData = player.skeleton.data;
-        const skins = Object.values(attributes).filter(
-          (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-        );
-
-        if (skins.length > 0) {
-          if (skins.length === 1) {
-            player.skeleton.setSkinByName(skins[0]);
-          } else {
-            const firstSkinData = skeletonData.skins[0];
-            if (firstSkinData) {
-              const SkinConstructor = firstSkinData.constructor as any;
-              const combinedSkin = new SkinConstructor('combined-skin');
-              skins.forEach(name => {
-                const skin = skeletonData.skins.find((s: any) => s.name === name);
-                if (skin) combinedSkin.addSkin(skin);
-              });
-              player.skeleton.setSkin(combinedSkin);
-            }
-          }
-          player.skeleton.setSlotsToSetupPose();
-        }
-
-        // Set image dimensions from spine container so face rect positioning works
-        if (spineContainerRef.value) {
-          actualImageWidth.value = spineContainerRef.value.offsetWidth;
-          actualImageHeight.value = spineContainerRef.value.offsetHeight;
-          renderedImageHeight.value = spineContainerRef.value.offsetHeight;
-        }
-      },
-      error: (_player: SpinePlayer, error: string) => {
-        console.error('Spine preview error:', error);
-      }
     });
+
+    if (!spine) return;
+    spineInstance = spine;
+
+    // Apply skins from attributes (convention-based: attribute values = Spine skin names)
+    const skeletonData = spine.skeleton.data;
+    const skins = Object.values(attributes).filter(
+      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
+    );
+    if (skins.length > 0) {
+      spineRenderer.applySkins(spine, skins);
+    }
+
+    // Set image dimensions for face rect positioning
+    // actualImage uses the game's reference size (500×700) since CharacterFace.vue
+    // crops spine at that fixed size. renderedImageHeight uses the actual display size
+    // so imageScaleFactor correctly maps between reference and preview coordinates.
+    if (spineContainerRef.value) {
+      actualImageWidth.value = 500;
+      actualImageHeight.value = 700;
+      renderedImageHeight.value = spineContainerRef.value.offsetHeight;
+    }
   } catch (error) {
     console.error('Failed to initialize Spine preview:', error);
   }
 }
 
 function disposeSpinePlayer() {
-  if (spinePlayer) {
-    spinePlayer.dispose();
-    spinePlayer = null;
+  if (spineSlotId) {
+    spineRenderer.unregister(spineSlotId);
+    spineSlotId = '';
   }
+  spineInstance = null;
 }
 
 // Reinitialize spine when view changes
@@ -573,22 +538,16 @@ onMounted(() => {
           <p class="info-text">Note: All image layer pictures should have the same size dimensions.</p>
         </div>
 
-        <!-- Game padding zone (default view only — relative to character sheet positioning) -->
-        <div v-if="isDefaultView && (isSpineCharacter || imageLayers.length > 0)" class="game-padding-zone"
-          :style="{ width: dollMarginLeft }">
-        </div>
 
         <!-- Character-sheet start boundary (default view only) -->
-        <div v-if="isDefaultView && (isSpineCharacter || imageLayers.length > 0)" class="sheet-boundary"
-          :style="{ left: sheetStartLeft }">
-        </div>
+        <div v-if="isDefaultView && (isSpineCharacter || imageLayers.length > 0)" class="sheet-boundary"></div>
 
         <!-- Spine Character Preview -->
         <template v-if="isSpineCharacter">
           <div class="character-doll-wrapper" :class="{ 'art-draggable': isDefaultView }"
+            :style="isDefaultView ? { transform: `scale(${localArtScale}) translate(${localArtDx}cqh, ${localArtDy}cqh)` } : {}"
             @mousedown="handleArtMouseDown">
-            <div class="character-doll"
-              :style="{ transform: isDefaultView ? `scale(${localArtScale}) translate(${localArtDx}%, ${localArtDy}%)` : 'none', transformOrigin: 'center center' }">
+            <div class="character-doll">
               <div ref="spineContainerRef" class="spine-preview-container" />
 
               <!-- Draggable Purple Rectangle -->
@@ -602,9 +561,9 @@ onMounted(() => {
         <!-- Static Image Character Preview -->
         <template v-else-if="imageLayers.length > 0">
           <div class="character-doll-wrapper" :class="{ 'art-draggable': isDefaultView }"
+            :style="isDefaultView ? { transform: `scale(${localArtScale}) translate(${localArtDx}cqh, ${localArtDy}cqh)` } : {}"
             @mousedown="handleArtMouseDown">
-            <div class="character-doll"
-              :style="{ transform: isDefaultView ? `scale(${localArtScale}) translate(${localArtDx}%, ${localArtDy}%)` : 'none', transformOrigin: 'center center' }">
+            <div class="character-doll">
               <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="character-doll-image"
                 @error="($event.target as HTMLImageElement).style.display = 'none'"
                 @load="index === 0 ? updateRenderedHeight() : null" />
@@ -722,14 +681,12 @@ onMounted(() => {
 
 .preview-container {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   background-color: #fafafa;
   border: 1px solid #ddd;
   border-radius: 4px;
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
   position: relative;
+  container-type: size;
 }
 
 .no-layers-message {
@@ -748,24 +705,18 @@ onMounted(() => {
   color: #666;
 }
 
-.sheet-boundary {
+
+/* Matches game's .character-doll-wrapper (50vh wide) + .character-slot-scale-wrapper */
+.character-doll-wrapper {
   position: absolute;
   top: 0;
+  left: 0;
+  width: 50cqh;
   height: 100%;
-  border-left: 2px dashed rgba(0, 0, 0, 0.15);
-  pointer-events: none;
-  z-index: 1;
-}
-
-.game-padding-zone {
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.2);
-  flex-shrink: 0;
-}
-
-.character-doll-wrapper {
-  position: relative;
-  display: inline-block;
+  transform-origin: 50% 50%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .character-doll-wrapper.art-draggable {
@@ -776,6 +727,16 @@ onMounted(() => {
   cursor: grabbing;
 }
 
+.sheet-boundary {
+  position: absolute;
+  top: 0;
+  left: 50cqh;
+  height: 100%;
+  border-left: 2px dashed rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  z-index: 1;
+}
+
 .character-doll {
   position: relative;
   display: inline-block;
@@ -784,10 +745,8 @@ onMounted(() => {
 
 .character-doll-image {
   display: block;
-  max-width: 100%;
-  max-height: 70vh;
+  height: 100cqh;
   width: auto;
-  height: auto;
 }
 
 .character-doll-image:not(:first-child) {
@@ -836,11 +795,8 @@ onMounted(() => {
 
 /* Spine preview */
 .spine-preview-container {
-  width: 500px;
-  height: 700px;
+  height: 100cqh;
+  aspect-ratio: 5 / 7;
 }
 
-.spine-preview-container :deep(.spine-player-controls) {
-  display: none !important;
-}
 </style>

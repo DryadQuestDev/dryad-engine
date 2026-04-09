@@ -1,0 +1,45 @@
+[
+  {
+    "id": "_config_",
+    "params": {
+      "id": "template",
+      "dungeon_type": "screen",
+      "gdoc_id": "https://docs.google.com/document/d/1wCTCV1QgscSP31zFoyQYfn1GTUQpR64s1wk2xpW6JLg",
+      "music": "music_track1",
+      "image": "assets/games_assets/tutorial/_core/bgs/rikomap_floor2.webp",
+      "map_width": 1920,
+      "map_height": 1080
+    }
+  },
+  {
+    "id": "$dungeon_name",
+    "val": "My Dungeon Name"
+  },
+  {
+    "id": "@main.description",
+    "val": "Screen Description"
+  },
+  {
+    "id": "#main.greetings.1.1.1",
+    "val": "riko: Hi, I’m Riko!{actor: “riko->left”}",
+    "params": {
+      "if": true
+    }
+  },
+  {
+    "id": "#main.greetings.1.1.2",
+    "val": "riko: Nice to meet you!"
+  },
+  {
+    "id": "@main.encounter1",
+    "val": "Test Encounter"
+  },
+  {
+    "id": "!main.encounter1.choice1",
+    "val": "__Default__:choice1"
+  },
+  {
+    "id": "#main.encounter1~choice1.1.1.1",
+    "val": "Test interaction"
+  }
+]

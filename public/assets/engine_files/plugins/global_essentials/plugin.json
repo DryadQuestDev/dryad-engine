@@ -46,7 +46,13 @@
         "type": "image",
         "id": "face_static",
         "uid": "9nmGAtilhzjA",
-        "description": "Static image. If present, takes precedence over Face Picker."
+        "description": "Static image for the character face."
+      },
+      {
+        "type": "boolean",
+        "id": "face_static_precedence",
+        "uid": "ge_face_static_prec",
+        "description": "If true, face_static takes precedence over face crop. If false, prefer crop even when face_static exists."
       },
       {
         "id": "name",
@@ -147,26 +153,39 @@
         "role": "meta",
         "type": "string",
         "description": "Display name of the ability shown in UI",
-        "uid": "GeDfAbName"
+        "uid": "GeDfAbName",
+        "order": -100
+      },
+      {
+        "id": "group",
+        "role": "meta",
+        "type": "chooseOne",
+        "fromFile": "ability_groups",
+        "description": "Ability group for panel tab organization.",
+        "uid": "GeDfAbGroup",
+        "order": -99
       },
       {
         "id": "icon",
         "role": "meta",
         "type": "image",
         "description": "Icon image displayed for the ability",
-        "uid": "GeDfAbIcon"
+        "uid": "GeDfAbIcon",
+        "order": -98
       },
       {
         "id": "description",
         "role": "meta",
         "type": "htmlarea",
         "description": "Player-facing description of the ability",
-        "uid": "GeDfAbDesc"
+        "uid": "GeDfAbDesc",
+        "order": -97
       },
       {
         "id": "cooldown",
         "role": "meta",
         "type": "number",
+        "order": -96,
         "description": "Turns before ability can be used again",
         "uid": "GeDfAbCooldown"
       },
@@ -178,15 +197,25 @@
         "fromFile": "character_stats",
         "fromFileType": "number",
         "fromFileTypeAnd": "{ \"is_resource\": true }",
-        "description": "Resource costs {stat_id: amount}",
-        "uid": "GeDfAbCosts"
+        "description": "Resource costs",
+        "uid": "GeDfAbCosts",
+        "order": -95
+      },
+      {
+        "id": "order",
+        "role": "meta",
+        "type": "number",
+        "description": "Sort order in ability lists. Lower values appear first.",
+        "uid": "GeDfAbOrder",
+        "order": -94
       },
       {
         "id": "is_hidden",
         "role": "meta",
         "type": "boolean",
         "description": "Hide this ability from UI (character sheet, battle log)",
-        "uid": "GeDfAbHidden"
+        "uid": "GeDfAbHidden",
+        "order": -93
       }
     ],
     "dev/encounters_default": [

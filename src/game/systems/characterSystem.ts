@@ -21,6 +21,7 @@ import { SkillSlotObject } from "../../schemas/skillSlotSchema";
 import { SkillTreeObject } from "../../schemas/skillTreeSchema";
 import { AbilityDefinitionObject } from "../../schemas/abilityDefinitionSchema";
 import { AbilityTemplateObject } from "../../schemas/abilityTemplateSchema";
+import { AbilityGroupObject } from "../../schemas/abilityGroupSchema";
 
 // Type for the function that computes stats
 export type StatComputerFunction = (character: Character) => Record<string, number>;
@@ -94,6 +95,8 @@ export class CharacterSystem {
   public abilityDefinitionsMap!: Map<string, AbilityDefinitionObject>;
   @Skip()
   public abilityTemplatesMap!: Map<string, AbilityTemplateObject>;
+  @Skip()
+  public abilityGroupsMap!: Map<string, AbilityGroupObject>;
 
 
   @Skip()
@@ -600,14 +603,6 @@ export class CharacterSystem {
               // Remove: remove a style class
               character.removeSkinLayerStyle(op.key, op.value);
             }
-            break;
-
-          case 'animation':
-            if (op.operator !== '=') {
-              gameLogger.error(`Animation only supports "=" operator. Got "${op.operator}" for ${op.charId}.animation.${op.key}`);
-              continue;
-            }
-            character.setSpineAnimation(String(op.value));
             break;
 
           default:

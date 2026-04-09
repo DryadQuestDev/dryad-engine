@@ -1,0 +1,73 @@
+[
+  {
+    "item_slots": [
+      {
+        "uid": "qstldbJ2dWAz",
+        "slot": "riko_outfit",
+        "id": "outfit1",
+        "x": 8.64864864864865,
+        "y": 39.5945945945946,
+        "item_default": "riko_outfit_engine1"
+      },
+      {
+        "uid": "4pEUjRCCext7",
+        "slot": "riko_underwear",
+        "id": "underwear1",
+        "x": 32.16216216216217,
+        "y": 50.27027027027027,
+        "item_default": "riko_underwear1"
+      },
+      {
+        "uid": "Sjpsb5nq3VLB",
+        "slot": "riko_boots",
+        "id": "boots1",
+        "x": 13.520061110909024,
+        "y": 89.7089956713106,
+        "item_default": "riko_boots1"
+      }
+    ],
+    "id": "riko",
+    "auto_create": true,
+    "uid": "jkhlyMxeK8C9",
+    "attributes": {
+      "riko_underwear": "0",
+      "base": "1",
+      "hairstyle": "1",
+      "mood": "normal",
+      "riko_outfit": "0"
+    },
+    "skin_layers": [
+      "riko_base",
+      "riko_face",
+      "riko_hair_back",
+      "riko_hair_front"
+    ],
+    "traits": {
+      "face_shift_x": 31.812229456913165,
+      "face_shift_y": 13.243788876359533,
+      "face_shift_scale": 0.44,
+      "name": "Riko",
+      "title_color": "00ffee"
+    },
+    "gallery": {
+      "gallery_id": "characters",
+      "entity_name": "Riko",
+      "entity_description": "<p><span style=\"color: rgb(102, 163, 224);\">It&#39;s Riko!</span></p>"
+    },
+    "stats": {
+      "health": 150,
+      "stamina": 15,
+      "fashion": 50,
+      "endurance": 5,
+      "power": 10,
+      "sorcery": 25,
+      "speed": 55,
+      "armor": 3,
+      "leadership_cost": 2
+    },
+    "computed_stats": [],
+    "skill_trees": [],
+    "abilities": [],
+    "add_to_party": true
+  }
+]

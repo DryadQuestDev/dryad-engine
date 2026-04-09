@@ -1,6 +1,6 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle, addFloatingText } from './rpg-battle-state.mjs';
+import { currentRpgBattle, addFloatingText, getBattleDisplayName, parseFloatingText } from './rpg-battle-state.mjs';
 import {
   resolveAbility, processTokenEffects, getTokenStacks,
   removeTokenStacks, getTokenDefinitions, isCharAlive,
@@ -23,36 +23,30 @@ export function initBattleTracking() {
   const battle = currentRpgBattle.value;
   if (!battle) return;
 
-  battle.abilitiesState = {};
-  battle.tokens = {};
-  battle.defeatedPlayer = [];
-  battle.defeatedEnemy = [];
-
   const allChars = [...battle.playerParty, ...battle.enemyParty];
   for (const charId of allChars) {
     const char = game.getCharacter(charId);
     if (!char) continue;
+    const cs = battle.charState[charId];
 
     // Init ability states
-    battle.abilitiesState[charId] = {};
     const abilities = char.getAbilities();
     for (const abId in abilities) {
       const meta = abilities[abId].meta;
-      battle.abilitiesState[charId][abId] = {
+      cs.abilities[abId] = {
         cooldown: meta.cd_on_battle_start || 0,
         charges: meta.charges || -1,
       };
     }
 
     // Init tokens from source stats
-    battle.tokens[charId] = {};
     const defs = getTokenDefinitions();
     if (defs) {
       for (const [tokenId, def] of defs) {
         if (!def.source) continue;
         const stacks = char.getStat(def.source) || 0;
         if (stacks > 0) {
-          battle.tokens[charId][tokenId] = [{ stacks, source: charId }];
+          cs.tokens[tokenId] = [{ stacks, source: charId }];
         }
       }
     }
@@ -61,11 +55,8 @@ export function initBattleTracking() {
     setIdleState(charId);
   }
 
-  // Process turn 1 start through normal flow
-  processRoundStart();
-  if (battle.activeCharId) {
-    startCharacterTurn(battle.activeCharId);
-  }
+  // Start turn 1 through normal flow
+  advanceToNextTurn();
 }
 
 // ── Ability usability ──
@@ -86,7 +77,7 @@ export function canUseAbility(characterId, abilityId) {
   const ability = char.getAbility(abilityId);
   if (!ability) return false;
 
-  const state = battle.abilitiesState[characterId]?.[abilityId];
+  const state = battle.charState[characterId]?.abilities[abilityId];
   if (!state) return false;
 
   // Cooldown check
@@ -119,6 +110,9 @@ export function canUseAbility(characterId, abilityId) {
   // Stun check
   if (getTokenStacks(characterId, 'stun') > 0) return false;
 
+  // Bonus action limit
+  if (meta.bonus_action && battle.charState[characterId].bonusUsed >= 1) return false;
+
   return true;
 }
 
@@ -144,77 +138,120 @@ export function getUsableAbilities(characterId) {
 /**
  * Start a character's turn: tick cooldowns, drain tokens/statuses, process DoT/HoT, check stun.
  * @param {string} charId
- * @returns {boolean} true if character can act, false if stunned/skipped/dead
+ * @returns {{ canAct: boolean, dotResults: RpgEffectResult[] }}
  */
 function startCharacterTurn(charId) {
   const battle = currentRpgBattle.value;
   battle.activeCharId = charId;
   battle.activeSide = getSide(charId);
+  battle.charState[charId].bonusUsed = 0;
   battle.log.push({ turn: battle.turn, actorId: charId, type: 'char_turn_start' });
 
   // 1. Tick cooldowns for this character
   tickCooldowns(charId);
 
-  // 2. Drain token durations for this character
+  // 2. Process DoT/HoT for this character (before draining so last-turn effects still apply)
+  const dotResults = processTokenEffects(charId);
+
+  // 3. Drain token durations for this character
   drainCharTokenDurations(charId);
 
-  // 3. Drain battle-tagged status durations for this character
+  // 4. Drain battle-tagged status durations for this character
   drainCharStatusDurations(charId);
-
-  // 4. Process DoT/HoT for this character
-  const results = processTokenEffects(charId);
-  for (const r of results) {
+  for (const r of dotResults) {
     parseFloatingText(r);
     battle.log.push({ turn: battle.turn, actorId: charId, effect: r });
   }
 
-  // 5. Check if character died from DoT
+  // 5. Check if character died from DoT — defer to processDeaths for animations
   if (!isCharAlive(charId)) {
-    handleDeath(charId);
-    checkBattleEnd();
-    return false;
+    return { canAct: false, dotResults };
   }
 
   // 6. Check stun — skip turn
   if (getTokenStacks(charId, 'stun') > 0) {
     removeTokenStacks(charId, 'stun', 1);
-    const char = game.getCharacter(charId);
-    battle.log.push({ turn: battle.turn, actorId: charId, text: game.getLine('log_stunned', { name: char?.getTrait('name') || charId }) });
-    return false;
+    battle.log.push({ turn: battle.turn, actorId: charId, text: game.getLine('log_stunned', { name: getBattleDisplayName(charId) }) });
+    return { canAct: false, dotResults };
   }
-  return true;
+  return { canAct: true, dotResults };
+}
+
+/**
+ * Re-sort remaining characters (after actorTurn) by current speed.
+ * Characters who already acted this round keep their positions.
+ */
+function resortRemainingTurnOrder() {
+  const battle = currentRpgBattle.value;
+  if (!battle) return;
+  const startIdx = battle.actorTurn + 1;
+  if (startIdx >= battle.turnOrder.length) return;
+  const remaining = battle.turnOrder.slice(startIdx);
+  const playerSet = new Set(battle.playerParty);
+  remaining.sort((a, b) => {
+    const speedA = game.getCharacter(a)?.getStat('speed') || 0;
+    const speedB = game.getCharacter(b)?.getStat('speed') || 0;
+    if (speedB !== speedA) return speedB - speedA;
+    if (playerSet.has(a) && !playerSet.has(b)) return -1;
+    if (!playerSet.has(a) && playerSet.has(b)) return 1;
+    return 0;
+  });
+  battle.turnOrder.splice(startIdx, remaining.length, ...remaining);
+}
+
+/**
+ * Full re-sort of turn order by current speed. Called at round start.
+ */
+export function resortFullTurnOrder() {
+  const battle = currentRpgBattle.value;
+  if (!battle) return;
+  const playerSet = new Set(battle.playerParty);
+  battle.turnOrder.sort((a, b) => {
+    const speedA = game.getCharacter(a)?.getStat('speed') || 0;
+    const speedB = game.getCharacter(b)?.getStat('speed') || 0;
+    if (speedB !== speedA) return speedB - speedA;
+    if (playerSet.has(a) && !playerSet.has(b)) return -1;
+    if (!playerSet.has(a) && playerSet.has(b)) return 1;
+    return 0;
+  });
 }
 
 /**
  * Advance to the next character's turn.
- * Returns the character ID of the new active character, or null if battle ended.
- * @returns {string | null}
+ * @returns {{ charId: string | null, dotResults: RpgEffectResult[] }}
  */
 export function advanceToNextTurn() {
   const battle = currentRpgBattle.value;
-  if (!battle || isFinished(battle)) return null;
+  if (!battle || isFinished(battle)) return { charId: null, dotResults: [] };
+
+  // Re-sort remaining characters by current speed after each turn
+  resortRemainingTurnOrder();
 
   const total = battle.turnOrder.length;
   for (let i = 0; i < total; i++) {
-    battle.turnIndex = (battle.turnIndex + 1) % total;
+    battle.actorTurn = (battle.actorTurn + 1) % total;
 
     // New round when we wrap around
-    if (battle.turnIndex === 0) {
+    if (battle.actorTurn === 0) {
       battle.turn++;
+      resortFullTurnOrder();
       processRoundStart();
-      if (isFinished(battle)) return null;
+      if (isFinished(battle)) return { charId: null, dotResults: [] };
     }
 
-    const charId = battle.turnOrder[battle.turnIndex];
+    const charId = battle.turnOrder[battle.actorTurn];
     if (isCharAlive(charId)) {
-      if (!startCharacterTurn(charId)) {
-        return advanceToNextTurn();
+      const { canAct, dotResults } = startCharacterTurn(charId);
+      if (!canAct) {
+        // Collect dotResults from skipped turns (DoT death, stun)
+        const next = advanceToNextTurn();
+        return { charId: next.charId, dotResults: [...dotResults, ...next.dotResults] };
       }
-      return charId;
+      return { charId, dotResults };
     }
   }
 
-  return null;
+  return { charId: null, dotResults: [] };
 }
 
 /**
@@ -237,22 +274,22 @@ function processRoundStart() {
 /** Decrement cooldowns for a single character. @param {string} charId */
 function tickCooldowns(charId) {
   const battle = currentRpgBattle.value;
-  const charState = battle.abilitiesState[charId];
-  if (!charState) return;
-  for (const abId in charState) {
-    if (charState[abId].cooldown > 0) charState[abId].cooldown--;
+  const abilities = battle.charState[charId]?.abilities;
+  if (!abilities) return;
+  for (const abId in abilities) {
+    if (abilities[abId].cooldown > 0) abilities[abId].cooldown--;
   }
 }
 
 /** Tick token durations for a single character, remove expired. @param {string} charId */
 function drainCharTokenDurations(charId) {
   const battle = currentRpgBattle.value;
-  const charTokens = battle.tokens[charId];
+  const charTokens = battle.charState[charId]?.tokens;
   if (!charTokens) return;
   for (const tokenId in charTokens) {
     const instances = charTokens[tokenId];
     for (let i = instances.length - 1; i >= 0; i--) {
-      if (instances[i].duration != null) {
+      if (instances[i].duration > 0) {
         instances[i].duration--;
         if (instances[i].duration <= 0) instances.splice(i, 1);
       }
@@ -292,29 +329,25 @@ export function executeAction(abilityId, targetId) {
   const ability = caster?.getAbility(abilityId);
   if (!ability) return [];
 
-  // Check if action is allowed
-  if (!game.trigger('battle_action_start', battle, caster, abilityId, targetId)) {
+  // Build mutable action event — listeners can modify abilityId, targetId, power
+  const actionEvent = { abilityId, targetId, power: caster.getStat('power') };
+  if (!game.trigger('battle_action_start', battle, caster, actionEvent)) {
     return [];
   }
 
-  // Log the action
-  battle.log.push({ turn: battle.turn, actorId: casterId, abilityId });
+  // Log the action (use potentially mutated abilityId)
+  battle.log.push({ turn: battle.turn, actorId: casterId, abilityId: actionEvent.abilityId });
 
   // Flash ability name on caster (AI-controlled characters only)
   if (isAIControlled(casterId)) {
-    addFloatingText(casterId, ability.meta?.name || abilityId, 'ability-use', null);
+    const ab = caster.getAbility(actionEvent.abilityId);
+    addFloatingText({ characterId: casterId, text: ab?.meta?.name || actionEvent.abilityId, cssClass: 'ability-use' });
   }
 
-  // Resolve effects
-  const results = resolveAbility(casterId, abilityId, targetId);
+  // Resolve effects (results are logged inside resolveAbility, before battle_action_applied)
+  const results = resolveAbility(casterId, actionEvent.abilityId, actionEvent.targetId, actionEvent.power);
 
-  // Floating texts
-  for (const r of results) {
-    parseFloatingText(r);
-    battle.log.push({ turn: battle.turn, actorId: casterId, effect: r });
-  }
-
-  game.trigger('battle_action_end', battle, caster, abilityId);
+  game.trigger('battle_action_end', battle, caster, actionEvent.abilityId, results);
 
   return results;
 }
@@ -328,7 +361,7 @@ export function processDeaths() {
 
   const allChars = [...battle.playerParty, ...battle.enemyParty];
   for (const charId of allChars) {
-    if (!isCharAlive(charId) && !battle.defeatedPlayer.includes(charId) && !battle.defeatedEnemy.includes(charId)) {
+    if (!isCharAlive(charId) && !battle.charState[charId]?.defeated) {
       handleDeath(charId);
     }
   }
@@ -352,18 +385,14 @@ export function handleDeath(characterId) {
     removeTokenStacks(characterId, 'death_defiance', 1);
     const char = game.getCharacter(characterId);
     if (char) char.setResource('health', 1);
-    addFloatingText(characterId, game.getLine('float_death_defiance'), 'death-defiance', null);
+    addFloatingText({ characterId, text: game.getLine('float_death_defiance'), cssClass: 'death-defiance' });
     return;
   }
 
-  const side = getSide(characterId);
-  if (side === 'player') {
-    battle.defeatedPlayer.push(characterId);
-  } else {
-    battle.defeatedEnemy.push(characterId);
-  }
+  const cs = battle.charState[characterId];
+  cs.defeated = true;
 
-  game.trigger('battle_character_defeated', battle, characterId, side);
+  game.trigger('battle_character_defeated', battle, characterId, cs.side);
 }
 
 /**
@@ -391,49 +420,3 @@ export function checkBattleEnd() {
   return false;
 }
 
-// ── Floating text helper ──
-
-const NEGATIVE_TYPES = new Set(['damage', 'token_dot', 'thorns']);
-
-/**
- * Convert a single effect result to a floating text entry.
- * @param {RpgEffectResult} effect
- */
-function parseFloatingText(effect) {
-  if (!effect.targetId) return;
-
-  const e = effect;
-
-  // Shield absorb: show separately
-  if (e.type === 'damage' && e.shieldAbsorbed > 0) {
-    addFloatingText(e.targetId, game.getLine('float_shield', { amount: e.shieldAbsorbed }), 'shield-absorb', null);
-  }
-
-  // Token apply uses token def for icon/color
-  if (e.type === 'token_apply') {
-    const def = getTokenDefinitions().get(e.tokenId);
-    addFloatingText(e.targetId, `+${e.stacks}`, 'token-apply', def?.icon || null, def?.color);
-    return;
-  }
-
-  const sign = (e.amount != null && e.amount > 0) ? (NEGATIVE_TYPES.has(e.type) ? '-' : '+') : '';
-  const text = e.amount != null ? `${sign}${e.amount}`
-    : e.statusName || e.statusId || game.getLine(`float_${e.type}`);
-
-  // CSS class determines both styling and icon (via ::before in rpg-battle.css)
-  const css = {
-    damage: e.isCrit ? `${e.damageType || 'physical'} crit` : (e.damageType || 'physical'),
-    token_dot: e.damageType || 'physical', thorns: 'physical',
-    heal: 'heal', steal: 'heal', token_hot: 'heal',
-    dodge: 'dodge', cleanse: 'cleanse', status_apply: 'status-apply', status_remove: 'status-remove', death_defiance: 'death-defiance',
-  }[e.type] || e.type;
-
-  // Status apply/remove: look up icon from status definitions
-  let icon = null;
-  if ((e.type === 'status_apply' || e.type === 'status_remove') && e.statusId) {
-    const statusDefs = game.getData('character_statuses', true);
-    icon = statusDefs?.get(e.statusId)?.image || null;
-  }
-
-  addFloatingText(e.targetId, text, css, icon);
-}

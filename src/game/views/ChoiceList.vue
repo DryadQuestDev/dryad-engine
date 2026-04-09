@@ -71,7 +71,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
         <span v-if="game.dungeonSystem.choiceType.value != 'encounter'">
           {{ index + 1 }}.
         </span>
-        {{ choice.name }}
+        {{ choice.nameComputed || choice.name }}
       </div>
     </template>
   </div>

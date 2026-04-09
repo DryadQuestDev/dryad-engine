@@ -12,7 +12,6 @@ export class Status {
     public polarity: string = "";
     public rarity: string = "";
 
-    // todo: implement
     public isHidden: boolean = false;
 
     public tags: string[] = [];
@@ -79,6 +78,7 @@ export class Status {
         if ('polarity' in obj && obj.polarity) this.polarity = obj.polarity;
         if ('tags' in obj && obj.tags) this.tags = obj.tags as string[];
         if ('duration' in obj && typeof obj.duration === 'number') this.duration = obj.duration;
+        if ('is_hidden' in obj && obj.is_hidden) this.isHidden = true;
 
         // set computed stats
         if (obj.computed_stats) {

@@ -263,23 +263,51 @@
 /* ── Turn Order ── */
 
 .rpg-turn-order {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.rpg-turn-order-list {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  flex: 1;
-  justify-content: center;
 }
 
 .rpg-turn-order-entry {
   opacity: 0.6;
-  transition: opacity 0.2s ease;
+  transform: scale(1);
+  margin: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease, margin 0.3s ease;
 }
 
 .rpg-turn-order-entry.active {
   opacity: 1;
+  transform: scale(1.27);
+  margin: 6px 0;
   outline: 2px solid rgba(234, 179, 8, 0.8);
   border-radius: 6px;
+}
+
+/* Move animation when turn order changes */
+.rpg-turn-order-move {
+  transition: transform 0.4s ease;
+}
+
+/* Shrink out when character dies */
+.rpg-turn-order-leave-active {
+  transition: max-height 0.3s ease, opacity 0.3s ease, margin 0.3s ease, padding 0.3s ease;
+  overflow: hidden;
+  max-height: 60px;
+}
+
+.rpg-turn-order-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
 }
 
 /* ── Ability Panel ── */
@@ -287,8 +315,7 @@
 .rpg-ability-panel {
   position: absolute;
   left: var(--rpg-ability-panel-left, 45%);
-  top: 50%;
-  transform: translateY(-50%);
+  top: 40%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -297,20 +324,51 @@
   padding: 8px;
 }
 
-.rpg-ability-item,
-.rpg-ability-panel .rpg-btn-end-turn {
-  width: 300px;
+.rpg-ability-item {
+  width: 100%;
 }
 
-.rpg-ability-panel.panel-exit .rpg-ability-item,
-.rpg-ability-panel.panel-exit .rpg-btn-end-turn {
-  animation: rpg-slide-out 0.25s cubic-bezier(0.55, 0, 1, 0.45) both;
+/* ── Ability tabs (Bonus / Main) ── */
+/**/
+.rpg-ability-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+.rpg-ability-tab {
+  flex: 1;
+  padding: 5px 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 1);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.rpg-ability-tab:hover {
+  background: rgba(0, 0, 0, 0.7);
+  color: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.rpg-ability-tab.active {
+  background: rgba(0, 0, 0, 0.8);
+  color: #42b983;
+  border-color: rgba(66, 185, 131, 0.4);
+}
+
+.rpg-ability-panel.panel-exit>* {
+  animation: rpg-slide-out 0.15s cubic-bezier(0.55, 0, 1, 0.45) both;
   animation-delay: calc(var(--i, 0) * 0.03s);
 }
 
-.rpg-ability-item,
-.rpg-ability-panel .rpg-btn-end-turn {
-  animation: rpg-slide-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+.rpg-ability-panel>* {
+  animation: rpg-slide-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   animation-delay: calc(var(--i, 0) * 0.04s);
 }
 
@@ -408,20 +466,15 @@
 /* ── Ability tooltip ── */
 
 .rpg-ability-tooltip {
-  position: absolute;
-  left: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-left: 8px;
-  z-index: 11;
-  pointer-events: none;
+  z-index: 100;
+  pointer-events: auto;
 }
 
 /* ── Target selection overlay ── */
 
 .rpg-target-overlay {
   position: absolute;
-  bottom: 10%;
+  bottom: 50%;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -530,6 +583,42 @@
   50% {
     filter: drop-shadow(0 0 16px rgba(66, 185, 131, 1)) drop-shadow(0 0 6px rgba(66, 185, 131, 0.7));
   }
+}
+
+/* ── Splash target highlight (same as hover) ── */
+
+.rpg-splash-highlight .character-doll-wrapper {
+  animation: none !important;
+  filter: drop-shadow(0 0 20px rgba(234, 179, 8, 1)) drop-shadow(0 0 10px rgba(234, 179, 8, 0.8)) drop-shadow(0 0 4px rgba(234, 179, 8, 0.6));
+}
+
+/* ── Combat Stats (above ability list) ── */
+
+.rpg-combat-stats {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  gap: 14px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  box-sizing: border-box;
+}
+
+.rpg-combat-stat {
+  display: flex;
+  gap: 4px;
+}
+
+.rpg-combat-stat-label {
+  color: #aaa;
+}
+
+.rpg-combat-stat-value {
+  color: #ffca00;
+  font-weight: 600;
 }
 
 /* ── Floating Combat Text ── */
@@ -896,7 +985,7 @@
   content: '';
   width: 12px;
   height: 12px;
-  background: url('/assets/engine_assets/icons/cooldown.svg') center/contain no-repeat;
+  background: url('assets/engine_assets/icons/cooldown.svg') center/contain no-repeat;
   filter: brightness(0) invert(1) opacity(0.7);
   flex-shrink: 0;
 }
@@ -917,7 +1006,7 @@
   content: '';
   width: 12px;
   height: 12px;
-  background: url('/assets/engine_assets/icons/charges.svg') center/contain no-repeat;
+  background: url('assets/engine_assets/icons/charges.svg') center/contain no-repeat;
   filter: brightness(0) invert(1) opacity(0.7);
   flex-shrink: 0;
 }
@@ -1019,6 +1108,7 @@
   flex-direction: column;
   align-items: center;
   pointer-events: none;
+  pointer-events: none;
   z-index: 5;
 }
 
@@ -1044,8 +1134,8 @@
   gap: 2px;
   padding: 2px 0;
   justify-content: center;
+  pointer-events: none;
   max-width: 120px;
-  pointer-events: auto;
 }
 
 .rpg-token {

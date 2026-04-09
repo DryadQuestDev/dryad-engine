@@ -1,0 +1,26 @@
+[
+  {
+    "id": "room1",
+    "gallery": {
+      "gallery_id": "backgrounds",
+      "entity_name": "Riko's House Hall Room"
+    },
+    "type": "image",
+    "file_image": "assets/games_assets/tutorial/_core/bgs/rikomap_floor1.webp",
+    "uid": "nQsAfoxz3PNt",
+    "xanchor": 0,
+    "yanchor": 0,
+    "x": 0,
+    "y": 0
+  },
+  {
+    "gallery": {
+      "gallery_id": "backgrounds",
+      "entity_name": "Riko's House Bedroom"
+    },
+    "id": "room3",
+    "type": "image",
+    "file_image": "assets/games_assets/tutorial/_core/bgs/rikomap_floor2.webp",
+    "uid": "mt8bYqbP7GX8"
+  }
+]

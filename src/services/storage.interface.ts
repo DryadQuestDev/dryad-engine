@@ -17,6 +17,7 @@ export interface StorageService {
     deleteFile(filePath: string, recursive?: boolean): Promise<void>;
     pathExists(itemPath: string): Promise<boolean>;
     createDir(dirPath: string): Promise<void>;
+    copyDir(src: string, dest: string): Promise<{ success: boolean; error?: string }>;
 
     getGamesList(): Promise<ManifestObject[]>;
     getModsList(game: string): Promise<ManifestObject[]>;

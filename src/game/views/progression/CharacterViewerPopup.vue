@@ -40,7 +40,7 @@ const emit = defineEmits<{
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
   width: 90%;
-  max-width: 1400px;
+  max-width: 1800px;
   height: 95%;
   padding: 1.5rem;
   overflow: hidden;

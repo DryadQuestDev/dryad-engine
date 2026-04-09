@@ -13,6 +13,7 @@ Format: `|placeholderName(args)|`
 | `item` | Returns the name of an item | `You are using \|item(uid, invId)\|` |
 | `from` | Fetches a locale entry and resolves it through the full pipeline | `\|from(greeting_text)\|` |
 | `pick` | Like `from`, but randomly selects from numbered locale variants | `\|pick(greeting_text)\|` |
+| `stat` | Returns a character stat value. Requires `context.character` passed to `resolveString` | `\|stat(power)\|` |
 
 ---
 

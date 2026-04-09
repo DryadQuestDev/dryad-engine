@@ -174,6 +174,21 @@ export class LocalhostStorageService implements StorageService {
         }
     }
 
+    async copyDir(src: string, dest: string): Promise<{ success: boolean; error?: string }> {
+        const url = `${this.baseUrl}/engine/copy-dir`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ src, dest })
+            });
+            return await response.json();
+        } catch (error) {
+            console.error(`Error copying directory via ${url}:`, error);
+            return { success: false, error: String(error) };
+        }
+    }
+
     /**
      * Lists all files recursively within a given directory by calling a backend endpoint.
      * Assumes the backend handles the recursive logic at GET /engine/list-files-recursively?path=...

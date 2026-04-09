@@ -14,6 +14,7 @@ const COMPONENT_ID = 'item-card';
 
 const props = defineProps<{
   item: Item;
+  characterId?: string;
 }>();
 
 // Get rarity CSS class
@@ -114,7 +115,7 @@ const consumeDurationText = computed(() => {
         <div v-if="consumeDurationText" class="consume-duration">{{ consumeDurationText }}</div>
       </div>
 
-      <StatusObjectDisplay :data="item.statusObject" />
+      <StatusObjectDisplay :data="item.statusObject" :character-id="characterId" />
 
       <!-- Weight display (for single item) -->
       <div v-if="itemWeight !== null" class="item-weight-info">

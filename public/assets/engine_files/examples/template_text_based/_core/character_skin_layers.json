@@ -1,0 +1,89 @@
+[
+  {
+    "id": "riko_base",
+    "uid": "iiGpGZjwlbHd",
+    "attributes": [
+      "base"
+    ],
+    "images": {
+      "riko_base_1": "assets/games_assets/tutorial/_core/characters/riko/riko_base.webp"
+    }
+  },
+  {
+    "id": "riko_boots",
+    "attributes": [
+      "riko_boots"
+    ],
+    "uid": "NiGSWDeKcAq8",
+    "images": {
+      "riko_boots_1": "assets/games_assets/tutorial/_core/characters/riko/riko_shoes.webp"
+    },
+    "z_index": 6
+  },
+  {
+    "id": "riko_face",
+    "uid": "F9N41H9wVlCy",
+    "attributes": [
+      "mood"
+    ],
+    "images": {
+      "riko_face_anxious": "assets/games_assets/tutorial/_core/characters/riko/riko_anxious.webp",
+      "riko_face_blush": "assets/games_assets/tutorial/_core/characters/riko/riko_blush.webp",
+      "riko_face_confused": "assets/games_assets/tutorial/_core/characters/riko/riko_confused.webp"
+    }
+  },
+  {
+    "id": "riko_hair_back",
+    "z_index": -5,
+    "attributes": [
+      "hairstyle"
+    ],
+    "uid": "CKgTrS5VshM8",
+    "images": {
+      "riko_hair_back_1": "assets/games_assets/tutorial/_core/characters/riko/riko_hair_back1.webp",
+      "riko_hair_back_2": "assets/games_assets/tutorial/_core/characters/riko/riko_hair_back2.webp",
+      "riko_hair_back_3": "assets/games_assets/tutorial/_core/characters/riko/riko_hair_back3.webp"
+    }
+  },
+  {
+    "id": "riko_hair_front",
+    "z_index": 5,
+    "attributes": [
+      "hairstyle"
+    ],
+    "uid": "2wjGghUDMPN5",
+    "images": {
+      "riko_hair_front_1": "assets/games_assets/tutorial/_core/characters/riko/riko_hair_front1.webp",
+      "riko_hair_front_2": "assets/games_assets/tutorial/_core/characters/riko/riko_hair_front2.webp",
+      "riko_hair_front_3": "assets/games_assets/tutorial/_core/characters/riko/riko_hair_front3.webp"
+    }
+  },
+  {
+    "id": "riko_outfit",
+    "attributes": [
+      "riko_outfit"
+    ],
+    "uid": "Xk9mP2vLqR7d",
+    "images": {
+      "riko_outfit_1": "assets/games_assets/tutorial/_core/characters/riko/riko_outfit_engine1.webp"
+    },
+    "z_index": 3,
+    "tags": [
+      "clothes"
+    ]
+  },
+  {
+    "id": "riko_undewear",
+    "uid": "gwCEvfwENadw",
+    "z_index": 1,
+    "attributes": [
+      "riko_underwear"
+    ],
+    "images": {
+      "riko_undewear_1": "assets/games_assets/tutorial/_core/characters/riko/riko_underwear_black.webp"
+    },
+    "tags": [
+      "clothes"
+    ]
+  }
+]

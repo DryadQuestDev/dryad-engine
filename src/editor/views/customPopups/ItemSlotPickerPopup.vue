@@ -4,8 +4,8 @@ import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { ITEM_SLOT_SIZE_PERCENT } from '../../../global/global';
-import { SpinePlayer } from '@esotericsoftware/spine-player';
-import '@esotericsoftware/spine-player/dist/spine-player.css';
+import { spineRenderer } from '../../../game/utils/spineRenderer';
+import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import Select from 'primevue/select';
 
 const props = defineProps<EditorCustomPopupProps>();
@@ -26,10 +26,21 @@ const isDragging = ref(false);
 const dragStartX = ref(0);
 const dragStartY = ref(0);
 
+// Art transform from character traits (matches game's CharacterSlot scale wrapper)
+const artDx = computed(() => localItem.value.traits?.art_dx ?? coreItem.value?.traits?.art_dx ?? 0);
+const artDy = computed(() => localItem.value.traits?.art_dy ?? coreItem.value?.traits?.art_dy ?? 0);
+const artScale = computed(() => localItem.value.traits?.art_scale ?? coreItem.value?.traits?.art_scale ?? 1);
+const artTransform = computed(() => {
+  const transforms = [`scale(${artScale.value})`];
+  if (artDx.value || artDy.value) {
+    transforms.push(`translate(${artDx.value}cqh, ${artDy.value}cqh)`);
+  }
+  return transforms.join(' ');
+});
+
 // Image dimensions
 const actualImageWidth = ref(0);
 const actualImageHeight = ref(0);
-const renderedImageHeight = ref(0);
 
 // Loaded skin layers
 const skinLayersData = ref<Record<string, any>[]>([]);
@@ -75,24 +86,6 @@ const slotTypeOptions = computed(() => {
   }));
 });
 
-// Compute the scaled rectangle size for visual display
-// Item slots in the game use ITEM_SLOT_SIZE_PERCENT width of container, with aspect-ratio 1:1
-// So we use the same percentage of the rendered height
-const scaledRectSize = computed(() => {
-  return renderedImageHeight.value * ITEM_SLOT_SIZE_PERCENT;
-});
-
-// Convert percentage to pixel position in preview coordinates
-// For slot mode, use container height directly (percentages are relative to container)
-const percentageToPreviewPixels = (percent: number): number => {
-  return (percent / 100) * renderedImageHeight.value;
-};
-
-// Convert preview pixel position to percentage
-// For slot mode, convert relative to container height
-const previewPixelsToPercentage = (pixels: number): number => {
-  return (pixels / renderedImageHeight.value) * 100;
-};
 
 // Get character image layers from skin_layers
 const imageLayers = computed(() => {
@@ -211,11 +204,10 @@ function updateRenderedHeight() {
   if (!containerRef.value) return;
   const img = containerRef.value.querySelector('.character-doll-image') as HTMLImageElement;
   if (img) {
-    renderedImageHeight.value = img.offsetHeight;
   }
 }
 
-// Get style for a specific slot
+// Get style for a specific slot — uses cqh units matching the game
 function getSlotStyle(slot: any) {
   if (!slot) return {};
 
@@ -223,11 +215,17 @@ function getSlotStyle(slot: any) {
   const y = slot.y ?? 50;
 
   return {
-    left: `${percentageToPreviewPixels(x)}px`,
-    top: `${percentageToPreviewPixels(y)}px`,
-    width: `${scaledRectSize.value}px`,
-    height: `${scaledRectSize.value}px`,
+    left: x + 'cqh',
+    top: y + 'cqh',
+    width: (ITEM_SLOT_SIZE_PERCENT * 100) + 'cqh',
+    height: (ITEM_SLOT_SIZE_PERCENT * 100) + 'cqh',
   };
+}
+
+// Convert pixel offset to cqh value (percentage of container height)
+function pxToCqh(px: number): number {
+  if (!containerRef.value) return 0;
+  return (px / containerRef.value.offsetHeight) * 100;
 }
 
 // Mouse event handlers
@@ -240,12 +238,11 @@ function handleMouseDown(event: MouseEvent, slot: any) {
   if (!containerRef.value) return;
 
   const rect = containerRef.value.getBoundingClientRect();
-  // Convert percentage to preview pixels for drag calculation
-  const currentPreviewX = percentageToPreviewPixels(slot.x ?? 50);
-  const currentPreviewY = percentageToPreviewPixels(slot.y ?? 50);
+  const currentX = (slot.x ?? 50) / 100 * rect.height;
+  const currentY = (slot.y ?? 50) / 100 * rect.height;
 
-  dragStartX.value = event.clientX - rect.left - currentPreviewX;
-  dragStartY.value = event.clientY - rect.top - currentPreviewY;
+  dragStartX.value = event.clientX - rect.left - currentX;
+  dragStartY.value = event.clientY - rect.top - currentY;
   event.preventDefault();
 }
 
@@ -253,17 +250,17 @@ function handleMouseMove(event: MouseEvent) {
   if (!isDragging.value || !containerRef.value || selectedSlotIndex.value === null) return;
 
   const rect = containerRef.value.getBoundingClientRect();
-  const previewX = event.clientX - rect.left - dragStartX.value;
-  const previewY = event.clientY - rect.top - dragStartY.value;
+  const pixelX = event.clientX - rect.left - dragStartX.value;
+  const pixelY = event.clientY - rect.top - dragStartY.value;
 
-  // Convert from preview pixel coordinates to percentages
-  const xPercent = previewPixelsToPercentage(previewX);
-  const yPercent = previewPixelsToPercentage(previewY);
+  // Convert from pixels to cqh (percentage of container height)
+  const xCqh = pxToCqh(pixelX);
+  const yCqh = pxToCqh(pixelY);
 
   // Update the slot
   if (localItem.value.item_slots && localItem.value.item_slots[selectedSlotIndex.value]) {
-    localItem.value.item_slots[selectedSlotIndex.value].x = xPercent;
-    localItem.value.item_slots[selectedSlotIndex.value].y = yPercent;
+    localItem.value.item_slots[selectedSlotIndex.value].x = xCqh;
+    localItem.value.item_slots[selectedSlotIndex.value].y = yCqh;
   }
 }
 
@@ -328,69 +325,49 @@ function initializeSpineRefs() {
 }
 
 const spineContainerRef = ref<HTMLDivElement | null>(null);
-let spinePlayer: SpinePlayer | null = null;
+let spineInstance: Spine | null = null;
+let spineSlotId = '';
 
-function initSpinePlayer() {
+async function initSpinePlayer() {
   if (!spineContainerRef.value || !spineAtlasRef.value || !spineSkeletonRef.value) return;
   disposeSpinePlayer();
 
   try {
-    spinePlayer = new SpinePlayer(spineContainerRef.value, {
-      jsonUrl: spineSkeletonRef.value,
+    spineSlotId = `item_slot_${Date.now()}`;
+    const attributes = localItem.value.attributes || {};
+
+    const spine = await spineRenderer.register(spineSlotId, spineContainerRef.value, {
+      skeletonUrl: spineSkeletonRef.value,
       atlasUrl: spineAtlasRef.value,
       animation: spineAnimationRef.value || undefined,
-      skin: 'default',
-      backgroundColor: '#00000000',
-      alpha: true,
-      preserveDrawingBuffer: false,
-      premultipliedAlpha: true,
-      showControls: false,
-      success: (player: SpinePlayer) => {
-        if (!player.skeleton) return;
-
-        const attributes = localItem.value.attributes || {};
-        const skeletonData = player.skeleton.data;
-        const skins = Object.values(attributes).filter(
-          (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-        );
-
-        if (skins.length > 0) {
-          if (skins.length === 1) {
-            player.skeleton.setSkinByName(skins[0]);
-          } else {
-            const firstSkinData = skeletonData.skins[0];
-            if (firstSkinData) {
-              const SkinConstructor = firstSkinData.constructor as any;
-              const combinedSkin = new SkinConstructor('combined-skin');
-              skins.forEach(name => {
-                const skin = skeletonData.skins.find((s: any) => s.name === name);
-                if (skin) combinedSkin.addSkin(skin);
-              });
-              player.skeleton.setSkin(combinedSkin);
-            }
-          }
-          player.skeleton.setSlotsToSetupPose();
-        }
-
-        // Set dimensions from spine container for slot positioning
-        if (spineContainerRef.value) {
-          renderedImageHeight.value = spineContainerRef.value.offsetHeight;
-        }
-      },
-      error: (_player: SpinePlayer, error: string) => {
-        console.error('Spine preview error:', error);
-      }
     });
+
+    if (!spine) return;
+    spineInstance = spine;
+
+    // Apply skins from attributes
+    const skeletonData = spine.skeleton.data;
+    const skins = Object.values(attributes).filter(
+      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
+    );
+    if (skins.length > 0) {
+      spineRenderer.applySkins(spine, skins);
+    }
+
+    // Set dimensions from spine container for slot positioning
+    if (spineContainerRef.value) {
+    }
   } catch (error) {
     console.error('Failed to initialize Spine preview:', error);
   }
 }
 
 function disposeSpinePlayer() {
-  if (spinePlayer) {
-    spinePlayer.dispose();
-    spinePlayer = null;
+  if (spineSlotId) {
+    spineRenderer.unregister(spineSlotId);
+    spineSlotId = '';
   }
+  spineInstance = null;
 }
 
 // Init spine when container appears
@@ -472,10 +449,15 @@ onMounted(() => {
           <p class="info-text">Note: All image layer pictures should have the same size dimensions.</p>
         </div>
 
+        <!-- Character-sheet start boundary -->
+        <div v-if="isSpineCharacter || imageLayers.length > 0" class="sheet-boundary"></div>
+
         <!-- Spine Character Preview -->
         <div v-if="isSpineCharacter" class="character-doll-wrapper">
-          <div class="character-doll">
-            <div ref="spineContainerRef" class="spine-preview-container" />
+          <div class="character-doll-scale-wrapper" :style="{ transform: artTransform }">
+            <div class="character-doll">
+              <div ref="spineContainerRef" class="spine-preview-container" />
+            </div>
           </div>
 
           <!-- Draggable Slot Rectangles -->
@@ -488,10 +470,12 @@ onMounted(() => {
 
         <!-- Static Image Character Preview -->
         <div v-else-if="imageLayers.length > 0" class="character-doll-wrapper">
-          <div class="character-doll">
-            <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="character-doll-image"
-              @error="($event.target as HTMLImageElement).style.display = 'none'"
-              @load="index === 0 ? updateRenderedHeight() : null" />
+          <div class="character-doll-scale-wrapper" :style="{ transform: artTransform }">
+            <div class="character-doll">
+              <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="character-doll-image"
+                @error="($event.target as HTMLImageElement).style.display = 'none'"
+                @load="index === 0 ? updateRenderedHeight() : null" />
+            </div>
           </div>
 
           <!-- Draggable Slot Rectangles -->
@@ -697,13 +681,12 @@ onMounted(() => {
 
 .preview-container {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   background-color: #fafafa;
   border: 1px solid #ddd;
   border-radius: 4px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  position: relative;
+  container-type: size;
 }
 
 .no-layers-message {
@@ -722,9 +705,34 @@ onMounted(() => {
   color: #666;
 }
 
+.sheet-boundary {
+  position: absolute;
+  top: 0;
+  left: 50cqh;
+  height: 100%;
+  border-left: 2px dashed rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  z-index: 1;
+}
+
 .character-doll-wrapper {
   position: relative;
-  display: inline-block;
+  width: 50cqh;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.character-doll-scale-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 50%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .character-doll {
@@ -734,10 +742,8 @@ onMounted(() => {
 
 .character-doll-image {
   display: block;
-  max-width: 100%;
-  max-height: 70vh;
+  height: 100cqh;
   width: auto;
-  height: auto;
 }
 
 .character-doll-image:not(:first-child) {
@@ -802,11 +808,8 @@ onMounted(() => {
 
 /* Spine preview */
 .spine-preview-container {
-  width: 500px;
-  height: 700px;
+  height: 100cqh;
+  aspect-ratio: 5 / 7;
 }
 
-.spine-preview-container :deep(.spine-player-controls) {
-  display: none !important;
-}
 </style>
