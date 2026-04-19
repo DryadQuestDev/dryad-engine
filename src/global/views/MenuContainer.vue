@@ -102,7 +102,9 @@ function setMenuState(state: string) {
   top: 0;
   left: 0;
   width: 100vw;
+  width: 100dvw;
   height: 100vh;
+  height: 100dvh;
   background: rgba(0, 0, 0, 0.3);
 }
 
@@ -112,6 +114,7 @@ function setMenuState(state: string) {
   left: 50%;
   transform: translate(-50%, -50%);
   height: 80vh;
+  height: 80dvh;
   width: 500px;
   background-color: #f0f0f0;
   padding: 20px;

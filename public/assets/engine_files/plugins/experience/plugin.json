@@ -34,12 +34,21 @@
           "type": "number",
           "defaultValue": 50,
           "tooltip": "Growth percentage applied per level to the XP threshold.",
-          "show": { "xp_formula": ["linear_percent", "exponential_percent"] }
+          "show": {
+            "xp_formula": [
+              "linear_percent",
+              "exponential_percent"
+            ]
+          }
         },
         "xp_table": {
           "type": "number[]",
           "tooltip": "Custom XP thresholds per level (index 0 = level 1). Levels beyond the table use the last entry.",
-          "show": { "xp_formula": ["custom_table"] }
+          "show": {
+            "xp_formula": [
+              "custom_table"
+            ]
+          }
         },
         "max_level": {
           "type": "number",
@@ -53,7 +62,9 @@
             "item_id": {
               "type": "chooseOne",
               "fromFile": "item_templates",
-              "fromFileTypeAnd": { "is_currency": true },
+              "fromFileTypeAnd": {
+                "is_currency": true
+              },
               "required": true,
               "tooltip": "Currency item to award (e.g., skill points)."
             },
@@ -74,6 +85,7 @@
         "name": "XP",
         "description": "Experience points toward next level.",
         "is_resource": true,
+        "is_hidden": true,
         "can_overflow": true,
         "color": "f0c040",
         "uid": "xp_stat_xp"

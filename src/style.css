@@ -1,4 +1,14 @@
 /* GLOBAL STYLES */
+html,
+body {
+  overscroll-behavior: none;
+  /* Kill the translucent blue flash mobile browsers paint on tapped elements.
+     Most visible in text dungeons where tapping to advance highlights the whole
+     scene area. Safe globally — this only removes the default tap-flash, not
+     focus/hover styles we author ourselves. */
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   margin: 0;
   /* Font family CSS variables for consistent typography across platforms */
@@ -58,15 +68,18 @@ p {
 .ql-editor li::before {
   content: none !important;
 }
+
 .ql-editor li[data-list] {
   list-style-type: none;
   padding-left: 1.5em;
   position: relative;
 }
+
 .ql-editor .ql-ui {
   position: absolute;
 }
-.ql-editor li > .ql-ui:before {
+
+.ql-editor li>.ql-ui:before {
   display: inline-block;
   margin-left: -1.5em;
   margin-right: 0.3em;
@@ -74,12 +87,15 @@ p {
   white-space: nowrap;
   width: 1.2em;
 }
-.ql-editor li[data-list="bullet"] > .ql-ui:before {
+
+.ql-editor li[data-list="bullet"]>.ql-ui:before {
   content: '\2022';
 }
-.ql-editor li[data-list="ordered"] > .ql-ui:before {
+
+.ql-editor li[data-list="ordered"]>.ql-ui:before {
   content: counter(list-0, decimal) '. ';
 }
+
 .ql-editor li[data-list="ordered"] {
   counter-increment: list-0;
   counter-reset: list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;
@@ -282,6 +298,38 @@ p {
   filter: invert(1) brightness(1.3);
 }
 
+/* Shared UI icon styling — used by UiContainer (cog / book) and CharacterList
+   (users icon), plus any plugin-authored icons that reuse the .ui-icon class.
+   `!important` on the sizing properties so the rule wins regardless of
+   load-order / plugin CSS / scoped Vue rules that would otherwise undercut it. */
+.ui-icon {
+  margin-right: 5px !important;
+  font-size: 2.2rem !important;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  .ui-icon {
+    font-size: 3rem !important;
+    margin-right: 10px !important;
+  }
+}
+
+/* Space reserved on the left for the fixed .ui-container tray (cog / book /
+   users icons). Panels rendered next to it (ProgressionContainer,
+   OverlayNavigation's .overlay.text) read this var so they don't overlap.
+   On touch devices the tray grows (bigger tap targets) so the reserved space
+   widens too. */
+:root {
+  --ui-tray-reserved-left: 120px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --ui-tray-reserved-left: 185px;
+  }
+}
+
 /* Item Slot Shared Styles */
 .item-slot-wrapper {
   position: relative;
@@ -391,25 +439,25 @@ p {
 
 /* Item Rarity Styles */
 
-/* Define rarity color variables */
+/* Define rarity color variables — tuned to read well on dark item backgrounds */
 .rarity_common {
-  --rarity-color: rgba(157, 157, 157, 1);
+  --rarity-color: #c0c0c0;
 }
 
 .rarity_uncommon {
-  --rarity-color: rgb(54, 136, 0);
+  --rarity-color: #4ade80;
 }
 
 .rarity_rare {
-  --rarity-color: rgba(0, 112, 221, 1);
+  --rarity-color: #60a5fa;
 }
 
 .rarity_epic {
-  --rarity-color: rgba(163, 53, 238, 1);
+  --rarity-color: #c084fc;
 }
 
 .rarity_legendary {
-  --rarity-color: rgba(255, 128, 0, 1);
+  --rarity-color: #ff8c42;
 }
 
 /* Apply rarity color to text (item names) */

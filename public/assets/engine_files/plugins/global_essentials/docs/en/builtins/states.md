@@ -13,9 +13,11 @@ All built-in game states you can read and write using `game.getState()` and `gam
 | `popup_state` | `null` | Active popup state |
 | `progression_state` | `null` | Side panel tab (quests, character, gallery) |
 | `progression_sub_state` | `null` | Character sheet sub-tab |
+| `suppress_character_progression` | `false` | When true, clicking a character in the character list only updates `selected_character` and skips opening the progression overlay. Use when the game renders the character sheet elsewhere (e.g., a side panel) and doesn't want the full-page overlay on every click. |
 | `gallery_tab` | `"characters"` | Active gallery tab |
 | `show_character_list` | `true` | Whether to show party character list |
 | `disable_ui` | `false` | Disable all UI interactions |
+| `block_scene_advance` | `false` | Block scene advancement clicks/keys without disabling UI |
 | `block_party_inventory` | `false` | Block access to party inventory |
 
 ---

@@ -134,10 +134,32 @@ export class InitSystem {
         }
         //coreSystem.stateLoading.value = false;
 
-        this.game.dungeonSystem.enterDungeon(
-            coreSystem.mergedManifest.starting_dungeon_id!,
-            coreSystem.mergedManifest.starting_dungeon_room_id!
-        );
+        const startingDungeonId = coreSystem.mergedManifest.starting_dungeon_id;
+        const startingRoomId = coreSystem.mergedManifest.starting_dungeon_room_id;
+
+        if (!startingDungeonId || !startingRoomId) {
+            gameLogger.error(
+                `Missing starting dungeon configuration. ` +
+                `starting_dungeon_id: '${startingDungeonId || '(not set)'}', ` +
+                `starting_dungeon_room_id: '${startingRoomId || '(not set)'}'. ` +
+                `Set these in the engine editor via Manifest settings.`
+            );
+            return;
+        }
+
+        const dungeonExists = this.game.dungeonSystem.dungeonLines.has(startingDungeonId);
+        if (!dungeonExists) {
+            gameLogger.error(`Starting dungeon '${startingDungeonId}' not found. Check that the dungeon ID in Manifest matches an existing dungeon.`);
+            return;
+        }
+
+        const roomExists = this.game.dungeonSystem.dungeonRooms.get(startingDungeonId)?.has(startingRoomId);
+        if (!roomExists) {
+            gameLogger.error(`Starting room '${startingRoomId}' not found in dungeon '${startingDungeonId}'. Check that the room ID in Manifest matches an existing room.`);
+            return;
+        }
+
+        this.game.dungeonSystem.enterDungeon(startingDungeonId, startingRoomId);
 
         // add default characters to party. Moved to global.createDefaultEntities()
         /*
@@ -182,10 +204,12 @@ export class InitSystem {
      */
     private registerStates(): void {
         this.game.registerState('disable_ui', false);
+        this.game.registerState('block_scene_advance', false);
         this.game.registerState('block_party_inventory', false);
         this.game.registerState('show_character_list', true);
         this.game.registerState('progression_state', null);
         this.game.registerState('progression_sub_state', null);
+        this.game.registerState('suppress_character_progression', false);
         this.game.registerState('gallery_tab', 'characters');
         this.game.registerState('game_state', '');
         this.game.registerState('map_zoom_factor', 1);

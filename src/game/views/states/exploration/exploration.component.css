@@ -4,7 +4,12 @@
   user-select: none;
   width: 100%;
   height: 100vh;
+  height: 100dvh;
   background: black;
+}
+
+.game-map-container.pan-enabled {
+  touch-action: none;
 }
 
 .game-map-container.grabbing {
@@ -119,6 +124,7 @@
 
 .map_block {
   height: 100vh;
+  height: 100dvh;
   width: 110%;
 }
 
@@ -294,6 +300,7 @@
 
   overflow: auto;
   max-height: 35vh;
+  max-height: 35dvh;
 
   /*background: url("../../../assets/img/handmadepaper.png") repeat;*/
 }

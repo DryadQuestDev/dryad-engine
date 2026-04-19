@@ -52,10 +52,10 @@ function toggleProgression() {
 </template>
 
 <style scoped>
+/* Base .ui-icon styling (size, margin, cursor, mobile scale-up) lives in
+   src/style.css so the same rules apply to icons rendered by plugin / sibling
+   components that use the shared class. */
 .ui-icon {
-  margin-right: 5px;
-  font-size: 2.2rem;
-  cursor: pointer;
   transition: transform 0.3s ease-in-out;
 }
 
@@ -68,5 +68,14 @@ function toggleProgression() {
   background: rgba(0, 0, 0, 0.5);
   width: fit-content;
   color: white;
+}
+
+/* Lift the tray off the viewport edge on touch devices so iOS home indicator
+   and Android gesture bar don't eat the hit area. */
+@media (pointer: coarse) {
+  .ui-container:deep() {
+    margin-bottom: 12px;
+    padding: 4px 6px;
+  }
 }
 </style>

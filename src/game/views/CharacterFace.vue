@@ -34,6 +34,8 @@ const DEBUG_MODE = false;
 const hasFaceStatic = computed(() => !!props.character?.getTrait('face_static'));
 const faceStaticPath = computed(() => props.character?.getTrait('face_static'));
 
+const hasAnyArt = computed(() => !!props.character?.hasArt());
+
 // Use static face when:
 // 1. staticFaceForce + spine character: forced static to avoid expensive spine rendering (logs, sidebar)
 // 2. face_static_precedence trait is true: per-character opt-in to prefer face_static over crop
@@ -63,14 +65,19 @@ const nameFontSize = computed(() => Math.max(9, sizeNum.value * 0.13) + 'px');
 const nameMaxWidth = computed(() => sizeNum.value * 1.2 + 'px');
 // Stable badge height so it doesn't shrink when v-fit reduces font-size
 const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) + 'px');
+// Centered no-art name scales with circle size, independent of parent font-size
+const centerFontSize = computed(() => Math.max(10, sizeNum.value * 0.14) + 'px');
 
 </script>
 
 <template>
   <div class="character-face-wrapper" v-if="character && !noWrapper">
     <div class="character-face">
+      <!-- No art: render name centered inside the circle -->
+      <div v-if="!hasAnyArt" class="character-face-name-center">{{ characterName }}</div>
+
       <!-- Static face image if available -->
-      <img v-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
+      <img v-else-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
 
       <!-- Fallback to CharacterDoll if no static face -->
       <div v-else class="character-face-doll-container">
@@ -82,18 +89,19 @@ const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) +
       <CustomComponentContainer v-if="overlaySlot" :slot="overlaySlot" :context="{ character }" />
 
       <!-- Overlay name (inside face bounds) -->
-      <div v-if="showName && (nameStyle ?? 'badge') === 'overlay'" v-fit class="character-face-name-overlay">{{
+      <div v-if="hasAnyArt && showName && (nameStyle ?? 'badge') === 'overlay'" v-fit class="character-face-name-overlay">{{
         characterName }}</div>
     </div>
 
     <!-- Badge name (below face, default) -->
-    <div v-if="showName && (nameStyle ?? 'badge') === 'badge'" v-fit class="character-face-name">{{ characterName }}
+    <div v-if="hasAnyArt && showName && (nameStyle ?? 'badge') === 'badge'" v-fit class="character-face-name">{{ characterName }}
     </div>
   </div>
 
   <!-- No-wrapper mode: just the face, no column layout -->
   <div class="character-face" v-else-if="character && noWrapper">
-    <img v-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
+    <div v-if="!hasAnyArt" v-fit class="character-face-name-center">{{ characterName }}</div>
+    <img v-else-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
     <div v-else class="character-face-doll-container">
       <CharacterDoll :character="character" />
     </div>
@@ -138,6 +146,22 @@ const nameMinHeight = computed(() => (Math.max(9, sizeNum.value * 0.13) * 1.6) +
   justify-content: center;
   outline: 2px solid rgba(255, 255, 255, 0.3);
   color: white;
+}
+
+.character-face-name-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0.5em;
+  font-size: v-bind(centerFontSize);
+  font-weight: 500;
+  color: white;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.15;
 }
 
 .character-face-name-overlay {

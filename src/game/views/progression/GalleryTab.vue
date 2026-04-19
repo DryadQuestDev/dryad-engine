@@ -884,15 +884,19 @@ onMounted(() => {
 
 .gallery-type-tab {
   flex: 1;
-  padding: 10px;
+  padding: 8px 4px;
   text-align: center;
   border-radius: 5px;
   cursor: pointer;
   transition: all 0.3s;
+  font-size: 14px;
   font-weight: 500;
   background: rgba(0, 0, 0, 0.4);
   color: white;
   border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .gallery-type-tab:hover {
@@ -1070,6 +1074,7 @@ onMounted(() => {
 :deep(.p-floatlabel label) {
   color: rgba(255, 255, 255, 0.7) !important;
   background: transparent !important;
+  font-size: 14px;
 }
 
 :deep(.p-floatlabel:has(.p-focus) label),
@@ -1088,6 +1093,10 @@ onMounted(() => {
   color: white !important;
   transition: all 0.3s ease !important;
   min-width: 109px;
+}
+
+.tweak-field :deep(.p-multiselect) {
+  font-size: 14px;
 }
 
 .tweak-field :deep(.p-select:hover),
@@ -1327,7 +1336,9 @@ onMounted(() => {
   top: 0;
   left: 0;
   width: 100vw;
+  width: 100dvw;
   height: 100vh;
+  height: 100dvh;
   background-image: url('/assets/engine_assets/textures/green_cup.png');
   background-size: 256px 256px;
   background-repeat: repeat;

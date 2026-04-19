@@ -235,7 +235,7 @@ game.registerCustomComponent({
 
 These systems work together to make your game extensible:
 
-1. **Events** notify you when things happen
+1. **Event Emitters** notify you when things happen
 2. **States** control what the UI shows
 3. **Actions** execute game logic
 4. **Conditions** gate content based on game state

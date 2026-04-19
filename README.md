@@ -79,3 +79,6 @@ See [LICENSE.md](LICENSE.md) for details.
 ## Status
 
 Dryad Engine is in active development. Expect breaking changes until v1.0.
+
+
+Public repo updates per major release – see the [changelog](https://dryadengine.com/changelog) for detailed patch notes. Daily development happens privately on gitgud due to NSFW content.

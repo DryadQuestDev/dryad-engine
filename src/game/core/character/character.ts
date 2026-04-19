@@ -513,6 +513,14 @@ export class Character {
     return this.spineViews.has('');
   }
 
+  /** Whether this character has any renderable art (static face, spine, or skin layers). */
+  public hasArt(): boolean {
+    if (this.getTrait('face_static')) return true;
+    if (this.isSpineCharacter()) return true;
+    if (this.skinLayers.size > 0) return true;
+    return false;
+  }
+
   /** Get the default spine config (no view). Returns null if not defined. */
   public getDefaultSpine(): { atlas: string, skeleton: string, animation: string } | null {
     return this.spineViews.get('') || null;

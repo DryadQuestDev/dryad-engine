@@ -34,4 +34,11 @@ const togglePopup = () => {
 .toolbar-item:hover {
   transform: scale(1.1);
 }
+
+@media (pointer: coarse) {
+  .toolbar-item {
+    width: 44px;
+    height: 44px;
+  }
+}
 </style>

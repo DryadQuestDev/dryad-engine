@@ -135,6 +135,7 @@ function handleDragStart(event: DragEvent) {
     }" :draggable="!disabled" @click="handleClick" @dragstart="handleDragStart" @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave">
       <img v-if="icon" :src="icon" :alt="name" class="item-icon" v-persist />
+      <span v-else class="item-name-fallback">{{ name }}</span>
 
       <!-- Durability indicator on the left side -->
       <span v-if="durability !== null" class="item-durability">
@@ -188,6 +189,20 @@ function handleDragStart(event: DragEvent) {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  pointer-events: none;
+}
+
+.item-name-fallback {
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--rarity-color, #fff);
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: hidden;
   pointer-events: none;
 }
 

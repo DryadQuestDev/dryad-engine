@@ -282,6 +282,8 @@ Displays equipped item slots for a character. Shows all item slots with their eq
 
 **Props:**
 - `character` (Character, required) - The character whose equipped items to display
+- `disabled` (boolean, optional) - Disables item click/drag while keeping hover tooltips
+- `layout` (string, optional) - `'doll'` (default) positions slots over a character portrait via each slot's `x`/`y` coordinates. `'row'` renders a flex row of slots (no positioning) — use this in text-based dungeons or in sheet headers where there is no portrait.
 
 ---
 

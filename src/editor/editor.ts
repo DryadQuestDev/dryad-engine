@@ -164,7 +164,8 @@ export class Editor {
     //this.loadState(); // we need to load the state again after initializing the plugins
 
     await this.loadGames();
-    await this.setGame(this.state.selectedGame ?? '', true);
+    const gameToSelect = this.state.selectedGame || this.games[0]?.id || '';
+    await this.setGame(gameToSelect, true);
     //await this.loadGames();
     //await this.loadActiveObject();
     //await this.loadDungeons();
@@ -436,7 +437,7 @@ export class Editor {
 
     await this.loadMods();
     if (onLoad) {
-      await this.setMod(this.state.selectedMod ?? '');
+      await this.setMod(this.state.selectedMod || this.mods[0]?.id || '');
     } else {
       await this.setMod(this.mods[0].id);
     }
@@ -1075,6 +1076,12 @@ export class Editor {
       this.clearFileCache();
     }
 
+    if (this.create && this.global.isWebSite) {
+      this.global.addNotification('Creating content is not available in the web demo. Download the app to edit games.');
+      this.create = null;
+      return;
+    }
+
     switch (this.create) {
       case 'game':
         await this.createGame();
@@ -1108,6 +1115,11 @@ export class Editor {
             }
           }
         }
+      }
+
+      if (this.global.isWebSite) {
+        this.global.addNotification('Saving is not available in the web demo. Download the app to edit games.');
+        return;
       }
 
       console.log(`[Editor] Saving tab: ${this.secondaryTab}`);
@@ -1310,6 +1322,11 @@ export class Editor {
   }
 
   async createGameFromTemplate(templateId: string, gameId: string, gameName: string, author: string, dungeonId: string): Promise<boolean> {
+    if (this.global.isWebSite) {
+      this.global.addNotification('Creating content is not available in the web demo. Download the app to edit games.');
+      return false;
+    }
+
     try {
       // Check if game already exists
       const exists = await this.global.pathExists(`games_files/${gameId}`);
@@ -1339,6 +1356,13 @@ export class Editor {
       manifest.starting_dungeon_id = dungeonId;
       manifest.version = '0.1.0';
 
+      // Rewrite manifest script/css paths: template-rooted → new game's games_assets location
+      const oldAssetPrefix = `assets/engine_files/examples/${templateId}/`;
+      const newAssetPrefix = `assets/games_assets/${gameId}/`;
+      const rewriteAssetPath = (p: string) => p.startsWith(oldAssetPrefix) ? newAssetPrefix + p.slice(oldAssetPrefix.length) : p;
+      if (Array.isArray(manifest.scripts)) manifest.scripts = manifest.scripts.map(rewriteAssetPath);
+      if (Array.isArray(manifest.css)) manifest.css = manifest.css.map(rewriteAssetPath);
+
       await this.global.writeJson(manifestPath, manifest);
 
       // Rename dungeon folder if needed
@@ -1366,6 +1390,15 @@ export class Editor {
 
       // Create empty assets folder
       await this.global.createDir(`games_assets/${gameId}/_core`);
+
+      // Move scripts/ and css/ out of games_files into games_assets (matches production convention)
+      for (const folder of ['scripts', 'css']) {
+        const src = `games_files/${gameId}/_core/${folder}`;
+        if (await this.global.pathExists(src)) {
+          await this.global.copyDir(src, `games_assets/${gameId}/_core/${folder}`);
+          await this.global.deleteFile(src, true);
+        }
+      }
 
       // Update dev_settings with correct asset_folders
       const devSettingsPath = `games_files/${gameId}/_core/dev/dev_settings.json`;
@@ -2172,6 +2205,11 @@ export class Editor {
 
     if (!this.activeObject.value || !Array.isArray(this.activeObject.value)) {
       console.warn("[Editor] Nothing to save or invalid data");
+      return;
+    }
+
+    if (this.global.isWebSite) {
+      this.global.addNotification('Saving is not available in the web demo. Download the app to edit games.');
       return;
     }
 

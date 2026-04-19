@@ -213,7 +213,7 @@ function isGoalCompleted(goalId: string): boolean {
 
 .quest-list-header h2 {
   margin: 0 0 10px 0;
-  font-size: 1.5rem;
+  font-size: 1.5em;
   color: #d4af37;
 }
 

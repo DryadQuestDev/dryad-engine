@@ -3,7 +3,6 @@
 The `game.getData()` method provides access to the raw data defined in the engine editor. Use it when you need to reference editor-defined data for custom logic.
 
 **Note:** By default, returns a deep copy of the data. You can safely modify the returned data without affecting the source.
-
 ---
 
 ## API Reference
@@ -143,5 +142,43 @@ const health = stats.get("health");
 
 if (health.is_resource) {
   console.log("Health is a resource stat");
+}
+```
+
+---
+
+## Manifest
+
+`manifest.json` is a structural file (game id, name, author, version, etc.) and is intentionally **not** accessible via `getData()` — it isn't moddable. Use the dedicated accessors:
+
+### getManifest()
+
+Returns the current game's manifest object. Read-only.
+
+```js
+const manifest = game.getManifest();
+console.log(manifest.id);          // "my_game"
+console.log(manifest.name);        // "My game"
+console.log(manifest.author);      // "dev99"
+console.log(manifest.version);     // "1.0.0"
+console.log(manifest.description); // "..."
+```
+
+### getId()
+
+Shorthand for `getManifest().id`. Useful for building API paths or referencing the current game.
+
+```js
+fetch(`/api/games/${game.getId()}/status`);
+```
+
+### getMods()
+
+Returns an array of active mod manifests (in load order). Empty if no mods are loaded.
+
+```js
+const mods = game.getMods();
+if (mods.length) {
+  console.log('Loaded mods:', mods.map(m => `${m.name} v${m.version}`).join(', '));
 }
 ```

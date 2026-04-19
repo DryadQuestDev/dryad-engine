@@ -1024,7 +1024,9 @@ onUnmounted(() => {
   top: 0;
   left: 0;
   width: 100vw;
+  width: 100dvw;
   height: 100vh;
+  height: 100dvh;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
@@ -1033,8 +1035,10 @@ onUnmounted(() => {
 
 .docs-container-content {
   width: 80vw;
+  width: 80dvw;
   max-width: 1200px;
   height: 90vh;
+  height: 90dvh;
   background-color: #ffffff;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -1182,6 +1186,7 @@ onUnmounted(() => {
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   max-height: 60vh;
+  max-height: 60dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;

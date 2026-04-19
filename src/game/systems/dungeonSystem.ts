@@ -536,6 +536,7 @@ export class DungeonSystem {
     this.activeDungeonId.value = dungeonUsedId;
 
     let { output, actions } = this.game.logicSystem.resolveString(line.val, true);
+    output = this.game.logicSystem.resolveTalkingCharacter(output);
 
     // If paragraph resolved to empty (e.g. inline if{} produced no text), skip to next paragraph
     if (!output.trim() && Object.keys(actions).length === 0) {

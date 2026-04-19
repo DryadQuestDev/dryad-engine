@@ -164,12 +164,12 @@ const resolvedDescription = computed(() => {
 }
 
 .stats-section h3 {
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 0.75em 0;
   color: #42b983;
-  font-size: 1.1rem;
+  font-size: 1.1em;
   font-weight: bold;
   border-bottom: 1px solid #555;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.5em;
 }
 
 /* Stat/Resource Popup */

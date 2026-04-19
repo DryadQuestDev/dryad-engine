@@ -13,7 +13,9 @@ function toggleCharacterList() {
 function clickCharacter(character: Character) {
   game.setState('selected_character', character.id);
   // Sticky state is now managed by useItemPopup composable and will reset when character changes
-  game.setState('progression_state', 'character');
+  if (!game.getState<boolean>('suppress_character_progression')) {
+    game.setState('progression_state', 'character');
+  }
 }
 
 // GSAP Animation hooks for character list items
@@ -70,10 +72,10 @@ function onLeave(el: Element, done: () => void) {
 </template>
 
 <style scoped>
+/* Base .ui-icon styling (size, margin, cursor, mobile scale-up) lives in
+   src/style.css. Only the characters-icon–specific active/inactive fade stays
+   here. */
 .ui-icon.characters-icon {
-  margin-right: 5px;
-  font-size: 2.2rem;
-  cursor: pointer;
   transition: opacity 0.3s ease-in-out, filter 0.3s ease-in-out;
 }
 
@@ -86,8 +88,10 @@ function onLeave(el: Element, done: () => void) {
   padding: 10px 10px 20px 10px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 16px;
   max-height: 95vh;
+  max-height: 95dvh;
   overflow: auto;
 }
 

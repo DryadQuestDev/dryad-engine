@@ -9,5 +9,11 @@
   "version": "0.0.1",
   "description": "<p>Template game.</p>",
   "starting_dungeon_room_id": "main",
-  "starting_dungeon_id": "template"
+  "starting_dungeon_id": "template",
+  "scripts": [
+    "assets/engine_files/examples/template_vn_based/_core/scripts/main.mjs"
+  ],
+  "css": [
+    "assets/engine_files/examples/template_vn_based/_core/css/main.css"
+  ]
 }

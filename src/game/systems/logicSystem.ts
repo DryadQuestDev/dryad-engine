@@ -432,9 +432,6 @@ export class LogicSystem {
         let { resultString, resultActions } = this.resolveTextActions(output, noExecuteActions);
         output = resultString;
 
-        // resolve talking character ane: blah blah
-        output = this.resolveTalkingCharacter(output);
-
         // bold * and italic **
         output = this.resolveTextStyles(output);
 
@@ -465,7 +462,7 @@ export class LogicSystem {
         });
     }
 
-    private resolveTalkingCharacter(text: string): string {
+    public resolveTalkingCharacter(text: string): string {
         const pattern = /^(\w+):\s*(.*)$/;
         const match = text.match(pattern);
 

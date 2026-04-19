@@ -1,4 +1,4 @@
-import { ref, computed, watch, provide } from 'vue';
+import { ref, computed, watch, provide, onMounted, onUnmounted } from 'vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { Game } from '../../game';
 import { Item } from '../../core/character/item';
@@ -174,6 +174,30 @@ export function useItemPopup(
       hoveredItemSlotRef.value = null;
     }
   }
+
+  // Clicking outside both the item slots and the popup deselects the sticky item.
+  // Slot clicks bubble to this listener too, but are ignored (the slot's own click
+  // handler manages toggling/switching). Popup clicks are ignored so ItemChoices
+  // buttons still work.
+  function handleDocumentClick(e: MouseEvent) {
+    if (stickyItemUid.value === null) return;
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('.item-slot-wrapper')) return;
+    if (popupContainerRef.value && popupContainerRef.value.contains(target)) return;
+
+    stickyItemUid.value = null;
+    if (hoverItemUid.value !== null) hoverItemUid.value = null;
+    currentHoveredItem.value = null;
+    hoveredItemSlotRef.value = null;
+  }
+
+  onMounted(() => {
+    document.addEventListener('click', handleDocumentClick);
+  });
+  onUnmounted(() => {
+    document.removeEventListener('click', handleDocumentClick);
+  });
 
   return {
     // Refs for positioning

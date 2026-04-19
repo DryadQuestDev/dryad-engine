@@ -5,10 +5,12 @@ import EditorScreen from './editor/views/editor-screen/EditorScreen.vue'
 import GameScreen from './game/views/GameScreen.vue'
 import MenuContainer from './global/views/MenuContainer.vue'
 import DocsViewer from './global/views/DocsViewer.vue'
+import RotatePhoneOverlay from './global/views/RotatePhoneOverlay.vue'
 import ConfirmDialog from 'primevue/confirmdialog';
 import gsap from 'gsap';
 
 import { Global } from './global/global';
+import { useMobile } from './global/composables/useMobile';
 import Gform from './global/views/forms/Gform.vue';
 import { MenuOptions } from './global/menuOptions';
 
@@ -20,6 +22,8 @@ interface NotificationItem {
 
 const global = Global.getInstance();
 await global.init();
+
+const { showRotateOverlay } = useMobile();
 
 // Check if returning to editor from game
 if (localStorage.getItem('returning_to_editor')) {
@@ -220,6 +224,8 @@ onUnmounted(() => {
 
     <!-- Global ConfirmDialog for replacing native confirm/alert -->
     <ConfirmDialog />
+
+    <RotatePhoneOverlay v-if="showRotateOverlay" />
 
   </div>
 </template>

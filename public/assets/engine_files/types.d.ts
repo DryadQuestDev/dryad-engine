@@ -359,6 +359,22 @@ interface Game {
   isSaveDisabled(): boolean;
 
   /**
+   * Returns the current game's manifest — includes id, name, author, version, description, etc.
+   * Read-only; to edit the manifest, use the engine editor.
+   * @example
+   * const manifest = game.getManifest();
+   * console.log(manifest.id, manifest.version);
+   */
+  getManifest(): { id: string; name?: string; author?: string; version?: string; description?: string; [key: string]: any };
+
+  /**
+   * Returns the current game's id. Shorthand for `getManifest().id`.
+   * @example
+   * fetch(`/api/games/${game.getId()}/status`);
+   */
+  getId(): string;
+
+  /**
    * Go to next scene or exit scene if there's no next scene.
    */
   nextScene(): void;
@@ -3497,7 +3513,7 @@ declare global {
         ItemGrid: any;
         /** Renders a single item slot with icon, quantity, durability. Props: item (Item). Emits: click, dragstart, hover */
         ItemSlot: any;
-        /** Displays equipped item slots for a character. Props: character (Character) */
+        /** Displays equipped item slots for a character. Props: character (Character), disabled? (boolean), layout? ('doll' | 'row' — default 'doll' positions slots over a portrait via x/y; 'row' renders a flex row for text-based dungeons) */
         ItemSlots: any;
         /** Displays detailed item information in a popup card. Props: item (Item) */
         ItemCard: any;

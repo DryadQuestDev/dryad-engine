@@ -71,7 +71,9 @@
 
 .grid-scroll {
   max-height: 60vh;
+  max-height: 60dvh;
   max-width: 60vw;
+  max-width: 60dvw;
   overflow: auto;
   border-radius: 8px;
 }

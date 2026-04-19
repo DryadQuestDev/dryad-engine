@@ -100,6 +100,7 @@ function handleMouseLeave() {
         :alt="item.getTrait('name')"
         class="item-icon"
       />
+      <span v-else class="item-name-fallback">{{ item.getTrait('name') || item.id }}</span>
 
       <!-- Weight indicator (bottom-left) -->
       <span v-if="weight !== null" class="item-weight">{{ weight }}</span>
@@ -127,6 +128,23 @@ function handleMouseLeave() {
 
 .item-slot {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.item-name-fallback {
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--rarity-color, #fff);
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 /* Trade Price Overlay */

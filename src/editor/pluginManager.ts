@@ -71,29 +71,24 @@ export class PluginManager {
             let label: string;
             let pluginJson: any = null;
 
-            // Try to load plugin.json from global plugins first
+            // Pick the right source before touching the network. pathExists
+            // resolves against the cached files_tree.json in web mode, so
+            // probing the global path for a game-scoped plugin no longer
+            // fires a 404 fetch (which Nuxt's dev server logs as a Vue Router
+            // "no match found" warning).
             const globalPath = `engine_files/plugins/${pluginId}/plugin.json`;
             const modPath = `${basePath}/plugins/${pluginId}/plugin.json`;
+            const isGlobal = await Global.getInstance().pathExists(globalPath);
+            const pluginJsonPath = isGlobal ? globalPath : modPath;
 
             try {
-                pluginJson = await Global.getInstance().readJson(globalPath);
-                // readJson might return null instead of throwing, check for it
-                if (!pluginJson) {
-                    throw new Error('readJson returned null');
-                }
-                console.log(`[PluginManager] Loaded ${pluginId} from global`);
-            } catch (e) {
-                // If not in global, try mod plugins
-                try {
-                    pluginJson = await Global.getInstance().readJson(modPath);
-                    if (!pluginJson) {
-                        throw new Error('readJson returned null');
-                    }
-                    console.log(`[PluginManager] Loaded ${pluginId} from mod`);
-                } catch (e2) {
-                    console.warn(`[PluginManager] Could not load plugin.json for ${pluginId} from either ${globalPath} or ${modPath}`);
-                    // Plugin.json not found, will use fallback
-                }
+                pluginJson = await Global.getInstance().readJson(pluginJsonPath);
+            } catch {
+                // readJson threw; leave pluginJson null and fall through to
+                // the warn below.
+            }
+            if (!pluginJson) {
+                console.warn(`[PluginManager] Could not load plugin.json for ${pluginId} at ${pluginJsonPath}`);
             }
 
             // Create label from plugin.json metadata or fallback

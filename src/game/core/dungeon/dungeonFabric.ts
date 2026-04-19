@@ -296,12 +296,17 @@ export class DungeonFabric {
         }
 
         for (let [id, room] of dungeon.rooms) {
+            if (!room.descriptionEncounter) {
+                gameLogger.error(`Room '${id}' in dungeon '${dungeon.id}' has no entry in content document. Synchronize content in the editor via Dungeons -> Config.`);
+                continue;
+            }
             this.initChoices(room.descriptionEncounter, choicesLines, dungeon.id);
         }
 
     }
 
     private initChoices(encounter: DungeonEncounter, choicesLines: DungeonLine[], dungeonId: string) {
+        if (!encounter) return;
         let game = Game.getInstance();
         let parts = encounter.id.split(".");
         let pattern = "^!" + parts[0] + "\." + parts[1] + "\.";

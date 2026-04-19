@@ -105,9 +105,12 @@ const shouldShowDebugPanel = computed(() => {
 <style scoped>
 .game-body {
   width: 100vw;
+  width: 100dvw;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: row;
+  font-size: v-bind("global.userSettings.value.font_size + 'px'");
 }
 
 .game-body-content {
@@ -137,7 +140,9 @@ const shouldShowDebugPanel = computed(() => {
   /*background-color: #787878a7;*/
   background-color: black;
   width: 100vw;
+  width: 100dvw;
   height: 100vh;
+  height: 100dvh;
 }
 
 

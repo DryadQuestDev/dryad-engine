@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue';
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { Inventory } from '../../core/character/inventory';
 import { Item } from '../../core/character/item';
 import { TradeContext } from '../../systems/itemSystem';
@@ -8,9 +8,11 @@ import ExchangeItemSlot from './ExchangeItemSlot.vue';
 import RecipeList from './RecipeList.vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import gsap from 'gsap';
+import { inspectMode } from './useExchangeInspect';
 
-// Hover state for item cards
+// Hover state for item cards (desktop hover + inspect-mode pin)
 const hoveredItemUid = ref<string | null>(null);
+const pinnedItemUid = ref<string | null>(null);
 const referenceElement = ref<HTMLElement | null>(null);
 const floatingElement = ref<HTMLElement | null>(null);
 
@@ -74,11 +76,29 @@ const availableSlotsInfo = computed(() => {
 });
 
 function handleItemClick(item: Item, event: MouseEvent) {
+  // In inspect mode, pin the info popup instead of buying/moving
+  if (inspectMode.value) {
+    if (pinnedItemUid.value === item.uid) {
+      pinnedItemUid.value = null;
+      referenceElement.value = null;
+      return;
+    }
+    pinnedItemUid.value = item.uid;
+    hoveredItemUid.value = null;
+    const target = event.currentTarget as HTMLElement;
+    const slotWrapper = target.closest('.item-slot-wrapper') as HTMLElement | null;
+    referenceElement.value = slotWrapper || target;
+    return;
+  }
+
   if (!props.inventory || !props.targetInventory) return;
   emit('itemClick', item, props.inventory, props.targetInventory, event);
 }
 
 function handleItemHover(item: Item | null, event?: MouseEvent) {
+  // If an item is pinned (inspect mode), hover doesn't override it
+  if (pinnedItemUid.value) return;
+
   hoveredItemUid.value = item?.uid || null;
 
   if (item && event) {
@@ -88,10 +108,40 @@ function handleItemHover(item: Item | null, event?: MouseEvent) {
   }
 }
 
-// Get the currently hovered item
+// When the shared inspect toggle flips OFF, each ExchangeInventory instance
+// clears its own pinned popup. The toggle button itself now lives in the
+// parent OverlayExchange header.
+watch(inspectMode, (active) => {
+  if (!active) {
+    pinnedItemUid.value = null;
+    referenceElement.value = null;
+  }
+});
+
+function handleDocumentClick(e: MouseEvent) {
+  if (!pinnedItemUid.value) return;
+  const target = e.target as HTMLElement;
+  // Clicking another item slot → its click handler will re-pin / toggle
+  if (target.closest('.item-slot-wrapper')) return;
+  // Clicking the inspect toggle → let it handle
+  if (target.closest('.inspect-toggle')) return;
+  // Otherwise clear the pinned popup but keep inspect mode on
+  pinnedItemUid.value = null;
+  referenceElement.value = null;
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleDocumentClick);
+});
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocumentClick);
+});
+
+// Get the currently displayed item — pinned wins over hovered.
 const hoveredItem = computed(() => {
-  if (!hoveredItemUid.value) return null;
-  return visibleItems.value.find(item => item.uid === hoveredItemUid.value) || null;
+  const uid = pinnedItemUid.value || hoveredItemUid.value;
+  if (!uid) return null;
+  return visibleItems.value.find(item => item.uid === uid) || null;
 });
 
 // Watch for newly crafted items and animate them
@@ -180,7 +230,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
       :target-inventory="targetInventory" @recipe-select="emit('recipeSelect', $event)" />
 
     <!-- Fixed Grid Layout -->
-    <div v-if="isFixedGrid" class="inventory-grid fixed-grid">
+    <div v-if="isFixedGrid" class="inventory-grid fixed-grid" :class="{ 'inspect-active': inspectMode }">
       <template v-for="(slot, index) in gridSlots" :key="index">
         <ExchangeItemSlot v-if="slot" :item="slot" :target-inventory="targetInventory" :is-party="isParty" :mode="mode"
           :class="{ 'overflow-item': availableSlotsInfo && availableSlotsInfo.maxSize > 0 && index >= availableSlotsInfo.maxSize }"
@@ -191,7 +241,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
     </div>
 
     <!-- Dynamic Grid (unlimited inventory) -->
-    <div v-else class="inventory-grid dynamic-grid">
+    <div v-else class="inventory-grid dynamic-grid" :class="{ 'inspect-active': inspectMode }">
       <ExchangeItemSlot v-for="item in visibleItems" :key="item.uid" :item="item" :target-inventory="targetInventory"
         :is-party="isParty" :mode="mode" @click="handleItemClick(item, $event)"
         @mouseenter="handleItemHover(item, $event)" @mouseleave="handleItemHover(null)" />
@@ -237,6 +287,16 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inventory-grid.inspect-active {
+  cursor: help;
+}
+
+.inventory-grid.inspect-active .item-slot {
+  cursor: help;
 }
 
 .exchange-inventory-container h3 {
@@ -311,6 +371,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   padding: 4px;
   align-content: start;
   max-height: 40vh;
+  max-height: 40dvh;
 }
 
 .inventory-grid.fixed-grid {

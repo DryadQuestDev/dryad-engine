@@ -9,6 +9,10 @@ import ExchangeInventory from '../exchange/ExchangeInventory.vue';
 import ItemCard from '../progression/ItemCard.vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { gameLogger } from '../../utils/logger';
+import { inspectMode, toggleInspectMode } from '../exchange/useExchangeInspect';
+import { useMobile } from '../../../global/composables/useMobile';
+
+const { isMobile } = useMobile();
 
 const game = Game.getInstance();
 const global = Global.getInstance();
@@ -437,7 +441,21 @@ function close() {
   <div :id="COMPONENT_ID" class="overlay-exchange overlay-hoist">
     <div class="exchange-header">
       <h2>{{ mode === 'loot' ? 'Loot' : 'Trade' }}</h2>
-      <button class="close-button" @click="close">✕</button>
+      <div class="header-actions">
+        <button
+          v-if="isMobile"
+          type="button"
+          class="inspect-toggle"
+          :class="{ active: inspectMode }"
+          :aria-pressed="inspectMode"
+          title="Inspect mode: tap items to see details instead of buying/moving"
+          @click="toggleInspectMode"
+        >
+          <i class="pi pi-search"></i>
+          <span>Inspect</span>
+        </button>
+        <button class="close-button" @click="close">✕</button>
+      </div>
     </div>
 
     <div class="exchange-body">
@@ -534,7 +552,6 @@ function close() {
   display: flex;
   flex-direction: column;
   color: white;
-  font-size: v-bind("global.userSettings.value.font_size + 'px'");
   overflow: visible;
   box-shadow:
     0 8px 32px #c1c1c180, inset 0 1px #c3c3c35e, 0 0 0 1px #6b6b6b4d;
@@ -553,6 +570,48 @@ function close() {
   margin: 0;
   font-size: 24px;
   color: #dceb59;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspect-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.inspect-toggle i {
+  font-size: 0.95em;
+}
+
+.inspect-toggle:hover {
+  background: rgba(66, 185, 131, 0.15);
+  border-color: rgba(66, 185, 131, 0.5);
+  color: #fff;
+}
+
+.inspect-toggle.active {
+  background: linear-gradient(135deg, #42b983 0%, #2a9060 100%);
+  border-color: #42b983;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(66, 185, 131, 0.45);
+}
+
+.inspect-toggle.active:hover {
+  background: linear-gradient(135deg, #4dc690 0%, #2fa06c 100%);
 }
 
 .close-button {

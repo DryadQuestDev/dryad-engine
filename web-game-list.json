@@ -3,5 +3,10 @@
     "id": "tutorial",
     "source": "production/dryad-engine-linux/assets",
     "mods": ["_core", "lewd"]
+  },
+    {
+    "id": "sin_cradle_isekai",
+    "source": "production/dryad-engine-linux/assets",
+    "mods": ["_core"]
   }
 ]

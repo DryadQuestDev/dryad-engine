@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { Game } from '../game';
 import { DungeonEncounter } from '../core/dungeon/dungeonEncounter';
+import TextMap from './TextMap.vue';
 
 const game = Game.getInstance();
+
+const isFullMapOpen = ref(false);
+
+function openFullMap() {
+  isFullMapOpen.value = true;
+}
+
+function closeFullMap() {
+  isFullMapOpen.value = false;
+}
 
 // Get all encounters for current room including description
 const allEncounters = computed(() => {
@@ -59,19 +70,23 @@ function navigateToNeighbor(neighborRoom: any) {
 
 <template>
   <div class="text-dungeon-layout">
-    <!-- Direction arrows for room navigation -->
-    <div class="direction-arrows">
-      <template v-for="neighbor in game.dungeonSystem.currentRoom.value?.neighborsWithDirection" :key="neighbor.angle">
-        <div class="direction-arrow" :style="{ '--rotation': neighbor.angle + 'deg' }"
-          @click.stop="navigateToNeighbor(neighbor)">
-        </div>
-      </template>
-    </div>
-
     <div class="text-dungeon-content">
       <!-- All encounters (including description) with their content and choices -->
       <div v-for="(encounter, index) in allEncounters" :key="encounter.id" class="text-dungeon-encounter"
         :class="{ 'first-encounter': index === 0 }">
+        <!-- Direction arrows: floated left inside description encounter so text wraps around -->
+        <div v-if="encounter === game.dungeonSystem.currentRoom.value?.descriptionEncounter"
+          class="direction-arrows embedded-direction-arrows">
+          <template v-for="neighbor in game.dungeonSystem.currentRoom.value?.neighborsWithDirection"
+            :key="neighbor.angle">
+            <div class="direction-arrow" :style="{ '--rotation': neighbor.angle + 'deg' }"
+              @click.stop="navigateToNeighbor(neighbor)">
+            </div>
+          </template>
+        </div>
+        <!-- Mini map floated right inside the description encounter so its text + choices wrap around it -->
+        <TextMap v-if="encounter === game.dungeonSystem.currentRoom.value?.descriptionEncounter" mode="mini"
+          class="embedded-mini-map" @openFullMap="openFullMap" @closeFullMap="closeFullMap" />
         <div class="text-dungeon-encounter-content" v-html="getEncounterContent(encounter)"></div>
         <div v-if="getEncounterVisibleChoices(encounter).length > 0" class="text-dungeon-encounter-choices">
           <div v-for="choice in getEncounterVisibleChoices(encounter)" :key="choice.id" class="text-dungeon-choice"
@@ -81,30 +96,36 @@ function navigateToNeighbor(neighborRoom: any) {
         </div>
       </div>
     </div>
+
+    <!-- Full map modal -->
+    <Teleport to="body">
+      <div v-if="isFullMapOpen" class="full-map-overlay" @click.self="closeFullMap">
+        <TextMap mode="full" @openFullMap="openFullMap" @closeFullMap="closeFullMap" />
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .text-dungeon-layout {
-  display: flex;
-  gap: 15px;
-  align-items: flex-start;
+  display: block;
 }
 
 .text-dungeon-content {
-  flex: 1;
+  width: 100%;
 }
 
 .text-dungeon-encounter {
-  margin-top: 1.5em;
-  padding-top: 1em;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
 }
 
 .text-dungeon-encounter.first-encounter {
   margin-top: 0;
-  padding-top: 0;
-  border-top: none;
+  min-height: 250px;
 }
 
 .text-dungeon-encounter-content {
@@ -135,5 +156,34 @@ function navigateToNeighbor(neighborRoom: any) {
 .text-dungeon-choice.unavailable {
   color: red;
   pointer-events: none;
+}
+
+/* Direction arrows floated left inside the description encounter so prose wraps around them */
+.embedded-direction-arrows {
+  float: left;
+  margin: 0 16px 12px 0;
+  shape-outside: margin-box;
+}
+
+/* Mini map floated right inside the description encounter so prose wraps around it */
+.embedded-mini-map {
+  float: right;
+  width: 220px;
+  margin: 0 0 12px 16px;
+  shape-outside: margin-box;
+}
+
+/* Full map modal overlay (teleported to body) */
+.full-map-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
 }
 </style>

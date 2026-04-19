@@ -36,37 +36,53 @@ const startY = ref(0);
 const scrollLeftStart = ref(0);
 const scrollTopStart = ref(0);
 
-const handleMouseDown = (event: MouseEvent) => {
+// Threshold-based capture: only claim the pointer after the user has moved past
+// DRAG_THRESHOLD. Below that, events flow naturally so clicks on encounters and
+// other child elements keep working.
+const DRAG_THRESHOLD = 5;
+const isActivelyDragging = ref(false);
+
+const handlePointerDown = (event: PointerEvent) => {
   if (!game.dungeonSystem.gameMapContainer.value || dungeon.value?.dungeon_type === 'screen') return;
   isDragging.value = true;
+  isActivelyDragging.value = false;
   startX.value = event.pageX - game.dungeonSystem.gameMapContainer.value.offsetLeft;
   startY.value = event.pageY - game.dungeonSystem.gameMapContainer.value.offsetTop;
   scrollLeftStart.value = game.dungeonSystem.gameMapContainer.value.scrollLeft;
   scrollTopStart.value = game.dungeonSystem.gameMapContainer.value.scrollTop;
-  game.dungeonSystem.gameMapContainer.value.style.cursor = 'grabbing';
 };
 
-const handleMouseMove = (event: MouseEvent) => {
+const handlePointerMove = (event: PointerEvent) => {
   if (!isDragging.value || !game.dungeonSystem.gameMapContainer.value || dungeon.value?.dungeon_type === 'screen') return;
-  event.preventDefault();
   const x = event.pageX - game.dungeonSystem.gameMapContainer.value.offsetLeft;
   const y = event.pageY - game.dungeonSystem.gameMapContainer.value.offsetTop;
-  const walkX = (x - startX.value) * 1.2; // Multiply by a factor for faster scrolling if needed
-  const walkY = (y - startY.value) * 1.2;
+  const dx = x - startX.value;
+  const dy = y - startY.value;
+
+  if (!isActivelyDragging.value) {
+    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+    isActivelyDragging.value = true;
+    game.dungeonSystem.gameMapContainer.value.style.cursor = 'grabbing';
+    try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); } catch {}
+  }
+
+  const walkX = dx * 1.2; // Multiply by a factor for faster scrolling if needed
+  const walkY = dy * 1.2;
   game.dungeonSystem.gameMapContainer.value.scrollLeft = scrollLeftStart.value - walkX;
   game.dungeonSystem.gameMapContainer.value.scrollTop = scrollTopStart.value - walkY;
 };
 
-const handleMouseUp = () => {
+const handlePointerUp = (event: PointerEvent) => {
   if (!game.dungeonSystem.gameMapContainer.value) return;
   isDragging.value = false;
+  if (isActivelyDragging.value) {
+    try { (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId); } catch {}
+    isActivelyDragging.value = false;
+  }
 };
 
-const handleMouseLeave = () => {
-  if (!game.dungeonSystem.gameMapContainer.value) return;
-  if (isDragging.value) {
-    isDragging.value = false;
-  }
+const handlePointerCancel = (event: PointerEvent) => {
+  handlePointerUp(event);
 };
 
 const handleMouseWheel = (event: WheelEvent) => {
@@ -362,8 +378,9 @@ const isMapInteractive = computed(() => {
 
 
   <div :id="COMPONENT_ID" :ref="el => game.dungeonSystem.gameMapContainer.value = el as HTMLElement"
-    class="game-map-container" v-if="dungeon && !isHideMap" @mousedown="handleMouseDown" @mousemove="handleMouseMove"
-    @mouseup="handleMouseUp" @mouseleave="handleMouseLeave" @wheel="handleMouseWheel" @click="handleMapClick"
+    class="game-map-container" :class="{ 'pan-enabled': dungeon?.dungeon_type !== 'screen' }" v-if="dungeon && !isHideMap"
+    @pointerdown="handlePointerDown" @pointermove="handlePointerMove" @pointerup="handlePointerUp"
+    @pointercancel="handlePointerCancel" @wheel="handleMouseWheel" @click="handleMapClick"
     :style="{ cursor: isDragging ? 'grabbing' : 'default' }">
     <div id="main-wrapper" ref="mainWrapperRef"
       :class="dungeon.dungeon_type === 'screen' ? 'screen-area' : 'map-wrapper-container'" :style="{

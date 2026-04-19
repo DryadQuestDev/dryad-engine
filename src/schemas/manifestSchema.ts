@@ -17,7 +17,7 @@ export const ManifestSchema = {
   cover_assets: { type: 'file[]', fileType: 'asset', tooltip: 'Cover images or videos displayed on the game/mod selection screen.' },
   scripts: { type: 'file[]', fileType: 'js', tooltip: 'JavaScript files to load and execute for this game/mod. \n Note: It is strongly recommended to use .mjs extension for better IDE support.' },
   css: { type: 'file[]', fileType: 'css', tooltip: 'CSS stylesheets to load for this game/mod.' },
-  nsfw: { type: 'boolean', tooltip: 'Whether the game/mod is NSFW.', defaultValue: false, show: { never: [true] } }
+  nsfw: { type: 'boolean', tooltip: 'Whether the game/mod is NSFW(only for website).', defaultValue: false, }
 } satisfies Schema;
 
 export type ManifestObject = SchemaToType<typeof ManifestSchema>;

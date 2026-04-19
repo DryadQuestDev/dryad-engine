@@ -93,6 +93,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   border: none;
   padding: 0 1rem;
   margin: 0;
+  background: none;
 }
 
 .choice-list h1 {
@@ -117,7 +118,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 }
 
 .choice.visited {
-  color: #ffffff;
+  color: #d1d1d1;
   font-weight: normal;
 }
 

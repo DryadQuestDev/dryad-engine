@@ -65,8 +65,9 @@ function closeProgression() {
 
 <style scoped>
 .progression-container {
-
-  padding: 20px 20px 20px 120px;
+  /* Left padding pulls from the global --ui-tray-reserved-left var so it
+     follows the .ui-container tray width across desktop/touch. */
+  padding: 20px 20px 20px var(--ui-tray-reserved-left, 120px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   color: #f0f0f0;
   height: 100%;

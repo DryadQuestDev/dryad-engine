@@ -64,7 +64,8 @@ const capacityInfo = computed(() => {
 .inventory-header h2 {
   margin: 0;
   color: #42b983;
-  font-size: 20px;
+  font-size: 1.1em;
+  font-weight: bold;
 }
 
 .inventory-stats {
@@ -93,7 +94,7 @@ const capacityInfo = computed(() => {
 /* Responsive adjustments */
 @media (max-width: 1200px) {
   .inventory-header h2 {
-    font-size: 18px;
+    font-size: 0.9em;
   }
 
   .stat {

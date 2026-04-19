@@ -17,6 +17,7 @@ import { Item } from './core/character/item';
 import { Status } from './core/character/status';
 import { Choice } from './core/content/choice';
 import { PoolEntryObject } from '../schemas/poolEntrySchema';
+import { ManifestObject } from '../schemas/manifestSchema';
 export class Game {
 
   // ============================================
@@ -92,6 +93,21 @@ export class Game {
 
   public isSaveDisabled(): boolean {
     return this.coreSystem.isSaveDisabled();
+  }
+
+  /** Returns the current game's manifest (id, name, author, version, etc.). Read-only. */
+  public getManifest(): ManifestObject {
+    return this.coreSystem.gameManifest;
+  }
+
+  /** Returns the current game's id (shorthand for `getManifest().id`). */
+  public getId(): string {
+    return this.coreSystem.gameManifest?.id || '';
+  }
+
+  /** Returns the manifests of all active mods, in load order. Empty array if no mods are loaded. */
+  public getMods(): ManifestObject[] {
+    return this.coreSystem.modsManifests;
   }
 
   // ============================================

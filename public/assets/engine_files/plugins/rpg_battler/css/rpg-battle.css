@@ -769,7 +769,10 @@
 .rpg-battle-log {
   position: absolute;
   top: 8px;
-  left: 130px;
+  /* Sit just past the .ui-container tray — shared variable updates on touch
+     devices where icons are bigger (see --ui-tray-reserved-left in
+     src/style.css). +10px gap so the log doesn't butt up against the tray. */
+  left: calc(var(--ui-tray-reserved-left, 120px) + 10px);
   z-index: 3;
   width: 240px;
   max-height: 300px;

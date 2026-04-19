@@ -112,6 +112,33 @@
   cursor: not-allowed;
 }
 
+/* Fullscreen / Install-PWA CTA — bright attention-grabbing styling */
+.header_item.fullscreen-cta {
+  background: linear-gradient(135deg, #ffd166 0%, #ff7b00 40%, #ff3864 75%, #c026d3 100%);
+  border: 1px solid #ffae42;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 0 14px rgba(255, 123, 0, 0.7),
+    0 0 28px rgba(255, 56, 100, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.header_item.fullscreen-cta i {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.header_item.fullscreen-cta:hover:not(.disabled) {
+  transform: translateY(-2px) scale(1.04);
+  border-color: #ffd166;
+  box-shadow:
+    0 0 22px rgba(255, 123, 0, 1),
+    0 0 44px rgba(255, 56, 100, 0.55),
+    0 4px 10px rgba(0, 0, 0, 0.4);
+}
+
 /* Install button - make it prominent with green color */
 .header_item.install-button {
   background: linear-gradient(135deg, #4CAF50, #45a049);
@@ -415,22 +442,62 @@
 .play_button {
   background: linear-gradient(135deg, #10B981 0%, #059669 100%);
   color: white;
-  padding: 18px 48px;
-  text-align: center;
-  font-size: 1.4em;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  padding: 14px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  /* Don't let the column's flex layout shrink the button — keeps its natural
+     content height so wrapped long names stay visible. Column has overflow:auto,
+     so any overflow is handled by the column scrolling, not by clipping us. */
+  flex-shrink: 0;
   border-radius: 12px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease,
+              opacity 0.3s ease, filter 0.3s ease;
   margin-bottom: 15px;
   box-shadow:
     0 4px 15px rgba(16, 185, 129, 0.5),
     0 2px 8px rgba(0, 0, 0, 0.2);
   border: none;
-  text-transform: uppercase;
   position: relative;
   overflow: hidden;
+}
+
+.play_label {
+  font-size: 1.5em;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  line-height: 1;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 12px rgba(255, 255, 255, 0.15);
+}
+
+.play_game_name {
+  font-size: 1.25em;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  line-height: 1.25;
+  opacity: 0.95;
+  /* Force block + full width so flex-item min-width: auto doesn't keep the
+     span at its intrinsic content width (which would overflow and get clipped
+     by the button's overflow: hidden). min-width: 0 + overflow-wrap: anywhere
+     lets text break at arbitrary points when needed. */
+  display: block;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  padding-top: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  margin-top: 2px;
+  padding-left: 8px;
+  padding-right: 8px;
+  box-sizing: border-box;
 }
 
 .play_button::before {
@@ -568,4 +635,32 @@
   font-size: 0.85em;
   color: #e65100;
   line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .main_screen {
+    --column-width: 220px;
+  }
+
+  .main_content {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .main_header {
+    padding: 8px 12px;
+  }
+
+  .play_button {
+    padding: 10px 16px;
+  }
+
+  .play_label {
+    font-size: 1.25em;
+    letter-spacing: 2px;
+  }
+
+  .play_game_name {
+    font-size: 1.05em;
+  }
 }

@@ -83,6 +83,7 @@ watch(() => dungeonSystem.isLogsPopupOpen.value, async (isOpen) => {
   width: 90%;
   max-width: 600px;
   max-height: 80vh;
+  max-height: 80dvh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -98,7 +99,7 @@ watch(() => dungeonSystem.isLogsPopupOpen.value, async (isOpen) => {
 }
 
 .logs-title {
-  font-size: 1.2rem;
+  font-size: 1.2em;
   font-weight: bold;
   color: #fff;
 }

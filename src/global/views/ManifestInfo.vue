@@ -174,6 +174,7 @@ watch(activeIndex, async () => {
   width: 100%;
   height: auto;
   max-height: 80vh;
+  max-height: 80dvh;
   object-fit: contain;
 }
 

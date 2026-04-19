@@ -1,8 +1,8 @@
-# Dryad Engine License
+# Free for Commercial Use (Game Development License)
 
 Version 1.0
 
-Copyright (c) 2025 Nekon
+Copyright (c) 2026 Nekon
 
 ## Preamble
 

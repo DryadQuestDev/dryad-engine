@@ -53,7 +53,9 @@ const isOpen = computed(() => {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   overflow: auto;
   max-width: 90vw;
+  max-width: 90dvw;
   max-height: 90vh;
+  max-height: 90dvh;
   pointer-events: auto;
 }
 

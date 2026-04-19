@@ -117,42 +117,56 @@ function handleMapClick() {
   game.dungeonSystem.cancelPathMovement();
 }
 
-// Dragging handlers
-function handleMouseDown(event: MouseEvent) {
+// Dragging handlers (pointer events — unified mouse + touch).
+// Capture is threshold-based: we only call setPointerCapture once the user
+// actually moves past DRAG_THRESHOLD. Before threshold, events flow naturally
+// so clicks on child elements still work (taps/clicks aren't intercepted).
+const DRAG_THRESHOLD = 5;
+const isActivelyDragging = ref(false);
+
+function handlePointerDown(event: PointerEvent) {
   if (!mapContainerRef.value) return;
   isDragging.value = true;
+  isActivelyDragging.value = false;
   startX.value = event.pageX - mapContainerRef.value.offsetLeft;
   startY.value = event.pageY - mapContainerRef.value.offsetTop;
   scrollLeftStart.value = mapContainerRef.value.scrollLeft;
   scrollTopStart.value = mapContainerRef.value.scrollTop;
-  mapContainerRef.value.style.cursor = 'grabbing';
 }
 
-function handleMouseMove(event: MouseEvent) {
+function handlePointerMove(event: PointerEvent) {
   if (!isDragging.value || !mapContainerRef.value) return;
-  event.preventDefault();
   const x = event.pageX - mapContainerRef.value.offsetLeft;
   const y = event.pageY - mapContainerRef.value.offsetTop;
-  const walkX = (x - startX.value) * 1.2;
-  const walkY = (y - startY.value) * 1.2;
+  const dx = x - startX.value;
+  const dy = y - startY.value;
+
+  if (!isActivelyDragging.value) {
+    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+    isActivelyDragging.value = true;
+    mapContainerRef.value.style.cursor = 'grabbing';
+    try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); } catch {}
+  }
+
+  const walkX = dx * 1.2;
+  const walkY = dy * 1.2;
   mapContainerRef.value.scrollLeft = scrollLeftStart.value - walkX;
   mapContainerRef.value.scrollTop = scrollTopStart.value - walkY;
 }
 
-function handleMouseUp() {
+function handlePointerUp(event: PointerEvent) {
   isDragging.value = false;
   if (mapContainerRef.value) {
     mapContainerRef.value.style.cursor = 'grab';
   }
+  if (isActivelyDragging.value) {
+    try { (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId); } catch {}
+    isActivelyDragging.value = false;
+  }
 }
 
-function handleMouseLeave() {
-  if (isDragging.value) {
-    isDragging.value = false;
-    if (mapContainerRef.value) {
-      mapContainerRef.value.style.cursor = 'grab';
-    }
-  }
+function handlePointerCancel(event: PointerEvent) {
+  handlePointerUp(event);
 }
 
 // Check if map is interactive
@@ -170,6 +184,10 @@ const miniMapViewBox = computed(() => {
   <div class="text-map-wrapper" :class="mode">
     <div class="map-header">
       <span class="map-title">Map</span>
+      <button v-if="mode === 'mini'" class="logs-btn"
+        @click.stop="game.dungeonSystem.isLogsPopupOpen.value = true" title="View logs">
+        <i class="pi pi-book"></i>
+      </button>
       <button v-if="mode === 'mini'" class="expand-btn" @click="emit('openFullMap')" title="Open full map">
         <i class="pi pi-expand"></i>
       </button>
@@ -179,8 +197,8 @@ const miniMapViewBox = computed(() => {
     </div>
 
     <div ref="mapContainerRef" class="map-container" :class="{ 'draggable': mode === 'full' }"
-      @mousedown="mode === 'full' && handleMouseDown($event)" @mousemove="mode === 'full' && handleMouseMove($event)"
-      @mouseup="mode === 'full' && handleMouseUp()" @mouseleave="mode === 'full' && handleMouseLeave()"
+      @pointerdown="mode === 'full' && handlePointerDown($event)" @pointermove="mode === 'full' && handlePointerMove($event)"
+      @pointerup="mode === 'full' && handlePointerUp($event)" @pointercancel="mode === 'full' && handlePointerCancel($event)"
       :style="mode === 'full' ? { cursor: isDragging ? 'grabbing' : 'grab' } : {}">
       <!-- Mini map: shows all rooms scaled to fit -->
       <svg v-if="mode === 'mini'" class="map-svg" :viewBox="miniMapViewBox" preserveAspectRatio="xMidYMid meet"
@@ -258,15 +276,17 @@ const miniMapViewBox = computed(() => {
 
 .text-map-wrapper.full {
   width: 90vw;
+  width: 90dvw;
   height: 90vh;
+  height: 90dvh;
   max-width: 1200px;
   max-height: 800px;
 }
 
 .map-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 4px;
   padding: 6px 10px;
   background: rgba(0, 0, 0, 0.5);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -278,10 +298,12 @@ const miniMapViewBox = computed(() => {
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 1px;
+  margin-right: auto;
 }
 
 .expand-btn,
-.close-btn {
+.close-btn,
+.logs-btn {
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.6);
@@ -294,8 +316,20 @@ const miniMapViewBox = computed(() => {
 }
 
 .expand-btn:hover,
-.close-btn:hover {
+.close-btn:hover,
+.logs-btn:hover {
   color: rgba(255, 255, 255, 1);
+}
+
+/* Touch devices: bump the mini-map header buttons (View logs, expand, close)
+   to a comfortable tap target. */
+@media (pointer: coarse) {
+  .expand-btn,
+  .close-btn,
+  .logs-btn {
+    padding: 10px;
+    font-size: 1.4em;
+  }
 }
 
 .map-container {
@@ -307,6 +341,7 @@ const miniMapViewBox = computed(() => {
 .map-container.draggable {
   overflow: auto;
   cursor: grab;
+  touch-action: none;
 }
 
 .map-svg {

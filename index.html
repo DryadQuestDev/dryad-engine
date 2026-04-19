@@ -4,7 +4,29 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/x-icon" href="/assets/engine_assets/favicon.ico" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta id="viewport" name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>
+    (function () {
+      var vpMeta = document.getElementById('viewport');
+      var mq = window.matchMedia('(pointer: coarse)');
+
+      function adjustViewport() {
+        if (!mq.matches) return;
+        var sw = screen.availWidth;
+        var sh = screen.availHeight;
+        var landscapeLong = Math.max(sw, sh);
+        var landscapeShort = Math.min(sw, sh);
+        if (landscapeLong > 1366) return;
+        var scale = Math.min(landscapeShort / 700, 1);
+        vpMeta.setAttribute(
+          'content',
+          'width=device-width, initial-scale=' + scale + ', maximum-scale=1, user-scalable=no, viewport-fit=cover'
+        );
+      }
+
+      adjustViewport();
+    })();
+  </script>
   <title>Dryad Engine</title>
 </head>
 

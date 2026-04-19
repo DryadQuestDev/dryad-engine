@@ -9,7 +9,6 @@ import CharacterFace from '../CharacterFace.vue';
 import { useTypingAnimation } from '../../../composables/useTypingAnimation';
 import gsap from 'gsap';
 import TextEncounter from '../TextEncounter.vue';
-import TextMap from '../TextMap.vue';
 
 const global = Global.getInstance();
 const game = Game.getInstance();
@@ -47,6 +46,10 @@ function handleKeyPress(event: KeyboardEvent) {
     event.preventDefault();
 
     if (game.coreSystem.getState('disable_ui')) {
+      return;
+    }
+
+    if (isSceneBlocked.value) {
       return;
     }
 
@@ -94,7 +97,10 @@ onUnmounted(() => {
   window.removeEventListener('keyup', handleCtrlKeyUp);
 });
 
+const isSceneBlocked = computed(() => game.coreSystem.getState('block_scene_advance'));
+
 const showContinueIndicator = computed(() => {
+  if (isSceneBlocked.value) return false;
   const choices = game.dungeonSystem.relevantChoices.value;
   return game.dungeonSystem.choiceType.value !== 'encounter' && choices && !Array.isArray(choices);
 });
@@ -105,6 +111,10 @@ const showContinueIndicator = computed(() => {
 function handleEventClick(event: MouseEvent) {
   //console.log('handleEventClick', event);
   if (game.coreSystem.getState('disable_ui')) {
+    return;
+  }
+
+  if (isSceneBlocked.value) {
     return;
   }
 
@@ -146,6 +156,11 @@ const encounterContent = computed(() => {
 
 const characterName = computed(() => {
   return game.dungeonSystem.talkingCharacter.value?.getTrait('name') ?? '';
+});
+
+const talkingCharacterHasNoArt = computed(() => {
+  const c = game.dungeonSystem.talkingCharacter.value;
+  return !!c && !c.hasArt();
 });
 
 const characterTitleColor = computed(() => {
@@ -319,17 +334,6 @@ const isTextDungeon = computed(() => {
   return game.dungeonSystem.currentDungeon.value?.dungeon_type === 'text';
 });
 
-// Full map modal state
-const isFullMapOpen = ref(false);
-
-function openFullMap() {
-  isFullMapOpen.value = true;
-}
-
-function closeFullMap() {
-  isFullMapOpen.value = false;
-}
-
 </script>
 
 <template>
@@ -368,21 +372,34 @@ function closeFullMap() {
         </div>
       </div>
 
-      <!-- Text dungeon layout: content + map side by side -->
+      <!-- Text dungeon layout: side column (left, fixed 500px) + content (right, flex, max 800px) -->
       <div v-if="isTextDungeon && !game.dungeonSystem.toolbarMinimized.value && !isDialogueCollapsed"
         class="text-dungeon-layout">
-        <div class="event-container"
-          :class="{ 'clickable': !Array.isArray(game.dungeonSystem.relevantChoices.value), 'text-selectable': isTextSelectable }"
-          @click="handleEventClick">
-          <div class="character-section">
+        <div class="overlay-navigation-side">
+          <CustomComponentContainer :slot="'overlay-navigation-side'"
+            :context="{ dungeon: game.dungeonSystem.currentDungeon.value }" />
+        </div>
+
+        <div class="event-container" :class="{
+          'clickable': !isSceneBlocked && !Array.isArray(game.dungeonSystem.relevantChoices.value),
+          'text-selectable': isTextSelectable,
+          'dialogue-mode': !!game.dungeonSystem.currentSceneId.value
+        }" @click="handleEventClick">
+          <div v-if="game.dungeonSystem.talkingCharacter.value?.hasArt()" class="character-section">
             <CharacterFace :key="game.dungeonSystem.talkingCharacter.value?.id"
-              :character="game.dungeonSystem.talkingCharacter.value ?? undefined" />
+              :character="game.dungeonSystem.talkingCharacter.value ?? undefined" :show-name="true" />
           </div>
 
           <div class="content-wrapper">
+            <CustomComponentContainer :slot="'scene-content-top'"
+              :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
             <!-- events scenes-->
             <div v-if="game.dungeonSystem.currentSceneId.value" class="dialogue-content event-content"
-              :style="dialogueContentStyle" v-html="displayContent"></div>
+              :style="dialogueContentStyle">
+              <span v-if="talkingCharacterHasNoArt" class="inline-character-name" :style="characterNameStyle">{{
+                characterName }}: </span>
+              <span v-html="displayContent"></span>
+            </div>
             <!-- encounters-->
             <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
               <TextEncounter />
@@ -394,21 +411,15 @@ function closeFullMap() {
 
             <!-- Scene choices for text dungeons -->
             <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
+            <CustomComponentContainer :slot="'scene-content-bottom'"
+              :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
           </div>
-        </div>
-
-        <!-- Mini map for text dungeons (hide during scenes) -->
-        <div v-if="!game.dungeonSystem.currentSceneId.value" class="text-map-column">
-          <button class="logs-button" @click="game.dungeonSystem.isLogsPopupOpen.value = true" title="View logs">
-            <i class="pi pi-book"></i>
-          </button>
-          <TextMap mode="mini" @openFullMap="openFullMap" @closeFullMap="closeFullMap" />
         </div>
       </div>
 
       <!-- Regular (non-text) dungeon layout -->
       <div v-else-if="!game.dungeonSystem.toolbarMinimized.value && !isDialogueCollapsed" class="event-container"
-        :class="{ 'clickable': !Array.isArray(game.dungeonSystem.relevantChoices.value), 'text-selectable': isTextSelectable }"
+        :class="{ 'clickable': !isSceneBlocked && !Array.isArray(game.dungeonSystem.relevantChoices.value), 'text-selectable': isTextSelectable }"
         @click="handleEventClick">
         <div class="character-section">
           <CharacterFace :key="game.dungeonSystem.talkingCharacter.value?.id"
@@ -416,6 +427,8 @@ function closeFullMap() {
         </div>
 
         <div class="content-wrapper">
+          <CustomComponentContainer :slot="'scene-content-top'"
+            :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
           <!-- events scenes-->
           <div v-if="game.dungeonSystem.currentSceneId.value" class="dialogue-content event-content"
             :style="dialogueContentStyle" v-html="displayContent"></div>
@@ -441,20 +454,21 @@ function closeFullMap() {
             class="flash-content" v-html="game.dungeonSystem.cachedFlashArray.value.join('<br>')"></div>
 
           <ChoiceList v-if="!game.dungeonSystem.toolbarMinimized.value && game.coreSystem.isTextUIContent.value" />
+          <CustomComponentContainer :slot="'scene-content-bottom'"
+            :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
         </div>
       </div>
     </div>
 
-    <!-- Full map modal for text dungeons -->
-    <Teleport to="body">
-      <div v-if="!game.dungeonSystem.currentSceneId.value && isFullMapOpen" class="full-map-overlay"
-        @click.self="closeFullMap">
-        <TextMap mode="full" @openFullMap="openFullMap" @closeFullMap="closeFullMap" />
-      </div>
-    </Teleport>
+    <!-- Screen-dungeon side column: absolutely positioned on the right edge of the viewport -->
+    <div v-if="!isTextDungeon" class="overlay-navigation-side overlay-navigation-side--screen">
+      <CustomComponentContainer :slot="'overlay-navigation-side'"
+        :context="{ dungeon: game.dungeonSystem.currentDungeon.value }" />
+    </div>
 
     <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ dungeon: game.dungeonSystem.currentDungeon.value, choices: game.dungeonSystem.relevantChoices.value }" />
+    <CustomComponentContainer :slot="COMPONENT_ID"
+      :context="{ dungeon: game.dungeonSystem.currentDungeon.value, choices: game.dungeonSystem.relevantChoices.value }" />
   </div>
 
 
@@ -478,10 +492,13 @@ function closeFullMap() {
   top: 0;
   bottom: 0;
   height: 100vh;
-  width: calc(100% - 125px);
+  height: 100dvh;
+  /* Clear the .ui-container tray on the left. See --ui-tray-reserved-left
+     in src/style.css — shared with .progression-container's padding. */
+  width: calc(100% - var(--ui-tray-reserved-left, 120px));
   max-width: none;
   left: 0;
-  margin-left: 125px;
+  margin-left: var(--ui-tray-reserved-left, 120px);
   transform: none;
   display: flex;
   flex-direction: column;
@@ -519,13 +536,15 @@ function closeFullMap() {
 }
 
 .overlay.text .event-container {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 800px;
   margin: 0;
   border: none;
-  padding: 40px 0px;
-  max-width: 800px;
+  padding: 10px;
   border-radius: 0;
   height: 100%;
+  background: #2d2d2df2;
 }
 
 .content-wrapper {
@@ -562,7 +581,6 @@ function closeFullMap() {
 
 .overlay-content {
   color: white;
-  font-size: v-bind("global.userSettings.value.font_size + 'px'");
 }
 
 .dialogue-content {
@@ -588,6 +606,13 @@ function closeFullMap() {
   justify-content: space-between;
   align-items: flex-end;
   margin-bottom: -1px;
+  max-width: 800px;
+}
+
+.overlay.text .dialogue-header {
+  max-width: 800px;
+  flex: 0 0 auto;
+  margin-left: 520px;
 }
 
 .character-name {
@@ -599,6 +624,10 @@ function closeFullMap() {
   border-radius: 4px 4px 0 0;
   border-bottom: none;
   width: fit-content;
+}
+
+.inline-character-name {
+  font-weight: bold;
 }
 
 .dialogue-header-left {
@@ -629,24 +658,41 @@ function closeFullMap() {
 
 
 .header-button {
-  background: rgba(0, 0, 0, 0.8);
-  border: 1px solid #eee;
+  background: #2d2d2df2;
   border-radius: 4px 4px 0 0;
   border-bottom: none;
   color: white;
-  padding: 4px 8px;
+  /* Fixed square footprint so logs (pi-book) and collapse (▼) buttons render
+     at identical size regardless of their glyph widths. */
+  width: 32px;
+  height: 28px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   font-size: 0.9em;
   transition: background 0.2s ease;
-  width: fit-content;
   margin-left: 5px;
+  box-sizing: border-box;
 }
 
 .header-button:hover {
   background: rgba(0, 0, 0, 0.9);
+}
+
+/* Touch devices: bigger glyph + hit area, and shift the group away from the
+   right edge so mobile browser chrome / gesture areas don't crowd them. */
+@media (pointer: coarse) {
+  .header-button {
+    width: 54px !important;
+    height: 48px !important;
+    font-size: 2rem !important;
+  }
+
+  .header-buttons {
+    margin-right: 12px;
+  }
 }
 
 .collapse-button::before {
@@ -675,53 +721,49 @@ function closeFullMap() {
   background: rgba(0, 0, 0, 0.9);
 }
 
-/* Text dungeon layout with map */
+/* Text dungeon layout: fixed-width content column + side column */
 .text-dungeon-layout {
   display: flex;
   gap: 20px;
   height: 100%;
   flex: 1;
+  align-items: stretch;
 }
 
-.text-dungeon-layout .event-container {
-  flex: 1;
-}
-
-.text-map-column {
-  flex-shrink: 0;
-  display: flex;
-  align-items: flex-start;
-  padding-top: 50px;
-  gap: 10px;
-}
-
-.text-map-column .logs-button {
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+/* In dialogue (scene) mode the whole event-container is the click target,
+   so lift the whole container via border only — keep the dark base background. */
+.overlay.text .event-container.dialogue-mode {
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.8);
-  padding: 6px 10px;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
-.text-map-column .logs-button:hover {
-  background: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.5);
+/* Side column — left, fixed 500px in text dungeons. */
+.overlay.text .overlay-navigation-side {
+  flex: 0 0 500px;
+  width: 500px;
+  padding: 10px;
+  padding-bottom: 1em;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: #2d2d2df2;
+  height: 100%;
 }
 
-/* Full map modal overlay */
-.full-map-overlay {
+/* Side column — screen dungeons: absolutely positioned on the right edge of the viewport,
+   empty by default so pass clicks through to underlying UI. */
+.overlay-navigation-side--screen {
   position: fixed;
-  top: 0;
-  left: 0;
   right: 0;
+  top: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+  width: 300px;
+  padding: 20px;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.overlay-navigation-side--screen>* {
+  pointer-events: auto;
 }
 </style>
