@@ -1,3 +1,5 @@
+# Creating a New Game
+
 ## Creating Your First Game
 
 ### 1. Create a New Game

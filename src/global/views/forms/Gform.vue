@@ -38,11 +38,11 @@ onMounted(() => {
 
 <style scoped>
 .gform {
-  /* Add your component-specific styles here */
-  border: 1px solid #eee;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1rem;
   margin: 1rem 0;
-  border-radius: 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .form-row {
@@ -50,16 +50,17 @@ onMounted(() => {
 }
 
 .form-title {
-  font-size: 1.25rem;
-  font-weight: bold;
+  font-family: var(--font-family-serif);
+  font-size: 1.1rem;
+  font-weight: 600;
   margin-bottom: 0.75rem;
-  color: #333;
+  color: #fff;
   text-align: center;
+  letter-spacing: 0.02em;
 }
 
 .gform h1 {
   margin-top: 0;
-  color: #42b983;
-  /* Vue green */
+  color: var(--glass-tint, #42b983);
 }
 </style>

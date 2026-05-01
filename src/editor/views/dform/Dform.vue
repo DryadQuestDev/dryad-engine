@@ -576,9 +576,8 @@ async function openFileInBrowser() {
 }
 
 // --- Custom Popup System ---
-const activePopup = ref<{ id: string; item: any; itemUid: string; isNewItem: boolean } | null>(null);
+const activePopup = ref<{ id: string; item: any; isNewItem: boolean } | null>(null);
 
-// Get custom popup components for the current subtab
 const popupComponents = computed(() => {
   if (!editor.customPopups.value || editor.customPopups.value.length === 0) {
     return [];
@@ -589,16 +588,13 @@ const popupComponents = computed(() => {
     .filter(comp => comp !== undefined);
 });
 
-// Open a popup with a deep copy of the item
 function openPopup(componentId: string, item: any) {
-  // Check if this is the new item by comparing references
-  const isNewItem = editor.newItem?.value && item === editor.newItem.value;
+  const isNewItem = !!(editor.newItem?.value && item === editor.newItem.value);
 
   activePopup.value = {
     id: componentId,
-    item: JSON.parse(JSON.stringify(item)), // Deep copy
-    itemUid: item.uid,
-    isNewItem: isNewItem
+    item: JSON.parse(JSON.stringify(item)),
+    isNewItem,
   };
 }
 
@@ -607,31 +603,31 @@ function closePopup() {
   activePopup.value = null;
 }
 
-// Save the mutated item back to the original array
-function handlePopupSave(mutatedItem: any) {
-  if (!activePopup.value) return;
+// Auto-open preference for the dungeon content editor
+const dungeonEditorSettings = useStorage<{
+  autoOpen: boolean;
+  selectedBlock: Record<string, { kind: string; id: string }>;
+}>('dungeonEditor_settings', { autoOpen: false, selectedBlock: {} });
 
-  if (activePopup.value.isNewItem) {
-    // Update the new item
-    if (editor.newItem?.value) {
-      Object.assign(editor.newItem.value, mutatedItem);
-    }
-  } else if (props.items) {
-    // Find the original item by uid in existing items
-    const originalItem = props.items.find(item => item.uid === activePopup.value!.itemUid);
-
-    if (originalItem) {
-      // Replace the original item with the mutated one
-      // This automatically triggers editor.hasUnsavedChanges via deep watch
-      Object.assign(originalItem, mutatedItem);
-    } else {
-      console.warn('[Dform] Could not find item with uid:', activePopup.value.itemUid);
-    }
-  }
-
-  // Close the popup
-  closePopup();
-}
+watch(
+  [
+    () => editor.customPopups.value,
+    () => editor.activeObject.value,
+    () => editor.isArray.value,
+    () => dungeonEditorSettings.value.autoOpen,
+  ],
+  () => {
+    if (!dungeonEditorSettings.value.autoOpen) return;
+    if (activePopup.value) return;
+    if (editor.isArray.value) return;
+    const ao = editor.activeObject.value;
+    if (!ao || Array.isArray(ao)) return;
+    const popups = editor.customPopups.value;
+    if (!popups || !popups.includes('dungeon-content-editor')) return;
+    openPopup('dungeon-content-editor', ao);
+  },
+  { immediate: true },
+);
 
 // --- Trigger initial detection when items render ---
 // --- Restore active bookmark when items arrive after tab switch ---
@@ -695,7 +691,14 @@ onUnmounted(() => {
     </Accordion>
 
     <!-- === Single Object Form === -->
-    <div v-if="!editor.isArray.value" class="item_single">
+    <div v-if="!editor.isArray.value && editor.activeObject.value" class="item_single">
+      <div v-if="popupComponents.length > 0" class="item_header mb-3">
+        <div class="item_title_with_buttons">
+          <Button v-for="comp in popupComponents" :key="comp.id" :label="comp.name"
+            @click="openPopup(comp.id, editor.activeObject.value)" severity="info" size="small"
+            class="custom-popup-button" />
+        </div>
+      </div>
       <div v-for="(fieldSchema, fieldKey) in editor.schema.value" :key="fieldKey.toString()" class="form-field-wrapper">
         <FormFieldRenderer :base-field-schema="fieldSchema" :field-key="fieldKey.toString()"
           :item-data="editor.activeObject.value" :root-schema="editor.schema.value" :field-id="fieldKey.toString()"
@@ -804,8 +807,8 @@ onUnmounted(() => {
 
   <!-- Custom Popup Wrapper -->
   <CustomPopupWrapper v-if="activePopup" :visible="!!activePopup" :componentId="activePopup.id" :item="activePopup.item"
-    :schema="editor.schema.value || undefined" :subtabId="editor.secondaryTab || ''" @save="handlePopupSave"
-    @close="closePopup" />
+    :schema="editor.schema.value || undefined" :subtabId="editor.secondaryTab || ''"
+    :is-new-item="activePopup.isNewItem" @close="closePopup" />
 </template>
 
 <style scoped src="./dform.component.css"></style>

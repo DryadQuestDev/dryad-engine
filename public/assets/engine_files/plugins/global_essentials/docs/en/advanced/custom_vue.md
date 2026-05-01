@@ -94,6 +94,60 @@ const CharacterBadge = defineComponent({
 
 ---
 
+### v-script
+
+Renders DryadScript text on any element with full lore-link interactivity. Resolves the input through the engine's text pipeline by default and attaches the hover/click event delegation needed to open lore tooltip popups on `[[record_id]]` references. Use this anywhere you display engine-resolved text in your own templates — plain `v-html` will render visually but the lore links won't react to hover or click. See ->miscellaneous.lore for the full lore system.
+
+**Usage (string form):**
+
+```html
+<div v-script="rawText" />
+```
+
+Resolves `rawText` through the text pipeline (placeholders, `if{}`, `[[lore-links]]`, etc.) and renders it. Equivalent to `v-script="{ html: rawText }"`.
+
+**Usage (object form):**
+
+```html
+<div v-script="{ html, resolver, navMode, onNavigate, disabled }" />
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `html` | `string` | required | text to render |
+| `resolver` | `boolean` | `true` | run `html` through `game.resolveString(html, true).output` (noExecuteActions=true; rendering must never fire side effects). Set `false` if `html` is already resolved upstream. |
+| `navMode` | `boolean` | `false` | for in-place navigation (e.g., the Encyclopedia tab): clicks call `onNavigate(recordId)` instead of opening a popup. Hover is suppressed in this mode. |
+| `onNavigate` | `(recordId: string) => void` | — | callback for `navMode` clicks |
+| `disabled` | `boolean` | `false` | suppress all hover/click handling. Use during DOM-unstable phases like a typing animation that re-parses HTML each frame, so the popup doesn't latch onto a stale anchor. |
+
+**Example - choice description:**
+
+```javascript
+const { vue } = window.engine;
+const { defineComponent } = vue;
+
+const ChoiceCard = defineComponent({
+  props: ['choice'],
+  template: /*html*/`
+    <div class="choice">
+      <h3>{{ choice.name }}</h3>
+      <div v-if="choice.description" v-script="choice.description" class="choice-description"></div>
+    </div>
+  `
+});
+```
+
+**Reactivity caveat:** the directive re-renders only when its bound value changes. Reactive dependencies *inside* `resolveString` (e.g., a placeholder that reads a ref the player can change mid-session) won't trigger a re-render automatically. For those cases, wrap in your own `computed(() => game.resolveString(text).output)` and pass with `{ resolver: false }`.
+
+**When to use:**
+- Any custom component that displays user-authored text containing `[[record]]` references, `|placeholders|`, or other DryadScript syntax
+- Choice descriptions, item descriptions, status descriptions in plugin UIs
+
+**When not needed:**
+- Plain text without any DryadScript syntax — use `{{ text }}` interpolation instead.
+
+---
+
 ### v-dragscroll
 
 Enables drag-to-scroll on any scrollable container. Click and drag to scroll horizontally, vertically, or both.
@@ -129,5 +183,6 @@ Powered by [vue-dragscroll](https://www.npmjs.com/package/vue-dragscroll).
 |-----------|---------|---------|
 | `v-persist` | `<img>` | Keep loaded images in browser memory cache |
 | `v-fit` | Any | Shrink font size so text fits without clipping |
+| `v-script` | Any | Render DryadScript text with `[[lore-link]]` interactivity |
 | `v-dragscroll` | Any | Drag-to-scroll on scrollable containers |
 | `v-tooltip` | Any | Show tooltip on hover (from PrimeVue) |

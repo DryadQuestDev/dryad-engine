@@ -86,6 +86,9 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   border-radius: 4px;
   background: #000c;
   width: 100%;
+  max-height: 40dvh;
+  min-height: 0;
+  overflow-y: auto;
   font-family: var(--font-family-serif);
 }
 
@@ -94,6 +97,8 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   padding: 0 1rem;
   margin: 0;
   background: none;
+  max-height: none;
+  overflow: visible;
 }
 
 .choice-list h1 {

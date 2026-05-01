@@ -1,666 +1,346 @@
-/* Base layout for the entire screen */
-.main_screen {
-  --column-width: 300px;
-  /* CSS variable for column width */
+.main-screen {
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  /* Full viewport height */
-  width: 100vw;
-  /* Full viewport width */
-  color: #333;
-  /* Dark text color */
   overflow: hidden;
-  /* Prevent scrollbars on the main screen itself */
+  color: rgba(216, 221, 228, 0.92);
+  background: radial-gradient(ellipse at center, #14181d 0%, #0b0d10 70%);
 }
 
-/* Header styling */
-.main_header {
-  display: flex;
-  justify-content: space-between;
-  /* Distribute items */
-  align-items: center;
-  /* Vertically center items */
-  padding: 10px 20px;
-  background-color: #444;
-  /* Darker grey header */
-  color: #fff;
-  /* White text */
-  flex-shrink: 0;
-  /* Prevent header from shrinking */
-}
-
-.header_left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  /* Space between items on the left */
-}
-
-.header_right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  /* Space between social buttons and engine name */
-}
-
-.engine_name {
-  font-size: 1.1em;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 6px 14px;
-  background: linear-gradient(135deg, #6a4c93, #9b7ec4);
-  border-radius: 4px;
-  border: 1px solid #7d5ba6;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  color: #fff;
-  text-decoration: none;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.engine_name:hover {
-  opacity: 0.85;
-}
-
-.save_list_container {
-  background-color: #fff;
-  padding: 12px;
-  border-radius: 5px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-  flex: 0 0 var(--column-width);
-  /* Fixed width using CSS variable */
-  min-width: var(--column-width);
-  min-height: 0;
-  /* Prevents flex items from overflowing in some cases */
-}
-
-.header_item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border-radius: 5px;
-  font-weight: 600;
-  font-size: 0.95em;
-  background-color: #555;
-  /* Slightly lighter than header background */
-  border: 1px solid #666;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-.header_item i {
-  font-size: 1.1em;
-}
-
-.header_item:hover:not(.disabled) {
-  background-color: #666;
-  /* Slightly lighter grey on hover */
-  border-color: #888;
-  transform: translateY(-1px);
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
-}
-
-.header_item.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Fullscreen / Install-PWA CTA — bright attention-grabbing styling */
-.header_item.fullscreen-cta {
-  background: linear-gradient(135deg, #ffd166 0%, #ff7b00 40%, #ff3864 75%, #c026d3 100%);
-  border: 1px solid #ffae42;
-  color: #fff;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  box-shadow:
-    0 0 14px rgba(255, 123, 0, 0.7),
-    0 0 28px rgba(255, 56, 100, 0.35),
-    0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.header_item.fullscreen-cta i {
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
-}
-
-.header_item.fullscreen-cta:hover:not(.disabled) {
-  transform: translateY(-2px) scale(1.04);
-  border-color: #ffd166;
-  box-shadow:
-    0 0 22px rgba(255, 123, 0, 1),
-    0 0 44px rgba(255, 56, 100, 0.55),
-    0 4px 10px rgba(0, 0, 0, 0.4);
-}
-
-/* Install button - make it prominent with green color */
-.header_item.install-button {
-  background: linear-gradient(135deg, #4CAF50, #45a049);
-  border-color: #3d8b40;
-  font-size: 1em;
-  padding: 10px 20px;
-  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
-}
-
-.header_item.install-button:hover:not(.disabled) {
-  background: linear-gradient(135deg, #45a049, #3d8b40);
-  border-color: #2e7d32;
-  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.4);
-}
-
-.header_item.install-button.disabled {
-  background: linear-gradient(135deg, #a5d6a7, #81c784);
-  border-color: #66bb6a;
-  opacity: 0.6;
-}
-
-.nsfw-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 6px 12px;
-  user-select: none;
-}
-
-.nsfw-label {
-  font-size: 0.85em;
-  color: #aaa;
-  font-weight: 600;
-}
-
-.nsfw-toggle .nsfw-switch {
+.main-screen-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   pointer-events: none;
 }
 
-.nsfw-status {
-  font-size: 0.8em;
-  color: #888;
-}
-
-
-/* Main content area styling */
-.main_content {
-  display: flex;
-  flex-grow: 1;
-  /* Allow content to fill remaining space */
-  padding: 20px;
-  gap: 20px;
-  /* Space between columns */
-  overflow: auto;
-  /* Allow scrolling if content overflows */
-}
-
-/* Column styling */
-.column {
-  background-color: #fff;
-  /* White background for columns */
-  padding: 15px;
-  border-radius: 5px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  /* Subtle shadow */
-  display: flex;
-  flex-direction: column;
-  /* Stack content vertically within columns */
-  overflow: auto;
-  /* Allow scrolling within columns if needed */
-  min-height: 0;
-  /* Added to help with flex column overflow */
-}
-
-/* First two columns have fixed width */
-.column:nth-child(1),
-.column:nth-child(2) {
-  flex: 0 0 var(--column-width);
-  /* Fixed width using CSS variable */
-  min-width: var(--column-width);
-}
-
-/* Third column takes remaining space */
-.column:nth-child(3) {
-  flex: 1;
-  /* Takes all remaining space */
-  min-width: 0;
-}
-
-/* Specific styling for mod content area */
-.mod_content {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid #ddd;
-  /* Light border */
-  border-radius: 3px;
-  flex-grow: 1;
-  /* Allow mod info to fill space in its column */
-  background-color: #f9f9f9;
-  /* Slightly off-white */
-  overflow: auto;
-  /* Scroll if mod info is long */
-}
-
-/* Styling for the 'no games' message */
-.no_games {
-  text-align: center;
-  padding: 40px;
-  font-style: italic;
-  color: #888;
-  /* Grey text */
-}
-
-/* Game and Mod list styling */
-.game_and_mods_list {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  /* Space between game sections */
-  overflow-y: auto;
-  /* Allow vertical scrolling if list is long */
-  flex-grow: 1;
-  /* Allow list to take available space */
-}
-
-.game_section {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.mod_list {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  /* Space between items */
-  padding-left: 10px;
-  /* Indent mods slightly */
-}
-
-.game_item,
-.mod_item {
-  padding: 8px 12px;
-  border: 1px solid #eee;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
-}
-
-.game_item:hover,
-.mod_item:hover {
-  background-color: #f5f5f5;
-  /* Light background on hover */
-  border-color: #ddd;
-}
-
-.game_item.selected,
-.mod_item.selected {
-  background-color: #e0eaff;
-  /* Light blue background for selected */
-  border-color: #a8c7fa;
-  font-weight: bold;
-}
-
-/* Mods section styling */
-.mods_section {
-  margin-left: 15px;
-  padding-left: 15px;
-  border-left: 3px solid #a8c7fa;
-  display: flex;
-  flex-direction: column;
-  background-color: #f9f9f9;
-  padding: 10px;
-  border-radius: 4px;
-}
-
-.mods_section h4 {
-  margin: 0 0 8px 0;
-  font-size: 0.95em;
-  color: #666;
-  font-weight: 600;
-}
-
-/* Mod item internal structure */
-.mod_item {
-  display: flex;
-  flex-direction: column;
-}
-
-.mod_header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  /* Space between checkbox and name */
-}
-
-.mod_choose {
-  /* Placeholder for checkbox styling */
-  width: 20px;
-  height: 20px;
-  border: 1px solid #ccc;
-  text-align: center;
-  line-height: 18px;
-  /* Center potential content vertically */
-  font-size: 12px;
-  cursor: pointer;
-  /* Indicate it's clickable */
+/* Header — transparent glass strip pinned to the top */
+.main-screen-header {
   position: relative;
-  /* Needed for pseudo-element positioning */
-  background-color: #fff;
-  /* Default background */
-  transition: background-color 0.2s ease;
-  /* Smooth transition */
-}
-
-.mod_choose:hover {
-  background-color: #f0f0f0;
-  /* Light grey on hover */
-}
-
-/* Styling for the active checkbox */
-.mod_choose.active {
-  background-color: #a8c7fa;
-  /* Same blue as selected item */
-  border-color: #7faded;
-}
-
-/* Simple checkmark using pseudo-element */
-.mod_choose.active::after {
-  content: '\2713';
-  /* Unicode checkmark character */
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  z-index: 50;
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: #fff;
-  /* White checkmark */
-  font-size: 14px;
-  font-weight: bold;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
 }
 
-.mod_name {
-  flex-grow: 1;
-  /* Allow name to take remaining space */
-  font-weight: 500;
-  /* Slightly bolder name */
-}
-
-/* Info content styling for game/mod details in third column */
-.info_content {
-  margin-top: 15px;
-  padding: 15px;
-  background-color: #f9f9f9;
-  border-radius: 5px;
-  flex-grow: 1;
-  overflow-y: auto;
-}
-
-.info_header {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 15px;
-  border-bottom: 2px solid #ddd;
-  padding-bottom: 10px;
-  flex-wrap: wrap;
-}
-
-.info_name {
-  font-size: 1.5em;
-  font-weight: bold;
-  color: #333;
-}
-
-.info_author {
-  font-size: 0.95em;
-  color: #777;
-  font-style: italic;
-}
-
-.info_version {
-  font-size: 0.85em;
-  color: #999;
-  margin-left: auto;
-}
-
-.info_description {
-  font-size: 1em;
-  color: #555;
-  line-height: 1.6;
-  margin-bottom: 15px;
-}
-
-/* Play button styling */
-.play_button {
-  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-  color: white;
-  padding: 14px 28px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 0;
-  /* Don't let the column's flex layout shrink the button — keeps its natural
-     content height so wrapped long names stay visible. Column has overflow:auto,
-     so any overflow is handled by the column scrolling, not by clipping us. */
-  flex-shrink: 0;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease,
-              opacity 0.3s ease, filter 0.3s ease;
-  margin-bottom: 15px;
-  box-shadow:
-    0 4px 15px rgba(16, 185, 129, 0.5),
-    0 2px 8px rgba(0, 0, 0, 0.2);
-  border: none;
-  position: relative;
-  overflow: hidden;
-}
-
-.play_label {
-  font-size: 1.5em;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 3px;
-  line-height: 1;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 12px rgba(255, 255, 255, 0.15);
-}
-
-.play_game_name {
-  font-size: 1.25em;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  line-height: 1.25;
-  opacity: 0.95;
-  /* Force block + full width so flex-item min-width: auto doesn't keep the
-     span at its intrinsic content width (which would overflow and get clipped
-     by the button's overflow: hidden). min-width: 0 + overflow-wrap: anywhere
-     lets text break at arbitrary points when needed. */
-  display: block;
-  width: 100%;
-  min-width: 0;
-  text-align: center;
-  white-space: normal;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  padding-top: 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-  margin-top: 2px;
-  padding-left: 8px;
-  padding-right: 8px;
-  box-sizing: border-box;
-}
-
-.play_button::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-  transition: left 0.5s ease;
-}
-
-.play_button:hover::before {
-  left: 100%;
-}
-
-.play_button:hover {
-  background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
-  transform: translateY(-2px) scale(1.02);
-  box-shadow:
-    0 6px 20px rgba(16, 185, 129, 0.6),
-    0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.play_button:active {
-  transform: translateY(0) scale(0.98);
-  box-shadow:
-    0 2px 8px rgba(16, 185, 129, 0.4),
-    0 1px 4px rgba(0, 0, 0, 0.2);
-}
-
-.play_button.disabled {
-  background: linear-gradient(135deg, #bdbdbd 0%, #9e9e9e 100%);
-  cursor: not-allowed;
-  opacity: 0.6;
-  transform: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  filter: grayscale(1);
-}
-
-.play_button.disabled:hover {
-  transform: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-/* No game/mod selected message */
-.no_game_selected_message,
-.no_mods_message {
-  text-align: center;
-  padding: 20px;
-  font-style: italic;
-  color: #888;
-}
-
-/* Cover Assets Gallery Styling */
-.cover-gallery {
-  margin-bottom: 20px;
-  width: 100%;
-}
-
-.gallery-item-image,
-.gallery-item-video {
-  width: 100%;
-  height: auto;
-  max-height: 500px;
-  object-fit: contain;
-  display: block;
-  margin: 0 auto;
-}
-
-.gallery-thumbnail {
-  width: 100%;
-  height: 60px;
-  object-fit: cover;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-/* Version compatibility warning styles */
-.version-warning {
+.main-screen-header-left,
+.main-screen-header-right {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px;
-  background-color: #fff4e5;
-  border: 1px solid #ffe0b2;
-  border-radius: 4px;
-  color: #e65100;
-  font-size: 0.9em;
-  margin-bottom: 15px;
+  flex-wrap: wrap;
 }
 
-.version-warning i {
-  font-size: 1.2em;
-  flex-shrink: 0;
+.main-screen-hbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  color: rgba(216, 221, 228, 0.92);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-/* Incompatible mod styling */
-.mod_item.incompatible {
-  opacity: 0.6;
-  background-color: #fafafa;
+.main-screen-hbtn:hover:not(:disabled) {
+  background: var(--glass-bg-strong);
+  color: #fff;
 }
 
-.mod_item.incompatible .mod_name {
-  color: #999;
-}
-
-.mod_choose.disabled {
-  background-color: #e0e0e0;
-  border-color: #bbb;
+.main-screen-hbtn:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
-.mod_choose.disabled:hover {
-  background-color: #e0e0e0;
+.main-screen-hbtn i {
+  font-size: 14px;
 }
 
-.incompatible-badge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 2px 8px;
-  background-color: #ffccbc;
-  color: #d84315;
-  font-size: 0.75em;
-  border-radius: 3px;
+.main-screen-hbtn--accent {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  border: 1px solid var(--glass-tint);
   font-weight: 600;
 }
 
-.mod-version-warning {
-  margin-top: 8px;
-  padding: 8px;
-  background-color: #fff4e5;
-  border-left: 3px solid #ff9800;
-  font-size: 0.85em;
-  color: #e65100;
-  line-height: 1.4;
+.main-screen-hbtn--accent:hover:not(:disabled) {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  filter: brightness(1.1);
 }
 
-@media (max-width: 900px) {
-  .main_screen {
-    --column-width: 220px;
+.main-screen-nsfw {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: rgba(216, 221, 228, 0.85);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.main-screen-nsfw-label {
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.main-screen-nsfw-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.main-screen-nsfw-toggle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(216, 221, 228, 0.85);
+  transform: translateY(-50%);
+  transition: left 0.15s ease, background 0.15s ease;
+}
+
+.main-screen-nsfw-toggle--on {
+  background: var(--glass-tint);
+  border-color: var(--glass-tint);
+}
+
+.main-screen-nsfw-toggle--on::after {
+  left: calc(100% - 18px);
+  background: #0b0d10;
+}
+
+/* Stage — the centered area with title + CTAs */
+.main-screen-stage {
+  position: relative;
+  z-index: 10;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 24px clamp(20px, 6vw, 80px) 80px;
+  padding-bottom: max(80px, env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+
+.main-screen-stage>* {
+  pointer-events: auto;
+}
+
+.main-screen-stage {
+  justify-content: flex-start;
+  align-items: safe center;
+}
+
+.main-screen-cards {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 24px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.main-screen-empty {
+  margin: auto;
+  padding: 24px 32px;
+  font-size: 15px;
+  color: rgba(216, 221, 228, 0.6);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 12px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.main-screen-empty code {
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+}
+
+.main-screen-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #ffd6a8;
+  background: rgba(180, 80, 0, 0.25);
+  border: 1px solid rgba(255, 160, 80, 0.4);
+  border-radius: 8px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+.main-screen-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.main-screen-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 28px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: rgba(216, 221, 228, 0.92);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 12px;
+  cursor: pointer;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.12s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.main-screen-cta i {
+  font-size: 14px;
+}
+
+.main-screen-cta:hover:not(:disabled) {
+  background: var(--glass-bg-strong);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.main-screen-cta:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.main-screen-cta--primary {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  border: 1px solid var(--glass-tint);
+  position: relative;
+  isolation: isolate;
+}
+
+.main-screen-cta--primary:hover:not(:disabled) {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  filter: brightness(1.1);
+}
+
+/* Soft pulsing halo — uniform on all sides via outset + blur. Only opacity
+   animates (GPU-composited), so it stays smooth in Electron. */
+.main-screen-cta--primary::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 18px;
+  background: var(--glass-tint);
+  filter: blur(10px);
+  opacity: 0;
+  z-index: -1;
+  pointer-events: none;
+  will-change: opacity;
+  animation: cta-primary-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes cta-primary-pulse {
+
+  0%,
+  100% {
+    opacity: 0;
   }
 
-  .main_content {
-    padding: 10px;
-    gap: 10px;
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.main-screen-cta--primary:disabled::after,
+.main-screen-cta--primary[disabled]::after {
+  animation: none;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-screen-cta--primary::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+
+@media (pointer: coarse),
+(max-width: 600px) {
+  .main-screen-stage {
+    padding: 16px 16px 45px;
   }
 
-  .main_header {
-    padding: 8px 12px;
+  .main-screen-hbtn span {
+    display: none;
   }
 
-  .play_button {
-    padding: 10px 16px;
+  .main-screen-hbtn {
+    padding: 12px 14px;
+    min-width: 48px;
+    min-height: 48px;
+    justify-content: center;
   }
 
-  .play_label {
-    font-size: 1.25em;
-    letter-spacing: 2px;
+  .main-screen-hbtn i {
+    font-size: 20px;
   }
 
-  .play_game_name {
-    font-size: 1.05em;
+  .main-screen-nsfw {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+
+  .main-screen-cta {
+    padding: 16px 24px;
+  }
+
+  .main-screen-cta i {
+    font-size: 18px;
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+
+  .main-screen-hbtn,
+  .main-screen-nsfw,
+  .main-screen-cta,
+  .main-screen-empty,
+  .main-screen-warning {
+    background: rgba(20, 24, 29, 0.92);
   }
 }

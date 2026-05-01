@@ -1,4 +1,5 @@
 import { isRef, isReactive } from 'vue';
+import { sanitizeSaveData } from './sanitizeSaveData';
 
 const skipMetadata = new WeakMap<any, Set<string>>();
 // const populateMetadata = new WeakMap<any, Map<string, { itemConstructor: Function }>>();
@@ -137,6 +138,11 @@ export function save(obj: any): any {
         result[key] = saveAny(obj[key]);
     }
     return result;
+}
+
+export function loadSave(target: any, data: any): void {
+    sanitizeSaveData(data);
+    load(target, data);
 }
 
 export function load(target: any, data: any): void {
@@ -528,18 +534,12 @@ export function load(target: any, data: any): void {
                     continue;
                 }
 
-                // Fallback for non-populated Ref<Map>
-                // console.log(`    - No @Populate decorator for Ref<Map>. Implementing default replace behavior.`);
+                // Fallback for non-populated Ref<Map>: merge-only.
+                // Saved keys overwrite live ones; live keys absent from the save are
+                // preserved (so registered defaults added in code after the save was
+                // made stay alive on load).
 
-                // First, remove keys that exist in live map but not in saved data
-                for (const liveKey of Array.from(liveMapInstance.keys())) {
-                    if (!Object.prototype.hasOwnProperty.call(savedValue, liveKey)) {
-                        // console.log(`      - Removing key "${liveKey}" from live Ref<Map> as it is not in saved data.`);
-                        liveMapInstance.delete(liveKey);
-                    }
-                }
-
-                // Then, update existing and add new keys from saved data
+                // Update existing and add new keys from saved data
                 for (const savedMapKey in savedValue) {
                     if (Object.prototype.hasOwnProperty.call(savedValue, savedMapKey)) {
                         const itemSavedContent = savedValue[savedMapKey];
@@ -689,18 +689,10 @@ export function load(target: any, data: any): void {
                 continue;
             }
 
-            // Fallback for non-populated direct Map (original logic)
-            // console.log(`    - No @Populate decorator. Implementing default replace behavior for Map.`);
+            // Fallback for non-populated direct Map: merge-only.
+            // Saved keys overwrite live ones; live keys absent from the save are preserved.
 
-            // First, remove keys that exist in live map but not in saved data
-            for (const liveKey of Array.from(liveMapInstance.keys())) {
-                if (!Object.prototype.hasOwnProperty.call(savedValue, liveKey)) {
-                    // console.log(`    - Removing key "${liveKey}" from live Map as it is not in saved data.`);
-                    liveMapInstance.delete(liveKey);
-                }
-            }
-
-            // Then, update existing and add new keys from saved data
+            // Update existing and add new keys from saved data
             for (const savedMapKey in savedValue) {
                 if (Object.prototype.hasOwnProperty.call(savedValue, savedMapKey)) {
                     const itemSavedContent = savedValue[savedMapKey];

@@ -1,11 +1,13 @@
 import Tooltip from 'primevue/tooltip';
 import type { Directive } from 'vue';
+import type { ScriptDirectiveValue } from './game/directives/scriptDirective';
 
 declare module '@vue/runtime-core' {
   export interface GlobalDirectives {
     tooltip: typeof Tooltip;
     vPersist: Directive<HTMLImageElement>;
     vFit: Directive<HTMLElement, { min?: number } | undefined>;
+    vScript: Directive<HTMLElement, ScriptDirectiveValue>;
   }
 
   export interface ComponentCustomProperties {

@@ -1,5 +1,7 @@
 # Google Docs Integration
 
+> **Most authors should start with the ->dungeons.visual_editor.** The Google Docs integration below is for collaborative writing, Docs-native features (comments, suggestions, revision history), or teams already working in Docs.
+
 Write your dungeon content in Google Docs and import it directly into your game. Great for collaborative writing and working in a familiar editor.
 
 To start, go to **Dungeons → Config** in the editor and click **Google Documents Integration**.

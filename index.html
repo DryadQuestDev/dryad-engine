@@ -28,10 +28,81 @@
     })();
   </script>
   <title>Dryad Engine</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+    }
+
+    .initial-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 28px;
+      background: radial-gradient(ellipse at center, #14181d 0%, #0b0d10 70%);
+      color: #d8dde4;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      z-index: 9999;
+    }
+
+    .initial-loader__ring {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg, rgba(0, 255, 234, 0) 0deg, rgba(0, 255, 234, 0.15) 90deg, rgba(0, 255, 234, 0.65) 270deg, #00ffea 360deg);
+      -webkit-mask: radial-gradient(circle at center, transparent 22px, #000 24px);
+      mask: radial-gradient(circle at center, transparent 22px, #000 24px);
+      filter: drop-shadow(0 0 12px rgba(0, 255, 234, 0.35));
+      animation: initial-loader-spin 1.1s linear infinite;
+    }
+
+    .initial-loader__label {
+      font-size: 12px;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: rgba(216, 221, 228, 0.7);
+      animation: initial-loader-breathe 2.4s ease-in-out infinite;
+    }
+
+    @keyframes initial-loader-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes initial-loader-breathe {
+
+      0%,
+      100% {
+        opacity: 0.45;
+      }
+
+      50% {
+        opacity: 1;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .initial-loader__ring,
+      .initial-loader__label {
+        animation: none;
+      }
+    }
+  </style>
 </head>
 
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <div class="initial-loader">
+      <div class="initial-loader__ring"></div>
+      <div class="initial-loader__label">Loading Dryad Engine</div>
+    </div>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 

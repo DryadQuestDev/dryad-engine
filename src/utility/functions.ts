@@ -320,6 +320,10 @@ function finalizeParsedObject(obj: any, codeBlockPlaceholders: string[]): any {
 
     // Ensure val is a string before attempting string operations
     if (obj.val && typeof obj.val === 'string') {
+        // Replace [br] line-break markers BEFORE restoring [code] blocks so
+        // [br] tokens inside [code]...[/code] are preserved literally.
+        obj.val = obj.val.replace(/\[br\]/gi, '<br>');
+
         // Restore [code] blocks from placeholders
         obj.val = obj.val.replace(/__CODE_BLOCK_(\d+)__/g, (match: string, index: string) => {
             return codeBlockPlaceholders[parseInt(index)] || match;

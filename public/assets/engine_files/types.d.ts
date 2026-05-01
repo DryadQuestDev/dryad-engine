@@ -146,6 +146,8 @@ interface CustomComponent {
   title?: string;
   /** Render order (lower numbers render first) */
   order?: number;
+  /** Optional props to pass to the component, e.g. { layout: 'row' } */
+  props?: Record<string, any>;
 }
 
 /**
@@ -365,7 +367,7 @@ interface Game {
    * const manifest = game.getManifest();
    * console.log(manifest.id, manifest.version);
    */
-  getManifest(): { id: string; name?: string; author?: string; version?: string; description?: string; [key: string]: any };
+  getManifest(): { id: string; name?: string; author?: string; version?: string; description?: string;[key: string]: any };
 
   /**
    * Returns the current game's id. Shorthand for `getManifest().id`.
@@ -1393,6 +1395,24 @@ interface Game {
    * });
    */
   registerNarrativeState(id: string, evaluator: Function): void;
+
+  /** Returns a record by id, or undefined if not found. Records are authored under Narrative > Records in the editor. */
+  getRecord(id: string): { id: string; title: string; summary?: string; content?: string; image?: string; auto_discovery?: boolean; tags?: string[] } | undefined;
+
+  /** Marks a record as discovered (persists in save). No-op if already discovered or id is unknown. */
+  discoverRecord(id: string): void;
+
+  /** Returns true if the record is discovered (or has auto_discovery=true). */
+  isRecordDiscovered(id: string): boolean;
+
+  /** Returns all encyclopedia trees, sorted by `order` ascending. */
+  getEncyclopediaTrees(): { id: string; tab: string; order?: number; groups?: { name: string; records?: { record: string }[] }[] }[];
+
+  /** Returns true if the record is referenced by any encyclopedia tree (i.e., has a full entry to "open"). */
+  isRecordInEncyclopedia(id: string): boolean;
+
+  /** Switches the progression UI to the Encyclopedia tab and selects the given record. No-op if the record isn't in any tree. */
+  openEncyclopediaForRecord(recordId: string): void;
 
   /**
    * Register a stat computer function.
@@ -3447,7 +3467,7 @@ declare global {
   type Asset = _Asset;
   type DungeonLine = _DungeonLine;
   type DungeonData = _DungeonData;
-  interface Game extends _Game {}
+  interface Game extends _Game { }
   type CharacterSkinLayerObject = _CharacterSkinLayerObject;
   type Character = _Character;
   type Property = _Property;

@@ -1,4 +1,8 @@
-## Google Docs Tools for Faster Authoring
+# Dungeon Template
+
+> **Most authors should start with the ->dungeons.visual_editor.** The Google Docs template below is for collaborative writing, Docs-native features (comments, suggestions, revision history), or teams already working in Docs.
+
+## Google Docs Template (Collaborative Authoring)
 
 Dryad Engine comes with a ready‑to‑use **Dungeon Template** Google Doc that already has the helper script installed and ready to use.  
 Simply **make a copy of that template** for your dungeon, and you’ll see extra menus like:

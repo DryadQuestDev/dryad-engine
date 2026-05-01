@@ -71,6 +71,20 @@ export class WebStorageService implements StorageService {
         }
     }
 
+    async readText(filePath: string): Promise<string | null> {
+        await this.ready;
+        try {
+            const response = await fetch(`./assets/${filePath}`);
+            if (!response.ok) {
+                return null;
+            }
+            return await response.text();
+        } catch (error) {
+            console.error(`[WebStorage] readText error: ${filePath}`, error);
+            return null;
+        }
+    }
+
     async listFiles(dirPath: string): Promise<string[]> {
         await this.ready;
         const node = this.getNode(dirPath);
@@ -174,6 +188,10 @@ export class WebStorageService implements StorageService {
 
     async writeJson(_filePath: string, _data: any): Promise<void> {
         console.warn('[WebStorage] writeJson is not available in web mode');
+    }
+
+    async writeText(_filePath: string, _content: string): Promise<void> {
+        console.warn('[WebStorage] writeText is not available in web mode');
     }
 
     async deleteFile(_filePath: string, _recursive?: boolean): Promise<void> {

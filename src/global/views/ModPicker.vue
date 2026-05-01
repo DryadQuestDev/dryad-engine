@@ -204,56 +204,72 @@ async function applyModChanges() {
 
 <style scoped>
 .mod-picker {
-  padding: 20px;
+  padding: 4px;
   max-width: 800px;
   margin: 0 auto;
+  color: rgba(216, 221, 228, 0.92);
 }
 
 .mod-picker h2 {
-  margin-bottom: 20px;
+  margin: 0 0 16px;
+  font-family: var(--font-family-serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.02em;
 }
 
 .warning-message {
-  background-color: #fff3cd;
-  border: 1px solid #ffc107;
-  color: #856404;
-  padding: 15px;
-  margin-bottom: 20px;
-  border-radius: 4px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #ffd6a8;
+  background: rgba(180, 110, 0, 0.18);
+  border: 1px solid rgba(255, 180, 60, 0.45);
+  border-radius: 10px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .warning-message strong {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
+  color: #fff;
+  font-weight: 600;
 }
 
 .mods-list {
-  margin-bottom: 20px;
-  /*max-height: 500px;*/
+  margin-bottom: 16px;
   overflow-y: auto;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 10px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .no-mods {
-  padding: 20px;
+  padding: 24px;
   text-align: center;
-  color: #666;
+  font-style: italic;
+  color: rgba(216, 221, 228, 0.5);
 }
 
 .mod-item {
-  padding: 10px;
-  border-bottom: 1px solid #eee;
-  transition: background-color 0.2s;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.mod-item:last-child {
-  border-bottom: none;
+.mod-item:hover {
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .mod-item.expanded {
-  background-color: #f8f9fa;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-tint);
 }
 
 .mod-header-row {
@@ -269,44 +285,55 @@ async function applyModChanges() {
   cursor: pointer;
   gap: 10px;
   flex: 1;
+  min-width: 0;
 }
 
 .mod-checkbox {
-  margin-top: 5px;
+  margin-top: 3px;
   cursor: pointer;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
+  accent-color: var(--glass-tint);
 }
 
 .mod-basic-info {
   flex: 1;
+  min-width: 0;
 }
 
 .mod-name {
-  font-weight: bold;
-  margin-bottom: 5px;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: rgba(216, 221, 228, 0.95);
 }
 
 .mod-meta {
-  font-size: 0.8em;
-  color: #999;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(216, 221, 228, 0.5);
   display: flex;
-  gap: 15px;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .expand-button {
-  background: none;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 5px 10px;
-  cursor: pointer;
-  font-size: 14px;
-  color: #666;
-  transition: all 0.2s;
-  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 32px;
   height: 32px;
+  padding: 0;
+  font-size: 12px;
+  color: rgba(216, 221, 228, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  position: relative;
+  flex-shrink: 0;
 }
 
 .expand-button::before {
@@ -316,6 +343,7 @@ async function applyModChanges() {
   left: 50%;
   transform: translate(-50%, -50%);
   transition: transform 0.2s;
+  font-size: 9px;
 }
 
 .expand-button.expanded::before {
@@ -323,22 +351,22 @@ async function applyModChanges() {
 }
 
 .expand-button:hover {
-  background-color: #e9ecef;
-  border-color: #adb5bd;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .expand-button.expanded {
-  background-color: #007bff;
-  color: white;
-  border-color: #007bff;
+  background: var(--glass-tint);
+  color: #0b0d10;
+  border-color: var(--glass-tint);
 }
 
 .mod-details {
-  margin-top: 15px;
-  padding: 15px;
-  background-color: white;
-  border-radius: 4px;
-  border: 1px solid #ddd;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
 }
 
 .actions {
@@ -348,33 +376,39 @@ async function applyModChanges() {
 }
 
 .apply-button {
-  padding: 10px 30px;
-  font-size: 16px;
-  background-color: #007bff;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 28px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #0b0d10;
+  background: var(--glass-tint);
+  border: 1px solid var(--glass-tint);
+  border-radius: 12px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.12s ease, filter 0.15s ease;
 }
 
 .apply-button:hover:not(:disabled) {
-  background-color: #0056b3;
+  transform: translateY(-1px);
+  filter: brightness(1.1);
 }
 
 .apply-button:disabled {
-  background-color: #ccc;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
-/* Incompatible mod styling */
 .mod-item.incompatible {
-  opacity: 0.6;
-  background-color: #fafafa;
+  opacity: 0.55;
 }
 
 .mod-item.incompatible .mod-name {
-  color: #999;
+  color: rgba(216, 221, 228, 0.55);
 }
 
 .mod-checkbox:disabled {
@@ -386,11 +420,14 @@ async function applyModChanges() {
   display: inline-block;
   margin-left: 8px;
   padding: 2px 8px;
-  background-color: #ffccbc;
-  color: #d84315;
-  font-size: 0.75em;
-  border-radius: 3px;
+  background: rgba(192, 57, 43, 0.25);
+  color: #ff8a80;
+  border: 1px solid rgba(192, 57, 43, 0.5);
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 999px;
 }
 
 .mod-version-warning {
@@ -398,15 +435,17 @@ async function applyModChanges() {
   align-items: center;
   gap: 8px;
   margin-top: 10px;
-  padding: 10px;
-  background-color: #fff4e5;
-  border-left: 3px solid #ff9800;
-  font-size: 0.85em;
-  color: #e65100;
+  padding: 10px 12px;
+  background: rgba(180, 80, 0, 0.18);
+  border: 1px solid rgba(255, 160, 80, 0.4);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #ffd6a8;
   line-height: 1.4;
 }
 
 .mod-version-warning i {
   flex-shrink: 0;
+  color: #ffb74d;
 }
 </style>

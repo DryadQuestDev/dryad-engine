@@ -23,7 +23,7 @@ export const DungeonConfigSchema = {
     }
   },
   gdoc_id: { type: 'string', tooltip: 'Google Doc document ID to import content into dungeon_content field. WARNING: Players can access this link - use view-only permissions!' },
-  dungeon_content: { type: 'textarea', tooltip: 'Dungeon content markup with special syntax: ^rooms, @encounters, !choices, and #events.' },
+  dungeon_content: { type: 'textarea', externalFile: 'content_raw.txt', tooltip: 'Dungeon content markup with special syntax: ^rooms, @encounters, !choices, and #events.' },
 } satisfies Schema;
 
 export type DungeonConfigObject = SchemaToType<typeof DungeonConfigSchema>;

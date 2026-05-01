@@ -142,6 +142,45 @@ app.post('/engine/write', (req, res) => {
   }
 });
 
+// POST /engine/write-text
+app.post('/engine/write-text', (req, res) => {
+  const { path: relativePath, content } = req.body;
+
+  if (!relativePath) {
+    return res.status(400).json({ error: 'Missing "path" in request body.' });
+  }
+  if (typeof content !== 'string') {
+    return res.status(400).json({ error: '"content" must be a string.' });
+  }
+
+  const safeFilePath = getSafePath(relativePath);
+  if (!safeFilePath) {
+    return res.status(400).json({ error: 'Invalid or forbidden path.' });
+  }
+
+  try {
+    const dirPath = path.dirname(safeFilePath);
+    if (!dirPath.startsWith(assetsPath.slice(0, -1))) {
+      return res.status(400).json({ error: 'Invalid or forbidden path.' });
+    }
+
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+      console.log(`[write-text] Created directory: ${dirPath}`);
+    }
+
+    if (fs.existsSync(safeFilePath) && fs.lstatSync(safeFilePath).isDirectory()) {
+      return res.status(400).json({ error: 'Cannot overwrite a directory with a file.' });
+    }
+
+    fs.writeFileSync(safeFilePath, content, 'utf8');
+    res.json({ message: 'File written successfully.' });
+  } catch (e) {
+    console.error('[write-text] Error:', e);
+    res.status(500).json({ error: 'Error writing file.' });
+  }
+});
+
 // GET /engine/list-files?path=...
 app.get('/engine/list-files', (req, res) => {
   const relativeDirPath = req.query.path;

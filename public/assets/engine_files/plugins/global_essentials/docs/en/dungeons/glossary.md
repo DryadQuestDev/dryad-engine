@@ -1,7 +1,9 @@
+# Glossary
+
 ### DryadScript Markup: How Dungeons Are Written
 
 Dungeon content uses a lightweight markup called **DryadScript**.  
-You’ll usually write it in **Google Docs** or directly in the editor’s `dungeon_content` field.
+You'll usually write it in the **->dungeons.visual_editor** (recommended); you can also author in **->dungeons.google_docs_integration** for collaboration.
 
 At a high level, you use special markers to tell the engine what each piece of text is:
 
@@ -274,7 +276,7 @@ $greeting~3
 Greetings, traveler.
 ```
 
-When the engine resolves `|$greeting|`, it automatically detects all variants (`$greeting`, `$greeting~2`, `$greeting~3`) and **randomly picks one**. No special syntax needed from the caller — just write `|$greeting|` and the engine handles the rest.
+When the engine resolves `|$greeting|`, it automatically detects all variants (`$greeting`, `$greeting~2`, `$greeting~3`) and **randomly picks one**. No special syntax needed from the caller – just write `|$greeting|` and the engine handles the rest.
 
 This is useful for adding variety to repeated text (encounter descriptions, NPC reactions, flavor text) without any scripting.
 

@@ -1,7 +1,10 @@
+import { ref } from "vue";
 import { Game } from "../game";
 import { Skip } from "../../utility/save-system";
 import { gameLogger } from "../utils/logger";
 import { NarrativeSlotObject, NarrativeStateObject, NarrativeSegmentObject } from "../../schemas/narrativeSchema";
+import { RecordObject } from "../../schemas/recordSchema";
+import { EncyclopediaTreeObject } from "../../schemas/encyclopediaTreeSchema";
 
 export class NarrativeSystem {
 
@@ -20,6 +23,22 @@ export class NarrativeSystem {
     // Pre-indexed segments grouped by slot type for O(1) lookup
     @Skip()
     private segmentsByType = new Map<string, NarrativeSegmentObject[]>();
+
+    @Skip()
+    public recordsMap = new Map<string, RecordObject>();
+
+    @Skip()
+    public encyclopediaTreesMap = new Map<string, EncyclopediaTreeObject>();
+
+    /** Index of record id → first owning tree id (cross-listed records take the lowest-order tree). Built once at game init. */
+    @Skip()
+    public encyclopediaRecordIndex = new Map<string, { treeId: string }>();
+
+    public discoveredRecords: Set<string> = new Set();
+
+    /** Encyclopedia UI state (persisted in save). The Encyclopedia tab binds directly to these. */
+    public selectedEncyclopediaTreeId = ref<string | null>(null);
+    public selectedEncyclopediaRecordId = ref<string | null>(null);
 
     // ============================================================================
     // Public API
@@ -282,5 +301,55 @@ export class NarrativeSystem {
         }
 
         return candidates[candidates.length - 1];
+    }
+
+    // ============================================================================
+    // Records / Encyclopedia
+    // ============================================================================
+
+    public getRecord(id: string): RecordObject | undefined {
+        return this.recordsMap.get(id);
+    }
+
+    public discoverRecord(id: string): void {
+        if (this.discoveredRecords.has(id)) return;
+        const record = this.recordsMap.get(id);
+        if (!record) {
+            gameLogger.error(`discoverRecord("${id}") — no such record.`);
+            return;
+        }
+        this.discoveredRecords.add(id);
+    }
+
+    public isRecordDiscovered(id: string): boolean {
+        const record = this.recordsMap.get(id);
+        if (!record) return false;
+        if (record.auto_discovery) return true;
+        return this.discoveredRecords.has(id);
+    }
+
+    /** Walk encyclopedia trees once and index each record id → first owning tree. Call after `encyclopediaTreesMap` is populated. */
+    public buildEncyclopediaIndex(): void {
+        this.encyclopediaRecordIndex.clear();
+        for (const tree of this.encyclopediaTreesMap.values()) {
+            for (const group of tree.groups || []) {
+                for (const entry of group.records || []) {
+                    if (!entry.record) continue;
+                    if (this.encyclopediaRecordIndex.has(entry.record)) continue;
+                    this.encyclopediaRecordIndex.set(entry.record, { treeId: tree.id });
+                }
+            }
+        }
+    }
+
+    public isRecordInEncyclopedia(id: string): boolean {
+        return this.encyclopediaRecordIndex.has(id);
+    }
+
+    public openInEncyclopedia(recordId: string): void {
+        const entry = this.encyclopediaRecordIndex.get(recordId);
+        if (!entry) return;
+        this.selectedEncyclopediaTreeId.value = entry.treeId;
+        this.selectedEncyclopediaRecordId.value = recordId;
     }
 }

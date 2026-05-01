@@ -6,6 +6,7 @@
   ],
   "dungeons": [
     "what_is_dungeon",
+    "visual_editor",
     "dungeon_template",
     "google_docs_integration",
     "quests",
@@ -41,6 +42,7 @@
     "locale",
     "random_pools",
     "narrative_system",
+    "lore",
     "game_settings"
   ],
   "advanced": [

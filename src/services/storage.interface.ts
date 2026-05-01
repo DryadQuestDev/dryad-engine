@@ -11,6 +11,8 @@ export interface StorageService {
     // --- File System Methods ---
     readJson(filePath: string): Promise<any>;
     writeJson(filePath: string, data: any): Promise<void>;
+    readText(filePath: string): Promise<string | null>;
+    writeText(filePath: string, content: string): Promise<void>;
     listFiles(dirPath: string): Promise<string[]>;
     listFolders(dirPath: string): Promise<string[]>;
     listFilesRecursively(dirPath: string, assetFolders?: string[], ignoreEngineAssets?: boolean): Promise<string[]>;

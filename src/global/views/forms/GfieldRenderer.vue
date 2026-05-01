@@ -94,6 +94,7 @@ const displayOptions = computed(() => {
       optionLabel="label"
       optionValue="value"
       class="g-field-input"
+      panelClass="dark-mode-dropdown"
       filter
     />
 
@@ -106,6 +107,7 @@ const displayOptions = computed(() => {
       optionLabel="label"
       optionValue="value"
       class="g-field-input"
+      panelClass="dark-mode-dropdown"
       display="chip"
       filter
     />

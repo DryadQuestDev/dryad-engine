@@ -6,11 +6,13 @@
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden;
+  background: #1a1a1a8a
 }
 
 .formation-hint {
   opacity: 0.7;
   margin-bottom: 16px;
+  padding: 5px;
 }
 
 /* Reserves row on top */

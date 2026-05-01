@@ -6,6 +6,7 @@ import { EditorMap } from "./editorMap";
 import { debounceTime, switchMap, startWith, catchError, map, tap } from 'rxjs/operators';
 import { ref, reactive, Ref, watch, nextTick, computed, Component } from "vue";
 import { getImageDimensions, parseText } from "../utility/functions";
+import { stripHighlights } from "../utility/dungeonEditor/stripHighlights";
 import { DevEncountersDefaultObject, DevEncountersDefaultSchema } from "../schemas/devEncountersDefaultSchema";
 import ShortUniqueId from 'short-unique-id';
 import { EDITOR_TABS, EditorTab, registerEditorCustomComponents } from "./editorTabs";
@@ -788,9 +789,16 @@ export class Editor {
       }
     }
 
+    // Load external-file fields (e.g. `dungeon_content` ← `content_raw.txt`)
+    // BEFORE publishing `activeObject` so consumers (popups bound to it via
+    // `props.item`) see a complete object on their first reaction. Otherwise
+    // their non-deep watchers fire once with the field still undefined and
+    // never re-fire when the async load finally lands.
+    if (!this.isArray.value && file && typeof file === 'object' && !Array.isArray(file)) {
+      await this.loadExternalFieldsInto(file);
+    }
+
     this.activeObject.value = file;
-
-
 
 
     // set Default values
@@ -972,32 +980,29 @@ export class Editor {
   // --- Add Item Logic ---
 
   public newItem = ref<Record<string, any>>({});
-  public addItem() {
-    //console.log("this.isArray.value", this.isArray.value);
+  public addItem(): { success: boolean; uid?: string; message?: string } {
     if (this.isArray.value && Array.isArray(this.activeObject.value) && this.schema.value) {
-      // Ensure newItem is initialized if somehow empty (edge case)
       if (Object.keys(this.newItem.value).length === 0 && this.schema.value) {
         this.global.addNotificationId('invalid_id');
-        return
+        return { success: false, message: 'invalid_id' };
       }
 
-      console.log("this.newItem.value", this.newItem.value);
-      // Validate the new item id
       const validationResult = this.validateItemId(this.newItem.value.id, false);
       if (!validationResult.isValid) {
-        this.global.addNotificationId(validationResult.message ?? 'invalid_id');
-        return;
+        const message = validationResult.message ?? 'invalid_id';
+        this.global.addNotificationId(message);
+        return { success: false, message };
       }
 
-      this.newItem.value.uid = this.createUid(); // create uid for the new item
+      const uid = this.createUid();
+      this.newItem.value.uid = uid;
 
-      // Push a deep clone to prevent reactivity issues with the form
       this.activeObject.value.push(this.newItem.value);
-      // Reset the form for the next item
-      //this.newItem.value = {};
       this.populateNewItemWithDefaults();
+      this.hasUnsavedChanges.value = true;
+      return { success: true, uid };
     }
-    this.hasUnsavedChanges.value = true;
+    return { success: false, message: 'not_array' };
   }
 
   public populateNewItemWithDefaults() {
@@ -1124,7 +1129,7 @@ export class Editor {
 
       console.log(`[Editor] Saving tab: ${this.secondaryTab}`);
       console.log(`[Editor] Saving active object to: ${this.filePath}`);
-      await this.global.writeJson(this.filePath, this.activeObject.value);
+      await this.writeActiveObjectWithExternals();
       this.hasUnsavedChanges.value = false;
       if (this.secondaryTab === 'config') {
         //console.log("saving config");
@@ -1139,6 +1144,49 @@ export class Editor {
     } catch (error) {
       console.error(`[Editor] Failed to save file: ${this.filePath}`, error);
       this.global.addNotificationId("save_error");
+    }
+  }
+
+  private getExternalFileFields(): Array<{ key: string; fileName: string }> {
+    const schema = this.schema.value;
+    if (!schema || this.isArray.value) return [];
+    const result: Array<{ key: string; fileName: string }> = [];
+    for (const key in schema) {
+      const fileName = (schema[key] as Schemable | undefined)?.externalFile;
+      if (typeof fileName === 'string' && fileName.length > 0) {
+        result.push({ key, fileName });
+      }
+    }
+    return result;
+  }
+
+  private siblingPath(fileName: string): string {
+    return this.filePath.replace(/[^/]+\.json$/, fileName);
+  }
+
+  private async writeActiveObjectWithExternals(): Promise<void> {
+    const externals = this.getExternalFileFields();
+    const obj = this.activeObject.value;
+    if (externals.length === 0 || !obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      await this.global.writeJson(this.filePath, obj);
+      return;
+    }
+    const clone: Record<string, any> = JSON.parse(JSON.stringify(obj));
+    for (const { key, fileName } of externals) {
+      const value = typeof clone[key] === 'string' ? clone[key] : '';
+      await this.global.writeText(this.siblingPath(fileName), value);
+      delete clone[key];
+    }
+    await this.global.writeJson(this.filePath, clone);
+  }
+
+  private async loadExternalFieldsInto(target: Record<string, any>): Promise<void> {
+    const externals = this.getExternalFileFields();
+    for (const { key, fileName } of externals) {
+      const text = await this.global.readText(this.siblingPath(fileName));
+      if (text !== null) {
+        target[key] = text;
+      }
     }
   }
 
@@ -1185,7 +1233,7 @@ export class Editor {
     // parse and save the content
     let content = this.activeObject.value.dungeon_content;
 
-    let parsedContent = parseText(content);
+    let parsedContent = parseText(stripHighlights(content));
     let path = `games_files/${selected_game}/${selected_mod}/dungeons/${selected_dungeon}/content_parsed.json`;
 
 

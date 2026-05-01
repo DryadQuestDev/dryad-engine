@@ -5,7 +5,6 @@ import { Game } from "../../../game/game";
 import { DungeonLine } from "../../systems/dungeonSystem";
 import { DungeonRoom } from "./dungeonRoom";
 import { DungeonEncounter } from "./dungeonEncounter";
-import { DungeonRoomObject } from "../../../schemas/dungeonRoomSchema";
 import { DungeonConfigObject } from "../../../schemas/dungeonConfigSchema";
 import { getImageDimensions } from "../../../utility/functions";
 import { DungeonEncounterObject } from "../../../schemas/dungeonEncounterSchema";
@@ -106,16 +105,6 @@ export class DungeonFabric {
         //let roomsObjects = await game.coreSystem.fetchArrayFile<DungeonRoomObject>("rooms", dungeonId);
         let roomsObjects = Array.from(game.dungeonSystem.dungeonRooms.get(dungeonId)?.values() || []);
         let rooms: Map<string, DungeonRoom> = new Map();
-
-        // if dungeon is vn-like screen, create only 'main' room
-        if (this.dungeonConfig.dungeon_type === 'screen') {
-            let roomObject: DungeonRoomObject = {
-                id: "main",
-                uid: "main",
-            }
-            roomsObjects = [roomObject];
-        }
-        //console.log("roomsObjects", roomsObjects);
 
         for (let roomObject of roomsObjects) {
 

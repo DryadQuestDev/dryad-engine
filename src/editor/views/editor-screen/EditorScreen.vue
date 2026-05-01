@@ -9,6 +9,7 @@ import PlaytestModsPopup from '../PlaytestModsPopup.vue';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
 import { showConfirm } from '../../../services/dialogService';
+import DungeonSelect from '../shared/DungeonSelect.vue';
 
 const componentName = ref('EditorScreen');
 const editor = Editor.getInstance();
@@ -59,11 +60,6 @@ const handleGameChange = (event: any) => {
 const handleModChange = (event: any) => {
   editor.setMod(event.value);
 };
-
-const handleDungeonChange = (event: any) => {
-  editor.setDungeon(event.value);
-};
-
 
 const getSecondaryTabsForCurrentMain = computed(() => {
   // Explicitly read reactive values at top level for proper dependency tracking
@@ -247,11 +243,7 @@ function openLoadGamePopup() {
       <div class="secondary_row tab_row" v-if="editor.mainTab == 'new' || (editor.selectedGame && editor.selectedMod)">
 
         <!-- choose dungeon-->
-        <Select v-if="editor.mainTab === 'dungeons'" :modelValue="editor.selectedDungeon"
-          :options="editor.filteredDungeons.value" @change="handleDungeonChange" filter :resetFilterOnHide="true"
-          placeholder="Choose Dungeon" filterPlaceholder="Find dungeon..." class="choose_dungeon"
-          :disabled="!editor.selectedGame || !editor.selectedMod || !editor.filteredDungeons.value || editor.filteredDungeons.value.length === 0"
-          emptyFilterMessage="No dungeons found" emptyMessage="Select game and mod first" scrollHeight="250px" />
+        <DungeonSelect v-if="editor.mainTab === 'dungeons'" class="choose_dungeon" />
 
         <!-- Secondary Tabs - Iterate over subtabs for the current main tab -->
         <div v-for="subtab in getSecondaryTabsForCurrentMain" :key="subtab.id" class="tab secondary_tab"

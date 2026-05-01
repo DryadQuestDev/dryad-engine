@@ -118,7 +118,11 @@ assets/                            # ← Open this folder in VS Code
 ├── games_files/
 │   └── my_game/
 │       └── _core/                 # JSON data managed by engine editor
-│           └── manifest.json
+│           ├── manifest.json
+│           └── dungeons/
+│               └── my_dungeon/
+│                   ├── config.json
+│                   └── content_raw.txt   # Dungeon markup (editable in VS Code)
 └── engine_files/
     ├── plugins/                   # Engine plugins (each with its own docs/)
     │   ├── global_essentials/

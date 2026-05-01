@@ -32,6 +32,7 @@ import ItemSlotPickerPopup from "./views/customPopups/ItemSlotPickerPopup.vue";
 import CharacterSceneSlotPopup from "./views/customPopups/CharacterSceneSlotPopup.vue";
 import AssetPopup from "./views/customPopups/AssetPopup.vue";
 import MaskEditorPopup from "./views/customPopups/MaskEditorPopup.vue";
+import DungeonContentEditorPopup from "./views/customPopups/DungeonContentEditorPopup.vue";
 import { Editor } from "./editor";
 import { SkillSlotSchema } from "../schemas/skillSlotSchema";
 import { SkillTreeSchema } from "../schemas/skillTreeSchema";
@@ -41,6 +42,8 @@ import { AbilityTemplateSchema } from "../schemas/abilityTemplateSchema";
 import { PoolDefinitionSchema } from "../schemas/poolDefinitionSchema";
 import { PoolEntrySchema } from "../schemas/poolEntrySchema";
 import { NarrativeTagSchema, NarrativeSlotSchema, NarrativeStateSchema, NarrativeSegmentSchema } from "../schemas/narrativeSchema";
+import { RecordSchema } from "../schemas/recordSchema";
+import { EncyclopediaTreeSchema } from "../schemas/encyclopediaTreeSchema";
 import { CharacterViewSchema } from "../schemas/characterViewSchema";
 
 export type EditorTab = {
@@ -191,6 +194,7 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
         requiresDungeon: true,
         disableId: true,
+        customPopups: ['dungeon-content-editor'],
       },
       {
         id: 'rooms',
@@ -433,6 +437,22 @@ export const EDITOR_TABS: EditorTab[] = [
     id: 'narrative',
     subtabs: [
       {
+        id: 'records',
+        schema: RecordSchema,
+        file: 'records',
+        title: 'record',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'encyclopedia_trees',
+        schema: EncyclopediaTreeSchema,
+        file: 'encyclopedia_trees',
+        title: 'encyclopedia_tree',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
         id: 'narrative_tags',
         schema: NarrativeTagSchema,
         file: 'narrative_tags',
@@ -550,5 +570,12 @@ export function registerEditorCustomComponents(editor: Editor) {
     id: 'mask-editor',
     name: 'Mask Editor',
     component: MaskEditorPopup
+  });
+
+  // Register visual dungeon content editor
+  editor.registerCustomComponent({
+    id: 'dungeon-content-editor',
+    name: 'Content Editor',
+    component: DungeonContentEditorPopup
   });
 }

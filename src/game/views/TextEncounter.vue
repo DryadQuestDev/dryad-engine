@@ -87,7 +87,8 @@ function navigateToNeighbor(neighborRoom: any) {
         <!-- Mini map floated right inside the description encounter so its text + choices wrap around it -->
         <TextMap v-if="encounter === game.dungeonSystem.currentRoom.value?.descriptionEncounter" mode="mini"
           class="embedded-mini-map" @openFullMap="openFullMap" @closeFullMap="closeFullMap" />
-        <div class="text-dungeon-encounter-content" v-html="getEncounterContent(encounter)"></div>
+        <div class="text-dungeon-encounter-content"
+          v-script="{ html: getEncounterContent(encounter), resolver: false }"></div>
         <div v-if="getEncounterVisibleChoices(encounter).length > 0" class="text-dungeon-encounter-choices">
           <div v-for="choice in getEncounterVisibleChoices(encounter)" :key="choice.id" class="text-dungeon-choice"
             :class="{ unavailable: !choice.isAvailable }" @click.stop="handleEncounterChoice(choice)">

@@ -59,7 +59,7 @@ export class Game {
   /**
    * Narrative system - data-driven component selection for narrative slots.
    */
-  @Skip()
+  @Populate(NarrativeSystem, { mode: 'update' })
   public narrativeSystem = new NarrativeSystem();
 
   /**
@@ -509,6 +509,38 @@ export class Game {
 
   public registerNarrativeState(id: string, evaluator: Function) {
     this.narrativeSystem.registerState(id, evaluator);
+  }
+
+  /** Returns a record by id, or undefined if not found. */
+  public getRecord(id: string) {
+    return this.narrativeSystem.getRecord(id);
+  }
+
+  /** Marks a record as discovered. No-op if already discovered or unknown id. */
+  public discoverRecord(id: string): void {
+    this.narrativeSystem.discoverRecord(id);
+  }
+
+  /** Returns true if the record is discovered (or has auto_discovery=true). */
+  public isRecordDiscovered(id: string): boolean {
+    return this.narrativeSystem.isRecordDiscovered(id);
+  }
+
+  /** Returns all encyclopedia trees, sorted by `order`. */
+  public getEncyclopediaTrees() {
+    return [...this.narrativeSystem.encyclopediaTreesMap.values()]
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+
+  /** Returns true if the record is referenced by any encyclopedia tree (i.e., has a full entry to "open"). */
+  public isRecordInEncyclopedia(id: string): boolean {
+    return this.narrativeSystem.isRecordInEncyclopedia(id);
+  }
+
+  /** Switches the progression UI to the Encyclopedia tab and selects the given record. No-op if the record isn't in any tree. */
+  public openEncyclopediaForRecord(recordId: string): void {
+    this.narrativeSystem.openInEncyclopedia(recordId);
+    this.coreSystem.setState('progression_state', 'encyclopedia');
   }
 
   public registerStatComputer(key: string, computer: StatComputerFunction): void {

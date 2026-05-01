@@ -3,11 +3,11 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick, PropType } from
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { Global, ARROWHEAD_SIZE } from '../../../global/global';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { getShapePath, getShapeEdgePoint, getArrowPath, ShapeType, getArrowheadPath } from '../../../utility/shapes';
 import BackgroundAsset from '../BackgroundAsset.vue';
 import StatusObjectDisplay from './StatusObjectDisplay.vue';
 import SkillSlot from './SkillSlot.vue';
+import { useHoverPopup } from './useHoverPopup';
 import { isSkillVisible, isSkillDisabledByParams } from './useSkillParams';
 import type { SkillTreeObject } from '../../../schemas/skillTreeSchema';
 import type { SkillSlotObject } from '../../../schemas/skillSlotSchema';
@@ -25,50 +25,44 @@ const global = Global.getInstance();
 
 // State
 const activeTreeId = ref<string | null>(null);
-const hoveredSkill = ref<{ treeId: string; skillId: string; slotId: string; skillSlot: any } | null>(null);
 
 // Refs
 const canvasWrapperRef = ref<HTMLElement | null>(null);
-const referenceRef = ref<HTMLElement | null>(null);
-const floatingRef = ref<HTMLElement | null>(null);
 
 // Panning state
 const isPanning = ref(false);
 const panStart = ref({ x: 0, y: 0 });
 const scrollStart = ref({ left: 0, top: 0 });
 
-// Popup hover delay
-let hidePopupTimeout: number | null = null;
-
 // Tree selector state
 const isTreeSelectorCollapsed = ref(false);
-const hoveredTree = ref<SkillTreeObject | null>(null);
-const treeReferenceRef = ref<HTMLElement | null>(null);
-const treeFloatingRef = ref<HTMLElement | null>(null);
-let hideTreePopupTimeout: number | null = null;
 
-// Setup floating UI for skill popup
-const { floatingStyles } = useFloating(referenceRef, floatingRef, {
+// Skill popup (hover-triggered, lore-aware)
+const {
+  hovered: hoveredSkill,
+  popupRef: floatingRef,
+  floatingStyles,
+  show: showSkillPopup,
+  scheduleHide: hideSkillPopup,
+  onPopupEnter: handlePopupMouseEnter,
+  onPopupLeave: handlePopupMouseLeave,
+} = useHoverPopup<{ treeId: string; skillId: string; slotId: string; skillSlot: any }>({
   placement: 'right-start',
-  strategy: 'fixed',
-  middleware: [
-    offset(-4),
-    flip({ padding: 8 }),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
+  offset: -4,
 });
 
-// Setup floating UI for tree description popup
-const { floatingStyles: treeFloatingStyles } = useFloating(treeReferenceRef, treeFloatingRef, {
+// Tree description popup
+const {
+  hovered: hoveredTree,
+  popupRef: treeFloatingRef,
+  floatingStyles: treeFloatingStyles,
+  show: showTreePopup,
+  scheduleHide: hideTreePopup,
+  onPopupEnter: handleTreePopupMouseEnter,
+  onPopupLeave: handleTreePopupMouseLeave,
+} = useHoverPopup<SkillTreeObject>({
   placement: 'right-start',
-  strategy: 'fixed',
-  middleware: [
-    offset(8),
-    flip({ padding: 8 }),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
+  offset: 8,
 });
 
 // Get all available skill trees for this character
@@ -353,76 +347,24 @@ const arrowConnections = computed(() => {
 // Mouse handlers for skill hover
 function handleSkillMouseEnter(event: MouseEvent, skill: any) {
   if (!activeTreeId.value) return;
-
-  // Clear any pending hide timeout
-  if (hidePopupTimeout !== null) {
-    clearTimeout(hidePopupTimeout);
-    hidePopupTimeout = null;
-  }
-
-  referenceRef.value = event.currentTarget as HTMLElement;
-  hoveredSkill.value = {
+  showSkillPopup({
     treeId: activeTreeId.value,
     skillId: skill.skill,
     slotId: skill.id,
-    skillSlot: skill
-  };
+    skillSlot: skill,
+  }, event.currentTarget as HTMLElement);
 }
 
 function handleSkillMouseLeave() {
-  // Delay hiding to allow mouse to move to popup
-  hidePopupTimeout = window.setTimeout(() => {
-    hoveredSkill.value = null;
-    referenceRef.value = null;
-  }, 100);
+  hideSkillPopup();
 }
 
-function handlePopupMouseEnter() {
-  // Clear hide timeout when mouse enters popup
-  if (hidePopupTimeout !== null) {
-    clearTimeout(hidePopupTimeout);
-    hidePopupTimeout = null;
-  }
-}
-
-function handlePopupMouseLeave() {
-  // Hide popup when mouse leaves popup
-  hoveredSkill.value = null;
-  referenceRef.value = null;
-}
-
-// Tree hover handlers
 function handleTreeMouseEnter(event: MouseEvent, tree: SkillTreeObject) {
-  // Clear any pending hide timeout
-  if (hideTreePopupTimeout !== null) {
-    clearTimeout(hideTreePopupTimeout);
-    hideTreePopupTimeout = null;
-  }
-
-  treeReferenceRef.value = event.currentTarget as HTMLElement;
-  hoveredTree.value = tree;
+  showTreePopup(tree, event.currentTarget as HTMLElement);
 }
 
 function handleTreeMouseLeave() {
-  // Delay hiding to allow mouse to move to popup
-  hideTreePopupTimeout = window.setTimeout(() => {
-    hoveredTree.value = null;
-    treeReferenceRef.value = null;
-  }, 100);
-}
-
-function handleTreePopupMouseEnter() {
-  // Clear hide timeout when mouse enters popup
-  if (hideTreePopupTimeout !== null) {
-    clearTimeout(hideTreePopupTimeout);
-    hideTreePopupTimeout = null;
-  }
-}
-
-function handleTreePopupMouseLeave() {
-  // Hide popup when mouse leaves popup
-  hoveredTree.value = null;
-  treeReferenceRef.value = null;
+  hideTreePopup();
 }
 
 // Toggle tree selector collapse
@@ -633,7 +575,7 @@ watch(() => props.character, () => {
         <h3>{{ popupSkillData.name || hoveredSkill.skillId }}</h3>
       </div>
 
-      <div v-if="popupSkillData.description" class="popup-description" v-html="popupSkillData.description"></div>
+      <div v-if="popupSkillData.description" v-script="popupSkillData.description" class="popup-description"></div>
 
       <!-- Current Level -->
       <div class="popup-level">
@@ -693,7 +635,7 @@ watch(() => props.character, () => {
       <div class="tree-popup-header">
         <h3>{{ hoveredTree.name || hoveredTree.id }}</h3>
       </div>
-      <div class="tree-popup-description" v-html="hoveredTree.description"></div>
+      <div v-script="hoveredTree.description || ''" class="tree-popup-description"></div>
     </div>
   </div>
 </template>

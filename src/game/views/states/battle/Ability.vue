@@ -19,6 +19,7 @@ const effects = computed(() => {
   return effectsList;
 });
 
+
 function useAbility() {
   if (!props.abilityData) {
     console.error(`Ability data not found for ${props.abilityId}`);
@@ -68,7 +69,8 @@ function useAbility() {
       />
       <div class="ability-info">
         <div class="ability-name">{{ abilityData.meta.name || abilityId }}</div>
-        <div class="ability-description" v-if="abilityData.meta.description" v-html="abilityData.meta.description"></div>
+        <div v-if="abilityData.meta.description" v-script="abilityData.meta.description" class="ability-description">
+        </div>
         <div class="ability-cooldown" v-if="abilityData.meta.cooldown">
           Cooldown: {{ abilityData.meta.cooldown }} turns
         </div>

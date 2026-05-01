@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import type { EntityStatObject } from '../../../schemas/entityStatSchema';
 import StatEntity from './StatEntity.vue';
+import { useHoverPopup } from './useHoverPopup';
 
 interface StatGroup {
   id: string;
@@ -83,38 +83,26 @@ const statGroups = computed((): StatGroup[] => {
   return groups;
 });
 
-// Popup state for stats/resources
-const hoveredStat = ref<{ statId: string; stat: EntityStatObject } | null>(null);
-const statReferenceRef = ref<HTMLElement | null>(null);
-const statPopupRef = ref<HTMLElement | null>(null);
-
-// Floating UI setup for stat popups
-const { floatingStyles: statFloatingStyles } = useFloating(statReferenceRef, statPopupRef, {
-  placement: 'left-start',
-  strategy: 'fixed',
-  middleware: [
-    offset(10),
-    flip({ padding: 8 }),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
-});
+// Stat popup
+const {
+  hovered: hoveredStat,
+  popupRef: statPopupRef,
+  floatingStyles: statFloatingStyles,
+  show: showStat,
+  scheduleHide: hideStat,
+  onPopupEnter: onStatPopupEnter,
+  onPopupLeave: onStatPopupLeave,
+} = useHoverPopup<{ statId: string; stat: EntityStatObject }>({ placement: 'left-start' });
 
 const onStatHover = (event: MouseEvent, statId: string, stat: EntityStatObject) => {
   if (!stat.ingame_description) return;
-  statReferenceRef.value = event.currentTarget as HTMLElement;
-  hoveredStat.value = { statId, stat };
+  showStat({ statId, stat }, event.currentTarget as HTMLElement);
 };
 
 const onStatLeave = () => {
-  hoveredStat.value = null;
-  statReferenceRef.value = null;
+  hideStat();
 };
 
-const resolvedDescription = computed(() => {
-  if (!hoveredStat.value?.stat.ingame_description) return '';
-  return game.resolveString(hoveredStat.value.stat.ingame_description).output;
-});
 </script>
 
 <template>
@@ -133,12 +121,13 @@ const resolvedDescription = computed(() => {
 
     <!-- Stat/Resource Popup -->
     <Teleport to="body">
-      <div v-if="hoveredStat" ref="statPopupRef" class="stat-popup" :style="statFloatingStyles">
+      <div v-if="hoveredStat" ref="statPopupRef" class="stat-popup" :style="statFloatingStyles"
+        @mouseenter="onStatPopupEnter" @mouseleave="onStatPopupLeave">
         <div class="popup-header">
           <h4>{{ hoveredStat.stat.name || hoveredStat.statId }}</h4>
         </div>
         <div class="popup-body">
-          <div class="popup-description" v-html="resolvedDescription"></div>
+          <div v-script="hoveredStat.stat.ingame_description || ''" class="popup-description"></div>
         </div>
       </div>
     </Teleport>

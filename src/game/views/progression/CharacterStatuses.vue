@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { Status } from '../../core/character/status';
@@ -7,7 +7,7 @@ import { Item } from '../../core/character/item';
 import StatusObjectDisplay from './StatusObjectDisplay.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import ItemCard from './ItemCard.vue';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
+import { useHoverPopup } from './useHoverPopup';
 
 const props = withDefaults(defineProps<{
   character: Character;
@@ -19,56 +19,34 @@ const props = withDefaults(defineProps<{
 });
 const game = Game.getInstance();
 
-// ---- Status popup state ----
-const hoveredStatus = ref<Status | null>(null);
-const statusReferenceRef = ref<HTMLElement | null>(null);
-const statusPopupRef = ref<HTMLElement | null>(null);
-
-const { floatingStyles: statusFloatingStyles } = useFloating(statusReferenceRef, statusPopupRef, {
-  placement: 'left-start',
-  strategy: 'fixed',
-  middleware: [
-    offset(10),
-    flip({ padding: 8 }),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
-});
+// ---- Status popup ----
+const {
+  hovered: hoveredStatus,
+  popupRef: statusPopupRef,
+  floatingStyles: statusFloatingStyles,
+  show: showStatus,
+  scheduleHide: hideStatusPopup,
+  onPopupEnter: onStatusPopupEnter,
+  onPopupLeave: onStatusPopupLeave,
+} = useHoverPopup<Status>({ placement: 'left-start' });
 
 const showStatusPopup = (event: MouseEvent, status: Status) => {
-  hoveredStatus.value = status;
-  statusReferenceRef.value = event.currentTarget as HTMLElement;
+  showStatus(status, event.currentTarget as HTMLElement);
 };
 
-const hideStatusPopup = () => {
-  hoveredStatus.value = null;
-  statusReferenceRef.value = null;
-};
-
-// ---- Item popup state ----
-const hoveredItem = ref<Item | null>(null);
-const itemReferenceRef = ref<HTMLElement | null>(null);
-const itemPopupRef = ref<HTMLElement | null>(null);
-
-const { floatingStyles: itemFloatingStyles } = useFloating(itemReferenceRef, itemPopupRef, {
-  placement: 'left-start',
-  strategy: 'fixed',
-  middleware: [
-    offset(10),
-    flip({ padding: 8 }),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
-});
+// ---- Item popup ----
+const {
+  hovered: hoveredItem,
+  popupRef: itemPopupRef,
+  floatingStyles: itemFloatingStyles,
+  show: showItem,
+  scheduleHide: hideItemPopup,
+  onPopupEnter: onItemPopupEnter,
+  onPopupLeave: onItemPopupLeave,
+} = useHoverPopup<Item>({ placement: 'left-start' });
 
 const showItemPopup = (event: MouseEvent, item: Item) => {
-  hoveredItem.value = item;
-  itemReferenceRef.value = event.currentTarget as HTMLElement;
-};
-
-const hideItemPopup = () => {
-  hoveredItem.value = null;
-  itemReferenceRef.value = null;
+  showItem(item, event.currentTarget as HTMLElement);
 };
 
 // ---- Status helpers ----
@@ -198,7 +176,8 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
 
     <!-- Status Popup -->
     <Teleport to="body">
-      <div v-if="hoveredStatus" ref="statusPopupRef" class="status-popup" :style="statusFloatingStyles">
+      <div v-if="hoveredStatus" ref="statusPopupRef" class="status-popup" :style="statusFloatingStyles"
+        @mouseenter="onStatusPopupEnter" @mouseleave="onStatusPopupLeave">
         <div class="popup-header">
           <h4 :class="getStatusRarity(hoveredStatus) ? ['item-name', 'rarity_' + getStatusRarity(hoveredStatus)] : []">
             {{ getStatusName(hoveredStatus) }}
@@ -208,9 +187,8 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
           </h4>
         </div>
         <div class="popup-body">
-          <div class="popup-description" v-if="getStatusDescription(hoveredStatus)"
-            v-html="getStatusDescription(hoveredStatus)">
-          </div>
+          <div v-if="getStatusDescription(hoveredStatus)" v-script="getStatusDescription(hoveredStatus)"
+            class="popup-description"></div>
           <StatusObjectDisplay
             :data="{ stats: hoveredStatusStats, abilities: [...hoveredStatus.abilities], ability_modifiers: hoveredStatus.abilityModifiers }"
             :stacks="hoveredStatus.currentStacks"
@@ -221,7 +199,8 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
 
     <!-- Item Popup -->
     <Teleport to="body">
-      <div v-if="hoveredItem" ref="itemPopupRef" class="item-popup" :style="itemFloatingStyles">
+      <div v-if="hoveredItem" ref="itemPopupRef" class="item-popup" :style="itemFloatingStyles"
+        @mouseenter="onItemPopupEnter" @mouseleave="onItemPopupLeave">
         <ItemCard :item="hoveredItem" />
       </div>
     </Teleport>

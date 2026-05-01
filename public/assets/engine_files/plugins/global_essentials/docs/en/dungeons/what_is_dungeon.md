@@ -1,4 +1,4 @@
-## What is a Dungeon?
+# What is a Dungeon?
 
 In Dryad Engine, a **dungeon** is a self‑contained area of your game – a location, chapter, hub, or route – that holds:
 
@@ -66,26 +66,33 @@ Behind the scenes, the **Dungeon System**:
 
 You don’t have to think in terms of “functions” or “callbacks” – you write story and structure, and the engine wires it up.
 
-## Google Docs Integration: Why Write Outside the Editor?
+## How You Author a Dungeon
 
-You *can* write all your dungeon content directly in the editor, but for story‑heavy games it’s usually better to:
+You have two options, both driven by the same DryadScript markup under the hood:
 
-- Draft and edit scenes in **Google Docs** (with comments, suggestions, and collaboration).  
-- Use headings, tables, and comments to organize your flow.  
-- Link that document to your dungeon via its **Google Doc ID**.
+### Visual Editor (recommended)
 
-The engine’s document tools:
+The in-engine **Visual Editor** is the default starting point for most authors. It turns DryadScript into editable block cards – rooms, encounters, scenes, templates – with lint on save, auto-highlighting of syntactic tokens, drag-to-reorder table of contents, and autosave. No external setup.
 
-- Fetch the Google Doc.  
-- Convert it into plain DryadScript.  
-- Import it into your dungeon’s `dungeon_content` field.  
+Open it at **Dungeons → Config → Content Editor**.
 
-From there, the normal parsing pipeline kicks in, and your dungeons become fully playable – with rooms, encounters, choices, and events – all driven by text you wrote in a familiar editor.
+See ->dungeons.visual_editor for the full walkthrough.
+
+### Google Docs (for collaboration)
+
+For story-heavy games with multiple writers, or when you already have a long Docs draft, author in **Google Docs** and import via the engine's document tools. Docs gives you comments, suggestions, and revision history that the in-editor surface doesn't.
+
+The engine fetches the Google Doc, converts it into plain DryadScript, and imports it into your dungeon's `dungeon_content` field – after which the normal parsing pipeline takes over.
+
+See ->dungeons.dungeon_template and ->dungeons.google_docs_integration to get set up.
+
+The two workflows are interoperable – you can start in the Visual Editor, export to Docs for a review pass (the editor has a **Copy tables** button for that), then pull the result back in.
 
 If you want to see a real example, open the **Tutorial** dungeon in the editor and look at its config, rooms, encounters, and imported content side‑by‑side.
 
 ## Next Steps
 
-- ->dungeons.dungeon_template – How to start writing your content.  
-- ->dungeons.google_docs_integration – How to import your content into the game.  
+- ->dungeons.visual_editor – The recommended authoring surface.
+- ->dungeons.dungeon_template – Google Docs template for collaborative authoring.
+- ->dungeons.google_docs_integration – How to import Docs content into the game.
 - ->dungeons.glossary – The core scripting concepts behind dungeons.  

@@ -6,13 +6,11 @@ import InputNumber from 'primevue/inputnumber';
 import FloatLabel from 'primevue/floatlabel';
 import ToggleSwitch from 'primevue/toggleswitch';
 import Textarea from 'primevue/textarea';
-import Editor from 'primevue/editor';
 import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
 import Button from 'primevue/button';
 import Checkbox from 'primevue/checkbox';
 import ColorPicker from 'primevue/colorpicker';
-import Dialog from 'primevue/dialog';
 import { useSortable } from '@vueuse/integrations/useSortable'
 import { Editor as AppEditor } from '../../../editor/editor'; // Adjust the relative path based on your project structure
 import { Global } from '../../../global/global';
@@ -20,20 +18,11 @@ import NestedSchemaRenderer from './NestedSchemaRenderer.vue';
 import { watchDebounced, useStorage } from '@vueuse/core';
 import TriStateSwitch from './TriStateSwitch.vue';
 import FileInput from './FileInput.vue';
+import HtmlAreaInput from './HtmlAreaInput.vue';
 import RangeInput from './RangeInput.vue';
 import StringArrayInput from './StringArrayInput.vue';
 import { preserveScroll } from './preserveScrollDirective';
 import { useGeneratedFields } from './useGeneratedFields';
-import Quill from 'quill';
-
-// Override Quill's Image blot to accept relative paths without URL sanitization
-const ImageBlot = Quill.import('formats/image') as any;
-class CustomImage extends ImageBlot {
-  static sanitize(url: string) {
-    return url; // Accept all URLs without sanitization
-  }
-}
-Quill.register(CustomImage, true);
 
 // Get editor instance
 const editor = AppEditor.getInstance();
@@ -46,34 +35,6 @@ const hideEmptySchemaFields = computed({
 
 // Register custom directive
 const vPreserveScroll = preserveScroll;
-
-// Prompt dialog state for image URL
-const promptDialog = ref({
-  visible: false,
-  value: '',
-  resolve: null as ((value: string | null) => void) | null
-});
-
-function showPrompt(message: string, defaultValue: string = ''): Promise<string | null> {
-  return new Promise((resolve) => {
-    promptDialog.value = {
-      visible: true,
-      value: defaultValue,
-      resolve
-    };
-  });
-}
-
-function submitPrompt(value: string | null) {
-  if (promptDialog.value.resolve) {
-    promptDialog.value.resolve(value);
-  }
-  promptDialog.value.visible = false;
-  promptDialog.value.resolve = null;
-}
-
-
-
 
 
 // MOVE defineProps UP
@@ -262,71 +223,6 @@ const isNestedSchemaVisible = (props.baseFieldSchema.type === 'schema' || props.
     })
   : ref(false);
 // --- End State for Schema Visibility ---
-
-// HTML mode state for Quill Editor
-const isHtmlMode = ref(false);
-const htmlContent = ref('');
-
-// Define Quill Editor toolbar configuration
-const editorModules = {
-  toolbar: [
-    [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
-    ['bold', 'italic', 'underline', 'strike'],        // toggled buttons
-    ['blockquote'],                            // custom button values
-    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
-    [{ 'indent': '-1' }, { 'indent': '+1' }],          // outdent/indent
-    [{ 'align': [] }],
-    [{ 'color': [] }],                             // font color
-    ['clean'],                                         // remove formatting button
-    ['link', 'image']                                // link and image
-  ]
-};
-
-// Toggle between HTML and visual mode
-function toggleHtmlMode() {
-  if (isHtmlMode.value) {
-    // Switching from HTML to visual mode
-    internalValue.value = htmlContent.value;
-    isHtmlMode.value = false;
-  } else {
-    // Switching from visual to HTML mode
-    htmlContent.value = internalValue.value || '';
-    isHtmlMode.value = true;
-  }
-}
-
-// Watch for changes in HTML mode textarea (only for htmlarea fields)
-if (props.baseFieldSchema.type === 'htmlarea') {
-  watch(htmlContent, (newHtml) => {
-    if (isHtmlMode.value) {
-      internalValue.value = newHtml;
-    }
-  });
-}
-
-// Clean HTML content by replacing consecutive &nbsp; with regular spaces
-function cleanHtmlContent(html: string): string {
-  if (!html) return html;
-
-  // Replace &nbsp; with regular spaces, but keep single ones that might be intentional
-  // This replaces multiple consecutive &nbsp; or &nbsp; between words with regular spaces
-  return html
-    .replace(/(&nbsp;){2,}/g, ' ') // Replace 2+ consecutive &nbsp; with single space
-    .replace(/(\w)&nbsp;(\w)/g, '$1 $2'); // Replace &nbsp; between words with regular space
-}
-
-// Custom handler for editor initialization and image button
-function onEditorInit({ instance }: { instance: any }) { // PrimeVue passes 'instance', not 'editor'
-  const toolbar = instance.getModule('toolbar');
-  toolbar.addHandler('image', async () => {
-    const url = await showPrompt('Enter image URL:');
-    if (url) {
-      const range = instance.getSelection(true);
-      // Insert the image at the current cursor position or the beginning
-      instance.insertEmbed(range ? range.index : 0, 'image', url, 'user');
-    }
-  });
-}
 
 // String Array Logic is now handled by StringArrayInput.vue component
 
@@ -616,11 +512,6 @@ watchDebounced(internalValue, (newValue, oldValue) => {
 
   let processedNewValue = newValue;
 
-  // Clean HTML content for htmlarea fields
-  if (fieldType.value === 'htmlarea' && typeof newValue === 'string') {
-    processedNewValue = cleanHtmlContent(newValue);
-  }
-
   if (fieldType.value === 'chooseMany' && Array.isArray(newValue) && Array.isArray(options.value)) {
     const currentOptions = options.value as any[];
 
@@ -768,19 +659,7 @@ watchDebounced(internalValue, (newValue, oldValue) => {
     <!-- HTML Area Input -->
     <div v-else-if="fieldType === 'htmlarea'" class="field-container html-area-field">
       <div class="input-wrapper">
-        <div class="flex items-center justify-between mb-2">
-          <label :for="fieldId" class="block">{{ label }}</label>
-          <Button :icon="isHtmlMode ? 'pi pi-eye' : 'pi pi-code'" :label="isHtmlMode ? 'Visual' : 'HTML'"
-            @click="toggleHtmlMode" size="small" severity="secondary" outlined
-            v-tooltip.top="isHtmlMode ? 'Switch to Visual Editor' : 'View HTML Source'" />
-        </div>
-
-        <Editor v-if="!isHtmlMode" v-model="internalValue" :modules="editorModules" @load="onEditorInit"
-          v-tooltip.left="tooltip" editorStyle="height: 200px" class="w-full" />
-
-        <Textarea v-else v-model="htmlContent" autoResize v-tooltip.left="tooltip" class="w-full html-source-editor"
-          :style="{ minHeight: '200px', fontFamily: 'var(--font-family-mono)', fontSize: '0.875rem' }"
-          v-preserve-scroll />
+        <HtmlAreaInput v-model="internalValue" :label="label" :tooltip="tooltip" :field-id="fieldId" />
       </div>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
@@ -972,17 +851,6 @@ watchDebounced(internalValue, (newValue, oldValue) => {
       Unsupported type: {{ fieldType }} for field {{ fieldKey }}
     </div>
 
-    <!-- Prompt Dialog for Image URL -->
-    <Dialog v-model:visible="promptDialog.visible" header="Enter Image URL" :modal="true" :closable="false"
-      :style="{ width: '450px' }">
-      <div @keydown.enter="submitPrompt(promptDialog.value)">
-        <InputText v-model="promptDialog.value" style="width: 100%;" />
-      </div>
-      <template #footer>
-        <Button label="Cancel" @click="submitPrompt(null)" severity="secondary" />
-        <Button label="OK" @click="submitPrompt(promptDialog.value)" />
-      </template>
-    </Dialog>
   </div>
 </template>
 
@@ -1193,19 +1061,6 @@ watchDebounced(internalValue, (newValue, oldValue) => {
   margin-top: calc(1rem * calc(1 - var(--tw-space-y-reverse)));
   /* Corresponds to space-y-4 */
   margin-bottom: calc(1rem * var(--tw-space-y-reverse));
-}
-
-/* HTML Source Editor Styles */
-.html-source-editor {
-  background-color: var(--p-surface-100);
-  border: 1px solid var(--p-surface-300);
-  border-radius: var(--p-border-radius);
-  padding: 0.75rem;
-}
-
-.html-source-editor:focus {
-  border-color: var(--p-primary-color);
-  box-shadow: 0 0 0 0.2rem var(--p-primary-100);
 }
 
 .justify-between {

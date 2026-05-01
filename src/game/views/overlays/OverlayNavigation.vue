@@ -391,28 +391,32 @@ const isTextDungeon = computed(() => {
           </div>
 
           <div class="content-wrapper">
-            <CustomComponentContainer :slot="'scene-content-top'"
-              :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
-            <!-- events scenes-->
-            <div v-if="game.dungeonSystem.currentSceneId.value" class="dialogue-content event-content"
-              :style="dialogueContentStyle">
-              <span v-if="talkingCharacterHasNoArt" class="inline-character-name" :style="characterNameStyle">{{
-                characterName }}: </span>
-              <span v-html="displayContent"></span>
-            </div>
-            <!-- encounters-->
-            <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
-              <TextEncounter />
-            </div>
-            <!-- flash messages-->
-            <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
-              ref="flashContentElement" class="flash-content"
-              v-html="game.dungeonSystem.cachedFlashArray.value.join('<br>')"></div>
+            <div class="text-dialogue-box">
+              <CustomComponentContainer :slot="'scene-content-top'"
+                :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
+              <!-- events scenes-->
+              <div v-if="game.dungeonSystem.currentSceneId.value" class="dialogue-content event-content"
+                :style="dialogueContentStyle">
+                <span v-if="talkingCharacterHasNoArt" class="inline-character-name" :style="characterNameStyle">{{
+                  characterName }}: </span>
+                <span v-script="{ html: displayContent, resolver: false, disabled: typingAnimation.isAnimating.value }"
+                  style="display:inline"></span>
+              </div>
+              <!-- encounters-->
+              <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
+                <TextEncounter />
+              </div>
+              <!-- flash messages-->
+              <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
+                ref="flashContentElement" class="flash-content"
+                v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>'), resolver: false }"></div>
 
-            <!-- Scene choices for text dungeons -->
-            <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
-            <CustomComponentContainer :slot="'scene-content-bottom'"
-              :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
+              <!-- Scene choices for text dungeons -->
+              <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
+              <CustomComponentContainer :slot="'scene-content-bottom'"
+                :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
+            </div>
+
           </div>
         </div>
       </div>
@@ -431,7 +435,8 @@ const isTextDungeon = computed(() => {
             :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
           <!-- events scenes-->
           <div v-if="game.dungeonSystem.currentSceneId.value" class="dialogue-content event-content"
-            :style="dialogueContentStyle" v-html="displayContent"></div>
+            :style="dialogueContentStyle"
+            v-script="{ html: displayContent, resolver: false, disabled: typingAnimation.isAnimating.value }"></div>
           <!-- encounters-->
           <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
             <!-- Map/Screen dungeon: original layout -->
@@ -446,12 +451,14 @@ const isTextDungeon = computed(() => {
                 </template>
               </div>
 
-              <div class="encounter-text" v-html="encounterContent"></div>
+              <div class="encounter-text" v-script="{ html: encounterContent, resolver: false }"></div>
             </div>
           </div>
           <!-- flash messages-->
           <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0" ref="flashContentElement"
-            class="flash-content" v-html="game.dungeonSystem.cachedFlashArray.value.join('<br>')"></div>
+            class="flash-content"
+            v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>'), resolver: false }">
+          </div>
 
           <ChoiceList v-if="!game.dungeonSystem.toolbarMinimized.value && game.coreSystem.isTextUIContent.value" />
           <CustomComponentContainer :slot="'scene-content-bottom'"
@@ -482,6 +489,10 @@ const isTextDungeon = computed(() => {
   transform: translateX(-50%);
   width: 80%;
   max-width: 800px;
+  max-height: 80dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 
 
   border-radius: 4px;
@@ -491,8 +502,7 @@ const isTextDungeon = computed(() => {
 .overlay.text {
   top: 0;
   bottom: 0;
-  height: 100vh;
-  height: 100dvh;
+  max-height: 100dvh;
   /* Clear the .ui-container tray on the left. See --ui-tray-reserved-left
      in src/style.css — shared with .progression-container's padding. */
   width: calc(100% - var(--ui-tray-reserved-left, 120px));
@@ -521,6 +531,9 @@ const isTextDungeon = computed(() => {
   margin-bottom: 1rem;
   display: flex;
   position: relative;
+  max-height: 40dvh;
+  min-height: 0;
+  overflow-y: auto;
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -544,7 +557,9 @@ const isTextDungeon = computed(() => {
   padding: 10px;
   border-radius: 0;
   height: 100%;
-  background: #2d2d2df2;
+  max-height: none;
+  overflow-y: visible;
+  background: #2d2d2d4f;
 }
 
 .content-wrapper {
@@ -559,7 +574,7 @@ const isTextDungeon = computed(() => {
 }
 
 .encounter-type .content-wrapper {
-  justify-content: center;
+  justify-content: safe center;
 }
 
 
@@ -581,12 +596,27 @@ const isTextDungeon = computed(() => {
 
 .overlay-content {
   color: white;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .dialogue-content {
   padding: 10px;
   line-height: 1.2em;
   font-family: var(--font-family-serif);
+}
+
+.text-dungeon-layout .dialogue-content {
+  padding: 0px;
+}
+
+.text-dialogue-box {
+  background: #1e1e1ebd;
+  border-radius: 10px;
+  padding: 10px;
+  min-height: 20dvh;
 }
 
 .clickable {
@@ -745,7 +775,7 @@ const isTextDungeon = computed(() => {
   padding-bottom: 1em;
   box-sizing: border-box;
   overflow-y: auto;
-  background: #2d2d2df2;
+  background: #2d2d2d4f;
   height: 100%;
 }
 

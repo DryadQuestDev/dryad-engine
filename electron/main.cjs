@@ -16,7 +16,24 @@ const sharp = require('sharp');
 const archiver = require('archiver');
 const yauzl = require('yauzl');
 
-let mainWindow;
+const windows = new Set();
+
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  return;
+}
+app.on('second-instance', () => {
+  createWindow();
+});
+
+function broadcastToWindows(channel, payload) {
+  for (const w of windows) {
+    if (w && w.webContents && !w.webContents.isDestroyed()) {
+      w.webContents.send(channel, payload);
+    }
+  }
+}
 
 // Load the index.html file directly from the file system
 //const indexPath = path.join(__dirname, '../dist/dryad-engine/browser/index.html');
@@ -33,7 +50,7 @@ let oauthHttpServer; // Added: To hold the HTTP server instance
 // --- End Google OAuth Configuration ---
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1200,
     height: 800,
     show: false, // Don't show until maximized
@@ -45,32 +62,33 @@ function createWindow() {
       webSecurity: true,    // enforces CORS and other restrictions
     }
   });
+  windows.add(win);
 
-  mainWindow.loadFile(indexPath);
+  win.loadFile(indexPath);
 
   // Get screen dimensions and set bounds before showing to avoid resize animation
-  mainWindow.once('ready-to-show', () => {
+  win.once('ready-to-show', () => {
     const { bounds } = screen.getPrimaryDisplay();
-    mainWindow.setBounds(bounds);
-    mainWindow.show();
+    win.setBounds(bounds);
+    win.show();
   });
 
   // Open DevTools for debugging (remove in production)
-  // mainWindow.webContents.openDevTools();
+  // win.webContents.openDevTools();
 
-  mainWindow.on('closed', function () {
-    mainWindow = null;
+  win.on('closed', function () {
+    windows.delete(win);
   });
 
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  mainWindow.webContents.on("zoom-changed", (event, zoomDirection) => {
+  win.webContents.on("zoom-changed", (event, zoomDirection) => {
 
-    let currentZoom = mainWindow.webContents.getZoomFactor();
+    let currentZoom = win.webContents.getZoomFactor();
 
     if (zoomDirection === "in") {
       currentZoom = currentZoom + 0.1;
@@ -80,10 +98,15 @@ function createWindow() {
     }
 
     currentZoom = Math.max(0.25, Math.min(5, currentZoom));
-    mainWindow.webContents.zoomFactor = currentZoom;
+    win.webContents.zoomFactor = currentZoom;
 
   })
-
+  /*
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.setVisualZoomLevelLimits(1, 1);
+      win.webContents.setZoomFactor(1);
+    });
+  */
 
   // menu
   const menu = Menu.buildFromTemplate([
@@ -141,7 +164,7 @@ function createWindow() {
 
   Menu.setApplicationMenu(menu);
 
-  mainWindow.on('close', () => {
+  win.on('close', () => {
     globalShortcut.unregisterAll();
   });
 
@@ -152,19 +175,21 @@ function createWindow() {
     }
   });
 
-  mainWindow.setMenuBarVisibility(true);
+  win.setMenuBarVisibility(true);
 
 
 
 }
 function toggleFullscreen() {
-  if (mainWindow) {
-    const barVisibility = !mainWindow.isMenuBarVisible()
-    const isFullScreen = mainWindow.isFullScreen();
-    mainWindow.setFullScreen(!isFullScreen);
-    mainWindow.setMenuBarVisibility(barVisibility);
+  const target = BrowserWindow.getFocusedWindow();
+  if (target) {
+    const barVisibility = !target.isMenuBarVisible()
+    const isFullScreen = target.isFullScreen();
+    target.setFullScreen(!isFullScreen);
+    target.setMenuBarVisibility(barVisibility);
   }
 }
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
@@ -661,6 +686,52 @@ ipcMain.handle("write-json", async (_, filePath, jsonData) => {
 
     fs.writeFileSync(absolutePath, JSON.stringify(jsonData, null, 2), "utf-8");
     return { message: "JSON saved successfully!" };
+  } catch (error) {
+    dialog.showErrorBox("Error writing file:", error);
+    return;
+  }
+});
+
+// 📄 Read Text File (Electron IPC)
+ipcMain.handle("read-text", async (_, filePath) => {
+  const safePath = getSafeAbsolutePath(filePath);
+  if (!safePath) {
+    console.warn(`[IPC read-text] Invalid or unsafe path resolved for input: ${filePath}`);
+    return null;
+  }
+
+  try {
+    if (!fs.existsSync(safePath)) {
+      console.warn(`[IPC read-text] File not found: ${safePath}`);
+      return null;
+    }
+    return fs.readFileSync(safePath, "utf-8");
+  } catch (error) {
+    console.error(`[IPC read-text] Error processing file ${safePath}:`, error);
+    dialog.showErrorBox("Error reading file", `Failed to read ${filePath || 'provided path'}. Error: ${error.message || String(error)}`);
+    return null;
+  }
+});
+
+// ✍️ Write Text File (Electron IPC)
+ipcMain.handle("write-text", async (_, filePath, content) => {
+  const safePath = getSafeAbsolutePath(filePath);
+  if (!safePath) {
+    dialog.showErrorBox('Unsafe or invalid file path.');
+    return;
+  }
+
+  try {
+    const appPath = app.getAppPath();
+    const absolutePath = path.join(appPath, "../../assets/", filePath);
+
+    const directory = path.dirname(absolutePath);
+    if (!fs.existsSync(directory)) {
+      fs.mkdirSync(directory, { recursive: true });
+    }
+
+    fs.writeFileSync(absolutePath, String(content ?? ''), "utf-8");
+    return { message: "Text saved successfully!" };
   } catch (error) {
     dialog.showErrorBox("Error writing file:", error);
     return;
@@ -1720,18 +1791,14 @@ function createOAuthHttpServer(attempt = 0) { // Added attempt counter for EADDR
           if (dialog && typeof dialog.showErrorBox === 'function') {
             dialog.showErrorBox("OAuth Error", `Authentication failed: ${error}`);
           }
-          if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-            mainWindow.webContents.send('google-auth-callback', { error: String(error) });
-          }
+          broadcastToWindows('google-auth-callback', { error: String(error) });
           stopServerAndRespond(400, "Auth Failed", `Authentication Failed. Error: ${error}.`);
           return;
         }
 
         if (code) {
           console.log("[OAuth Server] Authorization Code received via HTTP server:", code);
-          if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-            mainWindow.webContents.send('google-auth-callback', { code: String(code) });
-          }
+          broadcastToWindows('google-auth-callback', { code: String(code) });
           stopServerAndRespond(200, "Auth Success", "Authentication Successful! The application has received the authorization code.");
           return;
         }
@@ -1813,7 +1880,7 @@ app.on('window-all-closed', function () {
 });
 
 app.on('activate', function () {
-  if (mainWindow === null) {
+  if (windows.size === 0) {
     createWindow();
   }
 });
@@ -1842,18 +1909,16 @@ app.on('open-url', (event, receivedUrl) => {
       if (dialog && typeof dialog.showErrorBox === 'function') {
         dialog.showErrorBox("OAuth Error (via open-url)", `Authentication failed: ${error}`);
       }
-      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-        mainWindow.webContents.send('google-auth-callback', { error });
-      }
+      broadcastToWindows('google-auth-callback', { error });
       return;
     }
 
     if (authorizationCode) {
       console.log("[OAuth Redirect via open-url] Authorization Code received:", authorizationCode);
-      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-        mainWindow.webContents.send('google-auth-callback', { code: authorizationCode });
+      if (windows.size > 0) {
+        broadcastToWindows('google-auth-callback', { code: authorizationCode });
       } else {
-        console.error("[OAuth Redirect via open-url] mainWindow not available to send auth code.");
+        console.error("[OAuth Redirect via open-url] no windows available to send auth code.");
       }
     } else {
       console.warn("[OAuth Redirect via open-url] No authorization code or error found in URL:", receivedUrl);

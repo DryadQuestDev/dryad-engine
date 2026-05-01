@@ -2,6 +2,7 @@ import { ref, computed, watch, provide, onMounted, onUnmounted } from 'vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { Game } from '../../game';
 import { Item } from '../../core/character/item';
+import { getStack as getLoreStack } from '../lore/lorePopupStore';
 
 // Injection keys for provide/inject
 export const STICKY_ITEM_UID_KEY = Symbol('stickyItemUid');
@@ -162,8 +163,19 @@ export function useItemPopup(
     }
   }
 
+  function loreAnchorIsInsidePopup(): boolean {
+    const container = popupContainerRef.value;
+    if (!container) return false;
+    return getLoreStack().value.some(entry => container.contains(entry.anchorEl));
+  }
+
   function handlePopupLeave() {
     isHoveringPopup.value = false;
+    // If a lore popup is open with its source link inside this item popup, keep
+    // the item popup alive — the cursor is moving toward the lore popup, and
+    // closing now would yank the link out from under it. The watcher below
+    // closes the item popup once the lore stack drains.
+    if (loreAnchorIsInsidePopup()) return;
     // Clear hover state when leaving popup (unless there's a sticky item)
     if (!stickyItem.value && currentHoveredItem.value) {
       // Clear global hover
@@ -174,6 +186,21 @@ export function useItemPopup(
       hoveredItemSlotRef.value = null;
     }
   }
+
+  // When the lore stack drains (e.g., user moved away from all lore popups),
+  // re-check whether the item popup should close. This handles the case where
+  // handlePopupLeave bailed out because a lore popup was anchored inside.
+  watch(() => getLoreStack().value.length, (newLen) => {
+    if (newLen > 0) return;
+    if (isHoveringPopup.value) return;
+    if (stickyItem.value) return;
+    if (!currentHoveredItem.value) return;
+    if (hoverItemUid.value === currentHoveredItem.value.uid) {
+      hoverItemUid.value = null;
+    }
+    currentHoveredItem.value = null;
+    hoveredItemSlotRef.value = null;
+  });
 
   // Clicking outside both the item slots and the popup deselects the sticky item.
   // Slot clicks bubble to this listener too, but are ignored (the slot's own click

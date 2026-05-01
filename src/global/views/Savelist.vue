@@ -210,14 +210,23 @@ async function handleFileUpload(event: Event): Promise<void> {
 
   <div class="load_controls">
     <input type="file" ref="fileInput" @change="handleFileUpload" accept=".json" style="display: none;" />
-    <button @click="triggerLoadFromFile" class="load_button">Load from File</button>
+    <button @click="triggerLoadFromFile" class="load_button">
+      <i class="pi pi-upload"></i>
+      <span>Load from File</span>
+    </button>
+    <button v-if="isFromGame" @click="saveToFile" class="load_button" :disabled="isSaveDisabled">
+      <i class="pi pi-download"></i>
+      <span>Save to File</span>
+    </button>
   </div>
 
   <div class="ingame_block" v-if="isFromGame">
     <div class="save_controls">
       <input type="text" v-model="newSaveName" class="save_name_input" />
-      <button @click="saveLocally" class="save_button" :disabled="isSaveDisabled">Save Locally</button>
-      <button @click="saveToFile" class="save_button" :disabled="isSaveDisabled">Save to File</button>
+      <button @click="saveLocally" class="save_button save_button--primary" :disabled="isSaveDisabled">
+        <i class="pi pi-save"></i>
+        <span>Save Locally</span>
+      </button>
     </div>
 
   </div>
@@ -252,20 +261,10 @@ async function handleFileUpload(event: Event): Promise<void> {
 </template>
 
 <style scoped>
-h3 {
-  margin-top: 0;
-  margin-bottom: 10px;
-  font-size: 1.2em;
-  /* Consistent with other column titles */
-  color: #333;
-}
-
 .save_list {
-  margin-top: 10px;
-  /* Matches original .column > .save_list structure */
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
   overflow-y: auto;
   flex-grow: 1;
 }
@@ -273,48 +272,42 @@ h3 {
 .save_item {
   cursor: pointer;
   display: flex;
-  /* Changed from flex to allow save_item_main_content to control layout */
-  /* justify-content: space-between; Removed, handled by inner elements */
-  /* align-items: center; Removed, handled by inner elements */
-  padding: 8px 12px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  padding: 12px 14px;
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 10px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .save_item:hover {
-  background-color: #f5f5f5;
-  border-color: #9b9b9b;
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-tint);
 }
 
 .save_item_main_content {
   display: flex;
   flex-direction: column;
-  /* Stack header and meta vertically */
   flex-grow: 1;
   min-width: 0;
-  /* Allow flex child to shrink below content size */
   width: 100%;
-  /* Ensure it takes full width */
 }
 
 .save_item_header {
   display: flex;
   justify-content: space-between;
-  /* Puts save_name left, button right */
   align-items: flex-start;
-  /* Keep delete button at top when name wraps */
   width: 100%;
   margin-bottom: 8px;
-  /* Space between header and meta */
 }
 
 .save_name {
-  font-weight: bold;
+  font-weight: 600;
+  font-size: 13px;
+  color: rgba(216, 221, 228, 0.95);
   margin-right: 10px;
-  /* Space between name and delete button if they were closer */
   flex-grow: 1;
-  /* Allow name to take available space */
   min-width: 0;
   display: flex;
   align-items: center;
@@ -329,118 +322,166 @@ h3 {
 
 .dev_badge {
   background-color: #ff9800;
-  color: white;
+  color: #0b0d10;
   padding: 2px 8px;
   border-radius: 3px;
-  font-size: 0.85em;
-  font-weight: bold;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
 }
 
 .delete_save_button {
-  padding: 5px 10px;
-  background-color: #ff6b6b;
-  color: white;
-  border: none;
-  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  background: rgba(192, 57, 43, 0.18);
+  color: #ff8a80;
+  border: 1px solid rgba(192, 57, 43, 0.4);
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 0.9em;
-  transition: background-color 0.2s ease;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  transition: background 0.15s ease, color 0.15s ease;
   flex-shrink: 0;
 }
 
 .delete_save_button:hover {
-  background-color: #ef0000;
-  outline: 1px solid #000000;
+  background: rgba(192, 57, 43, 0.6);
+  color: #fff;
 }
 
 .save_meta {
-  font-size: 0.8em;
-  color: #555;
+  font-size: 11px;
+  color: rgba(216, 221, 228, 0.55);
   display: flex;
   flex-direction: column;
   gap: 3px;
-  /* Space between meta items */
   width: 100%;
-  /* Ensure meta section takes full width */
 }
 
 .save_meta span {
-  /* white-space: nowrap; Removed */
   overflow: hidden;
-  /* Ellipsis still useful for very long individual lines */
   text-overflow: ellipsis;
   word-wrap: break-word;
-  /* Allow long words/strings to break and wrap */
-  /* Or use overflow-wrap: break-word; */
+}
+
+.save_meta b {
+  color: rgba(216, 221, 228, 0.75);
+  font-weight: 500;
 }
 
 .no_saves_message {
-  padding: 10px;
+  padding: 24px 12px;
   font-style: italic;
-  color: #888;
+  font-size: 13px;
+  color: rgba(216, 221, 228, 0.5);
   text-align: center;
   flex-grow: 1;
   display: flex;
   justify-content: center;
+  align-items: center;
 }
 
 .save_controls {
   display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
   align-items: center;
 }
 
 .save_name_input {
   padding: 8px 12px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  color: rgba(216, 221, 228, 0.92);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 8px;
   flex-grow: 1;
+  min-width: 0;
+  outline: none;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: border-color 0.15s ease;
 }
 
-.save_button {
-  padding: 8px 15px;
-  background-color: #4CAF50;
-  /* Green */
-  color: white;
-  border: none;
-  border-radius: 4px;
+.save_name_input:focus {
+  border-color: var(--glass-tint);
+}
+
+.save_button,
+.load_button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: rgba(216, 221, 228, 0.92);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
 }
 
-.save_button:hover:not(:disabled) {
-  background-color: #45a049;
+.save_button i,
+.load_button i {
+  font-size: 13px;
 }
 
-.save_button:disabled {
-  background-color: #a5d6a7;
+.save_button:hover:not(:disabled),
+.load_button:hover:not(:disabled) {
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-tint);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.save_button:disabled,
+.load_button:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
+.save_button--primary {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  border-color: var(--glass-tint);
+  font-weight: 600;
+}
+
+.save_button--primary:hover:not(:disabled) {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  filter: brightness(1.1);
+}
+
 .load_controls {
-  margin-top: 10px;
-  /* Add some space above the load button */
-  padding-bottom: 10px;
+  margin-bottom: 12px;
   display: flex;
+  gap: 8px;
 }
 
 .load_button {
-  padding: 8px 15px;
-  background-color: #2196F3;
-  /* Blue */
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  width: 100%;
-  /* Make it full width similar to other controls if desired */
+  flex: 1;
+  min-width: 0;
 }
 
-.load_button:hover {
-  background-color: #1e88e5;
+@supports not (backdrop-filter: blur(1px)) {
+  .save_item,
+  .save_name_input,
+  .save_button,
+  .load_button {
+    background: rgba(20, 24, 29, 0.92);
+  }
 }
 </style>

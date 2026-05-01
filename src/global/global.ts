@@ -7,7 +7,7 @@ import { Game } from '../game/game';
 import { ManifestObject } from '../schemas/manifestSchema';
 import { PropertyObject } from '../schemas/propertySchema';
 // import { Stat } from '../game/Stat';
-import { load } from '../utility/save-system';
+import { loadSave } from '../utility/save-system';
 import { IndexedDbSaveService } from '../services/indexeddb-save.service';
 
 import { Property } from '../game/property';
@@ -37,6 +37,7 @@ import gsap from 'gsap';
 import fastCopy from 'fast-copy';
 import { PARTY_INVENTORY_ID } from '../game/systems/itemSystem';
 import { DungeonRoomObject } from '../schemas/dungeonRoomSchema';
+import { DungeonConfigObject } from '../schemas/dungeonConfigSchema';
 import { DungeonEncounterObject } from '../schemas/dungeonEncounterSchema';
 
 // Reusable components for external scripts
@@ -78,6 +79,7 @@ export type EngineState = 'main_menu' | 'game' | 'editor';
 
 const GAME_SCRIPT_ATTRIBUTE = 'data-game-script'; // Attribute to identify game scripts
 const GAME_CSS_ATTRIBUTE = 'data-game-css'; // Attribute to identify game CSS links
+const LANDING_CSS_ATTRIBUTE = 'data-landing-css'; // Attribute to identify landing-only CSS
 
 // Item slot size as a percentage of container height (used in both game and editor)
 export const ITEM_SLOT_SIZE_PERCENT = 0.08; // 8%
@@ -335,8 +337,12 @@ export class Global {
 
 
     let { mergedManifest } = await this.initGame(gameManifest, modsManifests);
+
+    // Re-apply per-game accent across the engine for in-game UI (menu, popups, etc.)
+    this.applyEngineTheme(modsManifests);
+
     gameLogger.info("Game initialized, loading save data...");
-    load(this.game, data);
+    loadSave(this.game, data);
 
     // Clean up any slots marked for removal (from exit animations that were in progress during save)
     if (this.game.dungeonSystem?.sceneSlots?.value) {
@@ -418,6 +424,9 @@ export class Global {
 
     let { mergedManifest } = await this.initGame(gameManifest, modList);
 
+    // Re-apply per-game accent across the engine for in-game UI (menu, popups, etc.)
+    this.applyEngineTheme(modList);
+
     // Create auto_create entities for new game
     this.createDefaultEntities();
 
@@ -470,6 +479,10 @@ export class Global {
       }
       for (let room of dungeonRooms) {
         dungeonRoomsMap.set(room.id, room);
+      }
+      const dungeonConfig = dungeonLinesMap.get('_config_')?.params as DungeonConfigObject | undefined;
+      if (dungeonConfig?.dungeon_type === 'screen' && dungeonRoomsMap.size === 0) {
+        dungeonRoomsMap.set('main', { id: 'main', uid: 'main' });
       }
       for (let encounter of dungeonEncounters) {
         dungeonEncountersMap.set(encounter.id, encounter);
@@ -552,6 +565,9 @@ export class Global {
     await this.fetchMapValues(gameId, `narrative_slots`, modsIds);
     await this.fetchMapValues(gameId, `narrative_states`, modsIds);
     await this.fetchMapValues(gameId, `narrative_segments`, modsIds);
+    game.narrativeSystem.recordsMap = await this.fetchMapValues(gameId, `records`, modsIds);
+    game.narrativeSystem.encyclopediaTreesMap = await this.fetchMapValues(gameId, `encyclopedia_trees`, modsIds, 'order');
+    game.narrativeSystem.buildEncyclopediaIndex();
     game.narrativeSystem.buildSegmentIndex();
 
     // set debug settings
@@ -937,6 +953,79 @@ export class Global {
     });
   }
 
+  public async loadLandingCss(manifests: ManifestObject[]): Promise<void> {
+    const target = new Set<string>();
+    for (const manifest of manifests) {
+      const paths = manifest?.landing_css;
+      if (!paths) continue;
+      for (const path of paths) {
+        if (path) target.add(path);
+      }
+    }
+
+    // Load any newly-needed sheets BEFORE removing the old ones, so there's
+    // no gap where the page renders un-themed.
+    await Promise.all(
+      [...target].map(async path => {
+        if (document.querySelector(`style[${LANDING_CSS_ATTRIBUTE}="${path}"]`)) return;
+        try {
+          await this.loadLandingCssFile(path);
+        } catch (error) {
+          gameLogger.error(`Failed to load landing CSS: ${path}`, error);
+        }
+      })
+    );
+
+    // Remove any landing CSS that is no longer in the target set.
+    document.querySelectorAll(`style[${LANDING_CSS_ATTRIBUTE}]`).forEach(style => {
+      const path = style.getAttribute(LANDING_CSS_ATTRIBUTE);
+      if (!path || !target.has(path)) style.parentNode?.removeChild(style);
+    });
+  }
+
+  public unloadLandingCss(): void {
+    const existingStyles = document.querySelectorAll(`style[${LANDING_CSS_ATTRIBUTE}]`);
+    existingStyles.forEach(style => {
+      style.parentNode?.removeChild(style);
+    });
+  }
+
+  public applyEngineTheme(manifests: ManifestObject[]): void {
+    let primary: string | undefined;
+    let accent: string | undefined;
+    for (const m of manifests) {
+      if (m?.theme?.primary) primary = m.theme.primary;
+      if (m?.theme?.accent) accent = m.theme.accent;
+    }
+    this.setThemeVar('--glass-tint', accent);
+    this.setThemeVar('--theme-primary', primary);
+  }
+
+  public clearEngineTheme(): void {
+    document.body.style.removeProperty('--glass-tint');
+    document.body.style.removeProperty('--theme-primary');
+  }
+
+  private setThemeVar(name: string, value: string | undefined): void {
+    if (!value) {
+      document.body.style.removeProperty(name);
+      return;
+    }
+    const c = /^(#|rgb|hsl)/i.test(value) ? value : `#${value}`;
+    document.body.style.setProperty(name, c);
+  }
+
+  private async loadLandingCssFile(path: string): Promise<void> {
+    if (document.querySelector(`style[${LANDING_CSS_ATTRIBUTE}="${path}"]`)) return;
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const cssText = await response.text();
+    const style = document.createElement('style');
+    style.setAttribute(LANDING_CSS_ATTRIBUTE, path);
+    style.textContent = cssText;
+    document.head.appendChild(style);
+  }
+
   private loadScript(path: string): Promise<void> {
     return new Promise((resolve, reject) => {
       // Check if script already exists
@@ -1146,6 +1235,14 @@ export class Global {
 
   async writeJson(path: string, data: any): Promise<void> {
     return this.storageService.writeJson(path, data);
+  }
+
+  async readText(path: string): Promise<string | null> {
+    return this.storageService.readText(path);
+  }
+
+  async writeText(path: string, content: string): Promise<void> {
+    return this.storageService.writeText(path, content);
   }
 
   async listFiles(path: string): Promise<string[]> {

@@ -15,6 +15,7 @@ import CharacterTab from '../views/progression/CharacterTab.vue';
 import CharacterSheet from '../views/progression/CharacterSheet.vue';
 import InventoryHeader from '../views/progression/InventoryHeader.vue';
 import GalleryTab from '../views/progression/GalleryTab.vue';
+import EncyclopediaTab from '../views/progression/EncyclopediaTab.vue';
 import SkillTree from '../views/progression/SkillTree.vue';
 import DebugOptions from '../views/debug_containers/DebugOptions.vue';
 import DebugDungeons from '../views/debug_containers/DebugDungeons.vue';
@@ -323,6 +324,13 @@ export class InitSystem {
             slot: 'progression-tabs',
             title: 'Gallery',
             component: GalleryTab,
+        });
+
+        this.game.coreSystem.addComponent({
+            id: 'encyclopedia',
+            slot: 'progression-tabs',
+            title: 'Encyclopedia',
+            component: EncyclopediaTab,
         });
     }
 
@@ -792,6 +800,14 @@ export class InitSystem {
         this.game.registerAction("flash", {
             action: (text: string) => {
                 this.game.dungeonSystem.addFlash(text);
+            }
+        });
+
+        this.game.registerAction("discover_lore", {
+            action: (data: string) => {
+                for (const id of data.split(',').map(s => s.trim()).filter(Boolean)) {
+                    this.game.narrativeSystem.discoverRecord(id);
+                }
             }
         });
         /*

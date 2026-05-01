@@ -38,8 +38,8 @@ function setMenuState(state: string) {
 
 
 
-    <div class="menu-container-bg" @click="handleClickOutside">
-      <div class="menu-container-content">
+    <div class="menu-container-bg glass-popup-mask" @click="handleClickOutside">
+      <div class="menu-container-content glass-popup-surface">
         <CustomComponentContainer :slot="'menu-before'" :context="{ menuState }" />
 
         <ul v-if="menuState === 'main'">
@@ -94,9 +94,9 @@ function setMenuState(state: string) {
 .menu-container {
   position: absolute;
   z-index: 1200;
-
 }
 
+/* Layout only — glass surface comes from .glass-popup-mask / .glass-popup-surface in src/style.css */
 .menu-container-bg {
   position: fixed;
   top: 0;
@@ -105,7 +105,6 @@ function setMenuState(state: string) {
   width: 100dvw;
   height: 100vh;
   height: 100dvh;
-  background: rgba(0, 0, 0, 0.3);
 }
 
 .menu-container-content {
@@ -115,17 +114,16 @@ function setMenuState(state: string) {
   transform: translate(-50%, -50%);
   height: 80vh;
   height: 80dvh;
-  width: 500px;
-  background-color: #f0f0f0;
-  padding: 20px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
+  width: min(500px, 92vw);
+  padding: 24px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
+  gap: 8px;
   scrollbar-gutter: stable;
 }
+
 
 .menu-container-content ul {
   list-style-type: none;
@@ -133,46 +131,60 @@ function setMenuState(state: string) {
   margin: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  gap: 8px;
   width: 100%;
 }
 
 .menu-container-content li {
-  background-color: #e0e0e0;
-  color: #333;
-  padding: 10px 20px;
-  margin: 10px 0;
-  border: 1px solid #ccc;
-  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 20px;
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: rgba(216, 221, 228, 0.92);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   cursor: pointer;
-  text-align: center;
-  min-width: 200px;
-  transition: background-color 0.3s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .menu-container-content li:hover {
-  background-color: #d0d0d0;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: var(--glass-tint);
+  color: #fff;
 }
 
-/* Fade transition classes */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.5s ease;
+@media (pointer: coarse), (max-width: 720px) {
+  .menu-container-content {
+    padding: 28px 22px;
+    gap: 12px;
+  }
+
+  .menu-container-content ul {
+    gap: 12px;
+  }
+
+  .menu-container-content li {
+    padding: 18px 24px;
+    font-size: 16px;
+    border-radius: 10px;
+  }
 }
 
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
 
 /* Dev Mode Section */
 .dev-mode-section {
   width: 100%;
-  margin-bottom: 20px;
-  padding: 15px;
-  background-color: #fff3cd;
-  border: 2px solid #ffc107;
-  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: rgba(180, 110, 0, 0.18);
+  border: 1px solid rgba(255, 180, 60, 0.45);
+  border-radius: 10px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .dev-mode-indicator {
@@ -180,29 +192,31 @@ function setMenuState(state: string) {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  margin-bottom: 15px;
-  color: #856404;
-  font-weight: bold;
+  margin-bottom: 12px;
+  color: #ffd6a8;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.04em;
 }
 
 .dev-badge {
   background-color: #ff9800;
-  color: white;
+  color: #0b0d10;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 0.9em;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
 }
 
 .debug-panel-toggle {
   display: flex;
   justify-content: center;
-  padding: 10px;
-  background-color: white;
-  border-radius: 5px;
-  border: 1px solid #ffc107;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 180, 60, 0.25);
 }
 
 .debug-panel-toggle label {
@@ -210,12 +224,14 @@ function setMenuState(state: string) {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  color: #333;
+  color: rgba(216, 221, 228, 0.9);
+  font-size: 13px;
 }
 
 .debug-panel-toggle input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
+  accent-color: var(--glass-tint);
 }
 </style>

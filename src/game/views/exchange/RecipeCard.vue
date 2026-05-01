@@ -51,7 +51,7 @@ const outputItems = computed(() => {
       <h3 class="recipe-name">{{ recipe.name || recipe.id }}</h3>
     </div>
 
-    <div v-if="recipe.description" class="recipe-description" v-html="recipe.description"></div>
+    <div v-if="recipe.description" v-script="recipe.description" class="recipe-description"></div>
 
     <!-- Input Items (Ingredients) -->
     <div v-if="inputItems.length > 0" class="recipe-section">

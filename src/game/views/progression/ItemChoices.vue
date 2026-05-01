@@ -43,7 +43,7 @@ function handleChoiceClick(choice: Choice) {
       <template v-for="(choice, index) in choices" :key="`${choice.id}-${index}`">
         <button v-if="choice.isVisible.value" class="choice-button" :class="{ 'disabled': !choice.isAvailable.value }"
           @click="handleChoiceClick(choice)">
-          <span class="choice-text" v-html="choice.nameComputed.value"></span>
+          <span class="choice-text" v-script="choice.nameComputed.value"></span>
         </button>
       </template>
     </div>

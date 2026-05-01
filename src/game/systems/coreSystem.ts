@@ -18,6 +18,7 @@ import { DiscoveredCharacter } from '../core/character/discoveredCharacter';
 import { DiscoveredAsset } from '../core/asset/discoveredAsset';
 import { AssetObject } from '../../schemas/assetSchema';
 import { InitSystem, CORE_EMITTER_SIGNATURES } from './initSystem';
+import { MusicPlayer } from '../../services/musicPlayer';
 import ShortUniqueId from 'short-unique-id';
 import { PropertyObject } from '../../schemas/propertySchema';
 import { LocaleObject } from '../../schemas/localeSchema';
@@ -211,10 +212,6 @@ export class CoreSystem {
   public soundsMap: Map<string, SoundObject> = new Map();
 
   music: string; // id from MusicMap
-  @Skip() musicArray: string[];
-  @Skip() musicIndex: number;
-  @Skip() musicPlayer: HTMLAudioElement;
-  @Skip() musicFadeInterval: number;
 
   public playSounds(val: string | string[]) {
     if (!val) {
@@ -275,110 +272,20 @@ export class CoreSystem {
       val = game.dungeonSystem.currentDungeon.value?.music || "";
     }
 
-    if (!load && this.music && this.music == val) {
-      return;
-    }
-
     if (!val) {
       return;
     }
 
-    if (this.musicFadeInterval) {
-      clearInterval(this.musicFadeInterval);
-    }
-
     this.music = val;
-    if (this.musicPlayer) {
-      let volume = this.musicPlayer.volume;
-      let steps = 10;
-      let currentStep = 0;
-      this.musicFadeInterval = setInterval(() => {
-        currentStep++;
-        if (currentStep == steps) {
-          this.musicPlayer.pause();
-          this.musicPlayer.currentTime = 0;
-          this.musicPlayer.remove();
-          this.setNextSongMap();
-          clearInterval(this.musicFadeInterval);
-        } else {
-          this.musicPlayer.volume = volume - volume * (currentStep / steps);
-        }
-      }, 100); // Increase volume every 100ms
 
-    } else {
-      this.setNextSongMap();
-    }
-  }
-
-  private setNextSongMap() {
-    // randomize an array
-    function shuffle(array: string[]) {
-      let currentIndex = array.length;
-
-      // While there remain elements to shuffle...
-      while (currentIndex != 0) {
-
-        // Pick a remaining element...
-        let randomIndex = Math.floor(Math.random() * currentIndex);
-        currentIndex--;
-
-        // And swap it with the current element.
-        [array[currentIndex], array[randomIndex]] = [
-          array[randomIndex], array[currentIndex]];
-      }
-    }
-
-    this.musicArray = this.musicMap.get(this.music)?.files || [];
-    if (this.musicArray.length === 0) {
-      gameLogger.error(`Music album "${this.music}" not found. Create it in the Music tab of the engine editor.`);
+    const files = this.musicMap.get(val)?.files || [];
+    if (files.length === 0) {
+      gameLogger.error(`Music album "${val}" not found. Create it in the Music tab of the engine editor.`);
       return;
     }
 
-    shuffle(this.musicArray);
-
-    // Debug: console.log(this.musicArray)
-
-    this.musicIndex = 0;
-    this.musicPlayer = new Audio();
-    // Event listener for when the song ends
-    this.musicPlayer.addEventListener('ended', () => {
-      // Debug: console.warn("ended song");
-      this.musicIndex++;
-      if (this.musicIndex >= this.musicArray.length) {
-        this.musicIndex = 0;
-      }
-      this.playSong();
-    });
-
-    this.playSong();
-  }
-
-  private playSong() {
-    this.musicPlayer.src = `${this.musicArray[this.musicIndex]}`;
-    // Debug: console.warn("music volume", Global.getInstance().userSettings.value.music_volume);
-    this.musicPlayer.volume = (Global.getInstance().userSettings.value.music_volume || 0) / 100;
-    this.musicPlayer.currentTime = 0;
-    this.musicPlayer.play().catch(error => {
-      if (error.name === 'NotAllowedError' || error.name === 'DOMException') {
-        gameLogger.warn('Music play prevented - waiting for user interaction');
-        let handleFirstInteraction = () => {
-          gameLogger.info('User interaction detected - resuming music');
-          this.setMusic(this.music, true);
-
-          // Remove all event listeners after the first interaction
-          document.removeEventListener('click', handleFirstInteraction);
-          document.removeEventListener('keydown', handleFirstInteraction);
-          document.removeEventListener('touchstart', handleFirstInteraction);
-        }
-        // Add event listeners for different types of user interactions
-        document.addEventListener('click', handleFirstInteraction);
-        document.addEventListener('keydown', handleFirstInteraction);
-        document.addEventListener('touchstart', handleFirstInteraction);
-      } else {
-        gameLogger.error('Unexpected music playback error:', error);
-      }
-    });
-    gameLogger.info(`Playing music: ${this.musicArray[this.musicIndex]}`);
+    const volume = (Global.getInstance().userSettings.value.music_volume || 0) / 100;
+    MusicPlayer.getInstance().play(val, files, { fade: 1.0, volume, force: load });
   }
 
   // ============================================
@@ -816,10 +723,7 @@ export class CoreSystem {
   public initMusicVolumeWatcher() {
     // music volume change watcher
     watch(() => Global.getInstance().userSettings.value.music_volume, (newVolume) => {
-      // Debug: console.warn("volume changed", newVolume);
-      if (this.musicPlayer) {
-        this.musicPlayer.volume = newVolume / 100;
-      }
+      MusicPlayer.getInstance().setVolume(newVolume / 100);
     });
   }
 

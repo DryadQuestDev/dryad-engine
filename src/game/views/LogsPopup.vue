@@ -49,9 +49,9 @@ watch(() => dungeonSystem.isLogsPopupOpen.value, async (isOpen) => {
         <div v-else class="log-list">
           <div v-for="(log, index) in dungeonSystem.logs" :key="index" class="log-entry"
             :class="{ 'choice': log.isChoice }">
-            <span class="log-text" v-html="formatLog(log)"></span>
+            <span class="log-text" v-script="{ html: formatLog(log), resolver: false }"></span>
             <div v-if="log.flash && log.flash.length > 0" class="flash-content"
-              v-html="log.flash.join('<br>')"></div>
+              v-script="{ html: log.flash.join('<br>'), resolver: false }"></div>
           </div>
         </div>
       </div>

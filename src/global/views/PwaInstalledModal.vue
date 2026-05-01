@@ -19,68 +19,118 @@ defineEmits<{ close: [] }>();
 .installed-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(8, 10, 14, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: 5500;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
 }
 
 .installed-modal {
-  background: #fff;
-  color: #222;
-  border-radius: 10px;
-  padding: 24px 28px;
+  position: relative;
   max-width: 420px;
   width: 100%;
-  position: relative;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  padding: 32px 28px 28px;
   text-align: center;
+  color: rgba(216, 221, 228, 0.92);
+  background: var(--glass-bg-strong);
+  border: var(--glass-border);
+  border-radius: 16px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
 }
 
 .close-btn {
   position: absolute;
-  top: 8px;
+  top: 10px;
   right: 12px;
-  background: none;
-  border: none;
-  font-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: var(--glass-border);
+  border-radius: 50%;
+  font-size: 22px;
   line-height: 1;
   cursor: pointer;
-  color: #666;
-  padding: 4px 10px;
+  color: rgba(216, 221, 228, 0.7);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .close-btn:hover {
-  color: #000;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 
 h2 {
   margin: 0 0 12px 0;
-  font-size: 1.4em;
+  font-family: var(--font-family-serif);
+  font-size: 22px;
+  font-weight: 600;
+  color: #fff;
 }
 
 p {
-  color: #555;
-  line-height: 1.5;
-  margin: 0 0 20px 0;
+  color: rgba(216, 221, 228, 0.8);
+  line-height: 1.55;
+  margin: 0 0 24px 0;
+  font-size: 14px;
 }
 
 .ok-btn {
-  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-  color: white;
-  padding: 10px 28px;
-  font-size: 1em;
-  font-weight: 700;
-  border: none;
-  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 32px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #0b0d10;
+  background: var(--glass-tint);
+  border: 1px solid var(--glass-tint);
+  border-radius: 12px;
   cursor: pointer;
-  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
-  transition: transform 0.15s ease;
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.12s ease, filter 0.15s ease;
 }
 
 .ok-btn:hover {
   transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+@media (pointer: coarse), (max-width: 720px) {
+  .installed-backdrop {
+    padding: 0;
+  }
+  .installed-modal {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: none;
+    padding: 32px 24px;
+    padding-top: max(32px, env(safe-area-inset-top));
+    padding-bottom: max(32px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .installed-modal {
+    background: rgba(20, 24, 29, 0.96);
+  }
 }
 </style>

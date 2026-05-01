@@ -1,6 +1,6 @@
 {
   "name": "dryad-engine",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "main": "electron/main.cjs",
   "description": "Dryad Engine - A Vue 3 and Electron based application for making modern 2D text-based games",
   "author": {
@@ -29,11 +29,13 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/lora": "^5.2.8",
     "@primeuix/themes": "^1.0.3",
+    "@types/dompurify": "^3.0.5",
     "@types/sortablejs": "^1.15.8",
     "@vueuse/core": "^13.1.0",
     "@vueuse/integrations": "^13.1.0",
     "@vueuse/rxjs": "^13.1.0",
     "archiver": "^7.0.1",
+    "dompurify": "^3.4.1",
     "fast-copy": "^3.0.2",
     "google-auth-library": "^9.15.1",
     "googleapis": "^148.0.0",

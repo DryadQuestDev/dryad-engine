@@ -11,6 +11,7 @@ import ProgressionContainer from './progression/ProgressionContainer.vue';
 import PopupContainer from './PopupContainer.vue';
 import LogsPopup from './LogsPopup.vue';
 import OverlayContainer from './overlays/OverlayContainer.vue';
+import LorePopup from './lore/LorePopup.vue';
 
 const global = Global.getInstance();
 const game = Game.getInstance();
@@ -44,8 +45,9 @@ const shouldShowDebugPanel = computed(() => {
 <template>
 
   <div class="game-screen">
-    <div class="is_loading" v-if="game.coreSystem.stateLoading.value">
-      Loading...
+    <div class="initial-loader" v-if="game.coreSystem.stateLoading.value">
+      <div class="initial-loader__ring"></div>
+      <div class="initial-loader__label">Loading</div>
     </div>
     <div class="game-body dark-scrollbar" v-else>
 
@@ -90,6 +92,8 @@ const shouldShowDebugPanel = computed(() => {
         </div>
 
         <LogsPopup />
+
+        <LorePopup />
 
       </div>
       <div v-if="shouldShowDebugPanel" :class="['game-body-panel', { expanded: debugPanelExpanded }]">

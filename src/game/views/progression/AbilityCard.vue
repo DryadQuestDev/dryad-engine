@@ -304,18 +304,21 @@ function getStatIcon(statId: string): string | undefined {
     </div>
 
     <div class="card-body">
-      <div class="ability-description" v-if="abilityMeta.description" v-html="abilityMeta.description"></div>
+      <div v-if="abilityMeta.description" v-script="abilityMeta.description" class="ability-description"></div>
 
       <div class="ability-details"
         v-if="metaDescription.length > 0 || description.length > 0 || deltaNewDesc.length > 0">
-        <div v-for="(line, i) in metaDescription" :key="'m' + i" class="meta-desc-line" v-html="line"></div>
+        <div v-for="(line, i) in metaDescription" :key="'m' + i" class="meta-desc-line"
+          v-script="{ html: line, resolver: false }"></div>
         <div v-for="(effect, i) in description" :key="'e' + i" class="effect-item">
           <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
-          <div v-for="(line, j) in effect.lines" :key="j" class="effect-line" v-html="line"></div>
+          <div v-for="(line, j) in effect.lines" :key="j" class="effect-line"
+            v-script="{ html: line, resolver: false }"></div>
         </div>
         <div v-for="(effect, i) in deltaNewDesc" :key="'dn' + i" class="effect-item new-effect">
           <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
-          <div v-for="(line, j) in effect.lines" :key="j" class="effect-line" v-html="line"></div>
+          <div v-for="(line, j) in effect.lines" :key="j" class="effect-line"
+            v-script="{ html: line, resolver: false }"></div>
         </div>
       </div>
     </div>

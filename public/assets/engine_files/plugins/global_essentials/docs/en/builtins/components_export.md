@@ -138,7 +138,7 @@ Renders a character in a scene slot with full animation support. Handles positio
 
 **Props:**
 - `character` (Character, required) - The character to display
-- `slot` (Partial<SceneSlot>, required) - Scene slot configuration with position, transforms, and animation data
+- `slot` (`Partial<SceneSlot>`, required) - Scene slot configuration with position, transforms, and animation data
 - `showItemSlots` (boolean, optional) - Whether to show equipped item slots
 - `enableAppear` (boolean, optional) - Enable appear animations
 - `view` (string, optional) - Character view override passed to CharacterDoll (e.g. `'back'`). See ->characters.character_views

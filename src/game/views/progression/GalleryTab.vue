@@ -30,12 +30,12 @@ const characterTweaks = ref<Map<string, { attributes: Map<string, string>, skinL
 // Asset tweaks state: Map<assetId, { animation: string | null, skins: string[] }>
 const assetTweaks = ref<Map<string, { animation: string | null, skins: string[] }>>(new Map());
 
-// Function: Filter galleries by selected type and only show galleries with items
-const getFilteredGalleries = () => {
+// Function: Filter galleries by type and only show galleries with items
+const getFilteredGalleries = (type: 'characters' | 'assets' = selectedTabType.value as 'characters' | 'assets') => {
   const galleries: GalleryObject[] = [];
   for (const gallery of game.coreSystem.galleriesMap.values()) {
-    if (gallery.type === selectedTabType.value) {
-      const items = getGalleryItems(gallery.id);
+    if (gallery.type === type) {
+      const items = getGalleryItems(gallery.id, type);
       if (items.length > 0) {
         galleries.push(gallery);
       }
@@ -45,10 +45,10 @@ const getFilteredGalleries = () => {
 };
 
 // Function: Get items for a specific gallery
-const getGalleryItems = (galleryId: string) => {
+const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = selectedTabType.value as 'characters' | 'assets') => {
   const items: Array<{ id: string; name: string; description: string; isDiscovered: boolean }> = [];
 
-  if (selectedTabType.value === 'characters') {
+  if (type === 'characters') {
     for (const template of game.characterSystem.templatesMap.values()) {
       if (template.gallery?.gallery_id === galleryId) {
         const isDiscovered = game.coreSystem.discoveredCharacters.has(template.id);
@@ -78,6 +78,17 @@ const getGalleryItems = (galleryId: string) => {
   items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
   return items;
+};
+
+const hasCharactersTab = getFilteredGalleries('characters').length > 0;
+const hasAssetsTab = getFilteredGalleries('assets').length > 0;
+const hasScenesTab = (game.dungeonSystem.getReplaySceneObject()?.dungeons?.length ?? 0) > 0;
+
+const firstAvailableTab = (): 'characters' | 'assets' | 'scenes' | null => {
+  if (hasCharactersTab) return 'characters';
+  if (hasAssetsTab) return 'assets';
+  if (hasScenesTab) return 'scenes';
+  return null;
 };
 
 // Computed: Selected item details (keep reactive - depends on reactive selectedItemId/selectedTabType)
@@ -567,6 +578,21 @@ const toggleFullscreen = () => {
 
 // Initialize gallery on mount
 onMounted(() => {
+  const current = selectedTabType.value;
+  const tabAvailable =
+    (current === 'characters' && hasCharactersTab) ||
+    (current === 'assets' && hasAssetsTab) ||
+    (current === 'scenes' && hasScenesTab);
+  if (!tabAvailable) {
+    const fallback = firstAvailableTab();
+    if (fallback && fallback !== current) {
+      selectTab(fallback);
+      return;
+    }
+  }
+
+  if (current === 'scenes') return;
+
   const galleries = getFilteredGalleries();
   if (galleries.length > 0) {
     const firstGallery = galleries[0];
@@ -587,14 +613,16 @@ onMounted(() => {
     <div class="gallery-list-column">
       <!-- Top Tabs -->
       <div class="gallery-type-tabs">
-        <div class="gallery-type-tab" :class="{ 'active': selectedTabType === 'characters' }"
+        <div v-if="hasCharactersTab" class="gallery-type-tab" :class="{ 'active': selectedTabType === 'characters' }"
           @click="selectTab('characters')">
           Characters
         </div>
-        <div class="gallery-type-tab" :class="{ 'active': selectedTabType === 'assets' }" @click="selectTab('assets')">
+        <div v-if="hasAssetsTab" class="gallery-type-tab" :class="{ 'active': selectedTabType === 'assets' }"
+          @click="selectTab('assets')">
           Assets
         </div>
-        <div class="gallery-type-tab" :class="{ 'active': selectedTabType === 'scenes' }" @click="selectTab('scenes')">
+        <div v-if="hasScenesTab" class="gallery-type-tab" :class="{ 'active': selectedTabType === 'scenes' }"
+          @click="selectTab('scenes')">
           Scenes
         </div>
       </div>
@@ -788,7 +816,7 @@ onMounted(() => {
             <Button :icon="descriptionMinimized ? 'pi pi-window-maximize' : 'pi pi-window-minimize'" text rounded
               size="small" @click="descriptionMinimized = !descriptionMinimized" />
           </div>
-          <div v-if="!descriptionMinimized" class="description-content" v-html="selectedItem.description"></div>
+          <div v-if="!descriptionMinimized" v-script="selectedItem.description || ''" class="description-content"></div>
         </div>
 
         <!-- Preview Area -->

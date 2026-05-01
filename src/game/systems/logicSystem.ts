@@ -415,11 +415,16 @@ export class LogicSystem {
         // todo: [code]some content with actions, placeholders etc that should be ignored in the resolvers[/code]
         let output = this.resolveCode(input);
 
+        // if{} — hoisted to run first so unreachable branches (and their [[!id]] discover-on-encounter
+        // tokens, side-effecting actions, etc.) are dropped before any other stage processes them.
+        // Trade-off: conditions cannot use |placeholder| substitution (they can use flags and registered _conditions).
+        output = this.ifLogic(output);
+
+        // [[record_id]] / [[!record_id]] / [[id>label]]
+        output = this.resolveLoreLinks(output);
+
         // |placeholder|
         output = this.resolveTextPlaceholders(output);
-
-        // if{}
-        output = this.ifLogic(output);
 
         // |@slot|
         output = this.resolveNarrativeSlots(output);
@@ -458,7 +463,7 @@ export class LogicSystem {
                 .replace(/\*/g, '&#42;')
                 .replace(/\$/g, '&#36;');
 
-            return `<span class="output_code">${escapedContent}</span>`;
+            return `<span class='output_code'>${escapedContent}</span>`;
         });
     }
 
@@ -486,6 +491,26 @@ export class LogicSystem {
         output = output.replace(/\*(.*?)\*/g, '<b>$1</b>');
 
         return output;
+    }
+
+    private resolveLoreLinks(text: string): string {
+        const regex = /\[\[(!?)([a-zA-Z0-9_]+)(?:(?:>|&gt;)([^\]]+?))?\]\]/g;
+        const narrative = this.game.narrativeSystem;
+        return text.replace(regex, (_match, bang: string, id: string, customLabel?: string) => {
+            const record = narrative.getRecord(id);
+            if (!record) {
+                gameLogger.error(`Unknown record "${id}" in [[${bang}${id}]]`);
+                return customLabel || id;
+            }
+            if (bang === '!') {
+                narrative.discoverRecord(id);
+            }
+            const display = customLabel || record.title || id;
+            if (!narrative.isRecordDiscovered(id)) {
+                return display;
+            }
+            return `<span class='lore-link' data-lore-id='${id}' tabindex='0'>${display}</span>`;
+        });
     }
 
     private resolveTextPlaceholders(text: string): string {
@@ -1448,7 +1473,7 @@ export class LogicSystem {
 
             let line = definition.ingame_description as string;
             line = line.replace(/\[v\]/g, `<b>${this.resolveAspectValue(fields[fieldId], definition)}</b>`);
-            line = line.replace(/\[([a-zA-Z0-9_]+)(?::id)?\]/g, (match: string, siblingId: string) => {
+            line = line.replace(/(?<!\[)\[([a-zA-Z0-9_]+)(?::id)?\](?!\])/g, (match: string, siblingId: string) => {
                 if (siblingId === 'v') return match;
                 const value = fields[siblingId] ?? fallbackFields?.[siblingId];
                 if (value === undefined) return '';
@@ -1462,6 +1487,7 @@ export class LogicSystem {
             });
             // Clean up extra whitespace from removed siblings
             line = line.replace(/\s{2,}/g, ' ').trim();
+            line = this.resolveString(line, true).output;
             lines.push(line);
         }
         return lines;

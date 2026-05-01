@@ -1,4 +1,4 @@
-## Getting Started
+# Getting Started
 
 The fastest way to understand Dryad Engine is to **play** with it before you try to build anything.
 

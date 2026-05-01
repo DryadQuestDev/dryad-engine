@@ -102,8 +102,7 @@ const consumeDurationText = computed(() => {
     </div>
 
     <div class="card-body">
-      <div class="item-description" v-html="item.getTrait('description') || ''">
-      </div>
+      <div v-script="item.getTrait('description') || ''" class="item-description"></div>
 
       <!-- Consume effects display -->
       <div v-if="consumeEffects.length > 0 || consumeMaxStacksText || consumeDurationText" class="consume-effects">

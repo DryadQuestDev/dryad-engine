@@ -52,6 +52,19 @@ export class ElectronStorageService implements StorageService {
         await this.invokeElectron('write-json', filePath, data);
     }
 
+    async readText(filePath: string): Promise<string | null> {
+        if (typeof filePath !== 'string' || filePath.trim() === '') {
+            console.error('ElectronStorageService.readText: Invalid filePath provided:', filePath);
+            return null;
+        }
+        const result = await this.invokeElectron('read-text', filePath);
+        return typeof result === 'string' ? result : null;
+    }
+
+    async writeText(filePath: string, content: string): Promise<void> {
+        await this.invokeElectron('write-text', filePath, String(content ?? ''));
+    }
+
     async listFiles(dirPath: string): Promise<string[]> {
         return this.invokeElectron('list-files', dirPath);
     }

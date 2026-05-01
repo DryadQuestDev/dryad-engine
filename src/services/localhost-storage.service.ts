@@ -90,6 +90,39 @@ export class LocalhostStorageService implements StorageService {
         }
     }
 
+    async readText(filePath: string): Promise<string | null> {
+        const url = `${this.baseUrl}/engine/read?path=${encodeURIComponent(filePath)}`;
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: { 'Accept': 'text/plain' }
+            });
+            if (!response.ok) {
+                return null;
+            }
+            return await response.text();
+        } catch (error) {
+            console.warn(`Error reading text file from ${url}:`, error);
+            return null;
+        }
+    }
+
+    async writeText(filePath: string, content: string): Promise<void> {
+        const url = `${this.baseUrl}/engine/write-text`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: filePath, content: String(content ?? '') })
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+        } catch (error) {
+            console.error(`Error writing text file to ${url}:`, error);
+        }
+    }
+
     async listFiles(dirPath: string): Promise<string[]> {
         const url = `${this.baseUrl}/engine/list-files?path=${encodeURIComponent(dirPath)}`;
         try {

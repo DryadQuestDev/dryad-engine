@@ -27,6 +27,7 @@ export interface Schemable {
   }
   objects?: Schema; // Optional: Holds the nested schema definition when type is 'schema'
   allowAndMode?: boolean; // Show AND/OR toggle for string[] fields (used in filter fields)
+  externalFile?: string; // If set, this field's value is stored in a sibling file with this name instead of inside the JSON
 }
 
 export type Schema = Record<string, Schemable>;

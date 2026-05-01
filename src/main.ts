@@ -19,13 +19,17 @@ import { initGlobalErrorHandlers } from './services/errorHandler';
 import { gameLogger } from './game/utils/logger';
 import { persistImage } from './game/directives/persistImageDirective';
 import { fitText } from './game/directives/fitTextDirective';
+import { script } from './game/directives/scriptDirective';
 import { dragscroll } from 'vue-dragscroll';
 
 const RootComponent = {
   render() {
     return h(Suspense, null, {
       default: () => h(App),
-      fallback: () => h('div', { class: 'is_loading' }, 'Loading...') // Optional: Add a loading indicator
+      fallback: () => h('div', { class: 'initial-loader' }, [
+        h('div', { class: 'initial-loader__ring' }),
+        h('div', { class: 'initial-loader__label' }, 'Loading Dryad Engine'),
+      ])
     });
   }
 };
@@ -40,6 +44,7 @@ app.use(ConfirmationService);
 app.directive('tooltip', Tooltip);
 app.directive('persist', persistImage);
 app.directive('fit', fitText);
+app.directive('script', script);
 app.directive('dragscroll', dragscroll);
 app.config.globalProperties.vTooltip = Tooltip;
 

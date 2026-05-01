@@ -143,7 +143,7 @@ export const FormationTab = defineComponent({
   },
   template: /*html*/`
     <div class="formation-tab">
-      <h3>{{ getLine('formation_title') }}</h3>
+      
 
       <!-- Leadership budget -->
       <div v-if="hasLeadership" class="leadership-info" :class="{ overflow: leadership.overflow }">

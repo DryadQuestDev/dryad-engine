@@ -145,7 +145,8 @@ function isGoalCompleted(goalId: string): boolean {
           <!-- Main logs (non-collapsible, shown at top) -->
           <div class="main-logs-section">
             <div v-for="logId in getMainLogs()" :key="logId" class="log-entry main-log"
-              v-html="getLogText(selectedQuest.dungeonId, selectedQuest.id, 'main', logId)"></div>
+              v-script="{ html: getLogText(selectedQuest.dungeonId, selectedQuest.id, 'main', logId), resolver: false }">
+            </div>
           </div>
 
           <!-- Other goals (collapsible) -->
@@ -163,7 +164,8 @@ function isGoalCompleted(goalId: string): boolean {
 
               <div v-if="!isGoalCollapsed(goal.id)" class="goal-logs">
                 <div v-for="logId in goal.logs" :key="logId" class="log-entry"
-                  v-html="getLogText(selectedQuest.dungeonId, selectedQuest.id, goal.id, logId)"></div>
+                  v-script="{ html: getLogText(selectedQuest.dungeonId, selectedQuest.id, goal.id, logId), resolver: false }">
+                </div>
               </div>
             </div>
           </div>

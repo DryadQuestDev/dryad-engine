@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import Dialog from 'primevue/dialog';
 import ProgressBar from 'primevue/progressbar';
 import { Global } from '../../global';
 import { ManifestObject } from '../../../schemas/manifestSchema';
@@ -316,148 +315,264 @@ watch(() => props.visible, async (newVal) => {
 </script>
 
 <template>
-  <Dialog v-model:visible="localVisible" modal :closable="!installing" :dismissableMask="!installing"
-    header="Install Games & Mods" :style="{ width: '900px' }">
-    <div class="install-modal-content">
-      <!-- Refresh Button -->
-      <div class="modal-actions">
-        <button class="refresh-button" :disabled="loading || installing" @click="scanArchives">
-          <i class="pi pi-refresh" :class="{ 'pi-spin': loading }"></i>
-          Refresh
-        </button>
-      </div>
+  <!-- Main install popup -->
+  <div v-if="localVisible" class="popup-mask glass-popup-mask" @click.self="closeModal">
+    <div class="popup-card popup-card--wide glass-popup-surface">
+      <header class="popup-header">
+        <h2 class="popup-title">Install Games & Mods</h2>
+        <button v-if="!installing" class="popup-close" @click="closeModal" aria-label="Close">×</button>
+      </header>
 
-      <!-- Loading State -->
-      <div v-if="loading" class="loading-state">
-        <i class="pi pi-spin pi-spinner" style="font-size: 2rem"></i>
-        <p>Scanning install folder...</p>
-      </div>
+      <div class="popup-body">
+        <div class="modal-actions">
+          <button class="refresh-button" :disabled="loading || installing" @click="scanArchives">
+            <i class="pi pi-refresh" :class="{ 'pi-spin': loading }"></i>
+            Refresh
+          </button>
+        </div>
 
-      <!-- No Archives Found -->
-      <div v-else-if="archives.length === 0" class="no-archives">
-        <p>No game archives found in the install folder.</p>
-        <p class="hint">Place .zip files in: <code>assets/install/</code></p>
-      </div>
+        <div v-if="loading" class="loading-state">
+          <i class="pi pi-spin pi-spinner" style="font-size: 2rem"></i>
+          <p>Scanning install folder...</p>
+        </div>
 
-      <!-- Grouped Archives List -->
-      <div v-else class="archives-list">
-        <div v-for="group in groupedArchives" :key="group.gameId" class="archive-group">
+        <div v-else-if="archives.length === 0" class="no-archives">
+          <p>No game archives found in the install folder.</p>
+          <p class="hint">Place .zip files in: <code>assets/install/</code></p>
+        </div>
 
-          <!-- Group Header (shown when no game archive, so mods have context) -->
-          <div v-if="!group.gameArchive" class="group-header">
-            <i class="pi pi-box"></i>
-            <span>{{ group.gameName }}</span>
-          </div>
-
-          <!-- Game Archive -->
-          <div v-if="group.gameArchive" class="archive-item game-archive"
-            :class="{ 'installing': installingArchive === group.gameArchive.zipFileName }">
-            <div class="archive-info">
-              <div class="archive-header">
-                <h3 class="archive-name">{{ group.gameArchive.name }}</h3>
-                <span class="archive-type type-game">Game</span>
-              </div>
-              <div class="archive-details">
-                <span class="archive-version">Version: {{ group.gameArchive.version }}</span>
-                <span v-if="group.gameArchive.installed" class="installed-version">
-                  (Installed: {{ group.gameArchive.installedVersion }})
-                </span>
-              </div>
+        <div v-else class="archives-list">
+          <div v-for="group in groupedArchives" :key="group.gameId" class="archive-group">
+            <div v-if="!group.gameArchive" class="group-header">
+              <i class="pi pi-box"></i>
+              <span>{{ group.gameName }}</span>
             </div>
 
-            <div class="archive-action">
-              <div class="status-text" :class="getStatusClass(group.gameArchive)">
-                {{ getStatusText(group.gameArchive) }}
-              </div>
-              <button v-if="canInstall(group.gameArchive)" class="install-button" :disabled="installing"
-                @click="installArchive(group.gameArchive)">
-                {{ group.gameArchive.installed ? 'Update' : 'Install' }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Mods for this Game -->
-          <div v-if="group.mods.length > 0" class="mods-section">
-            <h4 class="mods-title">Mods:</h4>
-            <div v-for="mod in group.mods" :key="mod.zipFileName" class="archive-item mod-archive"
-              :class="{ 'installing': installingArchive === mod.zipFileName }">
+            <div v-if="group.gameArchive" class="archive-item game-archive"
+              :class="{ 'installing': installingArchive === group.gameArchive.zipFileName }">
               <div class="archive-info">
                 <div class="archive-header">
-                  <h3 class="archive-name">{{ mod.name }}</h3>
-                  <span class="archive-type type-mod">Mod</span>
+                  <h3 class="archive-name">{{ group.gameArchive.name }}</h3>
+                  <span class="archive-type type-game">Game</span>
                 </div>
                 <div class="archive-details">
-                  <span class="archive-game">for {{ group.gameName }}</span>
-                  <span class="archive-version">Version: {{ mod.version }}</span>
-                  <span v-if="mod.installed" class="installed-version">
-                    (Installed: {{ mod.installedVersion }})
+                  <span class="archive-version">Version: {{ group.gameArchive.version }}</span>
+                  <span v-if="group.gameArchive.installed" class="installed-version">
+                    (Installed: {{ group.gameArchive.installedVersion }})
                   </span>
                 </div>
               </div>
 
               <div class="archive-action">
-                <div class="status-text" :class="getStatusClass(mod)">
-                  {{ getStatusText(mod) }}
+                <div class="status-text" :class="getStatusClass(group.gameArchive)">
+                  {{ getStatusText(group.gameArchive) }}
                 </div>
-                <button v-if="canInstall(mod)" class="install-button" :disabled="installing"
-                  @click="installArchive(mod)">
-                  {{ mod.installed ? 'Update' : 'Install' }}
+                <button v-if="canInstall(group.gameArchive)" class="install-button" :disabled="installing"
+                  @click="installArchive(group.gameArchive)">
+                  {{ group.gameArchive.installed ? 'Update' : 'Install' }}
                 </button>
+              </div>
+            </div>
+
+            <div v-if="group.mods.length > 0" class="mods-section">
+              <h4 class="mods-title">Mods:</h4>
+              <div v-for="mod in group.mods" :key="mod.zipFileName" class="archive-item mod-archive"
+                :class="{ 'installing': installingArchive === mod.zipFileName }">
+                <div class="archive-info">
+                  <div class="archive-header">
+                    <h3 class="archive-name">{{ mod.name }}</h3>
+                    <span class="archive-type type-mod">Mod</span>
+                  </div>
+                  <div class="archive-details">
+                    <span class="archive-game">for {{ group.gameName }}</span>
+                    <span class="archive-version">Version: {{ mod.version }}</span>
+                    <span v-if="mod.installed" class="installed-version">
+                      (Installed: {{ mod.installedVersion }})
+                    </span>
+                  </div>
+                </div>
+
+                <div class="archive-action">
+                  <div class="status-text" :class="getStatusClass(mod)">
+                    {{ getStatusText(mod) }}
+                  </div>
+                  <button v-if="canInstall(mod)" class="install-button" :disabled="installing"
+                    @click="installArchive(mod)">
+                    {{ mod.installed ? 'Update' : 'Install' }}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
+
+        <div v-if="installing" class="installation-progress">
+          <h4>Installing...</h4>
+          <ProgressBar :value="installProgress" />
+          <p class="current-file">{{ currentFile }}</p>
+        </div>
       </div>
 
-      <!-- Installation Progress -->
-      <div v-if="installing" class="installation-progress">
-        <h4>Installing...</h4>
-        <ProgressBar :value="installProgress" />
-        <p class="current-file">{{ currentFile }}</p>
-      </div>
+      <footer class="popup-footer">
+        <button class="close-button" :disabled="installing" @click="closeModal">
+          {{ installing ? 'Installing...' : 'Close' }}
+        </button>
+      </footer>
     </div>
+  </div>
 
-    <template #footer>
-      <button class="close-button" :disabled="installing" @click="closeModal">
-        {{ installing ? 'Installing...' : 'Close' }}
-      </button>
-    </template>
-  </Dialog>
+  <!-- Success popup -->
+  <div v-if="showSuccessDialog" class="popup-mask glass-popup-mask" @click.self="showSuccessDialog = false">
+    <div class="popup-card glass-popup-surface">
+      <header class="popup-header">
+        <h2 class="popup-title">Installation Successful</h2>
+        <button class="popup-close" @click="showSuccessDialog = false" aria-label="Close">×</button>
+      </header>
 
-  <!-- Success Dialog -->
-  <Dialog v-model:visible="showSuccessDialog" modal header="Installation Successful" :style="{ width: '600px' }">
-    <div v-if="installResult" class="success-content">
-      <div class="success-message">
-        <i class="pi pi-check-circle success-icon"></i>
-        <h3>The {{ installResult.type }} "{{ installResult.archiveName }}" has been installed!</h3>
+      <div v-if="installResult" class="popup-body success-content">
+        <div class="success-message">
+          <i class="pi pi-check-circle success-icon"></i>
+          <h3>The {{ installResult.type }} "{{ installResult.archiveName }}" has been installed!</h3>
+        </div>
+
+        <div class="installed-folders">
+          <h4>Installed to:</h4>
+          <ul>
+            <li v-for="folder in installResult.folders" :key="folder">
+              <code>{{ folder }}</code>
+            </li>
+          </ul>
+        </div>
+
+        <div class="cleanup-hint">
+          <i class="pi pi-info-circle"></i>
+          <p>You can now delete the archive from the <code>assets/install/</code> folder.</p>
+        </div>
       </div>
 
-      <div class="installed-folders">
-        <h4>Installed to:</h4>
-        <ul>
-          <li v-for="folder in installResult.folders" :key="folder">
-            <code>{{ folder }}</code>
-          </li>
-        </ul>
-      </div>
-
-      <div class="cleanup-hint">
-        <i class="pi pi-info-circle"></i>
-        <p>You can now delete the archive from the <code>assets/install/</code> folder.</p>
-      </div>
+      <footer class="popup-footer">
+        <button class="close-button" @click="showSuccessDialog = false">OK</button>
+      </footer>
     </div>
-
-    <template #footer>
-      <button class="close-button" @click="showSuccessDialog = false">
-        OK
-      </button>
-    </template>
-  </Dialog>
+  </div>
 </template>
 
 <style scoped>
+/* Popup layout — bg/blur/border from .glass-popup-mask + .glass-popup-surface in src/style.css */
+.popup-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+
+.popup-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90dvh;
+  overflow: hidden;
+  color: rgba(216, 221, 228, 0.92);
+}
+
+.popup-card--wide {
+  max-width: 900px;
+}
+
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.popup-title {
+  margin: 0;
+  font-family: var(--font-family-serif);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+
+.popup-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(216, 221, 228, 0.7);
+  background: transparent;
+  border: var(--glass-border);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.popup-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.popup-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px;
+}
+
+.popup-footer {
+  padding: 12px 22px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (pointer: coarse), (max-width: 720px) {
+  .popup-mask { padding: 0; }
+  .popup-card,
+  .popup-card--wide {
+    max-width: none;
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: none;
+  }
+  .popup-header {
+    padding-top: max(18px, env(safe-area-inset-top));
+  }
+  .popup-body {
+    padding: 14px 16px;
+  }
+  .popup-footer {
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+}
+
 .install-modal-content {
   min-height: 200px;
+  color: rgba(216, 221, 228, 0.92);
+}
+
+:deep(.p-progressbar) {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  height: 6px;
+  overflow: hidden;
+}
+
+:deep(.p-progressbar-value) {
+  background: var(--glass-tint);
 }
 
 .modal-actions {
@@ -466,27 +581,51 @@ watch(() => props.visible, async (newVal) => {
   margin-bottom: 1rem;
 }
 
-.refresh-button {
-  display: flex;
+.refresh-button,
+.install-button,
+.close-button {
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: #2196F3;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-weight: 600;
+  gap: 8px;
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: rgba(216, 221, 228, 0.92);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.2s;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.refresh-button:hover:not(:disabled) {
-  background: #1976D2;
+.refresh-button:hover:not(:disabled),
+.install-button:hover:not(:disabled),
+.close-button:hover:not(:disabled) {
+  background: var(--glass-bg-strong);
+  color: #fff;
 }
 
-.refresh-button:disabled {
-  background: #ccc;
+.refresh-button:disabled,
+.install-button:disabled,
+.close-button:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
+}
+
+.install-button {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  border-color: var(--glass-tint);
+  font-weight: 500;
+}
+
+.install-button:hover:not(:disabled) {
+  color: #0b0d10;
+  background: var(--glass-tint);
+  filter: brightness(1.1);
 }
 
 .loading-state,
@@ -498,280 +637,260 @@ watch(() => props.visible, async (newVal) => {
   padding: 2rem;
   text-align: center;
   min-height: 200px;
+  color: rgba(216, 221, 228, 0.7);
 }
 
 .no-archives .hint {
   margin-top: 1rem;
   font-size: 0.9rem;
-  color: #666;
+  color: rgba(216, 221, 228, 0.55);
 }
 
-.no-archives code {
-  background: #f0f0f0;
-  padding: 2px 6px;
-  border-radius: 3px;
+.no-archives code,
+.cleanup-hint code,
+.installed-folders code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 4px;
   font-family: var(--font-family-mono);
+  font-size: 12px;
+  color: rgba(216, 221, 228, 0.92);
 }
 
 .archives-list {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  max-height: 400px;
+  gap: 1rem;
+  max-height: 60vh;
   overflow-y: auto;
-  padding: 0.5rem;
+  padding: 4px;
 }
 
 .group-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  font-weight: 600;
-  font-size: 1rem;
-  color: #555;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(216, 221, 228, 0.55);
 }
 
 .archive-game {
-  color: #888;
+  color: rgba(216, 221, 228, 0.55);
   font-style: italic;
 }
 
-/* Archive Group Styles */
 .archive-group {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.5rem;
-  background: #f9f9f9;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.18);
+  border: var(--glass-border);
+  border-radius: 12px;
 }
 
-/* Game Archive */
-.game-archive {
-  background: #fff;
-  border-left: 4px solid #4CAF50;
-}
-
-/* Mods Section */
 .mods-section {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-left: 1rem;
-  padding-left: 1rem;
-  border-left: 2px solid #ddd;
+  gap: 8px;
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
 }
 
 .mods-title {
-  margin: 0 0 0.5rem 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #666;
+  margin: 0 0 4px 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Mod Archive */
-.mod-archive {
-  background: #fff;
-  border-left: 4px solid #2196F3;
+  color: rgba(216, 221, 228, 0.5);
 }
 
 .archive-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #fff;
-  transition: all 0.2s;
+  gap: 16px;
+  padding: 14px 16px;
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-left: 3px solid transparent;
+  border-radius: 10px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.archive-item.game-archive {
+  border-left-color: var(--glass-tint);
+}
+
+.archive-item.mod-archive {
+  border-left-color: rgba(180, 130, 230, 0.7);
 }
 
 .archive-item:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: var(--glass-bg-strong);
 }
 
 .archive-item.installing {
-  background: #f0f8ff;
-  border-color: #4CAF50;
+  border-color: var(--glass-tint);
+  background: var(--glass-bg-strong);
 }
 
 .archive-info {
   flex: 1;
+  min-width: 0;
 }
 
 .archive-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 
 .archive-name {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 15px;
   font-weight: 600;
+  color: rgba(216, 221, 228, 0.95);
 }
 
 .archive-type {
   padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .type-game {
-  background: #4CAF50;
-  color: white;
+  color: #0b0d10;
+  background: var(--glass-tint);
 }
 
 .type-mod {
-  background: #2196F3;
-  color: white;
+  color: #fff;
+  background: rgba(180, 130, 230, 0.7);
 }
 
 .archive-details {
   display: flex;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  color: #666;
+  gap: 10px;
+  font-size: 12px;
+  color: rgba(216, 221, 228, 0.6);
+  flex-wrap: wrap;
 }
 
 .installed-version {
-  color: #999;
+  color: rgba(216, 221, 228, 0.45);
 }
 
 .archive-action {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0.5rem;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .status-text {
-  font-size: 0.9rem;
+  font-size: 12px;
   font-weight: 500;
   text-align: right;
+  letter-spacing: 0.04em;
 }
 
 .status-ready {
-  color: #4CAF50;
+  color: var(--glass-tint);
 }
 
 .status-update {
-  color: #FF9800;
+  color: #ffb74d;
 }
 
 .status-current {
-  color: #999;
+  color: rgba(216, 221, 228, 0.45);
 }
 
 .status-error {
-  color: #f44336;
-}
-
-.install-button {
-  padding: 0.5rem 1.5rem;
-  background: #4CAF50;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.install-button:hover:not(:disabled) {
-  background: #45a049;
-}
-
-.install-button:disabled {
-  background: #ccc;
-  cursor: not-allowed;
+  color: #ff8a80;
 }
 
 .installation-progress {
-  margin-top: 1.5rem;
-  padding: 1rem;
-  border-top: 1px solid #ddd;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .installation-progress h4 {
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(216, 221, 228, 0.7);
 }
 
 .current-file {
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
-  color: #666;
+  margin-top: 8px;
+  font-size: 12px;
+  font-family: var(--font-family-mono);
+  color: rgba(216, 221, 228, 0.55);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.close-button {
-  padding: 0.5rem 1.5rem;
-  background: #666;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.close-button:hover:not(:disabled) {
-  background: #555;
-}
-
-.close-button:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-}
-
-/* Success Dialog Styles */
 .success-content {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  padding: 0.5rem;
+  gap: 1.25rem;
+  color: rgba(216, 221, 228, 0.92);
 }
 
 .success-message {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1rem;
+  gap: 12px;
   text-align: center;
 }
 
 .success-icon {
-  font-size: 3rem;
-  color: #4CAF50;
+  font-size: 2.6rem;
+  color: var(--glass-tint);
+  filter: drop-shadow(0 0 12px rgba(0, 255, 234, 0.35));
 }
 
 .success-message h3 {
   margin: 0;
-  font-size: 1.25rem;
+  font-family: var(--font-family-serif);
+  font-size: 18px;
   font-weight: 600;
-  color: #333;
+  color: #fff;
 }
 
 .installed-folders {
-  padding: 1rem;
-  background: #f5f5f5;
-  border-radius: 6px;
-  border: 1px solid #ddd;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: var(--glass-border);
+  border-radius: 10px;
 }
 
 .installed-folders h4 {
-  margin: 0 0 0.75rem 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #555;
+  margin: 0 0 10px 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(216, 221, 228, 0.55);
 }
 
 .installed-folders ul {
@@ -780,52 +899,39 @@ watch(() => props.visible, async (newVal) => {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-}
-
-.installed-folders li {
-  display: flex;
-  align-items: center;
-}
-
-.installed-folders code {
-  background: #e0e0e0;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-family: var(--font-family-mono);
-  font-size: 0.9rem;
-  color: #333;
+  gap: 6px;
 }
 
 .cleanup-hint {
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
-  padding: 0.75rem;
-  background: #e3f2fd;
-  border-radius: 6px;
-  border: 1px solid #90caf9;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(0, 130, 200, 0.12);
+  border: 1px solid rgba(80, 180, 255, 0.3);
+  border-radius: 10px;
 }
 
 .cleanup-hint i {
-  color: #2196F3;
-  font-size: 1.25rem;
+  color: var(--glass-tint);
+  font-size: 18px;
   flex-shrink: 0;
   margin-top: 2px;
 }
 
 .cleanup-hint p {
   margin: 0;
-  font-size: 0.9rem;
-  color: #333;
+  font-size: 13px;
+  color: rgba(216, 221, 228, 0.85);
   line-height: 1.5;
 }
 
-.cleanup-hint code {
-  background: #bbdefb;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: var(--font-family-mono);
-  font-size: 0.85rem;
+@supports not (backdrop-filter: blur(1px)) {
+  .archive-item,
+  .refresh-button,
+  .install-button,
+  .close-button {
+    background: rgba(20, 24, 29, 0.92);
+  }
 }
 </style>
