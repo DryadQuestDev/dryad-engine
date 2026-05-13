@@ -9,12 +9,14 @@ export const BaseStatusSchema = {
     abilities: { type: "chooseMany", fromFile: "ability_templates", fromFileTypeAnd: { modifies: '$falsy' }, tooltip: "Abilities available to the character." },
     ability_modifiers: { type: "chooseMany", fromFile: "ability_templates", fromFileTypeAnd: { modifies: '$truthy' }, tooltip: "Ability modifier templates to apply." },
     spine: {
-        type: 'schema[]', tooltip: 'Spine animation configurations. Entry without a view = default character spine. Last status wins per view.', objects: {
+        type: 'schema[]', tooltip: 'Spine animation configurations. Entry with view = _default (or empty) is the default character spine. Last status wins per view.', objects: {
             id: { type: 'string', required: true, tooltip: 'Unique identifier for this spine config.' },
-            view: { type: 'chooseOne', fromFile: 'character_views', tooltip: 'View this spine belongs to (e.g. back, side). Empty = default spine.' },
+            view: { type: 'chooseOne', fromFile: 'character_views', tooltip: 'View this spine belongs to (e.g. back, side). _default or empty = default spine.' },
             atlas: { type: 'file', fileType: 'atlas', tooltip: 'Spine atlas file (.atlas).' },
             skeleton: { type: 'file', fileType: 'spine_skeleton', tooltip: 'Spine skeleton file (.json or .skel).' },
-            default_animation: { type: 'string', tooltip: 'Default animation to play (e.g., "idle").' },
+            art_dx: { type: 'number', tooltip: 'X shift in % for this spine\'s art positioning. Tuned per spine entry.' },
+            art_dy: { type: 'number', tooltip: 'Y shift in % for this spine\'s art positioning. Tuned per spine entry.' },
+            art_scale: { type: 'number', tooltip: 'Scale multiplier for this spine\'s art. 1 = native.' },
         }
     },
 } as const satisfies Schema;

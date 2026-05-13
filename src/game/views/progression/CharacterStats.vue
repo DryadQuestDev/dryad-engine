@@ -109,19 +109,13 @@ const onStatLeave = () => {
   <div v-if="statGroups.length" class="character-stats">
     <div v-for="group in statGroups" :key="group.id" class="stats-section">
       <h3 v-if="group.id && !noHeaders">{{ game.getLine('group.' + group.id) }}</h3>
-      <StatEntity
-        v-for="statId in group.stats"
-        :key="statId"
-        :character="character"
-        :statId="statId"
-        @statHover="onStatHover"
-        @statLeave="onStatLeave"
-      />
+      <StatEntity v-for="statId in group.stats" :key="statId" :character="character" :statId="statId"
+        @statHover="onStatHover" @statLeave="onStatLeave" />
     </div>
 
     <!-- Stat/Resource Popup -->
     <Teleport to="body">
-      <div v-if="hoveredStat" ref="statPopupRef" class="stat-popup" :style="statFloatingStyles"
+      <div v-if="hoveredStat" ref="statPopupRef" class="stat-popup dark-scrollbar" :style="statFloatingStyles"
         @mouseenter="onStatPopupEnter" @mouseleave="onStatPopupLeave">
         <div class="popup-header">
           <h4>{{ hoveredStat.stat.name || hoveredStat.statId }}</h4>
@@ -148,8 +142,8 @@ const onStatLeave = () => {
 }
 
 .stats-section {
-  flex: 1 1 150px;
-  min-width: 150px;
+  flex: 1 1 250px;
+  min-width: 250px;
 }
 
 .stats-section h3 {
@@ -173,7 +167,9 @@ const onStatLeave = () => {
   max-width: 300px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   color: #fff;
-  pointer-events: none;
+  pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .stat-popup .popup-header {

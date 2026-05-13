@@ -246,7 +246,7 @@ async function handleFileUpload(event: Event): Promise<void> {
           <button class="delete_save_button" @click.stop="deleteSaveSlot(item.slot)">Delete</button>
         </div>
         <div class="save_meta" v-if="item.saveMeta">
-          <span><b>{{ item.saveMeta.mods.join(', ') }}</b></span>
+          <span v-if="item.saveMeta?.versions"><b>{{ item.saveMeta.versions._core?.name || '_core' }} v{{ item.saveMeta.versions._core?.version }}</b><span v-if="Object.keys(item.saveMeta.versions).length > 1"> + {{ Object.entries(item.saveMeta.versions).filter(([k]) => k !== '_core').map(([k, v]) => `${v.name || k} v${v.version}`).join(', ') }}</span></span>
           <span>Date: {{ new Date(item.saveMeta.saveDate).toLocaleString() }}</span>
           <span>Playtime: {{ formatPlayTime(item.saveMeta.playTime) }}</span>
           <span>Engine: v{{ item.saveMeta.engineVersion }}</span>

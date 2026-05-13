@@ -133,6 +133,9 @@ function selectCharacter(index: number) {
     position: relative;
     display: flex;
     align-items: center;
+    /* Center the slot in the 50cqh column so the body lands at column-center
+       when art_dx = 0 — matches CharacterTab and the editor popups. */
+    justify-content: center;
 }
 
 .viewer-doll-wrapper :deep(.character-slot) {
@@ -150,15 +153,12 @@ function selectCharacter(index: number) {
     height: 100%;
 }
 
-.viewer-doll-wrapper :deep(.character-slot-rotation-wrapper) {
-    justify-content: flex-start;
-}
-
 .viewer-sheet-wrapper {
     flex: 1;
     overflow: hidden;
     min-height: 0;
     padding-right: 10px;
     max-width: 1000px;
+    position: relative;
 }
 </style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { ManifestObject } from '../../../schemas/manifestSchema';
+import { manifestPanelCollapsed as collapsed } from './manifestPanelState';
 
 const props = withDefaults(defineProps<{
   manifest: ManifestObject | null;
@@ -16,7 +17,12 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
 </script>
 
 <template>
-  <div v-if="manifest" class="manifest-panel">
+  <div v-if="manifest" class="manifest-panel" :class="{ 'manifest-panel--collapsed': collapsed }">
+    <button v-if="typeof active !== 'boolean'" class="manifest-panel-collapse-btn"
+      :class="{ 'manifest-panel-collapse-btn--alone': !hasScreenshots }"
+      @click="collapsed = !collapsed" :aria-label="collapsed ? 'Expand description' : 'Collapse description'">
+      <i :class="collapsed ? 'pi pi-chevron-down' : 'pi pi-chevron-up'"></i>
+    </button>
     <button v-if="hasScreenshots" class="manifest-panel-screenshots-btn" @click="$emit('screenshots')"
       aria-label="Screenshots">
       <i class="pi pi-images"></i>
@@ -37,7 +43,7 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
       </div>
     </div>
     <slot />
-    <div v-if="manifest.description" class="manifest-panel-description dark-scrollbar">
+    <div v-if="manifest.description && !collapsed" class="manifest-panel-description dark-scrollbar">
       <div v-html="manifest.description"></div>
     </div>
   </div>
@@ -79,7 +85,7 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding-right: 48px;
+  padding-right: 92px;
 }
 
 .manifest-panel-title {
@@ -163,6 +169,45 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
   margin-bottom: 0;
 }
 
+.manifest-panel--collapsed {
+  height: auto;
+  min-height: 0;
+  align-self: flex-start;
+}
+
+.manifest-panel-collapse-btn {
+  position: absolute;
+  top: 16px;
+  right: 60px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: rgba(216, 221, 228, 0.75);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 50%;
+  cursor: pointer;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: background 0.15s ease, color 0.15s ease;
+  z-index: 1;
+}
+
+.manifest-panel-collapse-btn--alone {
+  right: 16px;
+}
+
+.manifest-panel-collapse-btn:hover {
+  background: var(--glass-bg-strong);
+  color: var(--glass-tint);
+}
+
+.manifest-panel-collapse-btn i {
+  font-size: 14px;
+}
+
 .manifest-panel-screenshots-btn {
   position: absolute;
   top: 16px;
@@ -194,12 +239,22 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
 
 @media (pointer: coarse),
 (max-width: 600px) {
-  .manifest-panel-screenshots-btn {
+  .manifest-panel-screenshots-btn,
+  .manifest-panel-collapse-btn {
     width: 48px;
     height: 48px;
   }
 
-  .manifest-panel-screenshots-btn i {
+  .manifest-panel-collapse-btn {
+    right: 76px;
+  }
+
+  .manifest-panel-collapse-btn--alone {
+    right: 16px;
+  }
+
+  .manifest-panel-screenshots-btn i,
+  .manifest-panel-collapse-btn i {
     font-size: 20px;
   }
 }
@@ -207,7 +262,8 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
 @supports not (backdrop-filter: blur(1px)) {
 
   .manifest-panel,
-  .manifest-panel-screenshots-btn {
+  .manifest-panel-screenshots-btn,
+  .manifest-panel-collapse-btn {
     background: rgba(20, 24, 29, 0.92);
   }
 }

@@ -314,7 +314,7 @@
 
 .rpg-ability-panel {
   position: absolute;
-  left: var(--rpg-ability-panel-left, 45%);
+  left: var(--rpg-ability-panel-left, 30%);
   top: 40%;
   display: flex;
   flex-direction: column;
@@ -547,7 +547,10 @@
   animation: rpg-target-pulse-hostile 1.5s ease-in-out infinite;
 }
 
-.rpg-targetable-hostile:has(:hover) .character-doll-wrapper {
+/* Drop-shadow tracks the hit-mask polygon (60%-wide rect over the body), not
+   the canvas/img bbox. Hovering empty space outside the polygon no longer
+   triggers the highlight. */
+.rpg-targetable-hostile:has(.character-slot-hit-mask polygon:hover) .character-doll-wrapper {
   animation: none;
   filter: drop-shadow(0 0 20px rgba(234, 179, 8, 1)) drop-shadow(0 0 10px rgba(234, 179, 8, 0.8)) drop-shadow(0 0 4px rgba(234, 179, 8, 0.6));
 }
@@ -556,7 +559,7 @@
   animation: rpg-target-pulse-friendly 1.5s ease-in-out infinite;
 }
 
-.rpg-targetable-friendly:has(:hover) .character-doll-wrapper {
+.rpg-targetable-friendly:has(.character-slot-hit-mask polygon:hover) .character-doll-wrapper {
   animation: none;
   filter: drop-shadow(0 0 20px rgba(234, 179, 8, 1)) drop-shadow(0 0 10px rgba(234, 179, 8, 0.8)) drop-shadow(0 0 4px rgba(234, 179, 8, 0.6));
 }
@@ -1093,40 +1096,37 @@
   z-index: 1;
 }
 
-/* ── Overlay anchors (positioned directly in viewport) ── */
-
-.rpg-overlay-anchor {
-  position: absolute;
-  transform: translateX(-50%);
-  pointer-events: none;
-  z-index: 10;
-}
-
-/* ── Character Overlay (health bar + tokens) ── */
+/* ── Character Overlay (health bar + tokens) ──
+   Sizes use cqh (1% of slot height = 1% of viewport height since the slot is
+   100% × 100% of the viewport with `container-type: size`). This makes the
+   overlay scale with the viewport — when the browser resizes, body and overlay
+   shrink/grow together. Reference at viewport_height = 900px: 22cqh ≈ 200px
+   width, 2cqh ≈ 18px font, etc. CharacterSlot's `overlayScale` boost stacks
+   on top via `transform: scale()` (Follow-up 13). Borders stay in px since
+   they pixel-snap better at small sizes. */
 
 .rpg-char-overlay {
   position: relative;
-  width: 120px;
+  width: 22cqh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  pointer-events: none;
   pointer-events: none;
   z-index: 5;
 }
 
 .rpg-char-overlay-name {
-  font-size: 11px;
+  font-size: 2cqh;
   font-weight: 600;
   color: #fff;
-  text-shadow: 0 0 4px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 0.8), 0 1px 2px rgba(0, 0, 0, 1);
+  text-shadow: 0 0 0.8cqh rgba(0, 0, 0, 1), 0 0 1.45cqh rgba(0, 0, 0, 0.8), 0 0.22cqh 0.33cqh rgba(0, 0, 0, 1);
   white-space: nowrap;
-  margin-bottom: 2px;
+  margin-bottom: 0.33cqh;
 }
 
 .rpg-char-overlay .progress-bar {
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
 }
 
 /* ── Tokens & Statuses ── */
@@ -1134,11 +1134,11 @@
 .rpg-char-tokens {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
-  padding: 2px 0;
+  gap: 0.33cqh;
+  padding: 0.33cqh 0;
   justify-content: center;
   pointer-events: none;
-  max-width: 120px;
+  max-width: 22cqh;
 }
 
 .rpg-token {

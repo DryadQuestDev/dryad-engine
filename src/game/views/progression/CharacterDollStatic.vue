@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Character } from '../../core/character/character';
 import { computed, ref, watch, onBeforeUnmount } from 'vue';
+import { CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../utils/characterReference';
 
 const props = defineProps<{
   character: Character;
@@ -115,7 +116,10 @@ function getInvertedMaskStyle(polygon: string): Record<string, string> {
   };
 }
 
-// Get style for a layer, including mask from layers above (only if mask is active)
+// Get style for a layer: mirror flip + any active mask from layers above.
+// Art offset (dx/dy/scale) is applied on the .character-doll wrapper so each img stays
+// free of inline transform — that lets CharacterFace's :deep(.character-doll-image)
+// face_shift transform win for face crop.
 const getLayerStyle = (index: number) => {
   const style: Record<string, string> = {};
 
@@ -127,10 +131,10 @@ const getLayerStyle = (index: number) => {
   // Only apply if the mask is "active" (after delay)
   const layers = imageLayers.value;
   for (let i = index + 1; i < layers.length; i++) {
-    const layer = layers[i];
-    if (layer.mask && activeMasks.value.has(layer.image)) {
+    const above = layers[i];
+    if (above.mask && activeMasks.value.has(above.image)) {
       // Use CSS mask-image with mask-composite: exclude for inverted masking
-      Object.assign(style, getInvertedMaskStyle(layer.mask));
+      Object.assign(style, getInvertedMaskStyle(above.mask));
       break;
     }
   }
@@ -151,24 +155,19 @@ const getLayerStyle = (index: number) => {
 <style scoped>
 .character-doll {
   position: relative;
-  width: auto;
   height: 100%;
   display: inline-block;
+  aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
   pointer-events: none;
 }
 
 .character-doll-image {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  width: 100%;
   height: 100%;
-  width: auto;
   object-fit: contain;
   user-select: none;
-}
-
-.character-doll-image:first-child {
-  position: relative;
 }
 
 /* Fade transitions for adding/removing layers */
@@ -182,11 +181,11 @@ const getLayerStyle = (index: number) => {
   opacity: 0;
 }
 
-/* Natural size mode for gallery */
+/* Natural size mode for gallery — image's natural aspect drives wrapper width */
 .character-doll.natural-size {
-  position: relative;
   height: 100%;
   width: fit-content;
+  aspect-ratio: auto;
   flex-shrink: 0;
 }
 
@@ -196,6 +195,8 @@ const getLayerStyle = (index: number) => {
   left: 0;
   height: 100%;
   width: auto;
+  inset: auto;
+  object-fit: unset;
 }
 
 .character-doll.natural-size .character-doll-image:first-child {

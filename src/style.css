@@ -353,7 +353,7 @@ p {
 .p-colorpicker-panel,
 .p-select-overlay,
 .p-multiselect-overlay {
-  z-index: 6000 !important;
+  z-index: 20000 !important;
 }
 
 .p-galleria {
@@ -399,8 +399,8 @@ span.lore-link,
   color: inherit;
   text-decoration: underline dotted;
   text-decoration-color: var(--theme-primary, #5dadec);
-  text-underline-offset: 2px;
-  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 0.1em;
   cursor: pointer;
   pointer-events: auto;
   transition: text-decoration-color 0.1s;
@@ -416,6 +416,14 @@ span.lore-link:focus-visible,
 
 .flash-content .special {
   color: #17ff32;
+}
+
+.positive {
+  color: #42b983;
+}
+
+.negative {
+  color: #e06c75;
 }
 
 .game-body-content a {

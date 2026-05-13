@@ -27,6 +27,29 @@ export function parseToAst(text: string): Document {
     }
   };
 
+  // Trailing blank lines are visual separators between blocks, not part of
+  // the previous block's body. Strip them when the block closes so the
+  // editor doesn't show a phantom empty row at the bottom AND so that the
+  // round-trip (parse → serialize → parse) is stable: without this, scene
+  // columns would gain one trailing newline per save (the blank-line
+  // handler in appendSceneLine appends `\n` to the last column's content
+  // for every blank line — including the inter-block separator written by
+  // serializeAst's `\n\n` join — so each save+reload grew the gap by one).
+  const closeCurrent = () => {
+    if (!current) return;
+    if (current.kind === 'scene') {
+      for (const row of current.rows) {
+        for (const col of row.columns) {
+          col.content = col.content.replace(/\n+$/, '');
+        }
+      }
+      return;
+    }
+    while (current.rows.length > 0 && current.rows[current.rows.length - 1].kind === 'empty') {
+      current.rows.pop();
+    }
+  };
+
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -50,6 +73,7 @@ export function parseToAst(text: string): Document {
 
     // Block headers close any open block.
     if (line.length > 0 && ['^', '@', '#', '$'].includes(line[0])) {
+      closeCurrent();
       const sigil = line[0];
       const rest = line.substring(1);
       const { body, paramsRaw } = splitTrailingParams(rest);
@@ -77,12 +101,16 @@ export function parseToAst(text: string): Document {
 
     if (current) {
       appendToBlock(current, line, line.trim() === '', false);
-    } else {
+    } else if (line.trim() !== '') {
+      // Blank lines outside any block are inter-block separators — skip
+      // them so they don't become empty `raw` blocks the editor would
+      // surface as orphan rows.
       pushRaw(line);
     }
     i++;
   }
 
+  closeCurrent();
   return doc;
 }
 

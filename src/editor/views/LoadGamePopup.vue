@@ -189,7 +189,7 @@ function closeDialog() {
 
 <template>
   <Dialog :visible="visible" @update:visible="closeDialog" modal header="Load Game in Dev Mode"
-    :style="{ width: '600px' }">
+    :style="{ width: '600px' }" class="load-game-dialog">
 
     <div class="load_controls">
       <input type="file" ref="fileInput" @change="handleFileUpload" accept=".json" style="display: none;" />
@@ -211,7 +211,7 @@ function closeDialog() {
             <button class="delete_save_button" @click.stop="deleteSaveSlot(item.slot)">Delete</button>
           </div>
           <div class="save_meta" v-if="item.saveMeta">
-            <span><b>{{ item.saveMeta.mods.join(', ') }}</b></span>
+            <span v-if="item.saveMeta?.versions"><b>{{ item.saveMeta.versions._core?.name || '_core' }} v{{ item.saveMeta.versions._core?.version }}</b><span v-if="Object.keys(item.saveMeta.versions).length > 1"> + {{ Object.entries(item.saveMeta.versions).filter(([k]) => k !== '_core').map(([k, v]) => `${v.name || k} v${v.version}`).join(', ') }}</span></span>
             <span>Date: {{ new Date(item.saveMeta.saveDate).toLocaleString() }}</span>
             <span>Playtime: {{ formatPlayTime(item.saveMeta.playTime) }}</span>
             <span>Engine: v{{ item.saveMeta.engineVersion }}</span>
@@ -354,5 +354,17 @@ function closeDialog() {
 
 .load_button:hover {
   background-color: #1e88e5;
+}
+</style>
+
+<style>
+/* PrimeVue auto-z-indexing assigns slots based on open order, but the dungeon
+   content editor popup is enormous and opens first — its modal mask covers
+   this dialog. Force LoadGamePopup above any other dialog. Teleported to
+   body, so scoped styles wouldn't reach. */
+.load-game-dialog,
+.load-game-dialog + .p-dialog-mask,
+.p-dialog-mask:has(.load-game-dialog) {
+  z-index: 10000 !important;
 }
 </style>

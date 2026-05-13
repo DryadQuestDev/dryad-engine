@@ -77,6 +77,13 @@ async function commitItem(): Promise<boolean> {
   } catch (err) {
     console.warn('[CustomPopupWrapper] Save failed:', err);
   }
+  // Optional hook for popup components that need to persist additional state
+  // (e.g. a manifest field) on save. Not called on Cancel.
+  try {
+    await childRef.value?.commitExternal?.();
+  } catch (err) {
+    console.warn('[CustomPopupWrapper] commitExternal failed:', err);
+  }
   return true;
 }
 

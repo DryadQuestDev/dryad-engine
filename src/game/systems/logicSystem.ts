@@ -36,6 +36,103 @@ export class LogicSystem {
 
     public customChoiceMap = new Map<string, CustomChoiceObject>();
 
+    /**
+     * Parse a generic `id<op>value` specification into a typed list of ops.
+     * Pure string parsing — no characters, stats, or game data are touched.
+     * Plugins use this to avoid hand-rolling regex when they accept the
+     * common `"id>5, id2=3"` shorthand syntax. Reused internally by
+     * `processCharAction` (with dotted ids) and the `char` content action.
+     *
+     * String form: comma-separated `"<id><op><value>"` where op is `=`, `>`,
+     * or `<`. Whitespace around the operator is allowed. The id may contain
+     * dots (e.g. `alice.stat.brawn`). Returned `value` is the trimmed string
+     * after the operator — consumers coerce as needed.
+     *
+     * Object form: `{ id: any }`. For numeric values, sign infers the op
+     * (positive `>`, negative `<`, zero `=`) and `value` is the absolute
+     * magnitude. For non-numeric values, op is `=` and the raw value passes
+     * through.
+     *
+     * Invalid specs are logged and skipped.
+     *
+     * @example
+     * logicSystem.parseOpsSpec("alice>5, bob = 3");
+     * // [{ id: 'alice', op: '>', value: '5' }, { id: 'bob', op: '=', value: '3' }]
+     * logicSystem.parseOpsSpec({ alice: 5, bob: -2 });
+     * // [{ id: 'alice', op: '>', value: 5 }, { id: 'bob', op: '<', value: 2 }]
+     */
+    public parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '>' | '<'; value: any }> {
+        const out: Array<{ id: string; op: '=' | '>' | '<'; value: any }> = [];
+        if (typeof data === 'string') {
+            for (const spec of data.split(',').map(s => s.trim()).filter(Boolean)) {
+                const m = spec.match(/^([^=<>\s]+)\s*([=<>])\s*(.+)$/);
+                if (!m) {
+                    gameLogger.error(`[parseOpsSpec] invalid spec: "${spec}". Use "<id>[=<>]<value>"`);
+                    continue;
+                }
+                out.push({ id: m[1], op: m[2] as '=' | '>' | '<', value: m[3].trim() });
+            }
+        } else if (data && typeof data === 'object') {
+            for (const [id, raw] of Object.entries(data)) {
+                if (typeof raw === 'number') {
+                    if (raw > 0) out.push({ id, op: '>', value: raw });
+                    else if (raw < 0) out.push({ id, op: '<', value: Math.abs(raw) });
+                    else out.push({ id, op: '=', value: 0 });
+                } else {
+                    out.push({ id, op: '=', value: raw });
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Parse a `targetId->item & item & ..., targetId->!item, ...` specification into
+     * a typed list of per-target add/remove operations. Pure string parsing — no
+     * characters, statuses, or game data are touched. Used by `status`, `skin_layer`,
+     * and `item_slot` content actions, and available to plugins authoring similar
+     * `caster->X & Y, caster->!Z` sugar.
+     *
+     * Format: comma-separates per-target specs; each spec is `id->item & item`,
+     * each item optionally prefixed with `!` to mark it for removal. Tokens with
+     * no `->` are logged and skipped. An empty item list (e.g. `"alice->"`) is
+     * skipped silently.
+     *
+     * @example
+     * logicSystem.parseTargetedSpec("alice->buff1 & buff2, bob->!debuff");
+     * // [
+     * //   { characterId: 'alice', items: [{ name: 'buff1', remove: false }, { name: 'buff2', remove: false }] },
+     * //   { characterId: 'bob', items: [{ name: 'debuff', remove: true }] },
+     * // ]
+     */
+    public parseTargetedSpec(data: string): Array<{ characterId: string; items: Array<{ name: string; remove: boolean }> }> {
+        const out: Array<{ characterId: string; items: Array<{ name: string; remove: boolean }> }> = [];
+        if (typeof data !== 'string' || !data.trim()) return out;
+
+        for (const spec of data.split(',').map(s => s.trim()).filter(Boolean)) {
+            const arrowIdx = spec.indexOf('->');
+            if (arrowIdx === -1) {
+                gameLogger.error(`[parseTargetedSpec] missing '->' in spec: "${spec}"`);
+                continue;
+            }
+            const characterId = spec.slice(0, arrowIdx).trim();
+            if (!characterId) {
+                gameLogger.error(`[parseTargetedSpec] missing target id in spec: "${spec}"`);
+                continue;
+            }
+            const items = spec.slice(arrowIdx + 2)
+                .split('&').map(s => s.trim()).filter(Boolean)
+                .map(token => {
+                    const remove = token.startsWith('!');
+                    return { name: remove ? token.slice(1).trim() : token, remove };
+                })
+                .filter(i => i.name);
+            if (items.length === 0) continue;
+            out.push({ characterId, items });
+        }
+        return out;
+    }
+
     public registerCondition(id: string, func: Function) {
         let firstChar = id.charAt(0);
 

@@ -472,71 +472,33 @@ export class CharacterSystem {
    */
   // ignore types
   public processCharAction(data: string | Record<string, any>): void {
-    let operations: Array<{ charId: string; type: string; key: string; operator: string; value: any }> = [];
+    const parsed = this.game.logicSystem.parseOpsSpec(data);
+    const operations: Array<{ charId: string; type: string; key: string; operator: string; value: any }> = [];
 
-    if (typeof data === 'string') {
-      // Parse "alice.trait.name=New Name, eleanor.resource.health<25.5" format
-      const specs = data.split(',').map(s => s.trim());
-      for (const spec of specs) {
-        // Match pattern: charId.type.key[operator]value OR charId.type[operator]value (for keyless types like animation)
-        const match = spec.match(/^([^.]+)\.([^.]+)\.([^=<>\s]+)\s*([=<>])\s*(.+)$/);
-        const match2 = !match ? spec.match(/^([^.]+)\.([^=<>\s]+)\s*([=<>])\s*(.+)$/) : null;
-        if (!match && !match2) {
-          gameLogger.error(`Invalid char format: "${spec}". Use "charId.type.key[=<>]value" or "charId.type[=<>]value"`);
+    for (const entry of parsed) {
+      const parts = entry.id.split('.');
+      if (parts.length !== 2 && parts.length !== 3) {
+        gameLogger.error(`Invalid char path: "${entry.id}". Use "charId.type.key" or "charId.type"`);
+        continue;
+      }
+      const charId = parts[0];
+      const type = parts[1];
+      const key = parts.length === 3 ? parts[2] : '';
+
+      let value: any = entry.value;
+      if (type === 'stat' || type === 'resource') {
+        const n = Number(value);
+        if (!Number.isFinite(n)) {
+          gameLogger.error(`Invalid numeric value: "${value}" for ${entry.id}`);
           continue;
         }
-
-        const charId = match ? match[1] : match2![1];
-        const type = match ? match[2] : match2![2];
-        const key = match ? match[3] : '';
-        const operator = match ? match[4] : match2![3];
-        const rawValue = match ? match[5] : match2![4];
-
-        // Parse value based on type
-        let value: any = rawValue.trim();
-        if (type === 'stat' || type === 'resource') {
-          value = Number(value);
-          if (isNaN(value)) {
-            gameLogger.error(`Invalid numeric value: "${rawValue}" for ${spec}`);
-            continue;
-          }
-        } else if (type === 'skinStyle') {
-          // For skinStyle with =, parse as array if it looks like [item1, item2]
-          if (operator === '=' && value.startsWith('[') && value.endsWith(']')) {
-            // Parse array format: [class1, class2]
-            const arrayContent = value.slice(1, -1);
-            value = arrayContent.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-          }
-          // For > and < operators, keep as string (single value)
-        }
-
-        operations.push({ charId, type, key, operator, value });
+        value = n;
+      } else if (type === 'skinStyle' && entry.op === '=' && typeof value === 'string'
+                 && value.startsWith('[') && value.endsWith(']')) {
+        value = value.slice(1, -1).split(',').map(s => s.trim()).filter(s => s.length > 0);
       }
-    } else {
-      // Object format: { "alice.trait.name": "New Name" }
-      for (const [path, value] of Object.entries(data)) {
-        const parts = path.split('.');
-        if (parts.length !== 3) {
-          gameLogger.error(`Invalid char path: "${path}". Use "charId.type.key"`);
-          continue;
-        }
 
-        const [charId, type, key] = parts;
-        // Infer operator: negative numbers mean subtract, positive mean add (for stats/resources)
-        let operator = '=';
-        let finalValue = value;
-
-        if ((type === 'stat' || type === 'resource') && typeof value === 'number') {
-          if (value < 0) {
-            operator = '<';
-            finalValue = Math.abs(value);
-          } else if (value > 0) {
-            operator = '>';
-          }
-        }
-
-        operations.push({ charId, type, key, operator, value: finalValue });
-      }
+      operations.push({ charId, type, key, operator: entry.op, value });
     }
 
     // Execute operations

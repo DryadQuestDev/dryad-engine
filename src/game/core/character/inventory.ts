@@ -15,7 +15,21 @@ import { TradeContext } from "../../systems/itemSystem";
 
 export class Inventory {
 
-
+    /**
+     * Apply the equip-status for an item onto a character. Removes any existing `item_<uid>` first,
+     * then creates a fresh Status from the item's current `statusObject` so a stale instance is
+     * replaced cleanly. Safe to call any number of times (idempotent refresh).
+     */
+    public static applyEquipStatus(item: Item, character: Character): void {
+        if (!item.statusObject) return;
+        const id = "item_" + item.uid;
+        if (character.hasStatus(id)) character.removeStatus(id);   // refresh-safe; silent on first equip
+        const status = new Status();
+        status.id = id;
+        status.setValues(item.statusObject);
+        status.isHidden = true;
+        character.addStatus(status);
+    }
 
     public id: string = "";
     public name: string = "";
@@ -504,14 +518,8 @@ export class Inventory {
         item.isEquipped = true;
         slot.itemUid = item.uid;
 
-        // create and add Item Status
-        if (item.statusObject) {
-            let status = new Status();
-            status.id = "item_" + item.uid;
-            status.setValues(item.statusObject);
-            status.isHidden = true;
-            character.addStatus(status);
-        }
+        // create and add Item Status (always-refreshing from item.statusObject)
+        Inventory.applyEquipStatus(item, character);
 
         if (item.actions?.item_equip_after) {
             game.logicSystem.resolveActions(item.actions.item_equip_after);

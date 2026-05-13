@@ -53,7 +53,8 @@
     "plugins",
     "releasing_game",
     "custom_vue",
-    "3rd_party"
+    "3rd_party",
+    "save_restoration"
   ],
   "builtins": [
     "actions",

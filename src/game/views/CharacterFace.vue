@@ -3,6 +3,10 @@ import { computed } from 'vue';
 import CharacterDoll from './progression/CharacterDoll.vue';
 import CustomComponentContainer from './CustomComponentContainer.vue';
 import { Character } from '../core/character/character';
+import { SPINE_REFERENCE_HEIGHT, SPINE_REFERENCE_WIDTH } from '../utils/characterReference';
+
+const SPINE_REFERENCE_HEIGHT_PX = `${SPINE_REFERENCE_HEIGHT}px`;
+const SPINE_REFERENCE_WIDTH_PX = `${SPINE_REFERENCE_WIDTH}px`;
 
 const props = defineProps<{
   character?: Character;
@@ -203,24 +207,24 @@ const centerFontSize = computed(() => Math.max(10, sizeNum.value * 0.14) + 'px')
   z-index: 1000;
 }
 
-.character-face-doll-container :deep(.character-doll) {
-  position: absolute;
-}
-
-.character-face-doll-container :deep(.character-doll-image) {
-  height: auto;
-  width: auto;
-  position: absolute;
-  transform: translate(v-bind("faceShiftX + '%'"), v-bind("faceShiftY + '%'")) scale(v-bind("faceShiftScale"));
-  transform-origin: top left;
-}
-
-/* Spine character face crop — spine renders oversized, then translate+scale crops to face region */
+/* Face crop unified rule: face_shift_x/y are percentages of the 1:1 doll wrapper.
+   Both static (.character-doll) and spine (.character-doll-spine) get the reference
+   size + translate-by-shift-% + scale, so spine and static use the same coordinate
+   system. The image inside (CharacterDollStatic's <img> with object-fit:contain)
+   keeps its 1:1 letterbox layout — translating the wrapper carries the image with it. */
+.character-face-doll-container :deep(.character-doll),
 .character-face-doll-container :deep(.character-doll-spine) {
   position: absolute;
-  width: 500px;
-  height: 700px;
+  width: v-bind("SPINE_REFERENCE_WIDTH_PX");
+  height: v-bind("SPINE_REFERENCE_HEIGHT_PX");
   transform: translate(v-bind("faceShiftX + '%'"), v-bind("faceShiftY + '%'")) scale(v-bind("faceShiftScale"));
   transform-origin: top left;
+}
+
+/* Reset the spine canvas's art_dx/art_dy CSS translate (applied by the renderer) inside
+   the face crop — face_shift_* is the only positioning that should apply here, otherwise
+   per-spine body offsets would shift the cropped face. Centering translate(-50%, -50%) stays. */
+.character-face-doll-container :deep(.character-doll-spine canvas) {
+  transform: translate(-50%, -50%) !important;
 }
 </style>

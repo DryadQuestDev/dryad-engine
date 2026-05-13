@@ -477,6 +477,22 @@ watch(localFileArray, async (newArray) => {
     }
   }
 }, { deep: true, immediate: true });
+
+async function revealInFolder(path: string | null | undefined) {
+  if (!path) return;
+  const relPath = path.replace(/^\/+/, '').replace(/^assets\//, '');
+  const storage = global.storageService;
+  if (storage && typeof storage.showFileInFolder === 'function') {
+    try {
+      const result = await storage.showFileInFolder(relPath);
+      if (!result.success) {
+        console.error('[FileInput] showFileInFolder failed:', result.error);
+      }
+    } catch (err) {
+      console.error('[FileInput] Error calling showFileInFolder:', err);
+    }
+  }
+}
 </script>
 
 <template>
@@ -497,6 +513,7 @@ watch(localFileArray, async (newArray) => {
 
       <div class="flex-grow file-input-container">
         <FloatLabel variant="on" class="p-float-label-variant-on w-full">
+          <div class="autocomplete-with-reveal">
           <AutoComplete
             v-model="internalValue"
             :suggestions="fileSuggestions"
@@ -544,6 +561,14 @@ watch(localFileArray, async (newArray) => {
                     <span v-if="fileSizes.get(slotProps.option)" class="file-size-badge">
                       {{ fileSizes.get(slotProps.option) }}
                     </span>
+                    <Button
+                      icon="pi pi-folder-open"
+                      text rounded
+                      class="reveal-suggestion-btn p-button-sm"
+                      v-tooltip.left="'Reveal file in folder'"
+                      @mousedown.stop.prevent
+                      @click.stop="revealInFolder(slotProps.option)"
+                      tabindex="-1" />
                   </div>
                 </div>
               </div>
@@ -556,6 +581,15 @@ watch(localFileArray, async (newArray) => {
               </div>
             </template>
           </AutoComplete>
+          <Button
+            icon="pi pi-folder-open"
+            text rounded
+            class="reveal-in-folder-btn p-button-sm"
+            :class="{ 'is-empty': !internalValue }"
+            v-tooltip.top="'Reveal file in folder'"
+            @click="revealInFolder(internalValue)"
+            tabindex="-1" />
+          </div>
           <label :for="fieldId">{{ label }}</label>
         </FloatLabel>
 
@@ -568,6 +602,7 @@ watch(localFileArray, async (newArray) => {
 
     <!-- Layout for Other File Types -->
     <FloatLabel v-else variant="on" class="p-float-label-variant-on w-full input-wrapper">
+      <div class="autocomplete-with-reveal">
       <AutoComplete
         v-model="internalValue"
         :suggestions="fileSuggestions"
@@ -585,7 +620,17 @@ watch(localFileArray, async (newArray) => {
         </template>
 
         <template #option="slotProps">
-          <span>{{ slotProps.option }}</span>
+          <div class="flex items-center justify-between gap-2 suggestion-item">
+            <span class="flex-grow">{{ slotProps.option }}</span>
+            <Button
+              icon="pi pi-folder-open"
+              text rounded
+              class="reveal-suggestion-btn p-button-sm"
+              v-tooltip.left="'Reveal file in folder'"
+              @mousedown.stop.prevent
+              @click.stop="revealInFolder(slotProps.option)"
+              tabindex="-1" />
+          </div>
         </template>
 
         <template #empty>
@@ -595,6 +640,15 @@ watch(localFileArray, async (newArray) => {
           </div>
         </template>
       </AutoComplete>
+      <Button
+        icon="pi pi-folder-open"
+        text rounded
+        class="reveal-in-folder-btn p-button-sm"
+        :class="{ 'is-empty': !internalValue }"
+        v-tooltip.top="'Reveal file in folder'"
+        @click="revealInFolder(internalValue)"
+        tabindex="-1" />
+      </div>
       <label :for="fieldId">{{ label }}</label>
     </FloatLabel>
   </div>
@@ -623,13 +677,14 @@ watch(localFileArray, async (newArray) => {
                alt="Video Preview"
                @error="($event.target as HTMLImageElement).style.display = 'none'" />
 
+          <div class="autocomplete-with-reveal flex-grow">
           <AutoComplete
             v-model="localFileArray[index]"
             :suggestions="fileSuggestions"
             @complete="handleFileSearch"
             forceSelection
             :delay="50"
-            class="flex-grow"
+            class="w-full"
             :inputClass="'w-full'"
             :loading="isConverting"
             :disabled="isConverting || disabled"
@@ -669,6 +724,14 @@ watch(localFileArray, async (newArray) => {
                     <span v-if="fileSizes.get(slotProps.option)" class="file-size-badge">
                       {{ fileSizes.get(slotProps.option) }}
                     </span>
+                    <Button
+                      icon="pi pi-folder-open"
+                      text rounded
+                      class="reveal-suggestion-btn p-button-sm"
+                      v-tooltip.left="'Reveal file in folder'"
+                      @mousedown.stop.prevent
+                      @click.stop="revealInFolder(slotProps.option)"
+                      tabindex="-1" />
                   </div>
                 </div>
               </div>
@@ -681,6 +744,15 @@ watch(localFileArray, async (newArray) => {
               </div>
             </template>
           </AutoComplete>
+          <Button
+            icon="pi pi-folder-open"
+            text rounded
+            class="reveal-in-folder-btn p-button-sm"
+            :class="{ 'is-empty': !localFileArray[index] }"
+            v-tooltip.top="'Reveal file in folder'"
+            @click="revealInFolder(localFileArray[index])"
+            tabindex="-1" />
+          </div>
 
           <Button icon="pi pi-trash" severity="danger" class="p-button-sm" aria-label="Remove Item"
                   @click="deleteFileItem(index)"
@@ -793,6 +865,38 @@ watch(localFileArray, async (newArray) => {
 
 .file-array-item .p-autocomplete {
   flex-grow: 1;
+}
+
+/* Reveal-in-folder icon overlaid on AutoComplete inputs */
+.autocomplete-with-reveal {
+  position: relative;
+  width: 100%;
+}
+
+.autocomplete-with-reveal :deep(.p-autocomplete-input) {
+  padding-right: 2.25rem;
+}
+
+.reveal-in-folder-btn {
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+.reveal-in-folder-btn.is-empty {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.reveal-suggestion-btn {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.reveal-suggestion-btn:hover {
+  opacity: 1;
 }
 
 .file-array-preview {

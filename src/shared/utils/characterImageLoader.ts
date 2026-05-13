@@ -45,9 +45,10 @@ export function loadCharacterImages(
   for (const layerId of skinLayerIds) {
     const skinLayer = skinLayersData.find((layer) => layer.id === layerId);
     if (!skinLayer || !skinLayer.images) continue;
-    // No view requested: only viewless layers. View requested: only matching layers.
-    if (!view) { if (skinLayer.view) continue; }
-    else { if (skinLayer.view !== view) continue; }
+    // _default and empty are equivalent on both the request and the layer.
+    const requestKey = !view || view === '_default' ? '' : view;
+    const layerKey = !skinLayer.view || skinLayer.view === '_default' ? '' : skinLayer.view;
+    if (requestKey !== layerKey) continue;
 
     // Build the image key from the layer's attributes
     const attributeValues: string[] = [layerId];

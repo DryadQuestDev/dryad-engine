@@ -1,7 +1,28 @@
 import type { Block, Document, Row, SceneBlock, SceneColumn } from './ast';
 
+// Per-block memoization keyed by block reference. The popup mutates blocks
+// via spread (`{ ...block, field: newValue }`), so a typed character makes
+// ONE block get a fresh reference — cache miss on that block, hit on every
+// other unchanged block. Without this, `serializeAst` was O(total content)
+// per keystroke (re-serializing 252 blocks for a 1-character edit). Now it's
+// O(1 block + array-join). WeakMap entries auto-free when blocks fall out
+// of the doc.
+const blockCache = new WeakMap<Block, string>();
+
+function serializeBlockCached(block: Block): string {
+  let cached = blockCache.get(block);
+  if (cached === undefined) {
+    cached = serializeBlock(block);
+    blockCache.set(block, cached);
+  }
+  return cached;
+}
+
 export function serializeAst(doc: Document): string {
-  return doc.blocks.filter(Boolean).map(serializeBlock).join('\n');
+  // Blocks are separated by a blank line on disk so the file is readable and
+  // round-trips cleanly: parser strips trailing blank lines from each block,
+  // serializer puts a single blank line back between blocks.
+  return doc.blocks.filter(Boolean).map(serializeBlockCached).join('\n\n');
 }
 
 function serializeBlock(block: Block): string {

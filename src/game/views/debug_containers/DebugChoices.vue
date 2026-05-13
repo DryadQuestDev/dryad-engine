@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import vTooltip from 'primevue/tooltip';
 import { Game } from '../../game';
 import { Choice } from '../../core/content/choice';
-import Tooltip from 'primevue/tooltip';
 
 const game = Game.getInstance();
 const debugChoices = ref<Choice[]>([]);

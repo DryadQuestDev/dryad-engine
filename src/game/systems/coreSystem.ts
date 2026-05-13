@@ -10,6 +10,7 @@ import { Property } from '../property';
 import { SoundObject } from '../../schemas/soundSchema';
 import { MusicObject } from '../../schemas/musicSchema';
 import { Character } from '../core/character/character';
+import { Inventory } from '../core/character/inventory';
 import type { Identifiable } from '../../functions/mergeById';
 import { Game } from '../game';
 import { gameLogger, captureCallerInfo } from '../utils/logger';
@@ -126,6 +127,192 @@ export class CoreSystem {
 
   @Skip()
   public stateLoading = ref(true);
+
+  /**
+   * Versions map stamped on the save that was just loaded — keyed by data-source id.
+   * `_core` is the game itself; remaining keys are mod ids. Each entry carries the manifest's
+   * display name alongside the version. null for a new game.
+   */
+  @Skip()
+  public loadedSaveVersions: Record<string, { name: string; version: string }> | null = null;
+
+  /** Returns the current `(game + mods)` versions map. Same shape as `loadedSaveVersions` / `saveMeta.versions`. */
+  public getVersions(): Record<string, { name: string; version: string }> {
+    const versions: Record<string, { name: string; version: string }> = {
+      _core: { name: this.gameManifest?.name || '', version: this.gameManifest?.version || '0' },
+    };
+    for (const mod of this.modsManifests || []) {
+      if (mod?.id) versions[mod.id] = { name: mod.name || mod.id, version: mod.version || '0' };
+    }
+    return versions;
+  }
+
+  /**
+   * Rebuild every character's state from current definitions (template + statuses + traits + attributes).
+   * No-op for new games or when the loaded versions match the current ones.
+   *
+   * See `Game.runDefaultSaveMigration()` for the public-facing wrapper and full docs.
+   */
+  public runDefaultSaveMigration(options: { ignoreStats?: string[]; ignoreTraits?: string[]; ignoreAttributes?: string[]; ignoreItemTraits?: string[]; ignoreItemAttributes?: string[]; } = {}): void {
+    const game = Game.getInstance();
+    if (game.isNewGame) return;                                      // fresh save: nothing to migrate
+
+    const stringify = (m: Record<string, { version: string }>) =>
+      Object.keys(m).sort().map(k => `${k}=${m[k].version}`).join(',');
+
+    // A missing or empty versions map on the save counts as its own (empty) signature —
+    // any current `_core` version mismatches it, so migration runs.
+    const oldSig = stringify(this.loadedSaveVersions ?? {});
+    const newSig = stringify(this.getVersions());
+    if (oldSig === newSig) return;                                   // nothing changed
+
+    console.log(`[save-migration] ${oldSig || '(none)'} → ${newSig}`);
+    const migrationStart = performance.now();
+
+    const ignoreStats = new Set(options.ignoreStats ?? []);
+    const ignoreTraits = new Set(options.ignoreTraits ?? []);
+    const ignoreAttributes = new Set(options.ignoreAttributes ?? []);
+
+    const statsMap = game.characterSystem.statsMap;
+    const statusesMap = game.characterSystem.statusesMap;
+    const traitsMap = game.characterSystem.traitsMap;
+    const attributesMap = game.characterSystem.attributesMap;
+    const templatesMap = game.characterSystem.templatesMap;
+
+    for (const char of game.getAllCharacters()) {
+      const template = templatesMap.get(char.templateId);
+      if (!template) continue;                                       // template gone (e.g. removed mod); leave char alone
+
+      const coreStatus = char.getCoreStatus();
+
+      // 1. Stats
+      const tplStats = (template as any).stats || {};
+      for (const key of Object.keys(coreStatus.stats || {})) {
+        if (ignoreStats.has(key)) continue;
+        if (!statsMap.has(key)) { delete coreStatus.stats[key]; continue; }
+        if (typeof tplStats[key] === 'number') char.setStat(key, tplStats[key]);
+      }
+      for (const key of Object.keys(tplStats)) {
+        if (ignoreStats.has(key)) continue;
+        if (!statsMap.has(key)) continue;
+        if (coreStatus.stats[key] === undefined) char.setStat(key, tplStats[key]);
+      }
+
+      // 2. Traits
+      const tplTraits = (template as any).traits || {};
+      for (const key of Object.keys(coreStatus.traits || {})) {
+        if (ignoreTraits.has(key)) continue;
+        if (!traitsMap.has(key)) { delete coreStatus.traits[key]; continue; }
+        if (tplTraits[key] !== undefined) char.setTrait(key, tplTraits[key]);
+      }
+      for (const key of Object.keys(tplTraits)) {
+        if (ignoreTraits.has(key)) continue;
+        if (!traitsMap.has(key)) continue;
+        if (coreStatus.traits[key] === undefined) char.setTrait(key, tplTraits[key]);
+      }
+
+      // 3. Attributes
+      const tplAttrs = (template as any).attributes || {};
+      for (const key of Object.keys(coreStatus.attributes || {})) {
+        if (ignoreAttributes.has(key)) continue;
+        if (!attributesMap.has(key)) { delete coreStatus.attributes[key]; continue; }
+        if (typeof tplAttrs[key] === 'string') char.setAttribute(key, tplAttrs[key]);
+      }
+      for (const key of Object.keys(tplAttrs)) {
+        if (ignoreAttributes.has(key)) continue;
+        if (!attributesMap.has(key)) continue;
+        if (coreStatus.attributes[key] === undefined) char.setAttribute(key, tplAttrs[key]);
+      }
+
+      // 4. Status reapply — refresh stat-grants for definition-backed statuses only.
+      // Live/runtime statuses (item_<uid>, plugin-spawned, hand-rolled createStatus calls) have no
+      // definition to refresh against — leave them entirely intact.
+      const heldSnapshot = char.getStatuses()
+        .filter(s => s.id !== '_core_status' && statusesMap.has(s.id))
+        .map(s => ({ id: s.id, stacks: s.currentStacks }));
+      for (const { id, stacks } of heldSnapshot) {
+        char.removeStatus(id);
+        char.addStatus(game.createStatus(id));
+        if (stacks > 1) char.addStatusStacks(id, stacks - 1);
+      }
+
+      // 5. Re-clamp resources to (possibly new) max
+      for (const [statId, def] of statsMap.entries()) {
+        if ((def as any).is_resource) {
+          const current = char.getResource(statId) || 0;
+          char.setResource(statId, current);
+        }
+      }
+    }
+
+    // Items: rebuild trait/attribute/property/statusObject shape from current definitions.
+    const ignoreItemTraits = new Set(options.ignoreItemTraits ?? []);
+    const ignoreItemAttributes = new Set(options.ignoreItemAttributes ?? []);
+    const itemTemplatesMap = game.itemSystem.itemTemplatesMap;
+    const itemTraitsMap = game.itemSystem.itemTraitsMap;
+    const itemAttributesMap = game.itemSystem.itemAttributesMap;
+    const itemPropertiesMap = game.itemSystem.itemPropertiesMap;
+
+    for (const inv of game.itemSystem.inventories.value.values()) {
+      for (const item of inv.items) {
+        const tpl = itemTemplatesMap.get(item.id);
+        if (!tpl) continue;                                          // template gone (removed mod); leave alone
+
+        // Traits
+        const tplTraits = (tpl as any).traits || {};
+        for (const k of Object.keys(item.traits || {})) {
+          if (ignoreItemTraits.has(k)) continue;
+          if (!itemTraitsMap.has(k)) { delete item.traits[k]; continue; }
+          if (tplTraits[k] !== undefined) item.traits[k] = tplTraits[k];
+        }
+        for (const k of Object.keys(tplTraits)) {
+          if (ignoreItemTraits.has(k)) continue;
+          if (!itemTraitsMap.has(k)) continue;
+          if (item.traits[k] === undefined) item.traits[k] = tplTraits[k];
+        }
+
+        // Attributes
+        const tplAttrs = (tpl as any).attributes || {};
+        for (const k of Object.keys(item.attributes || {})) {
+          if (ignoreItemAttributes.has(k)) continue;
+          if (!itemAttributesMap.has(k)) { delete item.attributes[k]; continue; }
+          if (typeof tplAttrs[k] === 'string') item.attributes[k] = tplAttrs[k];
+        }
+        for (const k of Object.keys(tplAttrs)) {
+          if (ignoreItemAttributes.has(k)) continue;
+          if (!itemAttributesMap.has(k)) continue;
+          if (item.attributes[k] === undefined) item.attributes[k] = tplAttrs[k];
+        }
+
+        // Properties — preserve current values; purge stale; backfill missing template properties.
+        const tplProps = (tpl as any).properties || {};
+        for (const k of Object.keys(item.properties || {})) {
+          if (!itemPropertiesMap.has(k)) delete item.properties[k];  // stale: purge
+        }
+        for (const k of Object.keys(tplProps)) {
+          if (!itemPropertiesMap.has(k)) continue;
+          if (item.properties[k] === undefined) {
+            const prop = game.itemSystem.createProperty(k, tplProps[k] as number);
+            if (prop) item.properties[k] = prop;
+          }
+        }
+
+        // Status object — refresh from template (no live state to preserve on this field).
+        item.statusObject = (tpl as any).status ? JSON.parse(JSON.stringify((tpl as any).status)) : {};
+      }
+    }
+
+    // Equip-status re-bind
+    for (const char of game.getAllCharacters()) {
+      for (const slot of char.itemSlots) {
+        if (!slot.itemUid) continue;
+        const item = game.itemSystem.getItemByUid(slot.itemUid);
+        if (item) Inventory.applyEquipStatus(item, char);
+      }
+    }
+
+    console.log(`[save-migration] done in ${(performance.now() - migrationStart).toFixed(1)}ms`);
+  }
 
   /**
    * Registers a new UI state with a default value.
@@ -413,12 +600,21 @@ export class CoreSystem {
     // Check if in dev mode
     const isDevMode = localStorage.getItem('devMode') === 'true';
 
+    // Versions map: `_core` is the game itself; every other key is a loaded mod id.
+    // Each entry carries the manifest's display name alongside the version so the save UI
+    // can render human-friendly names without depending on the mod being currently loaded.
+    const versions: Record<string, { name: string; version: string }> = {
+      _core: { name: gameManifest?.name || '', version: gameManifest?.version || '0' },
+    };
+    for (const mod of modsManifests) {
+      if (mod?.id) versions[mod.id] = { name: mod.name || mod.id, version: mod.version || '0' };
+    }
+
     return {
       saveDate: currentTime,
       playTime: Math.round(this.accumulatedPlayTime),
       engineVersion: engineVersion,
-      gameVersion: gameManifest?.version || "N/A",
-      mods: modsManifests.map(mod => `${mod.name} v${mod.version}`),
+      versions,
       isDevMode: isDevMode,
       hidden: options?.hidden
     };

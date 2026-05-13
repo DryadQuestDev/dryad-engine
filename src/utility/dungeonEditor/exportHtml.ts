@@ -1,28 +1,16 @@
 import type { Block, Document, EncounterBlock, SceneBlock, TemplateBlock } from './ast';
 
-const ALL_EDITOR_SPAN_RE = /<span\s+class=["'](?:hl|at|ae)-[\w-]+["']>([\s\S]*?)<\/span>/gi;
-const AUTO_TOKEN_SPAN_RE = /<span\s+class=["'](?:at|ae)-[\w-]+["']>([\s\S]*?)<\/span>/gi;
+const HIGHLIGHT_SPAN_RE = /<span\s+class=["']hl-[\w-]+["']>([\s\S]*?)<\/span>/gi;
 
-function stripSpansBy(s: string, re: RegExp): string {
+function stripHighlightSpans(s: string): string {
   if (!s) return s;
   let out = s;
   let prev;
   do {
     prev = out;
-    out = out.replace(re, '$1');
+    out = out.replace(HIGHLIGHT_SPAN_RE, '$1');
   } while (out !== prev);
   return out;
-}
-
-// Plain-text export: strip every visual span, including manual highlights.
-function stripAllEditorSpans(s: string): string {
-  return stripSpansBy(s, ALL_EDITOR_SPAN_RE);
-}
-
-// HTML export: strip only auto-tokens; keep manual `hl-*` highlights so the
-// walker can convert them to inline-styled spans for the paste target.
-function stripAutoTokens(s: string): string {
-  return stripSpansBy(s, AUTO_TOKEN_SPAN_RE);
 }
 
 function esc(s: string): string {
@@ -173,41 +161,31 @@ function walkAndHighlight(node: Node): string {
   for (const child of Array.from(node.childNodes)) {
     if (child.nodeType === 3 /* TEXT_NODE */) {
       out += highlightTokens(child.textContent || '');
-    } else if (child.nodeType === 1 /* ELEMENT_NODE */) {
-      const el = child as Element;
-      const inner = walkAndHighlight(el);
-      const hlStyle = highlightClassToInlineStyle(el.getAttribute('class'));
-      if (hlStyle) {
-        out += `<span style="${hlStyle}">${inner}</span>`;
-        continue;
-      }
-      // Preserve other inline tags (e.g. <a href>) verbatim with their
-      // attributes — dungeon_content allows raw HTML for links etc.
-      const tagName = el.tagName.toLowerCase();
-      const attrs: string[] = [];
-      for (const attr of Array.from(el.attributes)) {
-        attrs.push(`${attr.name}="${escAttr(attr.value)}"`);
-      }
-      const openTag = attrs.length ? `<${tagName} ${attrs.join(' ')}>` : `<${tagName}>`;
-      if (tagName === 'br' || tagName === 'hr' || tagName === 'img') {
-        out += openTag;
-      } else {
-        out += `${openTag}${inner}</${tagName}>`;
-      }
+      continue;
     }
+    if (child.nodeType !== 1 /* ELEMENT_NODE */) continue;
+    const el = child as Element;
+    const hlStyle = highlightClassToInlineStyle(el.getAttribute('class'));
+    if (hlStyle) {
+      // Manual `hl-*` highlights → inline-styled span, recurse for inner.
+      // (We GENERATE these for visual highlighting; authors don't type them
+      // as literal markup, so render as actual styled HTML.)
+      out += `<span style="${hlStyle}">${walkAndHighlight(el)}</span>`;
+      continue;
+    }
+    // All other author-typed tags (`<strong>`, `<a>`, `<div>`, `<table>`,
+    // …) → escape outerHTML so the actual tag chars appear as literal text
+    // in Google Docs. Authors writing dungeon content treat raw HTML as
+    // documented string content, not as render directives.
+    out += esc(el.outerHTML);
   }
   return out;
 }
 
 function cellContent(raw: string): string {
-  // Pipeline: strip auto-token spans (visual-only) → walk DOM, applying
-  // token highlighting to text nodes and translating `hl-*` highlight spans
-  // to inline-styled spans (so they survive paste). Newlines never fall
-  // inside a token range, so converting them to <br> last is safe.
   if (!raw) return '';
-  const stripped = stripAutoTokens(raw);
   const tmp = document.createElement('div');
-  tmp.innerHTML = stripped;
+  tmp.innerHTML = raw;
   return walkAndHighlight(tmp).replace(/\n/g, '<br>');
 }
 
@@ -334,5 +312,5 @@ export function exportDocumentAsHtml(doc: Document): string {
 }
 
 export function exportDocumentAsText(serialized: string): string {
-  return stripAllEditorSpans(serialized);
+  return stripHighlightSpans(serialized);
 }

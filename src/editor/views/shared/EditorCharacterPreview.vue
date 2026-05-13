@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { Editor } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
-import { spineRenderer } from '../../../game/utils/spineRenderer';
-import type { Spine } from '@esotericsoftware/spine-pixi-v8';
+import { useEditorSpinePlayer } from '../../../composables/useEditorSpinePlayer';
+import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../../game/utils/characterReference';
 
 const props = defineProps<{
   /** Character template object (with skin_layers, attributes, spine, traits) */
@@ -17,20 +17,24 @@ const props = defineProps<{
 const editor = Editor.getInstance();
 const skinLayersData = ref<any[]>([]);
 
-// ── Static image layers ──
 const imageLayers = computed(() => {
   return loadCharacterImages(props.character, skinLayersData.value, props.view);
 });
 
-// ── Spine support ──
 const spineContainerRef = ref<HTMLDivElement | null>(null);
-let spineInstance: Spine | null = null;
-let spineSlotId = '';
+
+// `''`, `undefined`, and `'_default'` all canonically refer to the default view —
+// FacePickerPopup writes `view: '_default'` when the dev picks Default in the
+// dropdown, while older entries leave the field empty. Treat them as equivalent.
+function viewMatches(entryView: any, target?: string | null): boolean {
+  const a = !entryView || entryView === '_default' ? '_default' : entryView;
+  const b = !target || target === '_default' ? '_default' : target;
+  return a === b;
+}
 
 function findSpineForView(spineArray: any, view?: string | null) {
   if (!Array.isArray(spineArray)) return null;
-  if (view) return spineArray.find((s: any) => s.view === view) || null;
-  return spineArray.find((s: any) => !s.view) || null;
+  return spineArray.find((s: any) => viewMatches(s.view, view)) || null;
 }
 
 const spineConfig = computed(() => {
@@ -41,76 +45,49 @@ const spineConfig = computed(() => {
   // If a view is requested but has no spine entry, return null so static layers render instead.
   const localDefault = !view ? findSpineForView(props.character?.spine) : null;
   const coreDefault = !view ? findSpineForView(props.coreCharacter?.spine) : null;
+  const merged = localSpine || coreSpine || localDefault || coreDefault || null;
   return {
-    atlas: localSpine?.atlas || coreSpine?.atlas || localDefault?.atlas || coreDefault?.atlas || null,
-    skeleton: localSpine?.skeleton || coreSpine?.skeleton || localDefault?.skeleton || coreDefault?.skeleton || null,
-    animation: localSpine?.default_animation || coreSpine?.default_animation || localDefault?.default_animation || coreDefault?.default_animation || null,
+    atlas: merged?.atlas || null,
+    skeleton: merged?.skeleton || null,
+    art_dx: typeof merged?.art_dx === 'number' ? merged.art_dx : 0,
+    art_dy: typeof merged?.art_dy === 'number' ? merged.art_dy : 0,
+    art_scale: typeof merged?.art_scale === 'number' ? merged.art_scale : 1,
   };
 });
 
-const isSpine = computed(() => !!(spineConfig.value.atlas && spineConfig.value.skeleton));
-const hasContent = computed(() => isSpine.value || imageLayers.value.length > 0);
+const atlasUrl = computed(() => spineConfig.value.atlas);
+const skeletonUrl = computed(() => spineConfig.value.skeleton);
+const attributes = computed(() => props.character?.attributes || {});
+const artScale = computed(() => spineConfig.value.art_scale);
+const artDx = computed(() => spineConfig.value.art_dx);
+const artDy = computed(() => spineConfig.value.art_dy);
+const gameScale = computed(() => getSpineCharacterScale(props.view, editor.getMergedManifest()));
 
-async function initSpinePlayer() {
-  if (!spineContainerRef.value || !spineConfig.value.atlas || !spineConfig.value.skeleton) return;
-  disposeSpinePlayer();
+const isSpine = computed(() => !!(atlasUrl.value && skeletonUrl.value));
 
-  try {
-    spineSlotId = `editor_preview_${Date.now()}`;
-    const attributes = props.character?.attributes || {};
+const { init: initSpinePlayer } = useEditorSpinePlayer({
+  containerRef: spineContainerRef,
+  atlasUrl,
+  skeletonUrl,
+  attributes,
+  artScale,
+  artDx,
+  artDy,
+  gameScale,
+  slotIdPrefix: 'editor_preview',
+});
 
-    const spine = await spineRenderer.register(spineSlotId, spineContainerRef.value, {
-      skeletonUrl: spineConfig.value.skeleton,
-      atlasUrl: spineConfig.value.atlas,
-      animation: spineConfig.value.animation || undefined,
-    });
-
-    if (!spine) return;
-    spineInstance = spine;
-
-    // Apply skins from attributes
-    const skeletonData = spine.skeleton.data;
-    const skins = Object.values(attributes).filter(
-      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-    );
-    if (skins.length > 0) {
-      spineRenderer.applySkins(spine, skins);
-    }
-  } catch (error) {
-    console.error('EditorCharacterPreview failed to init spine:', error);
-  }
-}
-
-function disposeSpinePlayer() {
-  if (spineSlotId) {
-    spineRenderer.unregister(spineSlotId);
-    spineSlotId = '';
-  }
-  spineInstance = null;
-}
-
-// Load skin layers data
 onMounted(async () => {
   const data = await editor.loadFullData('character_skin_layers');
   if (data && Array.isArray(data)) skinLayersData.value = data;
 });
 
-// Reinit spine when view or character changes
 watch([() => props.view, () => props.character?.id], () => {
-  if (isSpine.value) {
-    nextTick(() => initSpinePlayer());
-  }
+  if (isSpine.value) nextTick(() => initSpinePlayer());
 });
 
-// Init spine when container appears
 watch(spineContainerRef, (newRef) => {
-  if (newRef && isSpine.value) {
-    nextTick(() => initSpinePlayer());
-  }
-});
-
-onBeforeUnmount(() => {
-  disposeSpinePlayer();
+  if (newRef && isSpine.value) nextTick(() => initSpinePlayer());
 });
 </script>
 
@@ -120,8 +97,7 @@ onBeforeUnmount(() => {
       <div ref="spineContainerRef" class="editor-char-spine" />
     </template>
     <template v-else-if="imageLayers.length > 0">
-      <img v-for="(src, i) in imageLayers" :key="i" :src="src" class="editor-char-img"
-        :class="{ 'editor-char-img-stacked': i > 0 }" />
+      <img v-for="(src, i) in imageLayers" :key="i" :src="src" class="editor-char-img" />
     </template>
     <div v-else class="editor-char-empty">
       <slot name="empty">No art layers</slot>
@@ -134,6 +110,7 @@ onBeforeUnmount(() => {
   position: relative;
   display: inline-block;
   height: 100%;
+  aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
 }
 
 .editor-char-spine {
@@ -143,14 +120,11 @@ onBeforeUnmount(() => {
 
 .editor-char-img {
   display: block;
-  height: 100%;
-  width: auto;
-}
-
-.editor-char-img-stacked {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .editor-char-empty {

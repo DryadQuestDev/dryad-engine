@@ -6,7 +6,7 @@ import { inject } from 'vue';
 import Sortable from 'sortablejs';
 import RowEditor from './RowEditor.vue';
 import SceneEditor from './SceneEditor.vue';
-import RichContentEditor from './RichContentEditor.vue';
+import RichContentEditor from './PlainEditor.vue';
 import { inputMatchesSearch } from './searchState';
 import { tagWithUid } from './uid';
 
@@ -72,12 +72,17 @@ const labelTooltip = computed(() => {
   return kindLabel[props.block.kind] ?? '';
 });
 
+// All events carry the block's `index` as the first arg. Lets the parent
+// bind plain function references (e.g. `@update:block="updateBlock"`)
+// instead of inline arrows that close over `item.idx` — those create a new
+// listener reference per render and force a re-render of every visible
+// BlockCard on every keystroke.
 const emit = defineEmits<{
-  'update:block': [block: Block];
-  'remove': [];
-  'move-up': [];
-  'move-down': [];
-  'insert-scene': [sceneId: string];
+  'update:block': [idx: number, block: Block];
+  'remove': [idx: number];
+  'move-up': [idx: number];
+  'move-down': [idx: number];
+  'insert-scene': [idx: number, sceneId: string];
 }>();
 
 function onInsertSceneForChoice(rowIndex: number) {
@@ -86,7 +91,7 @@ function onInsertSceneForChoice(rowIndex: number) {
   if (row.kind !== 'choice') return;
   const encId = props.block.id || 'encounter';
   const choiceId = row.name || 'choice';
-  emit('insert-scene', `${encId}~${choiceId}`);
+  emit('insert-scene', props.index, `${encId}~${choiceId}`);
 }
 
 const kindLabel: Record<string, string> = {
@@ -159,7 +164,7 @@ function updateHeader(field: 'id' | 'paramsRaw', value: string) {
   } else {
     b.id = value;
   }
-  emit('update:block', b);
+  emit('update:block', props.index, b);
 }
 
 function updateTextGroup(value: string) {
@@ -167,7 +172,7 @@ function updateTextGroup(value: string) {
   // Drop every existing text-like row, then append the new prose as one block at the end.
   const rows = props.block.rows.filter((r) => !isTextLike(r));
   rows.push(...linesToRows(value));
-  emit('update:block', { ...props.block, rows });
+  emit('update:block', props.index, { ...props.block, rows });
 }
 
 function findStructIndex(rows: Row[], from: number, direction: -1 | 1): number {
@@ -186,13 +191,13 @@ function updateRow(rowIndex: number, row: Row) {
   if (props.block.kind !== 'encounter' && props.block.kind !== 'template') return;
   const rows = [...props.block.rows];
   rows[rowIndex] = row;
-  emit('update:block', { ...props.block, rows });
+  emit('update:block', props.index, { ...props.block, rows });
 }
 
 function removeRow(rowIndex: number) {
   if (props.block.kind !== 'encounter' && props.block.kind !== 'template') return;
   const rows = props.block.rows.filter((_, i) => i !== rowIndex);
-  emit('update:block', { ...props.block, rows });
+  emit('update:block', props.index, { ...props.block, rows });
 }
 
 function moveRow(rowIndex: number, direction: -1 | 1) {
@@ -201,7 +206,7 @@ function moveRow(rowIndex: number, direction: -1 | 1) {
   const target = findStructIndex(rows, rowIndex, direction);
   if (target === -1) return;
   [rows[rowIndex], rows[target]] = [rows[target], rows[rowIndex]];
-  emit('update:block', { ...props.block, rows });
+  emit('update:block', props.index, { ...props.block, rows });
 }
 
 // Drag-reorder of `!choice` rows within an encounter/template body. Other
@@ -227,7 +232,7 @@ function reorderChoices(newChoiceUids: number[]) {
     if (!r) return; // bail on any unknown uid — better than silent corruption
     newRows[choicePositions[k]] = r;
   }
-  emit('update:block', { ...props.block, rows: newRows });
+  emit('update:block', props.index, { ...props.block, rows: newRows });
 }
 
 // Wire SortableJS to the body container. Only `[data-row-kind=choice]`
@@ -264,7 +269,7 @@ onBeforeUnmount(() => {
 
 function addChoice() {
   if (props.block.kind !== 'encounter') return;
-  emit('update:block', {
+  emit('update:block', props.index, {
     ...props.block,
     rows: [...props.block.rows, tagWithUid({ kind: 'choice', name: '' }) as Row],
   });
@@ -272,11 +277,11 @@ function addChoice() {
 
 function updateRawText(v: string) {
   if (props.block.kind !== 'raw') return;
-  emit('update:block', { ...props.block, text: v });
+  emit('update:block', props.index, { ...props.block, text: v });
 }
 
 function onSceneUpdate(newScene: SceneBlock) {
-  emit('update:block', newScene);
+  emit('update:block', props.index, newScene);
 }
 </script>
 
@@ -306,10 +311,10 @@ function onSceneUpdate(newScene: SceneBlock) {
       </template>
       <div class="block-actions">
         <Button v-if="!locked" icon="pi pi-arrow-up" severity="secondary" text rounded size="small"
-          :disabled="!canMoveUp" @click="emit('move-up')" aria-label="Move block up" />
+          :disabled="!canMoveUp" @click="emit('move-up', props.index)" aria-label="Move block up" />
         <Button v-if="!locked" icon="pi pi-arrow-down" severity="secondary" text rounded size="small"
-          :disabled="!canMoveDown" @click="emit('move-down')" aria-label="Move block down" />
-        <Button v-if="!locked" icon="pi pi-trash" severity="danger" text rounded size="small" @click="emit('remove')"
+          :disabled="!canMoveDown" @click="emit('move-down', props.index)" aria-label="Move block down" />
+        <Button v-if="!locked" icon="pi pi-trash" severity="danger" text rounded size="small" @click="emit('remove', props.index)"
           aria-label="Remove block" />
         <span v-if="locked" class="locked-indicator" title="This block is required and cannot be moved or removed">
           <i class="pi pi-lock"></i>

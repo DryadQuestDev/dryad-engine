@@ -7,6 +7,7 @@ import MenuContainer from './global/views/MenuContainer.vue'
 import DocsViewer from './global/views/DocsViewer.vue'
 import RotatePhoneOverlay from './global/views/RotatePhoneOverlay.vue'
 import ConfirmDialog from 'primevue/confirmdialog';
+import DPopoverHost from './game/views/DPopoverHost.vue';
 import gsap from 'gsap';
 
 import { Global } from './global/global';
@@ -226,6 +227,8 @@ onUnmounted(() => {
     <ConfirmDialog />
 
     <RotatePhoneOverlay v-if="showRotateOverlay" />
+
+    <DPopoverHost />
 
   </div>
 </template>

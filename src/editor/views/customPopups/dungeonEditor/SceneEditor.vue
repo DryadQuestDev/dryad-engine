@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
-import RichContentEditor from './RichContentEditor.vue';
+import RichContentEditor from './PlainEditor.vue';
 import type { SceneBlock, SceneColumn, SceneRow } from '../../../../utility/dungeonEditor/ast';
 import { newSceneColumn, newSceneRow } from '../../../../utility/dungeonEditor/ast';
 import { tagWithUid } from './uid';

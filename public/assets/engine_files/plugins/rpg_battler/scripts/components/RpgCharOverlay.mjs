@@ -17,14 +17,8 @@ export const RpgCharOverlay = defineComponent({
     const health = computed(() => props.character?.getResource('health') || 0);
     const maxHealth = computed(() => props.character?.getStat('health') || 1);
 
-    // Scale overlay proportionally with character zoom (0.8 at scale 0.2, 1.6 at scale 1.0)
-    const overlayStyle = computed(() => {
-      const s = props.slotScale || 0.4;
-      const zoom = 0.6 + s;
-      return {
-        transform: `scale(${zoom})`,
-      };
-    });
+    // Scaling is handled by CharacterSlot's overlay-wrapper (Follow-up 13's
+    // `transform: scale(effectiveOverlayScale)`) — no extra scale applied here.
 
     const healthColor = computed(() => {
       const statsData = game.getData('character_stats', true);
@@ -77,14 +71,14 @@ export const RpgCharOverlay = defineComponent({
       return result;
     });
 
-    return { game, name, health, maxHealth, healthColor, battleStatuses, tokens, overlayStyle };
+    return { game, name, health, maxHealth, healthColor, battleStatuses, tokens };
   },
   template: /*html*/ `
-    <div v-if="character" class="rpg-char-overlay" :style="overlayStyle">
+    <div v-if="character" class="rpg-char-overlay">
       <CustomComponentContainer :slot="'rpg-char-overlay-top'" :context="{ character }" />
       <div class="rpg-char-overlay-name">{{ name }}</div>
       <ProgressBar :current="health" :max="maxHealth" :barColor="healthColor"
-        bgColor="rgba(0,0,0,0.5)" width="120px" height="18px" :hideMax="true" />
+        bgColor="rgba(0,0,0,0.5)" width="13cqh" height="2cqh" :hideMax="true" />
       <div v-if="battleStatuses.length || tokens.length" class="rpg-char-tokens">
         <div v-for="s in battleStatuses" :key="'s_' + s.id" class="rpg-token" :class="[s.polarity]">
           <img v-if="s.image" :src="s.image" class="rpg-token-icon" />

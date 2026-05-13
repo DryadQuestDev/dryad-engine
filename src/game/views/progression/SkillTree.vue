@@ -568,7 +568,7 @@ watch(() => props.character, () => {
     </div>
 
     <!-- Floating Popup -->
-    <div v-if="hoveredSkill && popupSkillData" ref="floatingRef" :style="floatingStyles" class="skill-popup"
+    <div v-if="hoveredSkill && popupSkillData" ref="floatingRef" :style="floatingStyles" class="skill-popup dark-scrollbar"
       @mouseenter="handlePopupMouseEnter" @mouseleave="handlePopupMouseLeave">
       <div class="popup-header">
         <img v-if="popupSkillData.image" :src="popupSkillData.image" class="popup-icon" alt="Skill Icon" />
@@ -631,7 +631,7 @@ watch(() => props.character, () => {
 
     <!-- Tree Description Popup -->
     <div v-if="hoveredTree && hoveredTree.description" ref="treeFloatingRef" :style="treeFloatingStyles"
-      class="tree-popup" @mouseenter="handleTreePopupMouseEnter" @mouseleave="handleTreePopupMouseLeave">
+      class="tree-popup dark-scrollbar" @mouseenter="handleTreePopupMouseEnter" @mouseleave="handleTreePopupMouseLeave">
       <div class="tree-popup-header">
         <h3>{{ hoveredTree.name || hoveredTree.id }}</h3>
       </div>
@@ -836,6 +836,9 @@ watch(() => props.character, () => {
   padding: 16px;
   color: #fff;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .popup-header {
@@ -1003,6 +1006,8 @@ watch(() => props.character, () => {
     0 0 0 1px rgba(255, 255, 255, 0.05) inset,
     0 0 20px rgba(100, 150, 255, 0.15);
   pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .tree-popup-header {

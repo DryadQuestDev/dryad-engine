@@ -1,5 +1,5 @@
 import { computed, ComputedRef, reactive, Ref, ref } from "vue";
-import { Status } from "./status";
+import { Status, SpineViewConfig } from "./status";
 import { Skip, Populate, load } from "../../../utility/save-system";
 import { Game } from "../../game";
 import { EntityStatObject } from "../../../schemas/entityStatSchema";
@@ -13,7 +13,7 @@ import { gameLogger } from "../../utils/logger";
 import { Inventory } from "./inventory";
 import { PARTY_INVENTORY_ID } from "../../systems/itemSystem";
 import { mergeTrait } from "../../../functions/mergeTrait";
-import { buildAnimationGroups, type AnimationGroupData } from "../../utils/spineAnimationGroups";
+import { buildAnimationGroups, buildEditorTrackMap, type AnimationGroupData } from "../../utils/spineAnimationGroups";
 import ShortUniqueId from "short-unique-id";
 
 export type learnedSkill = {
@@ -33,6 +33,9 @@ export type ImageLayerMeta = {
   image: string;
   layerId: string;
   mask?: string;
+  artDx: number;
+  artDy: number;
+  artScale: number;
 };
 
 export class Character {
@@ -78,8 +81,8 @@ export class Character {
 
   public actions: any = {};
 
-  // Spine configs keyed by view ('' = default, 'back' = back view, etc.)
-  public spineViews: Map<string, { atlas: string, skeleton: string, animation: string }> = new Map();
+  // Spine configs keyed by view ('' = default, 'back' = back view, etc.). _default normalizes to ''.
+  public spineViews: Map<string, SpineViewConfig> = new Map();
 
   // Available spine animation names per view, populated by CharacterDollSpine on load
   @Skip()
@@ -321,10 +324,14 @@ export class Character {
       const layerMasks = layerData?.masks as Record<string, string> | undefined;
 
       if (layerImages?.[imageKey]) {
+        const offset = this.getSkinLayerArtOffset(layer.id);
         result.push({
           image: layerImages[imageKey],
           layerId: layer.id,
-          mask: layerMasks?.[imageKey]  // Same key as image
+          mask: layerMasks?.[imageKey],  // Same key as image
+          artDx: offset.dx,
+          artDy: offset.dy,
+          artScale: offset.scale,
         });
       }
     }
@@ -341,8 +348,10 @@ export class Character {
     for (const layerId of this.skinLayers) {
       const layerObj = Game.getInstance().characterSystem.skinLayersMap.get(layerId);
       if (layerObj) {
-        // Skip view-tagged layers — they only render when explicitly requested
-        if ((layerObj as any).view) continue;
+        // Skip view-tagged layers — they only render when explicitly requested.
+        // _default and empty are equivalent (both = base layer).
+        const layerView = this.normalizeView((layerObj as any).view as string | undefined);
+        if (layerView) continue;
         skinLayerObjects.push(layerObj);
       }
     }
@@ -508,6 +517,12 @@ export class Character {
     this.reevaluate();
   }
 
+  /** Normalize a view id: _default and undefined/empty all become ''. */
+  private normalizeView(view?: string | null): string {
+    if (!view || view === '_default') return '';
+    return view;
+  }
+
   /** Whether this character has a default spine config (no view). */
   public isSpineCharacter(): boolean {
     return this.spineViews.has('');
@@ -522,7 +537,7 @@ export class Character {
   }
 
   /** Get the default spine config (no view). Returns null if not defined. */
-  public getDefaultSpine(): { atlas: string, skeleton: string, animation: string } | null {
+  public getDefaultSpine(): SpineViewConfig | null {
     return this.spineViews.get('') || null;
   }
 
@@ -530,15 +545,47 @@ export class Character {
    * Get spine config for a specific view (e.g. "back", "side").
    * Returns null if no spine view is defined for that view.
    */
-  public getSpineForView(view: string): { atlas: string, skeleton: string, animation: string } | null {
-    return this.spineViews.get(view) || null;
+  public getSpineForView(view: string): SpineViewConfig | null {
+    return this.spineViews.get(this.normalizeView(view)) || null;
   }
 
   /**
    * Check if a spine view exists for the given view name.
    */
   public isSpineForView(view: string): boolean {
-    return this.spineViews.has(view);
+    return this.spineViews.has(this.normalizeView(view));
+  }
+
+  /**
+   * Get art offset (dx/dy/scale) for the spine entry at the given view.
+   * Returns 0/0/1 if no spine entry exists, or for fields the override chain
+   * never set. No fallback to character traits — spine is tuned exclusively
+   * per spine entry.
+   */
+  public getSpineArtOffset(view?: string): { dx: number, dy: number, scale: number } {
+    const config = this.spineViews.get(this.normalizeView(view));
+    if (!config) return { dx: 0, dy: 0, scale: 1 };
+    return {
+      dx: config.artDx ?? 0,
+      dy: config.artDy ?? 0,
+      scale: config.artScale ?? 1,
+    };
+  }
+
+  /**
+   * Get art offset for a skin layer. Falls back to character art_dx/art_dy/art_scale
+   * traits when the layer doesn't set its own.
+   */
+  public getSkinLayerArtOffset(layerId: string): { dx: number, dy: number, scale: number } {
+    const layer = Game.getInstance().characterSystem.skinLayersMap.get(layerId) as any;
+    const traitDx = this.getTrait('art_dx');
+    const traitDy = this.getTrait('art_dy');
+    const traitScale = this.getTrait('art_scale');
+    return {
+      dx: typeof layer?.art_dx === 'number' ? layer.art_dx : (typeof traitDx === 'number' ? traitDx : 0),
+      dy: typeof layer?.art_dy === 'number' ? layer.art_dy : (typeof traitDy === 'number' ? traitDy : 0),
+      scale: typeof layer?.art_scale === 'number' ? layer.art_scale : (typeof traitScale === 'number' ? traitScale : 1),
+    };
   }
 
   /** Get all available view names for this character (excludes '' default). */
@@ -553,7 +600,7 @@ export class Character {
     for (const layerId of this.skinLayers) {
       const layerObj = game.characterSystem.skinLayersMap.get(layerId);
       if (layerObj) {
-        const layerView = (layerObj as any).view as string | undefined;
+        const layerView = this.normalizeView((layerObj as any).view as string | undefined);
         if (layerView) views.add(layerView);
       }
     }
@@ -569,23 +616,16 @@ export class Character {
   public getImageLayersForView(view?: string): ImageLayerMeta[] {
     const game = Game.getInstance();
     const skinLayerObjects: CharacterSkinLayerObject[] = [];
+    const requestedView = this.normalizeView(view);
 
     for (const layerId of this.skinLayers) {
       const layerObj = game.characterSystem.skinLayersMap.get(layerId);
       if (!layerObj) continue;
 
-      const layerView = (layerObj as any).view as string | undefined;
+      const layerView = this.normalizeView((layerObj as any).view as string | undefined);
 
-      if (!view) {
-        // Default mode: only viewless layers
-        if (!layerView) {
-          skinLayerObjects.push(layerObj);
-        }
-      } else {
-        // View requested: only layers matching that view
-        if (layerView === view) {
-          skinLayerObjects.push(layerObj);
-        }
+      if (layerView === requestedView) {
+        skinLayerObjects.push(layerObj);
       }
     }
 
@@ -615,35 +655,14 @@ export class Character {
 
   /**
    * Get the current track-to-animation mapping based on character attributes.
-   * Track 0 = base animation (no underscore), Tracks 1+ = grouped by attribute key.
+   * Track 0 = first base animation (no underscore). Tracks 1+ = group's
+   * alphabetical track, animation picked by attribute value or autoplay
+   * (first suffix) when the attribute is unset.
    */
   public getSpineTrackAnimations(view: string = ''): Map<number, string> {
-    const result = new Map<number, string>();
-    const groups = this.spineAnimationGroups.get(view);
-    if (!groups) return result;
-
-    // Track 0: base animation (or fall back to config's default_animation)
-    if (groups.baseAnimations.length > 0) {
-      result.set(0, groups.baseAnimations[0]);
-    } else {
-      const config = this.spineViews.get(view);
-      if (config?.animation) result.set(0, config.animation);
-    }
-
-    // Tracks 1+: attribute-driven groups
     const available = this.spineAnimationsAvailable.get(view);
-    for (const groupName in groups.groups) {
-      const group = groups.groups[groupName];
-      const attrValue = this.attributes[groupName];
-      if (attrValue) {
-        const animName = `${groupName}_${attrValue}`;
-        if (available?.has(animName)) {
-          result.set(group.track, animName);
-        }
-      }
-    }
-
-    return result;
+    if (!available || available.size === 0) return new Map();
+    return buildEditorTrackMap([...available], this.attributes);
   }
 
   // ignore types
@@ -654,7 +673,7 @@ export class Character {
     const newSkinLayers = new Set<string>();
     const newAbilities = new Set<string>();
     const newStatIds = new Set<string>();
-    const newSpineViews = new Map<string, { atlas: string, skeleton: string, animation: string }>();
+    const newSpineViews = new Map<string, SpineViewConfig>();
 
     for (const status of this.statuses.values()) {
       // Properties: latest status overwrites (unless is_merge)
@@ -702,10 +721,20 @@ export class Character {
         }
       }
 
-      // Spine: last status wins per view key
+      // Spine: per-view partial-override. Atlas/skeleton come from the latest
+      // status that sets them (full replacement). art_dx/dy/scale fall through
+      // to the previous layer when the override doesn't specify them — so a
+      // costume swap that re-uses the same skeleton inherits the core's
+      // calibrated offsets instead of resetting to 0.
       if (status.spineViews.size > 0) {
         for (const [viewKey, config] of status.spineViews) {
-          newSpineViews.set(viewKey, { ...config });
+          const existing = newSpineViews.get(viewKey);
+          newSpineViews.set(viewKey, {
+            ...config,
+            artDx: config.artDx ?? existing?.artDx,
+            artDy: config.artDy ?? existing?.artDy,
+            artScale: config.artScale ?? existing?.artScale,
+          });
         }
       }
     }
@@ -839,8 +868,10 @@ export class Character {
       if (!skinLayerObject) {
         throw new Error(`Skin Layer ${value} does not exist`);
       }
-      // Skip view-tagged layers — they only render when explicitly requested
-      if ((skinLayerObject as any).view) continue;
+      // Skip view-tagged layers — they only render when explicitly requested.
+      // _default and empty are equivalent (both = base layer).
+      const layerView = this.normalizeView((skinLayerObject as any).view as string | undefined);
+      if (layerView) continue;
       layers.push(skinLayerObject);
     }
     layers = layers.sort((a, b) => (a.z_index || 0) - (b.z_index || 0));

@@ -25,6 +25,12 @@ export const ManifestSchema = {
       accent: { type: 'color', tooltip: 'Accent color used to tint glass surfaces (Continue button, dropdown highlights, etc.).' },
     }
   },
+  spine_character_scale: {
+    type: 'schema',
+    fromFile: 'character_views',
+    fromFileType: 'number',
+    tooltip: 'Per-view spine size multiplier. One numeric field per character_view (including injected _default). 1.0 = native scale; 0.5 = half size. Per-spine art_scale stacks on top of this view-level baseline.'
+  },
   landing_css: { type: 'file[]', fileType: 'css', tooltip: 'CSS stylesheets applied only on the landing page (loaded on game/mod select, unloaded on switch). Separate from `css` so game-time styles do not leak while browsing.' },
   disable_engine_link: { type: 'boolean', defaultValue: false, tooltip: 'Hide the link on the Dryad Engine logo (logo still shown). For SFW releases that do not want to link to the 18+ engine site. Any active manifest setting this to true wins.' },
   scripts: { type: 'file[]', fileType: 'js', tooltip: 'JavaScript files to load and execute for this game/mod. \n Note: It is strongly recommended to use .mjs extension for better IDE support.' },

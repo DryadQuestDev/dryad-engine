@@ -6,9 +6,14 @@ import { SceneAsset } from '../systems/dungeonSystem';
 import gsap from 'gsap';
 import { PowerGlitch } from 'powerglitch';
 import SpineAsset from './SpineAsset.vue';
+import type { SpineStats } from '../utils/spineRenderer';
 
 const props = defineProps<{
   asset: SceneAsset;
+}>();
+
+const emit = defineEmits<{
+  'spine-loaded': [stats: SpineStats | null];
 }>();
 
 const global = Global.getInstance();
@@ -1081,7 +1086,11 @@ watch([idleAnimation, idleDuration, idleIntensity],
         playsinline />
     </div>
   </div>
-  <SpineAsset v-else-if="isSpineAsset" :asset="asset" />
+  <div v-else-if="isSpineAsset" class="spine-aspect-outer">
+    <div class="spine-aspect-wrapper">
+      <SpineAsset :asset="asset" @spine-loaded="emit('spine-loaded', $event)" />
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -1121,6 +1130,34 @@ watch([idleAnimation, idleDuration, idleIntensity],
   transform-origin: center;
   opacity: v-bind("alpha");
   filter: v-bind("cssFilter");
+}
+
+.spine-aspect-outer {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  z-index: v-bind("zindex");
+  pointer-events: none;
+}
+
+.spine-aspect-wrapper {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+@container (min-aspect-ratio: 16/9) {
+  .spine-aspect-wrapper {
+    width: auto;
+    height: 100%;
+    max-width: 100%;
+  }
 }
 
 /* CSS animation for jitter - more stable than GSAP for rapid movements */

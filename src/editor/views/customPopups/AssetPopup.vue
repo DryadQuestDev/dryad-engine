@@ -5,9 +5,11 @@ import type { EditorCustomPopupProps } from '../../editor';
 import type { AssetObject } from '../../../schemas/assetSchema';
 import { AssetSchema } from '../../../schemas/assetSchema';
 import BackgroundAsset from '../../../game/views/BackgroundAsset.vue';
+import type { SpineStats } from '../../../game/utils/spineRenderer';
 import Button from 'primevue/button';
 import Slider from 'primevue/slider';
 import Select from 'primevue/select';
+import MultiSelect from 'primevue/multiselect';
 
 const props = defineProps<EditorCustomPopupProps>();
 const emit = defineEmits<{ 'update:item': [item: any] }>();
@@ -35,6 +37,12 @@ const isIdlePreview = ref(false);
 // Animated position refs
 const animatedX = ref(localItem.value.x ?? 0);
 const animatedY = ref(localItem.value.y ?? 0);
+
+// Spine stats for the loaded asset (only populated for spine assets)
+const spineStats = ref<SpineStats | null>(null);
+function onSpineLoaded(stats: SpineStats | null) {
+  spineStats.value = stats;
+}
 
 // Get asset file path based on type
 const assetPath = computed(() => {
@@ -269,7 +277,7 @@ onBeforeUnmount(() => {
           <div ref="canvasRef" class="preview-canvas" @mousedown="handleMouseDown">
             <!-- Asset Preview using BackgroundAsset component -->
             <div v-if="assetPath || isSpineAsset" class="asset-wrapper">
-              <BackgroundAsset :key="componentKey" :asset="previewAsset" />
+              <BackgroundAsset :key="componentKey" :asset="previewAsset" @spine-loaded="onSpineLoaded" />
             </div>
 
             <!-- No Asset Message -->
@@ -282,23 +290,45 @@ onBeforeUnmount(() => {
 
       <!-- Right: Controls Panel -->
       <div class="controls-section">
+        <!-- Spine Animation & Skins Picker -->
+        <div class="control-group" v-if="isSpineAsset && spineStats">
+          <h4>Spine Playback</h4>
+          <div class="spine-counts">
+            <span><span class="count-label">Bones</span> {{ spineStats.bones }}</span>
+            <span><span class="count-label">Slots</span> {{ spineStats.slots }}</span>
+          </div>
+          <div class="control-item">
+            <label>Animation</label>
+            <Select :modelValue="localItem.animation ?? null"
+              @update:modelValue="(v) => { localItem.animation = v ?? undefined; }" :options="spineStats.animations"
+              placeholder="No animation" showClear class="animation-dropdown" />
+          </div>
+          <div class="control-item">
+            <label>Skins</label>
+            <MultiSelect :modelValue="localItem.skins ?? []"
+              @update:modelValue="(v) => { localItem.skins = (v as string[]).length > 0 ? v as string[] : undefined; }"
+              :options="spineStats.skins" placeholder="Default skin" :showToggleAll="false" display="chip"
+              class="animation-dropdown" />
+          </div>
+        </div>
+
         <!-- Spine Viewport Controls -->
         <div class="control-group" v-if="isSpineAsset">
           <h4>Viewport</h4>
           <div class="control-item">
             <label>Offset X: {{ spineViewport.dx }}</label>
-            <Slider :modelValue="spineViewport.dx"
-              @update:modelValue="(v) => updateViewport('dx', v)" :min="-500" :max="500" :step="1" />
+            <Slider :modelValue="spineViewport.dx" @update:modelValue="(v) => updateViewport('dx', v)" :min="-500"
+              :max="500" :step="1" />
           </div>
           <div class="control-item">
             <label>Offset Y: {{ spineViewport.dy }}</label>
-            <Slider :modelValue="spineViewport.dy"
-              @update:modelValue="(v) => updateViewport('dy', v)" :min="-500" :max="500" :step="1" />
+            <Slider :modelValue="spineViewport.dy" @update:modelValue="(v) => updateViewport('dy', v)" :min="-500"
+              :max="500" :step="1" />
           </div>
           <div class="control-item">
             <label>Zoom: {{ spineViewport.zoom.toFixed(2) }}</label>
-            <Slider :modelValue="spineViewport.zoom"
-              @update:modelValue="(v) => updateViewport('zoom', v)" :min="0.1" :max="5" :step="0.05" />
+            <Slider :modelValue="spineViewport.zoom" @update:modelValue="(v) => updateViewport('zoom', v)" :min="0.1"
+              :max="5" :step="0.01" />
           </div>
         </div>
 
@@ -697,6 +727,18 @@ onBeforeUnmount(() => {
   color: #333;
   padding-bottom: 0.5rem;
   border-bottom: 2px solid #ddd;
+}
+
+.spine-counts {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: #333;
+}
+
+.spine-counts .count-label {
+  color: #666;
+  margin-right: 0.25rem;
 }
 
 .animation-selects {

@@ -178,6 +178,35 @@ export class ItemSystem {
     }
 
     /**
+     * Walks every inventory and returns the item with the matching uid, or null if not found.
+     * Items have globally-unique uids across inventories.
+     */
+    public getItemByUid(uid: string): Item | null {
+        for (const inv of this.inventories.value.values()) {
+            const item = inv.getItemByUid(uid);
+            if (item) return item;
+        }
+        return null;
+    }
+
+    /**
+     * Construct a fresh reactive `Property` instance for a given property id and max value.
+     * Returns null and logs a warning if the property id has no definition in `itemPropertiesMap`.
+     * Used by `createItem()` and by save-migration when backfilling newly-defined template properties on old items.
+     */
+    public createProperty(propertyId: string, maxValue: number): Property | null {
+        const entityStat = this.itemPropertiesMap.get(propertyId);
+        if (!entityStat) {
+            console.warn(`[ItemSystem] Item property definition not found for: ${propertyId}`);
+            return null;
+        }
+        const propertyObj = this.convertToPropertyObject(propertyId, maxValue, entityStat);
+        const prop = new Property();
+        prop.init(propertyObj);
+        return reactive(prop) as Property;
+    }
+
+    /**
      * Convert EntityStatObject with a number value to PropertyObject for Property constructor
      * @param statId - The stat ID
      * @param value - The max value from template
@@ -238,15 +267,8 @@ export class ItemSystem {
         const properties: Record<string, Property> = {};
         if (obj.properties) {
             for (const [propertyId, maxValue] of Object.entries(obj.properties)) {
-                const entityStat = this.itemPropertiesMap.get(propertyId);
-                if (entityStat) {
-                    const propertyObj = this.convertToPropertyObject(propertyId, maxValue as number, entityStat);
-                    const prop = new Property();
-                    prop.init(propertyObj);
-                    properties[propertyId] = reactive(prop) as Property;
-                } else {
-                    console.warn(`[ItemSystem] Item property definition not found for: ${propertyId}`);
-                }
+                const prop = this.createProperty(propertyId, maxValue as number);
+                if (prop) properties[propertyId] = prop;
             }
         }
         item.properties = properties;

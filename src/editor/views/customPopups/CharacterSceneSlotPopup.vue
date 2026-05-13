@@ -8,10 +8,10 @@ import { useCharacterAnimation } from '../../../composables/useCharacterAnimatio
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import type { CharacterSceneSlotObject } from '../../../schemas/characterSceneSlotSchema';
 import { CharacterSceneSlotSchema } from '../../../schemas/characterSceneSlotSchema';
-import { spineRenderer } from '../../../game/utils/spineRenderer';
-import type { Spine } from '@esotericsoftware/spine-pixi-v8';
+import { useEditorSpinePlayer } from '../../../composables/useEditorSpinePlayer';
+import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../../game/utils/characterReference';
 import Button from 'primevue/button';
-import Dropdown from 'primevue/dropdown';
+import Select from 'primevue/select';
 import Slider from 'primevue/slider';
 import Checkbox from 'primevue/checkbox';
 import TriStateSwitch from '../../views/dform/TriStateSwitch.vue';
@@ -71,12 +71,15 @@ const selectedCharacter = computed(() => {
   return characterTemplates.value.find(c => c.id === selectedCharacterId.value);
 });
 
-// Spine character detection (default spine = entry without view)
+// _default and empty/undefined are equivalent for the default-view spine entry.
+function isDefaultViewSpineEntry(s: any): boolean {
+  return !s?.view || s.view === '_default';
+}
+
+// Spine character detection (default spine = entry with empty / `_default` view)
 const isSpineCharacter = computed(() => {
-  const char = selectedCharacter.value;
-  if (!Array.isArray(char?.spine)) return false;
-  const defaultSpine = char.spine.find((s: any) => !s.view);
-  return !!(defaultSpine?.atlas && defaultSpine?.skeleton);
+  const entry = defaultSpineEntry.value as any;
+  return !!(entry?.atlas && entry?.skeleton);
 });
 
 // Computed character images (static only — spine renders via spineRenderer)
@@ -88,11 +91,23 @@ const characterImages = computed(() => {
   return loadCharacterImages(character, skinLayersData.value);
 });
 
-// Character art offset from traits
+// Character art offset.
+//   Spine: per-spine entry's art_dx/dy/scale (no trait fallback under the new model).
+//          The spine renderer applies dx/dy as a CSS transform on its canvas, so the
+//          wrapper transform must NOT translate again — we only return scale here for
+//          potential composition. (dx/dy returned as 0 to avoid double-shifting.)
+//   Static: character art_* traits.
 const characterArtOffset = computed(() => {
-  if (!useCharacterArtOffset.value || !selectedCharacter.value?.traits) {
-    return { dx: 0, dy: 0, scale: 1 };
+  if (!useCharacterArtOffset.value) return { dx: 0, dy: 0, scale: 1 };
+  if (isSpineCharacter.value) {
+    const entry = defaultSpineEntry.value as any;
+    return {
+      dx: 0,
+      dy: 0,
+      scale: typeof entry?.art_scale === 'number' ? entry.art_scale : 1,
+    };
   }
+  if (!selectedCharacter.value?.traits) return { dx: 0, dy: 0, scale: 1 };
   return {
     dx: selectedCharacter.value.traits.art_dx || 0,
     dy: selectedCharacter.value.traits.art_dy || 0,
@@ -105,69 +120,56 @@ const characterArtOffset = computed(() => {
 // ============================================
 
 const spineContainerRef = ref<HTMLDivElement | null>(null);
-let spineInstance: Spine | null = null;
-let spineSlotId = '';
 
-async function initSpinePlayer() {
+const defaultSpineEntry = computed(() => {
   const char = selectedCharacter.value;
-  if (!spineContainerRef.value || !Array.isArray(char?.spine)) return;
-  const defaultSpine = char.spine.find((s: any) => !s.view);
-  if (!defaultSpine?.atlas || !defaultSpine?.skeleton) return;
-  disposeSpinePlayer();
-
-  try {
-    spineSlotId = `scene_slot_${Date.now()}`;
-    const attributes = char.attributes || {};
-
-    const spine = await spineRenderer.register(spineSlotId, spineContainerRef.value, {
-      skeletonUrl: defaultSpine.skeleton,
-      atlasUrl: defaultSpine.atlas,
-      animation: defaultSpine.default_animation || undefined,
-    });
-
-    if (!spine) return;
-    spineInstance = spine;
-
-    // Apply skins from attributes
-    const skeletonData = spine.skeleton.data;
-    const skins = Object.values(attributes).filter(
-      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-    );
-    if (skins.length > 0) {
-      spineRenderer.applySkins(spine, skins);
-    }
-  } catch (error) {
-    console.error('Failed to initialize Spine preview:', error);
-  }
-}
-
-function disposeSpinePlayer() {
-  if (spineSlotId) {
-    spineRenderer.unregister(spineSlotId);
-    spineSlotId = '';
-  }
-  spineInstance = null;
-}
-
-// Init/reinit spine when character selection changes
-watch(selectedCharacter, () => {
-  disposeSpinePlayer();
-  if (isSpineCharacter.value && spineContainerRef.value) {
-    initSpinePlayer();
-  }
+  if (!Array.isArray(char?.spine)) return null;
+  return char.spine.find((s: any) => isDefaultViewSpineEntry(s)) || null;
 });
 
-// Init spine when container appears
+const spineAtlas = computed(() => defaultSpineEntry.value?.atlas || null);
+const spineSkeleton = computed(() => defaultSpineEntry.value?.skeleton || null);
+const spineAttributes = computed(() => selectedCharacter.value?.attributes || {});
+const spineArtScale = computed(() => {
+  const v = (defaultSpineEntry.value as any)?.art_scale;
+  return typeof v === 'number' ? v : 1;
+});
+const spineArtDx = computed(() => {
+  const v = (defaultSpineEntry.value as any)?.art_dx;
+  return typeof v === 'number' ? v : 0;
+});
+const spineArtDy = computed(() => {
+  const v = (defaultSpineEntry.value as any)?.art_dy;
+  return typeof v === 'number' ? v : 0;
+});
+const spineGameScale = computed(() => getSpineCharacterScale('_default', editor.getMergedManifest()));
+const spineSlotScale = computed(() => localItem.value.scale ?? 1);
+
+const { init: initSpinePlayer } = useEditorSpinePlayer({
+  containerRef: spineContainerRef,
+  atlasUrl: spineAtlas,
+  skeletonUrl: spineSkeleton,
+  attributes: spineAttributes,
+  artScale: spineArtScale,
+  artDx: spineArtDx,
+  artDy: spineArtDy,
+  gameScale: spineGameScale,
+  slotScale: spineSlotScale,
+  slotIdPrefix: 'scene_slot',
+});
+
+watch(selectedCharacter, () => {
+  if (isSpineCharacter.value && spineContainerRef.value) initSpinePlayer();
+});
+
 watch(spineContainerRef, (newRef) => {
-  if (newRef && isSpineCharacter.value) {
-    initSpinePlayer();
-  }
+  if (newRef && isSpineCharacter.value) initSpinePlayer();
 });
 
 // Computed styles for character slot (outer container - gets GSAP animated)
 const characterSlotStyle = computed(() => {
-  const x = animationControls.animatedX.value ?? 50;
-  const y = animationControls.animatedY.value ?? 50;
+  const x = animationControls.animatedX.value ?? 0;
+  const y = animationControls.animatedY.value ?? 0;
   const alpha = localItem.value.alpha ?? 1;
   const blur = localItem.value.blur ?? 0;
   const brightness = localItem.value.brightness ?? 1;
@@ -204,22 +206,23 @@ const cssFilter = computed(() => {
   return filters.length > 0 ? filters.join(' ') : 'none';
 });
 
-// Scale wrapper: scale + art offset, always centered
+// Scale wrapper: `translate(t) scale(s)` — translate runs in screen coords AFTER scale,
+// so the visible offset stays slot-relative (cqh) regardless of slot.scale. Matches
+// CharacterSlot.vue's wrapper composition and the spine renderer's canvas CSS, so
+// static and spine characters land at the same place across slot scales.
 const scaleWrapperStyle = computed(() => {
   const scale = localItem.value.scale ?? 1;
   const artOffset = characterArtOffset.value;
-  const finalScale = scale * artOffset.scale;
+  const finalScale = isSpineCharacter.value ? 1 : scale * artOffset.scale;
 
-  const transforms = [];
-  transforms.push(`scale(${finalScale})`);
-
-  // Apply character art offset (for sprite padding compensation)
+  const parts: string[] = [];
   if (artOffset.dx !== 0 || artOffset.dy !== 0) {
-    transforms.push(`translate(${artOffset.dx}cqh, ${artOffset.dy}cqh)`);
+    parts.push(`translate(${artOffset.dx}cqh, ${artOffset.dy}cqh)`);
   }
+  parts.push(`scale(${finalScale})`);
 
   return {
-    transform: transforms.join(' '),
+    transform: parts.join(' '),
     transformOrigin: '50% 50%',
   };
 });
@@ -308,8 +311,8 @@ onMounted(async () => {
     }
 
     // Initialize all properties with core defaults if undefined
-    animationControls.animatedX.value = localItem.value.x ?? coreItem.value?.x ?? 50;
-    animationControls.animatedY.value = localItem.value.y ?? coreItem.value?.y ?? 50;
+    animationControls.animatedX.value = localItem.value.x ?? coreItem.value?.x ?? 0;
+    animationControls.animatedY.value = localItem.value.y ?? coreItem.value?.y ?? 0;
 
     // Initialize transform properties with core defaults
     if (localItem.value.scale === undefined && coreItem.value?.scale !== undefined) {
@@ -566,7 +569,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', handleMouseMove);
   document.removeEventListener('mouseup', handleMouseUp);
   animationControls.cleanup();
-  disposeSpinePlayer();
 });
 </script>
 
@@ -605,7 +607,8 @@ onBeforeUnmount(() => {
                         <div v-if="isSpineCharacter" ref="spineContainerRef" class="spine-preview-container" />
                         <!-- Static image character -->
                         <template v-else>
-                          <img v-for="(image, index) in characterImages" :key="index" :src="image" class="character-image"
+                          <img v-for="(image, index) in characterImages" :key="index" :src="image"
+                            class="character-image"
                             @error="($event.target as HTMLImageElement).style.display = 'none'" />
                         </template>
                       </div>
@@ -628,9 +631,9 @@ onBeforeUnmount(() => {
         <!-- Character Selection -->
         <div class="control-group">
           <h4>Character Selection</h4>
-          <Dropdown v-model="selectedCharacterId" :options="characterOptions" optionLabel="label" optionValue="value"
+          <Select v-model="selectedCharacterId" :options="characterOptions" optionLabel="label" optionValue="value"
             placeholder="Select a character" class="control-dropdown" />
-
+          <!--
           <div class="checkbox-control">
             <Checkbox v-model="useCharacterArtOffset" inputId="artOffset" binary />
             <label for="artOffset" class="checkbox-label">
@@ -641,6 +644,7 @@ onBeforeUnmount(() => {
               </span>
             </label>
           </div>
+          -->
         </div>
 
         <!-- Animation Controls -->
@@ -651,7 +655,7 @@ onBeforeUnmount(() => {
             <div class="animation-group">
               <div class="animation-select-item">
                 <label><strong>Enter:</strong></label>
-                <Dropdown v-model="localItem.enter" :options="enterTransitionOptions"
+                <Select v-model="localItem.enter" :options="enterTransitionOptions"
                   placeholder="Select enter transition" class="animation-dropdown" />
               </div>
               <Button label="Play Enter" @click="handlePlayEnter" size="small"
@@ -685,7 +689,7 @@ onBeforeUnmount(() => {
                       (core: {{ coreItem.enter_ease ?? 'power2' }})
                     </span>
                   </label>
-                  <Dropdown v-model="localItem.enter_ease" :options="easeOptions" placeholder="Select ease"
+                  <Select v-model="localItem.enter_ease" :options="easeOptions" placeholder="Select ease"
                     class="animation-dropdown" />
                 </div>
               </div>
@@ -695,7 +699,7 @@ onBeforeUnmount(() => {
             <div class="animation-group">
               <div class="animation-select-item">
                 <label><strong>Exit:</strong></label>
-                <Dropdown v-model="localItem.exit" :options="exitTransitionOptions" placeholder="Select exit transition"
+                <Select v-model="localItem.exit" :options="exitTransitionOptions" placeholder="Select exit transition"
                   class="animation-dropdown" />
               </div>
               <Button label="Play Exit" @click="handlePlayExit" size="small"
@@ -718,7 +722,7 @@ onBeforeUnmount(() => {
                       (core: {{ coreItem.exit_ease ?? 'power2' }})
                     </span>
                   </label>
-                  <Dropdown v-model="localItem.exit_ease" :options="easeOptions" placeholder="Select ease"
+                  <Select v-model="localItem.exit_ease" :options="easeOptions" placeholder="Select ease"
                     class="animation-dropdown" />
                 </div>
               </div>
@@ -728,7 +732,7 @@ onBeforeUnmount(() => {
             <div class="animation-group">
               <div class="animation-select-item">
                 <label><strong>Idle:</strong></label>
-                <Dropdown v-model="localItem.idle" :options="idleAnimationOptions" placeholder="Select idle animation"
+                <Select v-model="localItem.idle" :options="idleAnimationOptions" placeholder="Select idle animation"
                   class="animation-dropdown" />
               </div>
               <div class="idle-buttons">
@@ -1099,23 +1103,18 @@ onBeforeUnmount(() => {
 
 .character-images {
   position: relative;
-  width: auto;
   height: 100%;
   display: inline-block;
+  aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
 }
 
 .character-image {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  width: 100%;
   height: 100%;
-  width: auto;
   object-fit: contain;
   pointer-events: none;
-}
-
-.character-image:first-child {
-  position: relative;
 }
 
 /* Anchor Point Visualization */
@@ -1335,15 +1334,20 @@ onBeforeUnmount(() => {
 }
 
 @keyframes jitter-animation {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translate3d(0, 0, 0);
   }
+
   25% {
     transform: translate3d(var(--jitter-intensity, 2px), var(--jitter-intensity, 2px), 0);
   }
+
   50% {
     transform: translate3d(calc(var(--jitter-intensity, 2px) * -1), var(--jitter-intensity, 2px), 0);
   }
+
   75% {
     transform: translate3d(var(--jitter-intensity, 2px), calc(var(--jitter-intensity, 2px) * -1), 0);
   }
@@ -1353,7 +1357,5 @@ onBeforeUnmount(() => {
 .spine-preview-container {
   width: 100%;
   height: 100%;
-  aspect-ratio: 5 / 7;
 }
-
 </style>

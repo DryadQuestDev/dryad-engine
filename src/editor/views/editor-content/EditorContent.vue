@@ -154,8 +154,8 @@ onMounted(() => {
     <div class="column editor-right">
       <div v-if="editor.showMap.value" class="map_anchor" v-bind="{ 'data-bookmark-id': 'map' }"></div>
       <EditorMap v-if="editor.showMap.value" />
-      <EditorDocument v-if="editor.secondaryTab === 'config'" />
-      <AnalyserComponent v-if="editor.secondaryTab === 'config'" />
+      <EditorDocument v-if="editor.mainTab === 'dungeons' && editor.secondaryTab === 'config'" />
+      <AnalyserComponent v-if="editor.mainTab === 'dungeons' && editor.secondaryTab === 'config'" />
       <DevPanel v-if="editor.secondaryTab === 'dev_settings'" />
       <!-- Create from Template button (shown in new_game tab) -->
       <div v-if="editor.secondaryTab === 'new_game'" class="template-wizard-trigger">

@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
-import RichContentEditor from './RichContentEditor.vue';
+import RichContentEditor from './PlainEditor.vue';
 import { inputMatchesSearch } from './searchState';
 import type { Block, Row, TemplateBlock } from '../../../../utility/dungeonEditor/ast';
 import { newTemplate } from '../../../../utility/dungeonEditor/ast';

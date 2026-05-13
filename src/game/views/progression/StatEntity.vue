@@ -53,17 +53,20 @@ const onMouseLeave = () => {
 </script>
 
 <template>
-  <div v-if="stat && isBinary && displayValue" class="stat-entity binary-stat" :class="{ 'has-description': hasDescription }"
-    @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+  <div v-if="stat && isBinary && displayValue" class="stat-entity binary-stat"
+    :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
     <span class="binary-check" :style="{ color: binaryColor }">&#10003;</span>
     <span class="stat-name">{{ stat.name || statId }}</span>
   </div>
-  <div v-else-if="stat && (character.hasStat(statId) || maxValue !== 0)" class="stat-entity" :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave">
-    <span class="stat-name">{{ stat.name || statId }}:</span>
-    <ProgressBar v-if="isResource" class="resource-bar-right" :current="currentValue" :max="maxValue"
-      :barColor="stat.color ? `#${stat.color}` : undefined" width="150px" />
-    <span v-else class="stat-value">{{ displayValue }}</span>
+  <div v-else-if="stat && isResource && (character.hasStat(statId) || maxValue !== 0)" class="stat-entity resource-row"
+    :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+    <ProgressBar :current="currentValue" :max="maxValue" :barColor="stat.color ? `#${stat.color}` : undefined"
+      :label="stat.name || statId" width="100%" />
+  </div>
+  <div v-else-if="stat && (character.hasStat(statId) || maxValue !== 0)" class="stat-entity numeric-row"
+    :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+    <span class="stat-name">{{ stat.name || statId }}</span>
+    <span class="stat-value">{{ displayValue }}</span>
   </div>
 </template>
 
@@ -78,14 +81,21 @@ const onMouseLeave = () => {
   transition: all 0.2s;
 }
 
+.stat-entity.resource-row {
+  flex-wrap: nowrap;
+}
+
+.stat-entity.numeric-row {
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+}
+
 .stat-entity:last-child {
   border-bottom: none;
 }
 
 .stat-entity.has-description {
   cursor: help;
-  padding-left: 0.5rem;
-  margin-left: -0.5rem;
   border-radius: 2px;
 }
 
@@ -95,17 +105,21 @@ const onMouseLeave = () => {
 
 .stat-name {
   flex: 1;
-  font-weight: 500;
-  color: #ccc;
+  font-weight: bold;
+  color: #fff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.9),
+    0 0 3px rgba(0, 0, 0, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
 .stat-value {
   font-weight: bold;
-  color: #42b983;
-}
-
-.resource-bar-right {
-  margin-left: auto;
+  color: #fff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.9),
+    0 0 3px rgba(0, 0, 0, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
 .binary-stat {

@@ -1,5 +1,6 @@
 import { Global } from "../global/global";
 import { ManifestObject, ManifestSchema } from "../schemas/manifestSchema";
+import { mergeObjectArraySequentially } from "../functions/mergeById";
 import { Observable, Subject, BehaviorSubject, takeUntil, filter, firstValueFrom, of } from 'rxjs';
 import { Schema, Schemable, SchemaToType, getFileExtensions } from "../utility/schema";
 import { EditorMap } from "./editorMap";
@@ -324,6 +325,72 @@ export class Editor {
   public mods: ManifestObject[] = [];
   public filteredMods: Ref<string[]> = ref([]);
 
+  /**
+   * Bumped whenever a manifest is saved (and `games`/`mods` reloaded).
+   * Vue computeds that read manifest data should touch this ref to track
+   * manifest edits — `games` and `mods` are plain arrays, not reactive on
+   * their own, so reactivity needs an explicit signal.
+   */
+  public manifestRevision: Ref<number> = ref(0);
+
+  /**
+   * Writes a single field on the currently active manifest file (the selected
+   * game's `_core/manifest.json`, or `<selectedMod>/manifest.json` when a mod
+   * is selected). Updates the in-memory copy and bumps `manifestRevision` so
+   * Vue computeds re-evaluate. No-op when the value is unchanged.
+   */
+  public async setActiveManifestField<K extends keyof ManifestObject>(
+    field: K,
+    value: ManifestObject[K],
+  ): Promise<void> {
+    if (!this.selectedGame) return;
+    const modId = this.selectedMod || '_core';
+    const manifestPath = `games_files/${this.selectedGame}/${modId}/manifest.json`;
+    let manifest: ManifestObject;
+    try {
+      manifest = await this.global.readJson(manifestPath) as ManifestObject;
+    } catch (e) {
+      console.error(`[Editor] Failed to read manifest at ${manifestPath}:`, e);
+      return;
+    }
+    if (manifest[field] === value) return;
+    manifest[field] = value;
+    try {
+      await this.global.writeJson(manifestPath, manifest);
+    } catch (e) {
+      console.error(`[Editor] Failed to write manifest at ${manifestPath}:`, e);
+      return;
+    }
+    if (modId === '_core') {
+      const idx = this.games.findIndex(g => g.id === this.selectedGame);
+      if (idx >= 0) (this.games[idx] as any)[field] = value;
+    } else {
+      const idx = this.mods.findIndex(m => m.id === modId);
+      if (idx >= 0) (this.mods[idx] as any)[field] = value;
+    }
+    this.manifestRevision.value++;
+  }
+
+  /**
+   * Returns the merged manifest for the editor's current selection: `_core` of
+   * the selected game, with the currently selected mod's manifest merged on
+   * top (when one is selected and isn't `_core` itself). Mirrors how dev mode
+   * runs a game in the engine with a single mod active. Use this in editor
+   * previews when you need a manifest field a mod might override.
+   */
+  public getMergedManifest(): Partial<ManifestObject> | null {
+    // Touch the revision ref so Vue computeds calling this method re-evaluate
+    // when a manifest is edited via the form.
+    void this.manifestRevision.value;
+    const game = this.games.find(g => g.id === this.selectedGame);
+    if (!game) return null;
+    const modId = this.selectedMod;
+    if (!modId || modId === '_core') return game;
+    const mod = this.mods.find(m => m.id === modId);
+    if (!mod) return game;
+    return mergeObjectArraySequentially<ManifestObject>([game, mod]);
+  }
+
   public dungeonsList: DungeonConfigObject[] = [];
   public filteredDungeons: Ref<string[]> = ref([]);
 
@@ -432,20 +499,24 @@ export class Editor {
 
   public async setGame(game: string, onLoad: boolean = false): Promise<void> {
 
+    // `onLoad` is the initial editor boot — skip the prompt then.
+    if (!onLoad && !(await this.isProceedUnsavedChanges())) return;
+
     this.state.selectedGame = game;
     this.saveState();
     this.clearFileCache();
 
     await this.loadMods();
     if (onLoad) {
-      await this.setMod(this.state.selectedMod || this.mods[0]?.id || '');
+      await this.setMod(this.state.selectedMod || this.mods[0]?.id || '', true);
     } else {
-      await this.setMod(this.mods[0].id);
+      await this.setMod(this.mods[0].id, true);
     }
 
 
   }
-  public async setMod(mod: string): Promise<void> {
+  public async setMod(mod: string, skipUnsavedPrompt: boolean = false): Promise<void> {
+    if (!skipUnsavedPrompt && !(await this.isProceedUnsavedChanges())) return;
 
     this.state.selectedMod = mod;
     // this.saveState();
@@ -491,7 +562,7 @@ export class Editor {
 
     await this.loadDungeons();
     this.setFilteredDungeons('');
-    await this.setDungeon(this.state.selectedDungeon ?? '');
+    await this.setDungeon(this.state.selectedDungeon ?? '', true);
 
     // If we restored a plugin main tab, ensure the UI reflects it properly
     if (this.pluginManager.pluginTabs.value.some(tab => tab.id === this.state.selectedMainTab)) {
@@ -502,7 +573,8 @@ export class Editor {
 
   }
 
-  public async setDungeon(dungeon: string): Promise<void> {
+  public async setDungeon(dungeon: string, skipUnsavedPrompt: boolean = false): Promise<void> {
+    if (!skipUnsavedPrompt && !(await this.isProceedUnsavedChanges())) return;
     // If the selection hasn't actually changed, do nothing
     this.state.selectedDungeon = dungeon;
     this.saveState();
@@ -1024,7 +1096,8 @@ export class Editor {
 
   }
 
-  public async saveActiveObject() {
+  public async saveActiveObject(opts?: { silent?: boolean }) {
+    const silent = opts?.silent ?? false;
     // Check if this is the plugins tab
     const settings = this.getAllTabs().find(tab => tab.id === this.mainTab)?.subtabs.find(subtab => subtab.id === this.secondaryTab);
     if (settings?.isPlugins && this.selectedGame && this.selectedMod) {
@@ -1140,7 +1213,7 @@ export class Editor {
         await this.saveManifest(selected_game, selected_mod);
       }
 
-      this.global.addNotificationId("save_success");
+      if (!silent) this.global.addNotificationId("save_success");
     } catch (error) {
       console.error(`[Editor] Failed to save file: ${this.filePath}`, error);
       this.global.addNotificationId("save_error");
@@ -1197,6 +1270,11 @@ export class Editor {
     //this.loadState();
     //console.log(this.pluginManager.pluginTabs.value);
     // update the plugin tabs end
+
+    // Refresh in-memory manifest copies so consumers (spine previews, etc.)
+    // see the saved values without an editor reload.
+    await this.loadGames();
+    this.manifestRevision.value++;
   }
 
   public async setDungeonConfig(): Promise<void> {

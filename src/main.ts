@@ -20,6 +20,7 @@ import { gameLogger } from './game/utils/logger';
 import { persistImage } from './game/directives/persistImageDirective';
 import { fitText } from './game/directives/fitTextDirective';
 import { script } from './game/directives/scriptDirective';
+import { popover } from './game/directives/popoverDirective';
 import { dragscroll } from 'vue-dragscroll';
 
 const RootComponent = {
@@ -45,6 +46,7 @@ app.directive('tooltip', Tooltip);
 app.directive('persist', persistImage);
 app.directive('fit', fitText);
 app.directive('script', script);
+app.directive('popover', popover);
 app.directive('dragscroll', dragscroll);
 app.config.globalProperties.vTooltip = Tooltip;
 

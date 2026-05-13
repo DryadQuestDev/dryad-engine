@@ -7,8 +7,11 @@ export interface SaveMetaData {
   saveDate: number;
   playTime: number;
   engineVersion: string;
-  gameVersion: string;
-  mods: string[];
+  /**
+   * Map of data-source id → `{ name, version }`. `_core` is the game itself; remaining keys are mod ids.
+   * Name is the display name from the manifest; version is the manifest version.
+   */
+  versions: Record<string, { name: string; version: string }>;
   isDevMode?: boolean; // Flag to indicate if save was created in dev mode
   hidden?: boolean; // Flag to hide save from the list (e.g., replay mode saves)
 }

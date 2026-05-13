@@ -5,8 +5,6 @@ import { Character } from '../core/character/character';
 import { AssetObject } from '../../schemas/assetSchema';
 import { CharacterSceneSlotObject } from '../../schemas/characterSceneSlotSchema';
 import { Status } from '../core/character/status';
-import { computed, reactive } from 'vue';
-
 // Import Vue components for registration
 import ExplorationComponent from '../views/states/exploration/Exploration.vue';
 import BattleComponent from '../views/states/battle/Battle.vue';
@@ -21,6 +19,7 @@ import DebugOptions from '../views/debug_containers/DebugOptions.vue';
 import DebugDungeons from '../views/debug_containers/DebugDungeons.vue';
 import DebugCharacters from '../views/debug_containers/DebugCharacters.vue';
 import DebugChoices from '../views/debug_containers/DebugChoices.vue';
+import DebugActions from '../views/debug_containers/DebugActions.vue';
 import DebugRegistry from '../views/debug_containers/DebugRegistry.vue';
 import DebugInventories from '../views/debug_containers/DebugInventories.vue';
 import DebugStores from '../views/debug_containers/DebugStores.vue';
@@ -397,6 +396,14 @@ export class InitSystem {
             title: 'Debug Choices',
             component: DebugChoices,
             order: 4
+        });
+
+        this.game.coreSystem.addComponent({
+            id: 'debug-actions',
+            slot: 'debug-tabs',
+            title: 'Execute Actions',
+            component: DebugActions,
+            order: 5
         });
 
         this.game.coreSystem.addComponent({
@@ -1440,24 +1447,45 @@ export class InitSystem {
             gameLogger.info(`[delete_character] Deleted character "${data.id}"`);
         });
 
-        this.game.registerAction("add_status", (data: any) => {
-            if (!data.character) {
-                throw new Error("Character id is required when adding a status.");
+        this.game.registerAction("status", {
+            action: (data: string) => {
+                const groups = this.game.logicSystem.parseTargetedSpec(data);
+                for (const group of groups) {
+                    const character = this.game.characterSystem.characters.value.get(group.characterId);
+                    if (!character) {
+                        gameLogger.error(`[status] character not found: "${group.characterId}"`);
+                        continue;
+                    }
+                    const characterName = character.getName?.() || character.getTrait?.('name') || group.characterId;
+                    for (const item of group.items) {
+                        if (item.remove) {
+                            const existing = character.getStatus(item.name);
+                            const statusName = existing?.name || existing?.id || item.name;
+                            character.removeStatus(item.name);
+                            this.game.addFlash(Global.getInstance().getString('status.removed', {
+                                character: characterName,
+                                status: statusName,
+                            }));
+                        } else {
+                            try {
+                                const status = this.game.createStatus(item.name);
+                                character.addStatus(status);
+                                const statusName = status?.name || status?.id || item.name;
+                                const lineId = status?.polarity === 'positive' ? 'status.added.positive'
+                                    : status?.polarity === 'negative' ? 'status.added.negative'
+                                    : 'status.added.neutral';
+                                this.game.addFlash(Global.getInstance().getString(lineId, {
+                                    character: characterName,
+                                    status: statusName,
+                                }));
+                            } catch (e) {
+                                gameLogger.error(`[status] cannot apply "${item.name}" to "${group.characterId}": ${e}`);
+                            }
+                        }
+                    }
+                }
+                gameLogger.info(`[status] ${data}`);
             }
-
-            let character = this.game.characterSystem.characters.value.get(data.character);
-            if (!character) {
-                throw new Error(`Character with id "${data.id}" not found.`);
-            }
-            let statusObject = this.game.characterSystem.statusesMap.get(data.statusId);
-            if (!statusObject) {
-                throw new Error(`Status with id "${data.statusId}" not found.`);
-            }
-            let status = reactive(new Status());
-            status.id = data.statusId;
-            status.setValues(statusObject);
-            character.addStatus(status);
-            gameLogger.info(`[add_status] Added status "${data.statusId}" to character "${data.character}"`);
         });
 
         this.game.registerAction("char", {
@@ -1468,31 +1496,37 @@ export class InitSystem {
             }
         });
 
-        this.game.registerAction("add_skin_layer", {
+        this.game.registerAction("skin_layer", {
             action: (data: string) => {
-                this.game.characterSystem.processAddSkinLayerAction(data);
-                gameLogger.info(`[add_skin_layer] Added skin layer: ${data}`);
+                const groups = this.game.logicSystem.parseTargetedSpec(data);
+                const adds: string[] = [];
+                const removes: string[] = [];
+                for (const group of groups) {
+                    for (const item of group.items) {
+                        const spec = `${group.characterId}.${item.name}`;
+                        (item.remove ? removes : adds).push(spec);
+                    }
+                }
+                if (adds.length) this.game.characterSystem.processAddSkinLayerAction(adds.join(', '));
+                if (removes.length) this.game.characterSystem.processRemoveSkinLayerAction(removes.join(', '));
+                gameLogger.info(`[skin_layer] ${data}`);
             }
         });
 
-        this.game.registerAction("remove_skin_layer", {
+        this.game.registerAction("item_slot", {
             action: (data: string) => {
-                this.game.characterSystem.processRemoveSkinLayerAction(data);
-                gameLogger.info(`[remove_skin_layer] Removed skin layer: ${data}`);
-            }
-        });
-
-        this.game.registerAction("add_item_slot", {
-            action: (data: string) => {
-                this.game.characterSystem.processAddItemSlotAction(data);
-                gameLogger.info(`[add_item_slot] Added item slot: ${data}`);
-            }
-        });
-
-        this.game.registerAction("remove_item_slot", {
-            action: (data: string) => {
-                this.game.characterSystem.processRemoveItemSlotAction(data);
-                gameLogger.info(`[remove_item_slot] Removed item slot: ${data}`);
+                const groups = this.game.logicSystem.parseTargetedSpec(data);
+                const adds: string[] = [];
+                const removes: string[] = [];
+                for (const group of groups) {
+                    for (const item of group.items) {
+                        const spec = `${group.characterId}.${item.name}`;
+                        (item.remove ? removes : adds).push(spec);
+                    }
+                }
+                if (adds.length) this.game.characterSystem.processAddItemSlotAction(adds.join(', '));
+                if (removes.length) this.game.characterSystem.processRemoveItemSlotAction(removes.join(', '));
+                gameLogger.info(`[item_slot] ${data}`);
             }
         });
 

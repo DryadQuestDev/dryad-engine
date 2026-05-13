@@ -16,6 +16,14 @@
 import { Application, Assets } from 'pixi.js';
 import { Spine } from '@esotericsoftware/spine-pixi-v8';
 import { Global } from '../../global/global';
+import { SPINE_REFERENCE_HEIGHT } from './characterReference';
+
+/** Minimum effective render scale — at lower slot.scale the backing buffer
+ * is over-sampled relative to display size so spine edges don't alias when
+ * the atlas is heavily downsampled by the GPU at small render scales.
+ * The browser handles the final canvas → display scale with high-quality
+ * smoothing, giving cleaner outlines at the cost of slightly more GPU work. */
+const MIN_RENDER_SCALE = 0.6;
 
 interface SpineTransition {
   snapshot: HTMLCanvasElement;
@@ -31,6 +39,11 @@ interface SpineSlot {
   spine: Spine;
   mirror: boolean;
   viewport?: ViewportAdjust;
+  artScale: number;
+  artDx: number;
+  artDy: number;
+  gameScale: number;
+  slotScale: number;
   width: number;
   height: number;
   transition?: SpineTransition;
@@ -50,6 +63,26 @@ interface RegisterOptions {
   loop?: boolean;
   mirror?: boolean;
   viewport?: ViewportAdjust;
+  /** Per-character/per-asset scale multiplier applied inside the renderer's baseScale. Default 1. */
+  artScale?: number;
+  /** Per-spine x offset in % of slot height (cqh equivalent). Default 0. */
+  artDx?: number;
+  /** Per-spine y offset in % of slot height (cqh equivalent). Default 0. */
+  artDy?: number;
+  /** Per-game spine size multiplier (from manifest's spine_character_scale). Default 1. */
+  gameScale?: number;
+  /** Per-slot scale multiplier (replaces CSS transform scale to keep spine pixels sharp). Default 1. */
+  slotScale?: number;
+}
+
+export interface SpineStats {
+  animations: string[];
+  skins: string[];
+  bones: number;
+  slots: number;
+  ikConstraints: number;
+  transformConstraints: number;
+  pathConstraints: number;
 }
 
 class SpineRendererService {
@@ -147,11 +180,7 @@ class SpineRendererService {
 
       // Log available animations and skins in dev mode or editor
       if (Global.getInstance().engineState.value === 'editor' || localStorage.getItem('devMode') === 'true') {
-        console.log('🦴 Spine loaded:', {
-          slot: id,
-          animations: spine.skeleton.data.animations.map((a: any) => a.name),
-          skins: spine.skeleton.data.skins.map((s: any) => s.name),
-        });
+        console.log('🦴 Spine loaded:', { slot: id, ...this.getStats(spine) });
       }
 
       // Apply skins
@@ -167,18 +196,45 @@ class SpineRendererService {
         }
       }
 
-      // Create a 2D canvas inside the placeholder element
+      // Create a 2D canvas inside the placeholder element. Sized by slotScale and
+      // absolutely centered so it can overflow `element` symmetrically — lets the
+      // spine render bigger than the slot bounds without getting clipped.
+      // Per-spine art_dx/art_dy are applied as an EXTRA translate on the canvas itself
+      // (not on spineX/spineY): the canvas moves within `element` so accessories that
+      // sit on the offset side stay inside the canvas's render area instead of being
+      // clipped at the edge.
       const canvas2d = document.createElement('canvas');
-      canvas2d.style.cssText = 'width:100%;height:100%;display:block;';
+      const slotScale = options.slotScale ?? 1;
+      const pct = slotScale * 100;
+      const initArtDx = options.artDx ?? 0;
+      const initArtDy = options.artDy ?? 0;
+      const initMirror = options.mirror ?? false;
+      // Multiply by slotScale: art_dx is "% of body height", not "% of slot CSS height".
+      // See applyCanvasArtTransform for rationale.
+      const initDx = (initMirror ? -initArtDx : initArtDx) * slotScale;
+      const initDy = initArtDy * slotScale;
+      canvas2d.style.cssText =
+        `position:absolute;top:50%;left:50%;` +
+        `transform:translate(-50%,-50%) translate(${initDx}cqh, ${initDy}cqh);` +
+        `width:${pct}%;height:${pct}%;display:block;`;
+      // ensure host can anchor an absolute child
+      if (getComputedStyle(element).position === 'static') {
+        element.style.position = 'relative';
+      }
       element.appendChild(canvas2d);
 
       const ctx2d = canvas2d.getContext('2d')!;
 
-      // Initial size from element
+      // Initial size from element × max(slotScale, MIN_RENDER_SCALE).
+      // Backing buffer is decoupled from CSS display size — display stays at
+      // slotScale × element via canvas's `width: pct%`, but the buffer is at
+      // least MIN_RENDER_SCALE-relative so we render at a high enough resolution
+      // for spine edges to look clean after the browser's final downsample.
       const rect = element.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(1, Math.round(rect.width * dpr));
-      const h = Math.max(1, Math.round(rect.height * dpr));
+      const renderScale = Math.max(slotScale, MIN_RENDER_SCALE);
+      const w = Math.max(1, Math.round(rect.width * renderScale * dpr));
+      const h = Math.max(1, Math.round(rect.height * renderScale * dpr));
       canvas2d.width = w;
       canvas2d.height = h;
 
@@ -196,6 +252,11 @@ class SpineRendererService {
         ctx2d,
         spine,
         mirror: options.mirror ?? false,
+        artScale: options.artScale ?? 1,
+        artDx: options.artDx ?? 0,
+        artDy: options.artDy ?? 0,
+        gameScale: options.gameScale ?? 1,
+        slotScale: options.slotScale ?? 1,
         viewport: options.viewport,
         width: w,
         height: h,
@@ -228,6 +289,19 @@ class SpineRendererService {
     return this.slots.get(id)?.spine ?? null;
   }
 
+  getStats(spine: Spine): SpineStats {
+    const data: any = spine.skeleton.data;
+    return {
+      animations: (data.animations ?? []).map((a: any) => a.name),
+      skins: (data.skins ?? []).map((s: any) => s.name),
+      bones: data.bones?.length ?? 0,
+      slots: data.slots?.length ?? 0,
+      ikConstraints: data.ikConstraints?.length ?? 0,
+      transformConstraints: data.transformConstraints?.length ?? 0,
+      pathConstraints: data.pathConstraints?.length ?? 0,
+    };
+  }
+
   applySkins(spine: Spine, skins: string[]): void {
     const skeletonData = spine.skeleton.data;
     const validSkins = skins.filter(name => skeletonData.skins.find((s: any) => s.name === name));
@@ -250,9 +324,54 @@ class SpineRendererService {
     spine.skeleton.setSlotsToSetupPose();
   }
 
+  /** Rebuilds the canvas's CSS transform to apply art_dx/art_dy (with mirror flip on dx).
+   * Multiplies by slotScale so art_dx is "% of body's visible height" rather than "% of slot's
+   * full CSS height" — without the multiplier, a small canvas at slot.scale=0.2 still gets the
+   * full slot-height-relative shift, which translates to a 5x oversized relative shift. */
+  private applyCanvasArtTransform(slot: SpineSlot): void {
+    const dxRaw = slot.mirror ? -slot.artDx : slot.artDx;
+    const dx = dxRaw * slot.slotScale;
+    const dy = slot.artDy * slot.slotScale;
+    slot.canvas2d.style.transform =
+      `translate(-50%, -50%) translate(${dx}cqh, ${dy}cqh)`;
+  }
+
   updateMirror(id: string, mirror: boolean): void {
     const slot = this.slots.get(id);
-    if (slot) slot.mirror = mirror;
+    if (!slot) return;
+    slot.mirror = mirror;
+    // dx flips with mirror, so re-apply the canvas transform.
+    this.applyCanvasArtTransform(slot);
+  }
+
+  updateArtScale(id: string, artScale: number): void {
+    const slot = this.slots.get(id);
+    if (slot) slot.artScale = artScale;
+  }
+
+  updateArtOffset(id: string, artDx: number, artDy: number): void {
+    const slot = this.slots.get(id);
+    if (!slot) return;
+    slot.artDx = artDx;
+    slot.artDy = artDy;
+    this.applyCanvasArtTransform(slot);
+  }
+
+  updateGameScale(id: string, gameScale: number): void {
+    const slot = this.slots.get(id);
+    if (slot) slot.gameScale = gameScale;
+  }
+
+  updateSlotScale(id: string, slotScale: number): void {
+    const slot = this.slots.get(id);
+    if (!slot) return;
+    slot.slotScale = slotScale;
+    // Resize canvas CSS to match new scale; renderLoop picks up backing pixels next frame.
+    const pct = slotScale * 100;
+    slot.canvas2d.style.width = `${pct}%`;
+    slot.canvas2d.style.height = `${pct}%`;
+    // applyCanvasArtTransform multiplies art_dx/dy by slotScale, so re-emit it.
+    this.applyCanvasArtTransform(slot);
   }
 
   /** Capture current frame for a crossfade transition. Call before changing animations. */
@@ -285,9 +404,12 @@ class SpineRendererService {
     const dt = this.app!.ticker.deltaMS / 1000;
 
     for (const slot of this.slots.values()) {
-      // Use offsetWidth/Height (layout size, ignores CSS transforms — no false resizes during animations)
-      const ow = slot.element.offsetWidth;
-      const oh = slot.element.offsetHeight;
+      // Backing buffer = element × max(slotScale, MIN_RENDER_SCALE) × dpr.
+      // CSS display still scales by slotScale; the buffer is over-sampled at
+      // low scales so atlas downsampling doesn't produce ragged edges.
+      const renderScale = Math.max(slot.slotScale, MIN_RENDER_SCALE);
+      const ow = slot.element.offsetWidth * renderScale;
+      const oh = slot.element.offsetHeight * renderScale;
       if (ow <= 0 || oh <= 0) continue;
 
       const w = Math.round(ow * dpr);
@@ -310,16 +432,22 @@ class SpineRendererService {
 
       slot.spine.update(dt);
 
-      // Position and scale (with small inset padding to avoid edge clipping)
-      const pad = 20;
+      // Render at a consistent scale relative to a fixed reference height so
+      // every character's body is sized the same regardless of accessories
+      // extending its AABB. spine_character_scale is the per-game multiplier;
+      // art_scale (slot.artScale) is the per-character/per-asset fine-tune.
       const data = slot.spine.skeleton.data;
       const skelW = data.width || w;
       const skelH = data.height || h;
-      const baseScale = Math.min((w - pad * 2) / skelW, (h - pad * 2) / skelH);
+      const baseScale = (h / SPINE_REFERENCE_HEIGHT) * slot.gameScale * slot.artScale;
       const zoom = slot.viewport?.zoom ?? 1;
       const scale = baseScale * zoom;
       const dx = (slot.viewport?.dx ?? 0) * baseScale;
       const dy = (slot.viewport?.dy ?? 0) * baseScale;
+      // Spine position is always at canvas center. Per-spine art_dx/art_dy live on the
+      // canvas's CSS transform (set in register / updateArtOffset / updateMirror) so the
+      // canvas itself moves within `element` — accessories on the offset side are not
+      // clipped at the canvas edge.
       const spineX = (w / 2) - (data.x + skelW / 2) * scale + dx;
       const spineY = (h / 2) + (data.y + skelH / 2) * scale + dy;
 

@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue';
 import type { Ref } from 'vue';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
+import { useFloating, offset, flip, shift, size, autoUpdate } from '@floating-ui/vue';
 import type { Placement } from '@floating-ui/vue';
 import { getStack as getLoreStack, loreAnchorIsInside } from '../lore/lorePopupStore';
 
@@ -35,6 +35,14 @@ export function useHoverPopup<T>(options: {
             offset(options.offset ?? 10),
             flip({ padding: 8 }),
             shift({ padding: 8 }),
+            size({
+                padding: 8,
+                apply({ availableHeight, elements }) {
+                    Object.assign(elements.floating.style, {
+                        maxHeight: `${Math.max(120, availableHeight)}px`,
+                    });
+                },
+            }),
         ],
         whileElementsMounted: autoUpdate,
     });

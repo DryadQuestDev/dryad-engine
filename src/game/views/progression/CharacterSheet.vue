@@ -56,6 +56,10 @@ const hasAbilities = computed(() => props.character.abilities.size > 0);
   padding-right: 4px;
 }
 
+.character-sheet-container > * {
+  flex-shrink: 0;
+}
+
 .stats-wrapper {
   display: flex;
   flex-direction: column;

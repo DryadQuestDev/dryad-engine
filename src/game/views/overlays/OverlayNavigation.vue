@@ -409,7 +409,7 @@ const isTextDungeon = computed(() => {
               <!-- flash messages-->
               <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
                 ref="flashContentElement" class="flash-content"
-                v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>'), resolver: false }"></div>
+                v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>') }"></div>
 
               <!-- Scene choices for text dungeons -->
               <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
@@ -456,8 +456,7 @@ const isTextDungeon = computed(() => {
           </div>
           <!-- flash messages-->
           <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0" ref="flashContentElement"
-            class="flash-content"
-            v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>'), resolver: false }">
+            class="flash-content" v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>') }">
           </div>
 
           <ChoiceList v-if="!game.dungeonSystem.toolbarMinimized.value && game.coreSystem.isTextUIContent.value" />
@@ -617,6 +616,7 @@ const isTextDungeon = computed(() => {
   border-radius: 10px;
   padding: 10px;
   min-height: 20dvh;
+  margin-bottom: 5dvh;
 }
 
 .clickable {
@@ -731,7 +731,7 @@ const isTextDungeon = computed(() => {
 }
 
 .show-dialogue-button {
-  background: none;
+  background: #80808087;
   border: 1px solid #eee;
   border-radius: 4px;
   color: white;
@@ -772,7 +772,7 @@ const isTextDungeon = computed(() => {
   flex: 0 0 500px;
   width: 500px;
   padding: 10px;
-  padding-bottom: 1em;
+  padding-bottom: 2em;
   box-sizing: border-box;
   overflow-y: auto;
   background: #2d2d2d4f;

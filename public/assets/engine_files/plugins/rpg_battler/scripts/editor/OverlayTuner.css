@@ -83,6 +83,14 @@
     transform: translateX(-50%);
     width: 50cqh;
     height: 75%;
+    /* Center the doll horizontally inside the column so the body lands at
+       preview-x-50% by default. Without this, the inline-block .tuner-art
+       (75pcq wide, wider than the 50pcq column) hugs the wrapper's left edge,
+       pushing the body center ~12.5pcq right of preview-50% — and making the
+       overlay (anchored at 50%) appear shifted left of the body. */
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
 }
 
 .tuner-art {
@@ -109,7 +117,10 @@
     height: 50px;
     border: 2px dashed rgba(0, 200, 255, 0.7);
     background: rgba(0, 200, 255, 0.1);
-    transform: translate(-50%, -50%);
+    /* transform is inline (translateX(-50%) scale(effectiveOverlayScale)) so
+       the rect mirrors the in-game zoomed-out size. transform-origin pins the
+       scale to the rect's top-center — matches CharacterSlot's overlay-wrapper. */
+    transform-origin: 50% 0;
     cursor: grab;
     border-radius: 4px;
     display: flex;

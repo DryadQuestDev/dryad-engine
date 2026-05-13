@@ -377,6 +377,64 @@ interface Game {
   getId(): string;
 
   /**
+   * Returns the current game's manifest.version, or '0' if unset.
+   */
+  getGameVersion(): string;
+
+  /**
+   * Returns the current `(game + mods)` versions map — keyed by source id.
+   * `_core` is the game itself; remaining keys are mod ids. Each entry is `{ name, version }`.
+   * Mirrors the shape stamped into saves at `saveMeta.versions`.
+   * @example
+   * game.getVersions();
+   * // {
+   * //   _core: { name: 'My Game', version: '0.3.0' },
+   * //   foo_mod: { name: 'Foo', version: '1.0.0' }
+   * // }
+   */
+  getVersions(): Record<string, { name: string; version: string }>;
+
+  /**
+   * Returns the versions map stamped on the save that was just loaded, or `null` for a new game.
+   * Each entry is `{ name, version }`.
+   * @example
+   * game.on('game_initiated', () => {
+   *   const saved = game.getLoadedSaveVersions();
+   *   const current = game.getVersions();
+   *   // compare and react
+   * });
+   */
+  getLoadedSaveVersions(): Record<string, { name: string; version: string }> | null;
+
+  /**
+   * Rebuild every character's state from the current definitions (template + statuses + traits + attributes).
+   * No-op if the loaded save's `(gameVersion, mods)` signature matches the current one, or on a new game.
+   *
+   * Use this from a `game_initiated` listener to migrate old saves when the data model changes:
+   * - Resets template-driven stats / traits / attributes (except those in the ignore lists).
+   * - Purges keys that no longer exist in current definitions (e.g. a stat that was removed).
+   * - Re-applies every held status (preserving stack counts) so status stat-grants pick up new definitions.
+   * - Re-clamps every resource value to its possibly-new max.
+   *
+   * Player-set state outside statuses (direct `setStat` etc.) is wiped — route persistent boosts through statuses,
+   * or list fields in the ignore options to preserve them.
+   *
+   * Also rebuilds every item in every inventory: resets template-driven traits / attributes,
+   * purges keys no longer in `item_traits` / `item_attributes`, refreshes the equip-status object,
+   * preserves current property values, backfills new template properties, and purges stale properties.
+   * @example
+   * game.on('game_initiated', () => {
+   *   game.runDefaultSaveMigration({
+   *     ignoreTraits: ['info', 'bio'],
+   *     ignoreAttributes: ['life_stage'],
+   *     ignoreItemTraits: [],
+   *     ignoreItemAttributes: [],
+   *   });
+   * });
+   */
+  runDefaultSaveMigration(options?: { ignoreStats?: string[]; ignoreTraits?: string[]; ignoreAttributes?: string[]; ignoreItemTraits?: string[]; ignoreItemAttributes?: string[]; }): void;
+
+  /**
    * Go to next scene or exit scene if there's no next scene.
    */
   nextScene(): void;
@@ -896,6 +954,54 @@ interface Game {
    * game.deleteCharacter(npc);
    */
   deleteCharacter(character: Character | string): void;
+
+  /**
+   * Parse a generic `id<op>value` specification into a typed list of ops.
+   * Pure string parsing — no characters, stats, or game data are touched.
+   * Plugins use this to avoid hand-rolling regex when accepting the common
+   * `"id>5, id2=3"` shorthand syntax. The same primitive backs the `char`
+   * content action.
+   *
+   * String form: comma-separated `"<id><op><value>"` where op is `=`, `>`, or `<`.
+   * Whitespace around the operator is allowed. The id may contain dots
+   * (e.g. `alice.stat.brawn`). Returned `value` is the trimmed string after
+   * the operator — consumers coerce as needed.
+   *
+   * Object form: `{ id: any }`. For numeric values, sign infers the op
+   * (positive `>`, negative `<`, zero `=`) and `value` is the absolute
+   * magnitude. For non-numeric values, op is `=` and the raw value passes
+   * through.
+   *
+   * Invalid specs are logged and skipped.
+   *
+   * @example
+   * game.parseOpsSpec("alice>5, bob = 3");
+   * // [{ id: 'alice', op: '>', value: '5' }, { id: 'bob', op: '=', value: '3' }]
+   * game.parseOpsSpec({ alice: 5, bob: -2 });
+   * // [{ id: 'alice', op: '>', value: 5 }, { id: 'bob', op: '<', value: 2 }]
+   */
+  parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '>' | '<'; value: any }>;
+
+  /**
+   * Parse a `targetId->item & item & ..., targetId->!item, ...` specification
+   * into a typed list of per-target add/remove operations. Pure string parsing
+   * — no characters, statuses, or game data are touched. Backs the `status`,
+   * `skin_layer`, and `item_slot` content actions; available to plugins
+   * authoring similar `caster->X & Y, caster->!Z` sugar.
+   *
+   * Format: comma-separates per-target specs; each spec is `id->item & item`,
+   * each item optionally prefixed with `!` to mark it for removal. Specs with
+   * no `->` are logged and skipped. An empty item list (e.g. `"alice->"`) is
+   * skipped silently.
+   *
+   * @example
+   * game.parseTargetedSpec("alice->buff1 & buff2, bob->!debuff");
+   * // [
+   * //   { characterId: 'alice', items: [{ name: 'buff1', remove: false }, { name: 'buff2', remove: false }] },
+   * //   { characterId: 'bob', items: [{ name: 'debuff', remove: true }] },
+   * // ]
+   */
+  parseTargetedSpec(data: string): Array<{ characterId: string; items: Array<{ name: string; remove: boolean }> }>;
 
   // ============================================
   // Item System
@@ -1935,26 +2041,38 @@ interface Character {
   /** Whether this character has a default spine config (no view). */
   isSpineCharacter(): boolean;
 
-  /** Check if a spine config exists for the given view name (e.g. "back", "side"). */
+  /** Check if a spine config exists for the given view name. _default and '' are equivalent. */
   isSpineForView(view: string): boolean;
 
   /** Get the default spine config (no view). Returns null if not defined. */
-  getDefaultSpine(): { atlas: string, skeleton: string, animation: string } | null;
+  getDefaultSpine(): { atlas: string, skeleton: string, artDx: number, artDy: number, artScale: number } | null;
 
   /**
    * Get spine config for a specific view. Returns null if no config exists for that view.
-   * @param view - View name (e.g. "back", "side")
+   * Each spine entry carries its own art_dx/art_dy/art_scale tuning.
+   * @param view - View name (e.g. "back", "side"). _default and '' are equivalent.
    * @returns Spine config or null
    */
-  getSpineForView(view: string): { atlas: string, skeleton: string, animation: string } | null;
-
-  /** Spine configs keyed by view ('' = default, 'back' = back view, etc.). Accumulated from statuses, last wins per view. */
-  spineViews: Map<string, { atlas: string, skeleton: string, animation: string }>;
+  getSpineForView(view: string): { atlas: string, skeleton: string, artDx: number, artDy: number, artScale: number } | null;
 
   /**
-   * Get image layers filtered by requested views.
-   * No view: returns viewless layers only (base rendering).
-   * With view: returns only layers matching that view.
+   * Get the per-spine art offset for the given view. Reads only from the spine entry's
+   * own art_dx/art_dy/art_scale fields — no fallback to character traits.
+   * @param view - View name. _default and '' are equivalent.
+   */
+  getSpineArtOffset(view?: string): { dx: number, dy: number, scale: number };
+
+  /**
+   * Get the resolved art offset for a skin layer. Falls back to the character's
+   * art_dx/art_dy/art_scale traits when the layer doesn't set its own.
+   */
+  getSkinLayerArtOffset(layerId: string): { dx: number, dy: number, scale: number };
+
+  /** Spine configs keyed by view ('' = default, 'back' = back view, etc.). Accumulated from statuses, last wins per view. */
+  spineViews: Map<string, { atlas: string, skeleton: string, artDx: number, artDy: number, artScale: number }>;
+
+  /**
+   * Get image layers filtered by requested view. _default and '' are equivalent.
    * @param view - Optional view name to filter by
    */
   getImageLayersForView(view?: string): any[];
@@ -3501,6 +3619,22 @@ declare global {
         CustomComponentContainer: any;
         /** Generic animated progress bar for percentage-based values. Props: current (number), max (number), barColor?, bgColor?, width?, height?, hideMax? */
         ProgressBar: any;
+        /**
+         * Floating popover (Floating UI based). Usually consumed via the `v-popover` directive,
+         * but exposed for direct use too.
+         *
+         * Props: anchor (HTMLElement|null — reference element), html? (string|null — rendered via v-script),
+         * component? (Component|null — Vue component to render inside), componentProps? (object),
+         * width? (number|string, default '300px'), placement? (Placement, default 'top'), open (boolean).
+         * Emits: enter, leave (so external code can manage the hover-handoff debounce).
+         *
+         * Directive form (preferred):
+         *   v-popover="'<b>html</b> [[lore_id]]'"               // string → v-script
+         *   v-popover="{ html, width?, placement? }"
+         *   v-popover="{ component, props?, width?, placement? }"
+         *   Modifier sugar for placement: v-popover.top|.bottom|.left|.right
+         */
+        DPopover: any;
 
         // === Characters ===
         /** Character face/portrait component. Props: character (Character), showName? (boolean), nameStyle? ("badge"|"overlay", default "badge"), size? (number, default 100), borderRadius? (string, default "50%"), borderColor? (string, default "rgb(174,174,174)"), overlaySlot? (string — extra component slot rendered inside the face shape) */

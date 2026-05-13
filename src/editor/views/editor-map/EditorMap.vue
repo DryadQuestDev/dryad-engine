@@ -790,7 +790,7 @@ watch([() => editor.map?.isLoaded.value, mapContainer], ([isLoaded, containerEl]
     scrollListener = null;
     console.log("[MapComponent] Scroll listener removed as map is no longer loaded.");
   }
-}, { immediate: false }); // immediate: false, we want to wait for isLoaded to become true
+}, { immediate: false }); /// immediate: false, we want to wait for isLoaded to become true
 
 
 onUnmounted(() => {

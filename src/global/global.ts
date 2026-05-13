@@ -45,6 +45,7 @@ import CharacterFace from '../game/views/CharacterFace.vue';
 import CharacterDoll from '../game/views/progression/CharacterDoll.vue';
 import BackgroundAsset from '../game/views/BackgroundAsset.vue';
 import CustomComponentContainer from '../game/views/CustomComponentContainer.vue';
+import DPopover from '../game/views/DPopover.vue';
 
 // Progression components
 import CharacterSheet from '../game/views/progression/CharacterSheet.vue';
@@ -370,6 +371,12 @@ export class Global {
       // Fallback if saveMeta or playTime is missing (e.g., older save or error)
       this.game.coreSystem.resetPlayTimeOnLoad(0);
       gameLogger.warn("Could not find valid playTime in saveMeta - resetting to 0");
+    }
+
+    // Stash the loaded save's versions map so game scripts can detect a version/mod change
+    // and run a migration pass via game.runDefaultSaveMigration().
+    if (data.saveMeta?.versions && typeof data.saveMeta.versions === 'object') {
+      this.game.coreSystem.loadedSaveVersions = { ...data.saveMeta.versions };
     }
 
     await this.initGameAfter(mergedManifest);
@@ -836,6 +843,7 @@ export class Global {
         CharacterDoll,
         BackgroundAsset,
         CustomComponentContainer,
+        DPopover,
         // Progression components
         CharacterSheet,
         CharacterStats,

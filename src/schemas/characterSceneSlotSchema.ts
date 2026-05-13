@@ -3,8 +3,8 @@ import { Schema, SchemaToType } from '../utility/schema';
 export const CharacterSceneSlotSchema = {
     // Base Properties
     id: { type: 'string', required: true, tooltip: 'Slot ID used to reference this slot.' },
-    x: { type: 'number', tooltip: 'Position in % of the scene width.' },
-    y: { type: 'number', tooltip: 'Position in % of the scene height.' },
+    x: { type: 'number', defaultValue: 0, tooltip: 'Position in % of the scene width.' },
+    y: { type: 'number', defaultValue: 0, tooltip: 'Position in % of the scene height.' },
     // Layering
     z: { type: 'number', tooltip: 'Z-index for layering (higher = front).', defaultValue: 0, step: 1 },
     scale: { type: 'number', tooltip: 'Scale of the character.', defaultValue: 1, step: 0.1 },

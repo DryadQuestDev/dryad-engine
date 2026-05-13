@@ -67,10 +67,12 @@ function closeProgression() {
 .progression-container {
   /* Left padding pulls from the global --ui-tray-reserved-left var so it
      follows the .ui-container tray width across desktop/touch. */
-  padding: 20px 20px 20px var(--ui-tray-reserved-left, 120px);
+  padding: 20px 20px 0px var(--ui-tray-reserved-left, 120px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   color: #f0f0f0;
   height: 100%;
+  display: flex;
+  flex-direction: column;
 
   /*thick glass background*/
   background: rgba(255, 255, 255, 0.1);
@@ -80,9 +82,8 @@ function closeProgression() {
 }
 
 .tab-content {
-  height: 100%;
-  /*overflow: auto;*/
-  padding-bottom: 30px;
+  flex: 1;
+  min-height: 0;
 }
 
 .progression-header {

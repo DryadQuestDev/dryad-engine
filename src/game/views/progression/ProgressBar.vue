@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
   height?: string;
   hideMax?: boolean;
   formatNumbers?: boolean;
+  label?: string;
 }>(), {
   barColor: '#42b983',
   bgColor: '#555',
@@ -29,9 +30,13 @@ const displayText = computed(() => {
 </script>
 
 <template>
-  <div class="progress-bar" :style="{ background: bgColor, width: width ?? '100px', height: height ?? '1.2rem' }">
+  <div class="progress-bar" :style="{ background: bgColor, width: width ?? '100px', height: height ?? '1.5em' }">
     <div class="bar-fill" :style="{ width: percentage + '%', background: barColor }"></div>
-    <span class="bar-text">{{ displayText }}</span>
+    <div v-if="label" class="bar-split">
+      <span class="bar-label">{{ label }}</span>
+      <span class="bar-value">{{ displayText }}</span>
+    </div>
+    <span v-else class="bar-text">{{ displayText }}</span>
   </div>
 </template>
 
@@ -57,10 +62,40 @@ const displayText = computed(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 0.75rem;
   font-weight: bold;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
+  color: #fff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.9),
+    0 0 3px rgba(0, 0, 0, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.bar-split {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.5em;
+  font-weight: bold;
+  white-space: nowrap;
+  gap: 0.5em;
+  pointer-events: none;
+  color: #fff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.9),
+    0 0 3px rgba(0, 0, 0, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.bar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.bar-value {
+  flex-shrink: 0;
 }
 </style>

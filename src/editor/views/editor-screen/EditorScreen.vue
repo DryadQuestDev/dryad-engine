@@ -8,16 +8,18 @@ import LoadGamePopup from '../LoadGamePopup.vue';
 import PlaytestModsPopup from '../PlaytestModsPopup.vue';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
-import { showConfirm } from '../../../services/dialogService';
 import DungeonSelect from '../shared/DungeonSelect.vue';
+import {
+  startPlaytest,
+  openLoadGamePopup,
+  showLoadGamePopup,
+  showPlaytestModsPopup,
+} from './usePlaytest';
 
 const componentName = ref('EditorScreen');
 const editor = Editor.getInstance();
 editor.init();
 const global = Global.getInstance();
-
-const showLoadGamePopup = ref(false);
-const showPlaytestModsPopup = ref(false);
 
 // TODO: add tabs from plugins
 //const visibleMainTabs = EDITOR_TABS.filter(tab => !tab.disabled);
@@ -53,12 +55,24 @@ onUnmounted(() => {
 });
 
 // Handle dropdown changes
-const handleGameChange = (event: any) => {
-  editor.setGame(event.value);
+// Bump these to force the matching Select to remount with the editor's
+// current value. PrimeVue Select shows the user's clicked option before our
+// async confirm dialog resolves; if the user cancels, modelValue prop stays
+// the same but the Select's internal display sticks on the new value. A key
+// bump remounts the Select against the unchanged prop, snapping it back.
+const gameSelectKey = ref(0);
+const modSelectKey = ref(0);
+
+const handleGameChange = async (event: any) => {
+  const target = event.value;
+  await editor.setGame(target);
+  if (editor.selectedGame !== target) gameSelectKey.value++;
 };
 
-const handleModChange = (event: any) => {
-  editor.setMod(event.value);
+const handleModChange = async (event: any) => {
+  const target = event.value;
+  await editor.setMod(target);
+  if (editor.selectedMod !== target) modSelectKey.value++;
 };
 
 const getSecondaryTabsForCurrentMain = computed(() => {
@@ -108,87 +122,6 @@ function searchDungeon(event: Event): void {
 // const searchMod = (event: any) => { editor.searchMod(event.query); };
 // const searchDungeon = (event: any) => { editor.searchDungeon(event.query); };
 
-// Get stored playtest mods for the current game
-function getPlaytestMods(): string[] {
-  if (!editor.selectedGame) return [];
-
-  const storageKey = `playtest-mods-${editor.selectedGame}`;
-  const stored = localStorage.getItem(storageKey);
-
-  if (stored) {
-    try {
-      const storedModIds: string[] = JSON.parse(stored);
-      // Validate that stored mods still exist
-      return storedModIds.filter(modId =>
-        editor.mods.some(mod => mod.id === modId)
-      );
-    } catch (e) {
-      console.error('Failed to parse stored playtest mods:', e);
-      return [];
-    }
-  }
-  return [];
-}
-
-// Dev mode playtest functionality
-async function startPlaytest() {
-  if (!editor.selectedGame) {
-    global.addNotification('Please select a game first');
-    return;
-  }
-
-  // Check for unsaved changes
-  if (editor.hasUnsavedChanges.value) {
-    const confirmed = await showConfirm({
-      message: 'You have unsaved changes. Are you sure you want to start playtesting? All unsaved changes will be lost.',
-      header: 'Unsaved Changes'
-    });
-
-    if (!confirmed) {
-      return;
-    }
-  }
-
-  // Set dev mode flags
-  localStorage.setItem('devMode', 'true');
-  localStorage.setItem('dev_mode_selected_game', editor.selectedGame);
-
-  // Build the mod list: stored selected mods + always include active mod
-  const storedMods = getPlaytestMods();
-  const modList = new Set(storedMods);
-
-  // Always add the currently active mod
-  if (editor.selectedMod && editor.selectedMod !== '_core') {
-    modList.add(editor.selectedMod);
-  }
-
-  // Store the mod list as JSON array
-  localStorage.setItem('dev_mode_selected_mods', JSON.stringify(Array.from(modList)));
-
-  // Keep backward compatibility - store single mod too
-  if (editor.selectedMod) {
-    localStorage.setItem('dev_mode_selected_mod', editor.selectedMod);
-  }
-
-  // Set showDebugPanel to true (using localStorage directly)
-  localStorage.setItem('showDebugPanel', 'true');
-
-  // Set flags for App.vue to start a new game on reload
-  localStorage.setItem('game_starting_new', 'true');
-  localStorage.setItem('game_loading_game_id', editor.selectedGame);
-
-  // Reload page to properly initialize game
-  window.location.reload();
-}
-
-function openLoadGamePopup() {
-  if (!editor.selectedGame) {
-    global.addNotification('Please select a game first');
-    return;
-  }
-  showLoadGamePopup.value = true;
-}
-
 </script>
 
 <template>
@@ -213,22 +146,27 @@ function openLoadGamePopup() {
 
         <!-- Playtest Button -->
         <Button class="playtest-button" icon="pi pi-play" label="Playtest" @click="startPlaytest"
-          :disabled="!editor.selectedGame" v-tooltip.bottom="'Start playtesting with dev mode (Ctrl/Cmd+P)'" />
+          :disabled="!editor.selectedGame || editor.hasUnsavedChanges.value"
+          v-tooltip.bottom="editor.hasUnsavedChanges.value ? 'You have unsaved changes' : 'Start playtesting with dev mode (Ctrl/Cmd+P)'" />
 
         <!-- Load Game Button -->
-        <Button icon="pi pi-file-arrow-up" @click="openLoadGamePopup" :disabled="!editor.selectedGame"
-          v-tooltip.bottom="'Load save in dev mode'" class="load-game-button" text />
+        <Button icon="pi pi-file-arrow-up" @click="openLoadGamePopup"
+          :disabled="!editor.selectedGame || editor.hasUnsavedChanges.value"
+          v-tooltip.bottom="editor.hasUnsavedChanges.value ? 'You have unsaved changes' : 'Load save in dev mode'"
+          class="load-game-button" text />
 
         <!-- Documentation Button -->
         <Button label="📚 Docs" @click="global.setViewer('docs')" v-tooltip.bottom="'View engine documentation'"
           class="docs-button" text />
 
-        <Select :modelValue="editor.selectedGame" :options="editor.filteredGames.value" @change="handleGameChange"
+        <Select :key="gameSelectKey" :modelValue="editor.selectedGame" :options="editor.filteredGames.value"
+          @change="handleGameChange"
           filter :resetFilterOnHide="true" placeholder="Choose Game" filterPlaceholder="Find game..."
           class="choose_game" :disabled="!editor.filteredGames.value || editor.filteredGames.value.length === 0"
           emptyFilterMessage="No games found" emptyMessage="choose or create a game first" scrollHeight="250px" />
 
-        <Select :modelValue="editor.selectedMod" :options="editor.filteredMods.value" @change="handleModChange" filter
+        <Select :key="modSelectKey" :modelValue="editor.selectedMod" :options="editor.filteredMods.value"
+          @change="handleModChange" filter
           :resetFilterOnHide="true" placeholder="Choose Mod" filterPlaceholder="Find mod..." class="choose_mod"
           :disabled="!editor.selectedGame || !editor.filteredMods.value || editor.filteredMods.value.length === 0"
           emptyFilterMessage="No mods found" emptyMessage="select a game first" scrollHeight="250px" />

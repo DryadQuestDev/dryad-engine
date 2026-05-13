@@ -43,11 +43,14 @@
       "riko_hair_front"
     ],
     "traits": {
-      "face_shift_x": 31.812229456913165,
-      "face_shift_y": 13.243788876359533,
-      "face_shift_scale": 0.44,
+      "face_shift_x": 38.64100662355132,
+      "face_shift_y": 11.313607354130689,
+      "face_shift_scale": 1.01,
       "name": "Riko",
-      "title_color": "00ffee"
+      "title_color": "00ffee",
+      "art_dx": 5.016903132477717,
+      "art_dy": -1.3613791426014936,
+      "art_scale": 1
     },
     "gallery": {
       "gallery_id": "characters",

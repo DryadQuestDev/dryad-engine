@@ -4,6 +4,7 @@ import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { spineRenderer } from '../../utils/spineRenderer';
 import { spineCache } from '../../utils/spineCache';
+import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../utils/characterReference';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 const props = defineProps<{
@@ -13,6 +14,7 @@ const props = defineProps<{
   directRender?: boolean;
   enableAppear?: boolean;
   view?: string;
+  slotScale?: number;
 }>();
 
 const spineSlotRef = ref<HTMLDivElement | null>(null);
@@ -90,13 +92,18 @@ const initSpine = async () => {
   try {
     currentSlotId = makeSlotId();
 
+    const offset = props.character.getSpineArtOffset(props.view);
     const result = await spineRenderer.register(currentSlotId, spineSlotRef.value, {
       atlasUrl: spineAtlas.value,
       skeletonUrl: spineSkeleton.value,
       skins: spineSkins.value.length > 0 ? spineSkins.value : undefined,
-      animation: spineConfig.value?.animation,
       loop: true,
       mirror: props.mirror,
+      artScale: offset.scale,
+      artDx: offset.dx,
+      artDy: offset.dy,
+      gameScale: getSpineCharacterScale(props.view, Game.getInstance().getMergedManifest()),
+      slotScale: props.slotScale ?? 1,
     });
 
     if (!result) return;
@@ -223,6 +230,20 @@ watch(() => props.mirror, (newMirror) => {
     spineRenderer.updateMirror(currentSlotId, newMirror ?? false);
   }
 });
+
+// Per-spine art offset changes — applied inside the renderer (CharacterSlot does no CSS art transforms anymore).
+watch(() => props.character.getSpineArtOffset(props.view), (offset) => {
+  if (!currentSlotId) return;
+  spineRenderer.updateArtScale(currentSlotId, offset.scale);
+  spineRenderer.updateArtOffset(currentSlotId, offset.dx, offset.dy);
+}, { deep: true });
+
+// slot.scale changes — same pattern as art_scale, routed into renderer for sharp pixels.
+watch(() => props.slotScale, (newScale) => {
+  if (currentSlotId) {
+    spineRenderer.updateSlotScale(currentSlotId, newScale ?? 1);
+  }
+});
 </script>
 
 <template>
@@ -236,7 +257,7 @@ watch(() => props.mirror, (newMirror) => {
   position: relative;
   width: auto;
   height: 100%;
-  aspect-ratio: 5 / 7; /* Must match FacePickerPopup/ItemSlotPickerPopup spine container (500×700) */
+  aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
   display: inline-block;
   pointer-events: none;
 }

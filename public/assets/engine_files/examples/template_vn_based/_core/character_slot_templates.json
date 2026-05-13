@@ -1,5 +1,5 @@
 [
-  {
+ {
     "z": 1,
     "scale": 2,
     "rotation": 0,
@@ -13,13 +13,13 @@
     "sepia": 0,
     "hue": 0,
     "id": "left",
-    "x": -19.592931162509377,
+    "x": -32.13,
     "uid": "p7bDl0MWPRfS",
-    "y": 33.11094946665582,
+    "y": 30.64,
     "idle": "none",
     "mirror": false,
-    "xanchor": 50,
-    "yanchor": 50
+    "xanchor": 47,
+    "yanchor": 37
   },
   {
     "z": 2,
@@ -36,11 +36,11 @@
     "sepia": 0,
     "hue": 0,
     "id": "middle",
-    "x": 6.276227326620345,
+    "x": -3.11,
     "uid": "AjSLqVcnkf2A",
-    "y": 34.222262633336044,
-    "xanchor": 50,
-    "yanchor": 50
+    "y": 30.64,
+    "xanchor": 47,
+    "yanchor": 38
   },
   {
     "z": 3,
@@ -55,14 +55,14 @@
     "saturate": 1,
     "sepia": 0,
     "id": "right",
-    "x": 34.876334218787726,
+    "x": 30.28,
     "uid": "aVspUmbTbVW5",
-    "y": 34,
+    "y": 30.64,
     "idle": "none",
     "move": "easeIn",
     "move_duration": 0.5,
     "move_ease": "power2",
-    "xanchor": 50,
-    "yanchor": 50
+    "xanchor": 47,
+    "yanchor": 37
   }
 ]

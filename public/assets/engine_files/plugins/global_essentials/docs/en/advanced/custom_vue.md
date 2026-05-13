@@ -148,6 +148,88 @@ const ChoiceCard = defineComponent({
 
 ---
 
+### v-popover
+
+Floating UI based hover popover that just works on any element. 
+
+**Usage (string form — HTML rendered via `v-script`):**
+
+```html
+<button v-popover="'<b>Strength</b>: raises [[stat_attack]]'">Stats</button>
+```
+
+The string is treated as DryadScript HTML and rendered through `v-script`, so `[[record]]` lore-links, `|placeholders|`, and `if{}` blocks all work inside the popover.
+
+**Usage (object form — html mode):**
+
+```html
+<div v-popover="{ html: skill.description, width: 400 }">{{ skill.name }}</div>
+```
+
+**Usage (object form — Vue component mode):**
+
+```html
+<div v-popover="{ component: ItemCard, props: { item }, width: 360 }">
+  <img :src="item.icon">
+</div>
+```
+
+When `component` is supplied it wins over `html`. The component receives `props` via `v-bind`.
+
+**Placement modifiers (sugar for the `placement` option):**
+
+```html
+<div v-popover.bottom="content">Below</div>
+<div v-popover.right="content">To the right</div>
+```
+
+Equivalent to `v-popover="{ ..., placement: 'bottom' }"`. The default placement is `'top'`. Floating UI's `flip()` and `shift()` middleware automatically rescue placement near viewport edges.
+
+**Binding shape:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `html` | `string` | — | content to render through `v-script` |
+| `component` | `Component` | — | Vue component to render inside (wins over `html`) |
+| `props` | `object` | `{}` | props passed to `component` via `v-bind` |
+| `width` | `number \| string` | `'300px'` | popover width; numbers become `${n}px` |
+| `placement` | `Placement` | `'top'` | any Floating UI placement (`top`, `bottom-start`, `left-end`, etc.) |
+
+**Hover handoff:**
+
+The popover sits at `offset: 0` against the target side, and a 100 ms close-debounce covers the cursor's transition between target and popover. Hovering the popover keeps it open; leaving the popover closes it after 100 ms.
+
+**Example — character status with rich popover content:**
+
+```javascript
+const { vue, game } = window.engine;
+const { defineComponent } = vue;
+const { ItemCard } = window.engine.components;
+
+const InventoryRow = defineComponent({
+  props: ['item'],
+  setup(props) {
+    return { item: props.item, ItemCard };
+  },
+  template: /*html*/`
+    <div class="row" v-popover="{ component: ItemCard, props: { item }, placement: 'right' }">
+      <img :src="item.icon">
+      <span>{{ item.name }}</span>
+    </div>
+  `
+});
+```
+
+**When to use:**
+- Rich hover-over information panels (item details, ability tooltips, character cards)
+- Anywhere you'd reach for a tooltip but need clickable content inside
+- Any place game text with `[[lore-links]]` should appear on hover
+
+**When not needed:**
+- Plain text tooltips — use `v-tooltip` (PrimeVue), it's lighter
+
+---
+
 ### v-dragscroll
 
 Enables drag-to-scroll on any scrollable container. Click and drag to scroll horizontally, vertically, or both.
@@ -184,5 +266,6 @@ Powered by [vue-dragscroll](https://www.npmjs.com/package/vue-dragscroll).
 | `v-persist` | `<img>` | Keep loaded images in browser memory cache |
 | `v-fit` | Any | Shrink font size so text fits without clipping |
 | `v-script` | Any | Render DryadScript text with `[[lore-link]]` interactivity |
+| `v-popover` | Any | Hover popover with HTML or Vue-component content (Floating UI) |
 | `v-dragscroll` | Any | Drag-to-scroll on scrollable containers |
 | `v-tooltip` | Any | Show tooltip on hover (from PrimeVue) |

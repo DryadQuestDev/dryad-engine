@@ -110,6 +110,39 @@ export class Game {
     return this.coreSystem.modsManifests;
   }
 
+  /** Returns the merged manifest (`_core` + all active mods, last-wins by load order). Use when you want a manifest field a mod might override. */
+  public getMergedManifest(): ManifestObject {
+    return this.coreSystem.mergedManifest ?? this.coreSystem.gameManifest;
+  }
+
+  /** Returns the current game's manifest.version, or '0' if unset. */
+  public getGameVersion(): string {
+    return this.coreSystem.gameManifest?.version || '0';
+  }
+
+  /**
+   * Returns the current `(game + mods)` versions map — keyed by source id (`_core` for the game, mod id for mods).
+   * Each entry is `{ name, version }`. Mirrors the shape stamped into saves at `saveMeta.versions`.
+   */
+  public getVersions(): Record<string, { name: string; version: string }> {
+    return this.coreSystem.getVersions();
+  }
+
+  /**
+   * Returns the versions map stamped on the save that was just loaded, or `null` for a new game.
+   * Each entry is `{ name, version }`.
+   */
+  public getLoadedSaveVersions(): Record<string, { name: string; version: string }> | null {
+    return this.coreSystem.loadedSaveVersions ? { ...this.coreSystem.loadedSaveVersions } : null;
+  }
+
+  /**
+   * Rebuild every character's state from current definitions when the loaded save's versions differ from the current.
+   */
+  public runDefaultSaveMigration(options: { ignoreStats?: string[]; ignoreTraits?: string[]; ignoreAttributes?: string[]; ignoreItemTraits?: string[]; ignoreItemAttributes?: string[]; } = {}): void {
+    this.coreSystem.runDefaultSaveMigration(options);
+  }
+
   // ============================================
   // PUBLIC API: Event System
   // ============================================
@@ -320,6 +353,22 @@ export class Game {
 
   public deleteCharacter(character: Character | string): void {
     this.characterSystem.deleteCharacter(character);
+  }
+
+  /**
+   * Parse a generic `id<op>value` specification into a typed list of ops.
+   */
+  public parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '>' | '<'; value: any }> {
+    return this.logicSystem.parseOpsSpec(data);
+  }
+
+  /**
+   * Parse a `targetId->item & item & ..., targetId->!item, ...` specification
+   * into a typed list of per-target add/remove operations.
+   * See {@link LogicSystem.parseTargetedSpec} for behaviour.
+   */
+  public parseTargetedSpec(data: string): Array<{ characterId: string; items: Array<{ name: string; remove: boolean }> }> {
+    return this.logicSystem.parseTargetedSpec(data);
   }
 
   // ============================================
@@ -624,7 +673,7 @@ export class Game {
    * @param valueField Name for the value field (e.g., 'weight', 'amount', 'chance')
    * @returns Array of objects (e.g., [{ id: 'goblins', weight: 50 }, ...])
    */
-  public toEntries<T>(data: Record<string, T>, valueField: string): { id: string; [key: string]: T | string }[] {
+  public toEntries<T>(data: Record<string, T>, valueField: string): { id: string;[key: string]: T | string }[] {
     return this.logicSystem.toEntries(data, valueField);
   }
 

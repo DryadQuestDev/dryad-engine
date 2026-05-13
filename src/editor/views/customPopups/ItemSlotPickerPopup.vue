@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { ITEM_SLOT_SIZE_PERCENT } from '../../../global/global';
-import { spineRenderer } from '../../../game/utils/spineRenderer';
-import type { Spine } from '@esotericsoftware/spine-pixi-v8';
+import { useEditorSpinePlayer } from '../../../composables/useEditorSpinePlayer';
+import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../../game/utils/characterReference';
 import Select from 'primevue/select';
 
 const props = defineProps<EditorCustomPopupProps>();
@@ -26,16 +26,40 @@ const isDragging = ref(false);
 const dragStartX = ref(0);
 const dragStartY = ref(0);
 
-// Art transform from character traits (matches game's CharacterSlot scale wrapper)
+// Static preview uses character art_* traits as a generic fallback (each skin layer can also
+// override these in the layer form, but this popup renders all layers under one wrapper for
+// the slot-picking UX — close enough to the runtime preview).
 const artDx = computed(() => localItem.value.traits?.art_dx ?? coreItem.value?.traits?.art_dx ?? 0);
 const artDy = computed(() => localItem.value.traits?.art_dy ?? coreItem.value?.traits?.art_dy ?? 0);
 const artScale = computed(() => localItem.value.traits?.art_scale ?? coreItem.value?.traits?.art_scale ?? 1);
 const artTransform = computed(() => {
-  const transforms = [`scale(${artScale.value})`];
-  if (artDx.value || artDy.value) {
-    transforms.push(`translate(${artDx.value}cqh, ${artDy.value}cqh)`);
-  }
-  return transforms.join(' ');
+  // `translate(t) scale(s)` (not `scale(s) translate(t)`) — translate runs in
+  // screen coords, not magnified by scale. Matches the game's CharacterSlot
+  // wrapper composition so editor and game stay aligned at any art_scale.
+  const t = (artDx.value || artDy.value)
+    ? `translate(${artDx.value}cqh, ${artDy.value}cqh) `
+    : '';
+  return `${t}scale(${artScale.value})`;
+});
+
+// Spine path: the renderer applies art_dx/dy/scale internally now, so the CSS wrapper is a no-op.
+const spineArtTransform = computed(() => 'none');
+const defaultSpineEntryForArt = computed((): any => {
+  const local = (localItem.value.spine || []).find((s: any) => !s.view || s.view === '_default');
+  if (local) return local;
+  return ((coreItem.value as any)?.spine || []).find((s: any) => !s.view || s.view === '_default') || null;
+});
+const spineArtScale = computed(() => {
+  const v = defaultSpineEntryForArt.value?.art_scale;
+  return typeof v === 'number' ? v : 1;
+});
+const spineArtDx = computed(() => {
+  const v = defaultSpineEntryForArt.value?.art_dx;
+  return typeof v === 'number' ? v : 0;
+});
+const spineArtDy = computed(() => {
+  const v = defaultSpineEntryForArt.value?.art_dy;
+  return typeof v === 'number' ? v : 0;
 });
 
 // Image dimensions
@@ -303,87 +327,47 @@ function removeSlot() {
 // Spine Character Support
 // ============================================
 
-const spineAtlasRef = ref<string | null>(null);
-const spineSkeletonRef = ref<string | null>(null);
-const spineAnimationRef = ref<string | null>(null);
-
-const isSpineCharacter = computed(() => {
-  return !!(spineAtlasRef.value && spineSkeletonRef.value);
-});
-
-function findDefaultSpine(spineArray: any): { atlas?: string, skeleton?: string, default_animation?: string } | null {
+function findDefaultSpine(spineArray: any): { atlas?: string, skeleton?: string } | null {
   if (!Array.isArray(spineArray)) return null;
   return spineArray.find((s: any) => !s.view) || null;
 }
 
-function initializeSpineRefs() {
+const spineAtlas = computed(() => {
   const localSpine = findDefaultSpine(localItem.value.spine);
   const coreSpine = findDefaultSpine(coreItem.value?.spine);
-  spineAtlasRef.value = localSpine?.atlas || coreSpine?.atlas || null;
-  spineSkeletonRef.value = localSpine?.skeleton || coreSpine?.skeleton || null;
-  spineAnimationRef.value = localSpine?.default_animation || coreSpine?.default_animation || null;
-}
+  return localSpine?.atlas || coreSpine?.atlas || null;
+});
+
+const spineSkeleton = computed(() => {
+  const localSpine = findDefaultSpine(localItem.value.spine);
+  const coreSpine = findDefaultSpine(coreItem.value?.spine);
+  return localSpine?.skeleton || coreSpine?.skeleton || null;
+});
+
+const isSpineCharacter = computed(() => !!(spineAtlas.value && spineSkeleton.value));
+const spineAttributes = computed(() => localItem.value.attributes || {});
 
 const spineContainerRef = ref<HTMLDivElement | null>(null);
-let spineInstance: Spine | null = null;
-let spineSlotId = '';
 
-async function initSpinePlayer() {
-  if (!spineContainerRef.value || !spineAtlasRef.value || !spineSkeletonRef.value) return;
-  disposeSpinePlayer();
+const spineGameScale = computed(() => getSpineCharacterScale('_default', editor.getMergedManifest()));
 
-  try {
-    spineSlotId = `item_slot_${Date.now()}`;
-    const attributes = localItem.value.attributes || {};
+const { init: initSpinePlayer } = useEditorSpinePlayer({
+  containerRef: spineContainerRef,
+  atlasUrl: spineAtlas,
+  skeletonUrl: spineSkeleton,
+  attributes: spineAttributes,
+  artScale: spineArtScale,
+  artDx: spineArtDx,
+  artDy: spineArtDy,
+  gameScale: spineGameScale,
+  slotIdPrefix: 'item_slot',
+});
 
-    const spine = await spineRenderer.register(spineSlotId, spineContainerRef.value, {
-      skeletonUrl: spineSkeletonRef.value,
-      atlasUrl: spineAtlasRef.value,
-      animation: spineAnimationRef.value || undefined,
-    });
-
-    if (!spine) return;
-    spineInstance = spine;
-
-    // Apply skins from attributes
-    const skeletonData = spine.skeleton.data;
-    const skins = Object.values(attributes).filter(
-      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-    );
-    if (skins.length > 0) {
-      spineRenderer.applySkins(spine, skins);
-    }
-
-    // Set dimensions from spine container for slot positioning
-    if (spineContainerRef.value) {
-    }
-  } catch (error) {
-    console.error('Failed to initialize Spine preview:', error);
-  }
-}
-
-function disposeSpinePlayer() {
-  if (spineSlotId) {
-    spineRenderer.unregister(spineSlotId);
-    spineSlotId = '';
-  }
-  spineInstance = null;
-}
-
-// Init spine when container appears
 watch(spineContainerRef, (newRef) => {
-  if (newRef && isSpineCharacter.value) {
-    nextTick(() => initSpinePlayer());
-  }
+  if (newRef && isSpineCharacter.value) nextTick(() => initSpinePlayer());
 });
 
-onBeforeUnmount(() => {
-  disposeSpinePlayer();
-});
-
-// Add global mouse event listeners
 onMounted(() => {
-  initializeSpineRefs();
   document.addEventListener('mousemove', handleMouseMove);
   document.addEventListener('mouseup', handleMouseUp);
 });
@@ -393,7 +377,8 @@ onMounted(() => {
   <div class="item-slot-picker-popup">
     <div class="picker-header">
       <h3>Item Slot Positions Picker</h3>
-      <p class="hint">Drag the rectangles to position the item slots</p>
+      <p class="hint">Drag the rectangles to position the item slots. The outer dashed lines mark the
+        character-sheet column edges; the orange middle line marks the column's center.</p>
     </div>
 
     <div class="picker-content">
@@ -449,18 +434,23 @@ onMounted(() => {
           <p class="info-text">Note: All image layer pictures should have the same size dimensions.</p>
         </div>
 
-        <!-- Character-sheet start boundary -->
-        <div v-if="isSpineCharacter || imageLayers.length > 0" class="sheet-boundary"></div>
+        <!-- Character-sheet column boundaries (left + middle + right) -->
+        <template v-if="isSpineCharacter || imageLayers.length > 0">
+          <div class="sheet-boundary left"></div>
+          <div class="sheet-boundary middle"></div>
+          <div class="sheet-boundary right"></div>
+        </template>
 
         <!-- Spine Character Preview -->
         <div v-if="isSpineCharacter" class="character-doll-wrapper">
-          <div class="character-doll-scale-wrapper" :style="{ transform: artTransform }">
+          <div class="character-doll-scale-wrapper" :style="{ transform: spineArtTransform }">
             <div class="character-doll">
               <div ref="spineContainerRef" class="spine-preview-container" />
             </div>
           </div>
-
-          <!-- Draggable Slot Rectangles -->
+          <!-- Slot rects sit OUTSIDE the scale wrapper — matches the game's
+               ItemSlots layout (sibling of CharacterDoll, no scale/translate
+               applied). Stays a constant size regardless of character art_scale. -->
           <div v-for="(slot, index) in allSlots" :key="index"
             :class="['slot-selector-rect', { selected: slot.localIndex === selectedSlotIndex && !slot.isCore, 'core-slot': slot.isCore }]"
             :style="getSlotStyle(slot)" @mousedown="(e) => handleMouseDown(e, slot)">
@@ -477,8 +467,9 @@ onMounted(() => {
                 @load="index === 0 ? updateRenderedHeight() : null" />
             </div>
           </div>
-
-          <!-- Draggable Slot Rectangles -->
+          <!-- Slot rects sit OUTSIDE the scale wrapper — matches the game's
+               ItemSlots layout (sibling of CharacterDoll, no scale/translate
+               applied). Stays a constant size regardless of character art_scale. -->
           <div v-for="(slot, index) in allSlots" :key="index"
             :class="['slot-selector-rect', { selected: slot.localIndex === selectedSlotIndex && !slot.isCore, 'core-slot': slot.isCore }]"
             :style="getSlotStyle(slot)" @mousedown="(e) => handleMouseDown(e, slot)">
@@ -552,11 +543,6 @@ onMounted(() => {
 
 .slot-dropdown {
   width: 100%;
-}
-
-/* Ensure Select dropdown panel appears above dialog (which has z-index: 10000) */
-:deep(.p-select-overlay) {
-  z-index: 10001 !important;
 }
 
 .slot-info {
@@ -705,22 +691,43 @@ onMounted(() => {
   color: #666;
 }
 
+/* Three dashed lines mark the in-game character-sheet column: outer two are the
+   left/right edges of the 50cqh column; the middle line is the column's center
+   (where the body should land for art_dx = 0). The middle uses a brighter accent
+   so it reads as a different reference (centering aid) from the outer bounds. */
 .sheet-boundary {
   position: absolute;
   top: 0;
-  left: 50cqh;
   height: 100%;
   border-left: 2px dashed rgba(0, 0, 0, 0.15);
   pointer-events: none;
   z-index: 1;
 }
 
+.sheet-boundary.left {
+  left: calc(50% - 25cqh);
+}
+
+.sheet-boundary.middle {
+  left: 50%;
+  border-left-style: dashed;
+  border-left-color: rgba(255, 120, 0, 0.95);
+  border-left-width: 3px;
+}
+
+.sheet-boundary.right {
+  left: calc(50% + 25cqh);
+}
+
 .character-doll-wrapper {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: calc(50% - 25cqh);
   width: 50cqh;
   height: 100%;
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 
 .character-doll-scale-wrapper {
@@ -732,24 +739,23 @@ onMounted(() => {
   transform-origin: 50% 50%;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .character-doll {
   position: relative;
   display: inline-block;
+  height: 100cqh;
+  aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
 }
 
 .character-doll-image {
   display: block;
-  height: 100cqh;
-  width: auto;
-}
-
-.character-doll-image:not(:first-child) {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .slot-selector-rect {
@@ -809,7 +815,7 @@ onMounted(() => {
 /* Spine preview */
 .spine-preview-container {
   height: 100cqh;
-  aspect-ratio: 5 / 7;
+  aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
 }
 
 </style>

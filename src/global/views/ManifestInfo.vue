@@ -71,9 +71,9 @@ watch(activeIndex, async () => {
     <div class="info-description" v-html="manifest.description"></div>
 
     <!-- Cover Assets Carousel -->
-    <Galleria v-if="currentCoverAssets.length > 0" :key="manifest?.id" v-model:activeIndex="activeIndex" :value="currentCoverAssets"
-      :numVisible="Math.min(10, currentCoverAssets.length)" :showThumbnails="true" :showIndicators="true"
-      :showItemNavigators="true" :circular="false" :responsiveOptions="[
+    <Galleria v-if="currentCoverAssets.length > 0" :key="manifest?.id" v-model:activeIndex="activeIndex"
+      :value="currentCoverAssets" :numVisible="Math.min(10, currentCoverAssets.length)" :showThumbnails="true"
+      :showIndicators="true" :showItemNavigators="true" :circular="false" :responsiveOptions="[
         { breakpoint: '1600px', numVisible: Math.min(6, currentCoverAssets.length) },
         { breakpoint: '1200px', numVisible: Math.min(4, currentCoverAssets.length) },
         { breakpoint: '1000px', numVisible: Math.min(2, currentCoverAssets.length) },
@@ -145,7 +145,6 @@ watch(activeIndex, async () => {
 
 .info-description {
   line-height: 1.6;
-  color: #333;
 }
 
 .no-manifest-selected {

@@ -7,7 +7,6 @@ import ItemSlots from './ItemSlots.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import { Game } from '../../game';
 import { useCharacterAnimation } from '../../../composables/useCharacterAnimation';
-import gsap from 'gsap';
 
 const props = defineProps<{
   character: Character;
@@ -18,6 +17,16 @@ const props = defineProps<{
   view?: string; // Character view overrides (e.g. 'back')
   interactive?: boolean; // Enable pointer-events for click handling
   overlaySlot?: string; // Optional slot name for overlay injection (same pattern as CharacterFace)
+  /** Boost factor for the overlay's CSS scale ONLY when slot.scale < 1 (zoomed-out
+   * characters). Default 1 = no boost. Lets the dev keep the overlay readable
+   * for small enemies/inactive players without affecting full-size active ones. */
+  overlayScale?: number;
+  /** Dev-tuned fine-adjust offsets in cqh of slot height — added to bodyArtOffset
+   * so the overlay sits where the dev placed it via OverlayTuner (or similar).
+   * Plugins read their own per-character traits and pass them in; CharacterSlot
+   * stays plugin-agnostic. */
+  overlayOffsetX?: number;
+  overlayOffsetY?: number;
   instantLayers?: boolean; // Disable fade transition on layer changes (for combat animations)
 }>();
 
@@ -29,9 +38,6 @@ const animationControls = useCharacterAnimation({
   skipAutoPlay: false // Let it auto-play in game context
 });
 
-// Disable scale transition on mount to prevent initial animation
-const scaleTransitionEnabled = ref(false);
-
 // Element refs
 const characterRef = animationControls.elementRef;
 const scaleWrapperRef = animationControls.scaleWrapperRef;
@@ -39,9 +45,13 @@ const rotationWrapperRef = animationControls.rotationWrapperRef;
 const contentRef = animationControls.contentRef;
 const animatedX = animationControls.animatedX;
 const animatedY = animationControls.animatedY;
+const animatedScale = animationControls.animatedScale;
 const x = computed(() => animatedX.value);
 const y = computed(() => animatedY.value);
-const scale = computed(() => props.slot.scale ?? 1);
+// scale is sourced from animatedScale (synced on the same GSAP timeline as x/y
+// in playMove) so the body's vertical bottom interpolates monotonically between
+// endpoints during zoom transitions — no mid-flight lift exposing legs (FU 22).
+const scale = computed(() => animatedScale.value);
 const xanchor = computed(() => props.slot.xanchor ?? 50);
 const yanchor = computed(() => props.slot.yanchor ?? 50);
 const zindex = computed(() => props.slot.z ?? 0);
@@ -61,36 +71,111 @@ const hue = computed(() => props.slot.hue ?? 0);
 
 // Note: Animation properties are now handled by the composable
 
-// Character art positioning (from traits) - only for default view
-const isDefaultView = !props.view;
-
-const animatedArtOffset = ref({
-  dx: isDefaultView ? (props.character.getTrait('art_dx') || 0) : 0,
-  dy: isDefaultView ? (props.character.getTrait('art_dy') || 0) : 0,
-  scale: isDefaultView ? (props.character.getTrait('art_scale') || 1) : 1
+// Wrapper transforms key off `isSpineRendering` (= spine is currently the rendered
+// doll), not the per-character `isSpineCharacter()` — so when a static action overlay
+// (e.g. Ane back hit/attack) replaces the spine for a spine character, the wrapper
+// still applies slot.scale via CSS and the static frame doesn't pop to full size.
+const hasSpineForView = computed(() => {
+  if (props.view) return props.character.isSpineForView(props.view);
+  return props.character.isSpineCharacter();
 });
 
-// Watch for character changes and animate the art offset
-watch(() => props.character.id, () => {
-  const newDx = isDefaultView ? (props.character.getTrait('art_dx') || 0) : 0;
-  const newDy = isDefaultView ? (props.character.getTrait('art_dy') || 0) : 0;
-  const newScale = isDefaultView ? (props.character.getTrait('art_scale') || 1) : 1;
-
-  gsap.to(animatedArtOffset.value, {
-    dx: newDx,
-    dy: newDy,
-    scale: newScale,
-    duration: 0.3,
-    ease: 'power2.out'
-  });
+const hasActiveStaticLayer = computed(() => {
+  if (props.view) return props.character.getImageLayersForView(props.view).length > 0;
+  return props.character.imageLayersWithMeta.length > 0;
 });
 
-// Use cqh (container query height) so offset is height-relative in both axes.
-// This prevents art_dx from scaling with container width (breaks in wide scenes vs square panels).
-const artDx = computed(() => (mirror.value ? -animatedArtOffset.value.dx : animatedArtOffset.value.dx) + "cqh");
-const artDy = computed(() => animatedArtOffset.value.dy + "cqh");
+const isSpineRendering = computed(() =>
+  hasSpineForView.value && !hasActiveStaticLayer.value
+);
+
+
+// Trait art_dx/dy/scale apply to ALL static rendering (any view) — including the
+// back action overlays that swap in for spine views (e.g. Ane back hit/attack/cast).
+// Spine paths apply their own per-spine-entry offset via the renderer's canvas CSS,
+// so the wrapper returns 0/0/1 there to avoid double-shift.
+const animatedArtOffset = computed(() => {
+  if (isSpineRendering.value) return { dx: 0, dy: 0, scale: 1 };
+  return {
+    dx: props.character.getTrait('art_dx') || 0,
+    dy: props.character.getTrait('art_dy') || 0,
+    scale: props.character.getTrait('art_scale') || 1,
+  };
+});
+
 const artScale = computed(() => animatedArtOffset.value.scale);
-const finalScale = computed(() => scale.value * artScale.value);
+const cssSlotScale = computed(() => isSpineRendering.value ? 1 : scale.value);
+const finalScale = computed(() => cssSlotScale.value * artScale.value);
+
+// Visible character scale, regardless of how it's applied. Pass to overlay context.
+const visibleScale = computed(() => scale.value * animatedArtOffset.value.scale);
+
+// Hit-mask transform — same body-tracking pattern as the overlay (FU 17/29):
+// translate by bodyArtOffset.dx/dy × slot.scale (cqh in slot-parent space, NOT
+// magnified by the inner scale), then scale to body's drawn size. Both spine
+// and static produce the same effective body rect, so a single transform fits
+// both.
+const hitMaskArtDx = computed(() => `${bodyArtOffset.value.dx * scale.value}cqh`);
+const hitMaskArtDy = computed(() => `${bodyArtOffset.value.dy * scale.value}cqh`);
+
+// Body art offset for the OVERLAY (per-view): for spine characters use the spine
+// entry's art_dx/dy (which the spine renderer applies to the canvas CSS); for
+// static characters fall back to character traits (which CharacterDollStatic
+// applies to its layers). The overlay wrapper translates by the same amount so
+// it sits above the body's actual visible center, regardless of view (front vs
+// back) or scale. cqh resolves against the slot's container-type:size.
+const bodyArtOffset = computed(() => {
+  const view = props.view;
+  const isSpine = view ? props.character.isSpineForView(view) : props.character.isSpineCharacter();
+  if (isSpine) {
+    const o = props.character.getSpineArtOffset(view);
+    return { dx: mirror.value ? -o.dx : o.dx, dy: o.dy };
+  }
+  return {
+    dx: (mirror.value ? -1 : 1) * (props.character.getTrait('art_dx') || 0),
+    dy: props.character.getTrait('art_dy') || 0,
+  };
+});
+// bodyArtOffset auto-tracks the body's per-view art_dx/dy. The optional
+// overlayOffsetX/Y props add a dev-tuned fine-adjust on top (cqh of slot
+// height, mirror-aware on X — same convention as bodyArtOffset). Multiply
+// by scale.value so the overlay shift matches the body's visible shift at
+// any slot.scale (cqh otherwise resolves to slot's full CSS height, which
+// over-shifts at small slot.scale — see Follow-up 17).
+const overlayArtDx = computed(() => {
+  const tuned = (mirror.value ? -1 : 1) * (props.overlayOffsetX ?? 0);
+  return `${(bodyArtOffset.value.dx + tuned) * scale.value}cqh`;
+});
+const overlayArtDy = computed(() => `${(bodyArtOffset.value.dy + (props.overlayOffsetY ?? 0)) * scale.value}cqh`);
+// `overlayScale` prop boosts the overlay's CSS scale for zoomed-out characters,
+// capped at 1 so the active-player overlay never exceeds design size. Capping is
+// important because `scale` is animated smoothly via GSAP; the
+// previous `s < 1 ? s × boost : s` conditional was discontinuous at s=1 and made
+// the overlay balloon to ~2× size mid-transition before snapping back to 1×.
+// `min(s × boost, 1)` is monotonic — overlay grows smoothly to design size and
+// plateaus once `s × boost` reaches 1.
+const effectiveOverlayScale = computed(() =>
+  Math.min(scale.value * (props.overlayScale ?? 1), 1)
+);
+// Body's top edge in the slot's coord frame: slot center − half body height.
+// Always use the actual slot.scale (which determines body height), not the
+// boosted overlay scale — otherwise a boost > 1 would lift the anchor above
+// the head. The overlay's `transform-origin: 50% 0` makes its boosted size
+// grow downward (over the body), so the anchor stays pinned to body top.
+const overlayTop = computed(() => `${50 - 50 * scale.value}cqh`);
+
+// cqh resolves against the slot's container-type:size — i.e. always 1% of slot's
+// CSS height, INDEPENDENT of slot.scale. Without scaling by slot.scale here, the
+// same `art_dx` produces a much larger relative shift on a slot that's been zoomed
+// out (since the visible body shrinks but the translate stays the same absolute
+// pixels). Multiply by `scale.value` for both spine and static so art_dx/dy is
+// consistently "% of body's visible height" at any slot.scale.
+const artDxFactor = computed(() => scale.value);
+const artDx = computed(() => {
+  const v = (mirror.value ? -animatedArtOffset.value.dx : animatedArtOffset.value.dx) * artDxFactor.value;
+  return `${v}cqh`;
+});
+const artDy = computed(() => `${animatedArtOffset.value.dy * artDxFactor.value}cqh`);
 
 // CSS computed properties
 const cssPosition = computed(() => ({
@@ -111,17 +196,19 @@ const cssFilter = computed(() => {
   return filters.length > 0 ? filters.join(' ') : 'none';
 });
 
-// Scale wrapper: scale + art offset, always centered
+// Scale wrapper: `translate(t) scale(s)` — translate runs in screen coords AFTER scale,
+// so the visible offset stays slot-relative (cqh) regardless of slot.scale. Matches the
+// spine renderer's canvas CSS, which translates by art_dx cqh independent of slotScale.
+// (The reverse order, `scale(s) translate(t)`, would magnify the translate by `s` and
+// drift static characters out of alignment with spine characters in actor slots where
+// slot.scale < 1.)
+// For spine characters here animatedArtOffset is 0/0/1 → translate is omitted, leaving
+// just `scale(1)` (a no-op); the renderer's canvas CSS handles per-spine offsets.
 const scaleWrapperTransform = computed(() => {
-  const transforms = [];
-  transforms.push(`scale(${finalScale.value})`);
-
-  // Apply character art offset (for sprite padding compensation)
-  if (artDx.value !== '0%' || artDy.value !== '0%') {
-    transforms.push(`translate(${artDx.value}, ${artDy.value})`);
-  }
-
-  return transforms.join(' ');
+  const t = (artDx.value !== '0cqh' || artDy.value !== '0cqh')
+    ? `translate(${artDx.value}, ${artDy.value}) `
+    : '';
+  return `${t}scale(${finalScale.value})`;
 });
 
 // Rotation wrapper: no transform (removed - now applied to content)
@@ -147,9 +234,6 @@ const contentTransformOrigin = computed(() => {
 
 // Apply animations on mount
 onMounted(() => {
-  // Enable scale transition after first frame (prevents animation on initial mount)
-  requestAnimationFrame(() => { scaleTransitionEnabled.value = true; });
-
   if (characterRef.value) {
     // Skip enter animations if loading from save
     const shouldPlayEnter = !game.dungeonSystem.isLoadingSave.value;
@@ -185,26 +269,32 @@ watch(() => props.slot.isRemoving, (isRemoving) => {
   }
 });
 
-// Track previous position for move animations
+// Track previous position+scale for move animations
 const prevX = ref<number | undefined>(props.slot.x);
 const prevY = ref<number | undefined>(props.slot.y);
+const prevScale = ref<number | undefined>(props.slot.scale);
 
-// Watch for position changes to trigger move animations
-watch([() => props.slot.x, () => props.slot.y], ([newX, newY]) => {
+// Watch for position/scale changes to trigger move animations. Scale is included
+// here (instead of relying on a CSS transition) so it shares the same GSAP
+// timeline as x/y — keeping body_bottom interpolation monotonic between the
+// endpoints (Follow-up 22).
+watch([() => props.slot.x, () => props.slot.y, () => props.slot.scale], ([newX, newY, newScale]) => {
   const hasXChanged = newX !== undefined && prevX.value !== undefined && newX !== prevX.value;
   const hasYChanged = newY !== undefined && prevY.value !== undefined && newY !== prevY.value;
+  const hasScaleChanged = newScale !== undefined && prevScale.value !== undefined && newScale !== prevScale.value;
 
-  // Trigger move animation if position changed
-  if (characterRef.value && (hasXChanged || hasYChanged)) {
+  // Trigger move animation if position or scale changed
+  if (characterRef.value && (hasXChanged || hasYChanged || hasScaleChanged)) {
     animationControls.playMove(
-      { x: prevX.value, y: prevY.value },
-      { x: newX, y: newY }
+      { x: prevX.value, y: prevY.value, scale: prevScale.value },
+      { x: newX, y: newY, scale: newScale }
     );
   }
 
-  // Update previous position
+  // Update previous position+scale
   prevX.value = newX;
   prevY.value = newY;
+  prevScale.value = newScale;
 }, { flush: 'post' });
 
 // Watch for idle animation changes (e.g., when moving to a new slot with different idle)
@@ -246,23 +336,25 @@ const onLeave = (_el: Element, done: () => void) => {
   <transition name="character-exit" @before-leave="onBeforeLeave" @leave="onLeave">
     <div ref="characterRef" class="character-slot" :style="{ zIndex: zindex }">
       <div class="character-slot-positioner">
-        <div ref="scaleWrapperRef" class="character-slot-scale-wrapper"
-          :class="{ 'scale-animated': scaleTransitionEnabled }">
+        <div ref="scaleWrapperRef" class="character-slot-scale-wrapper">
           <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper">
             <div ref="contentRef" class="character-content">
               <div class="character-doll-wrapper">
                 <CharacterDoll :character="character" :mirror="mirror" :enableAppear="enableAppear" :view="view"
-                  :instantLayers="instantLayers" />
+                  :instantLayers="instantLayers" :slotScale="scale" />
               </div>
             </div>
           </div>
         </div>
         <div v-if="overlaySlot" class="character-slot-overlay-wrapper">
-          <CustomComponentContainer :slot="overlaySlot" :context="{ character, slotScale: finalScale }" />
+          <CustomComponentContainer :slot="overlaySlot" :context="{ character, slotScale: visibleScale }" />
         </div>
         <div v-if="showItemSlots" class="item-slots-transform-wrapper">
           <ItemSlots :character="character" :disabled="props.disableItemInteraction === true" />
         </div>
+        <svg v-if="interactive" class="character-slot-hit-mask" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polygon points="20,0 80,0 80,100 20,100" fill="black" fill-opacity="0" pointer-events="all" />
+        </svg>
       </div>
     </div>
   </transition>
@@ -297,10 +389,6 @@ const onLeave = (_el: Element, done: () => void) => {
   transform-origin: 50% 50%;
 }
 
-.character-slot-scale-wrapper.scale-animated {
-  transition: transform 0.5s cubic-bezier(0.33, 1, 0.68, 1);
-}
-
 .character-slot-rotation-wrapper {
   position: absolute;
   top: 0;
@@ -329,7 +417,48 @@ const onLeave = (_el: Element, done: () => void) => {
   height: 100%;
   transform: v-bind("contentTransform");
   transform-origin: v-bind("contentTransformOrigin");
-  pointer-events: v-bind("interactive ? 'auto' : 'none'");
+  /* pointer-events live on the rendered body element (img for static, canvas for
+     spine) — see selectors below. Spine's wrapper transform is identity (slot.scale
+     applied via canvas pixel size, not CSS), so pointer-events on .character-content
+     would expose the unscaled 1:1 box as clickable, much bigger than the visible
+     body. Routing events to img/canvas restricts the click area to the actual body. */
+  pointer-events: none;
+}
+
+.character-content :deep(.character-doll-image),
+.character-content :deep(.character-doll-spine canvas) {
+  /* The .character-slot-hit-mask SVG owns interaction; canvas/img are inert. */
+  pointer-events: none;
+}
+
+.character-slot-hit-mask {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  /* Match the body wrapper's box (aspect-ratio: 1/1, height-bound) so the
+     viewBox 0 0 100 100 stretches to a square — polygon renders 60% × 100%
+     of the body's square, not 60% × 100% of the slot's 16:9 box. */
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  width: auto;
+  /* Same body-tracking transform as the body itself (FU 17): translate places
+     the polygon over the body's visible center (cqh in slot-parent space, NOT
+     magnified by inner scale), scale shrinks the polygon to the body's drawn
+     size. Spine's per-canvas transform and static's wrapper transform both
+     resolve to the same effective rect, so this single transform fits both
+     paths. */
+  transform: translate(-50%, -50%)
+             translate(v-bind("hitMaskArtDx"), v-bind("hitMaskArtDy"))
+             scale(v-bind("scale"));
+  transform-origin: 50% 50%;
+  /* SVG passes pointer events through except on the polygon (which opts in
+     via pointer-events="all"), so clicks outside the polygon shape pass
+     through to whatever's behind the slot. */
+  pointer-events: none;
+  overflow: visible;
+}
+
+.character-slot-hit-mask polygon {
   cursor: v-bind("interactive ? 'pointer' : 'default'");
 }
 
@@ -341,8 +470,23 @@ const onLeave = (_el: Element, done: () => void) => {
 .character-slot-overlay-wrapper {
   position: absolute;
   left: 50%;
-  top: 0;
-  transform: translateX(-50%);
+  /* Body's top edge in slot's coord frame (= 50cqh − slot.scale × 50cqh). At
+     scale=1 body fills slot, top=0; at scale=0.20 body height=20cqh, top=40cqh. */
+  top: v-bind("overlayTop");
+  /* Transforms apply right-to-left: scale runs first (in element-local space),
+     then translate (in parent space, NOT magnified by scale), then -50% center.
+     This order keeps art_dx tracking accurate at any slot.scale — the overlay
+     shifts by exactly bodyArtOffset cqh regardless of how the body is sized.
+     translateX(-50%): horizontal centering on the wrapper.
+     translate(art_dx cqh, art_dy cqh): art tracking — matches the body's per-view
+     offset (spine entry's art_dx for spine views, traits for static). cqh resolves
+     against the slot (container-type:size), same as the canvas's own translate.
+     scale(slot.scale): shrink overlay's intrinsic size with the body, around
+     transform-origin (50% 0 = top-center) so it shrinks toward the head. */
+  transform: translateX(-50%) translate(v-bind("overlayArtDx"), v-bind("overlayArtDy")) scale(v-bind("effectiveOverlayScale"));
+  /* Anchor the scale at top-center so the overlay shrinks toward the body's
+     head, not from the slot's geometric center. */
+  transform-origin: 50% 0;
   pointer-events: none;
 }
 

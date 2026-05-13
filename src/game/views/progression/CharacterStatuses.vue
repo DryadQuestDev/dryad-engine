@@ -176,7 +176,7 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
 
     <!-- Status Popup -->
     <Teleport to="body">
-      <div v-if="hoveredStatus" ref="statusPopupRef" class="status-popup" :style="statusFloatingStyles"
+      <div v-if="hoveredStatus" ref="statusPopupRef" class="status-popup dark-scrollbar" :style="statusFloatingStyles"
         @mouseenter="onStatusPopupEnter" @mouseleave="onStatusPopupLeave">
         <div class="popup-header">
           <h4 :class="getStatusRarity(hoveredStatus) ? ['item-name', 'rarity_' + getStatusRarity(hoveredStatus)] : []">
@@ -199,7 +199,7 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
 
     <!-- Item Popup -->
     <Teleport to="body">
-      <div v-if="hoveredItem" ref="itemPopupRef" class="item-popup" :style="itemFloatingStyles"
+      <div v-if="hoveredItem" ref="itemPopupRef" class="item-popup dark-scrollbar" :style="itemFloatingStyles"
         @mouseenter="onItemPopupEnter" @mouseleave="onItemPopupLeave">
         <ItemCard :item="hoveredItem" />
       </div>
@@ -280,7 +280,9 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
   position: fixed;
   z-index: 9999;
   width: 350px;
-  pointer-events: none;
+  pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* Status bricks */
@@ -368,7 +370,9 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
   width: 350px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   color: #fff;
-  pointer-events: none;
+  pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .popup-header {

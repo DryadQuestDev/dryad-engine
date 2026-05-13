@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
+import { useFloating, offset, flip, shift, size, autoUpdate } from '@floating-ui/vue';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import { makeSticky, notifyPopupEnter, notifyPopupLeave, closeAll, closeFromDepth } from './lorePopupStore';
@@ -20,7 +20,19 @@ watch(() => props.entry, (e) => { anchor.value = e.anchorEl; });
 const { floatingStyles } = useFloating(anchor, popupEl, {
     placement: 'bottom-start',
     strategy: 'fixed',
-    middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
+    middleware: [
+        offset(6),
+        flip({ padding: 8 }),
+        shift({ padding: 8 }),
+        size({
+            padding: 8,
+            apply({ availableHeight, elements }) {
+                Object.assign(elements.floating.style, {
+                    maxHeight: `${Math.max(120, availableHeight)}px`,
+                });
+            },
+        }),
+    ],
     whileElementsMounted: autoUpdate,
 });
 
@@ -91,6 +103,8 @@ function onPopupLeave() {
     color: #e8e8f0;
     font-size: v-bind(fontSize);
     line-height: 1.5;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .lore-popup-inner {

@@ -2,6 +2,17 @@ import { CharacterStatusObject } from '../../../schemas/characterStatusSchema';
 import { Game } from '../../game';
 import { BaseStatusObject } from '../../../schemas/characterStatusSchema';
 
+// art_dx/dy/scale are optional so the partial-override merge in
+// Character.reevaluate() can distinguish "not set on this status" (inherit
+// from prior layer) from "explicitly 0" (reset).
+export type SpineViewConfig = {
+  atlas: string;
+  skeleton: string;
+  artDx?: number;
+  artDy?: number;
+  artScale?: number;
+};
+
 export class Status {
     public id: string = "";
     public maxStacks: number = 1; // -1 for unlimited
@@ -25,7 +36,8 @@ export class Status {
     public abilityModifiers: any[] = [];
 
     // Spine configs keyed by view ('' = default, 'back' = back view, etc.)
-    public spineViews: Map<string, { atlas: string, skeleton: string, animation: string }> = new Map();
+    // _default and empty view normalize to '' at this layer.
+    public spineViews: Map<string, SpineViewConfig> = new Map();
 
 
     public setValues(obj: CharacterStatusObject | BaseStatusObject) {
@@ -35,16 +47,23 @@ export class Status {
         this.abilities = new Set(obj.abilities || []);
         this.stats = obj.stats || {};
 
-        // Spine configs: array of { id, view?, atlas, skeleton, default_animation }
+        // Spine configs: array of { id, view?, atlas, skeleton, art_dx?, art_dy?, art_scale? }
+        // art_* are conditionally included so the merge can fall back to prior
+        // layers when this status doesn't set them (e.g. costume swaps that
+        // re-use the same skeleton should inherit the core's calibrated offsets).
         if (obj.spine && Array.isArray(obj.spine)) {
-            for (const entry of obj.spine) {
+            for (const entry of obj.spine as any[]) {
                 if (entry.atlas && entry.skeleton) {
-                    const key = entry.view || '';
-                    this.spineViews.set(key, {
+                    const rawView = entry.view || '';
+                    const key = rawView === '_default' ? '' : rawView;
+                    const view: SpineViewConfig = {
                         atlas: entry.atlas,
                         skeleton: entry.skeleton,
-                        animation: entry.default_animation || '',
-                    });
+                    };
+                    if (typeof entry.art_dx === 'number') view.artDx = entry.art_dx;
+                    if (typeof entry.art_dy === 'number') view.artDy = entry.art_dy;
+                    if (typeof entry.art_scale === 'number') view.artScale = entry.art_scale;
+                    this.spineViews.set(key, view);
                 }
             }
         }

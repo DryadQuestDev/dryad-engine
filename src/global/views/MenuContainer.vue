@@ -39,7 +39,7 @@ function setMenuState(state: string) {
 
 
     <div class="menu-container-bg glass-popup-mask" @click="handleClickOutside">
-      <div class="menu-container-content glass-popup-surface">
+      <div class="menu-container-content glass-popup-surface dark-scrollbar">
         <CustomComponentContainer :slot="'menu-before'" :context="{ menuState }" />
 
         <ul v-if="menuState === 'main'">
@@ -157,7 +157,8 @@ function setMenuState(state: string) {
   color: #fff;
 }
 
-@media (pointer: coarse), (max-width: 720px) {
+@media (pointer: coarse),
+(max-width: 720px) {
   .menu-container-content {
     padding: 28px 22px;
     gap: 12px;

@@ -11,19 +11,19 @@
       {
         "id": "art_dx",
         "type": "number",
-        "description": "Default x shift of Character Art in % to adjust for the space around the character in its image asset. Used both in Scenes and Character Sheet.",
+        "description": "Default x shift in % for static skin layers. Falls through to layers that don't override art_dx themselves. Spine entries use their own art_dx, not this trait.",
         "uid": "px4dO7PysJYh"
       },
       {
         "id": "art_dy",
         "type": "number",
-        "description": "Default y shift of Character Art in % to adjust for the space around the character in its image asset. Used both in Scenes and Character Sheet.",
+        "description": "Default y shift in % for static skin layers. Falls through to layers that don't override art_dy themselves. Spine entries use their own art_dy, not this trait.",
         "uid": "2vnRqYZmymQn"
       },
       {
         "id": "art_scale",
         "type": "number",
-        "description": "Scale size of character art",
+        "description": "Default scale multiplier for static skin layers. Falls through to layers that don't override art_scale. Spine entries use their own art_scale, not this trait.",
         "uid": "IlTj1SBqYLI6"
       },
       {
@@ -64,7 +64,14 @@
         "id": "title_color",
         "type": "color",
         "uid": "aR1kfGQ93TUx",
-        "description": "Color of character's title"
+        "description": "Color of character's dialogue"
+      }
+    ],
+    "character_views": [
+      {
+        "id": "_default",
+        "name": "Default",
+        "uid": "ge_view_default"
       }
     ],
     "properties": [

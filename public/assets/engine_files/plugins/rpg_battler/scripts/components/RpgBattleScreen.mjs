@@ -154,19 +154,16 @@ export const RpgBattleScreen = defineComponent({
     });
 
     // ── Slot generation ──
-    // CharacterSlot is 100% wide, art centered → visual center is at slot.x + 50%.
-    // Overlay offset adjusts from that center (negative = left).
-    const SLOT_CENTER = 50;
-    const OVERLAY_X_OFFSET = -1;
-    const OVERLAY_Y_OFFSET = -3;
-    const overlayX = SLOT_CENTER + OVERLAY_X_OFFSET;
+    // Overlay rendering is delegated to CharacterSlot via overlaySlot="rpg-battle-char-overlay".
+    // CharacterSlot positions the overlay above the body's head, scales it with slot.scale,
+    // and translates by the per-view body art_dx — no manual positioning math here.
 
     const enemySlots = computed(() => {
       const enemies = aliveEnemies.value;
       if (enemies.length === 0) return [];
 
-      const startX = 20, startY = -36, dx = 11, dy = 22, cols = 3;
-      const scale = 0.20;
+      const startX = 10, startY = -27, dx = 15, dy = 25, cols = 3;
+      const scale = 0.35; // up from 0.2
 
       return enemies.map((id, i) => ({
         charId: id,
@@ -181,7 +178,7 @@ export const RpgBattleScreen = defineComponent({
 
     // Player slots: single set, position changes based on zoom state
     const outStartX = -35, outDx = 20, outY = 31, outScale = 0.39;
-    const inX = -15, inY = 5, inScale = 1;
+    const inX = -30, inY = 5, inScale = 1;
 
     const playerSlots = computed(() => {
       const party = alivePlayers.value;
@@ -504,7 +501,7 @@ export const RpgBattleScreen = defineComponent({
     }
 
     return {
-      battle, activeChar, backgroundAsset, enemySlots, playerSlots, overlayX, OVERLAY_Y_OFFSET, getBattleDisplayName,
+      battle, activeChar, backgroundAsset, enemySlots, playerSlots, getBattleDisplayName,
       zoomedIn, isPlayerTurn, forceZoomOut, showZone,
       battlePhase, selectedAbilityName, activeBattleState, isBattleOver,
       isTargeting, targetsEnemies, targetsAllies, targetIncludesSelf,
@@ -525,11 +522,16 @@ export const RpgBattleScreen = defineComponent({
           <RpgBattleLog @select="(charId, side) => onSlotClick(charId, side)" />
 
           <div class="rpg-viewport" :class="{ 'events-zone': showZone }">
-            <!-- Enemies -->
+            <!-- Enemies. Overlay (name + HP + tokens) is rendered by CharacterSlot
+                 via overlaySlot="rpg-battle-char-overlay" — it auto-tracks the
+                 body's per-view art_dx and shrinks with slot.scale. -->
             <div v-for="es in enemySlots" :key="'e_' + es.charId" :data-rpg-char-id="es.charId">
               <CharacterSlot
                 :character="game.getCharacter(es.charId)" :slot="es.slot"
                 :interactive="true" :instantLayers="true"
+                overlaySlot="rpg-battle-char-overlay" :overlayScale="4"
+                :overlayOffsetX="game.getCharacter(es.charId)?.getTrait('battle_overlay_x_offset') || 0"
+                :overlayOffsetY="game.getCharacter(es.charId)?.getTrait('battle_overlay_y_offset') || 0"
                 :class="{
                   'rpg-targetable-hostile': isTargeting && targetsEnemies && isEnemyTargetable(es.charId),
                   'rpg-splash-highlight': isTargeting && isSplashTarget(es.charId),
@@ -539,12 +541,16 @@ export const RpgBattleScreen = defineComponent({
                 @click="isTargeting && targetsEnemies ? onEnemyTargetClick(es.charId) : onSlotClick(es.charId, 'enemy')" />
             </div>
 
-            <!-- Players -->
+            <!-- Players. view="back" → CharacterSlot resolves bodyArtOffset from
+                 the back spine entry, so the overlay tracks the back spine's center. -->
             <div v-for="ps in playerSlots" :key="'p_' + ps.charId" :data-rpg-char-id="ps.charId"
               v-show="!zoomedIn || ps.charId === battle.activeCharId">
               <CharacterSlot
                 :character="game.getCharacter(ps.charId)" :slot="ps.slot" view="back"
                 :interactive="true" :instantLayers="true"
+                overlaySlot="rpg-battle-char-overlay" :overlayScale="2"
+                :overlayOffsetX="game.getCharacter(ps.charId)?.getTrait('battle_overlay_x_offset') || 0"
+                :overlayOffsetY="game.getCharacter(ps.charId)?.getTrait('battle_overlay_y_offset') || 0"
                 :class="{
                   'rpg-targetable-friendly': isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId),
                   'rpg-splash-highlight': isTargeting && isSplashTarget(ps.charId),
@@ -552,23 +558,6 @@ export const RpgBattleScreen = defineComponent({
                 @mouseenter="isTargeting && targetsAllies && maxSplash ? hoveredTargetId = ps.charId : null"
                 @mouseleave="hoveredTargetId = null"
                 @click="isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId) ? selectTarget(ps.charId) : onSlotClick(ps.charId, 'player')" />
-            </div>
-
-            <!-- Character overlays — positioned at top of each character -->
-            <div v-for="es in enemySlots" :key="'eo_' + es.charId"
-              class="rpg-overlay-anchor" :style="{
-                left: (es.slot.x + overlayX + (game.getCharacter(es.charId)?.getTrait('battle_overlay_x_offset') || 0) * es.slot.scale) + '%',
-                top: (es.slot.y + 50 - es.slot.scale * 50 + OVERLAY_Y_OFFSET + (game.getCharacter(es.charId)?.getTrait('battle_overlay_y_offset') || 0) * es.slot.scale) + '%',
-              }">
-              <RpgCharOverlay :character="game.getCharacter(es.charId)" :slotScale="es.slot.scale" />
-            </div>
-            <div v-for="ps in playerSlots" :key="'po_' + ps.charId"
-              class="rpg-overlay-anchor" :style="{
-                left: (ps.slot.x + overlayX + (game.getCharacter(ps.charId)?.getTrait('battle_overlay_x_offset') || 0) * ps.slot.scale) + '%',
-                top: (ps.slot.y + 50 - ps.slot.scale * 50 + OVERLAY_Y_OFFSET + (game.getCharacter(ps.charId)?.getTrait('battle_overlay_y_offset') || 0) * ps.slot.scale) + '%',
-              }"
-              v-show="!zoomedIn || ps.charId === battle.activeCharId">
-              <RpgCharOverlay :character="game.getCharacter(ps.charId)" :slotScale="ps.slot.scale" />
             </div>
 
             <!-- Ability panel -->

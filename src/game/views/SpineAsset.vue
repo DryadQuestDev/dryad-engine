@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch, onUnmounted } from 'vue';
 import { AssetObject } from '../../schemas/assetSchema';
-import { spineRenderer } from '../utils/spineRenderer';
+import { spineRenderer, type SpineStats } from '../utils/spineRenderer';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 const props = defineProps<{
   asset: AssetObject;
+}>();
+
+const emit = defineEmits<{
+  'spine-loaded': [stats: SpineStats | null];
 }>();
 
 const spineContainerRef = ref<HTMLDivElement | null>(null);
@@ -37,6 +41,7 @@ const initSpine = async () => {
 
     if (!result) return;
     spineInstance = result;
+    emit('spine-loaded', spineRenderer.getStats(result));
 
     if (localStorage.getItem('devMode') === 'true') {
       console.log('🎬 SpineAsset rendered:', {
@@ -62,6 +67,7 @@ const cleanupSpine = () => {
     spineRenderer.unregister(slotId);
     spineInstance = null;
     slotId = '';
+    emit('spine-loaded', null);
   }
 };
 

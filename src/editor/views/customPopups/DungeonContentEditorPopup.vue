@@ -11,6 +11,7 @@ import Textarea from 'primevue/textarea';
 import ToggleSwitch from 'primevue/toggleswitch';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
+import { startPlaytest, openLoadGamePopup } from '../editor-screen/usePlaytest';
 import { Global } from '../../../global/global';
 import { parseToAst } from '../../../utility/dungeonEditor/parseToAst';
 import { serializeAst } from '../../../utility/dungeonEditor/serializeAst';
@@ -30,7 +31,6 @@ import QuestCard from './dungeonEditor/QuestCard.vue';
 import DungeonSelect from '../shared/DungeonSelect.vue';
 import { tagBlockDeep as tagBlock, tagBlocks } from './dungeonEditor/uid';
 import { groupQuestBlocks, questIdOf, questKindOf as questKindOfUtil } from '../../../utility/dungeonEditor/quest';
-
 const props = defineProps<EditorCustomPopupProps>();
 const emit = defineEmits<{
   'update:item': [item: any];
@@ -85,14 +85,29 @@ type DungeonEditorSettings = {
   autoOpen: boolean;
   autosave: boolean;
   autoCurlyQuotes: boolean;
-  selectedBlock: Record<string, { kind: string; id: string }>;
+  autoEnDash: boolean;
+  selectedBlock: Record<string, BlockAnchor>;
+  scrollPosition: Record<string, ScrollAnchor>;
 };
+
+// Block id alone is NOT unique across the doc — every room can have its own
+// `@description` encounter, multiple rooms can declare `#scene1`, etc. The
+// containing room id is part of the identity.
+type BlockAnchor = { kind: string; id: string; roomId: string };
+// Block-anchored scroll persistence: store the topmost visible block + the
+// pixel offset of the scroll viewport's top relative to that block's top.
+// Restoring against `block.offsetTop + offset` is robust against block-height
+// changes between save and reload (trailing-empty strip on parse, lazy-mount
+// activations, future content edits, etc.) — pixel `scrollTop` is not.
+type ScrollAnchor = BlockAnchor & { offset: number };
 const settings = useStorage<DungeonEditorSettings>('dungeonEditor_settings', {
   autoOpen: false,
   autosave: false,
   autoCurlyQuotes: false,
+  autoEnDash: false,
   selectedBlock: {},
-});
+  scrollPosition: {},
+}, undefined, { mergeDefaults: true });
 const autoOpen = computed({
   get: () => settings.value.autoOpen,
   set: (v) => { settings.value.autoOpen = v; },
@@ -104,6 +119,10 @@ const autosave = computed({
 const autoCurlyQuotes = computed({
   get: () => settings.value.autoCurlyQuotes ?? false,
   set: (v) => { settings.value.autoCurlyQuotes = v; },
+});
+const autoEnDash = computed({
+  get: () => settings.value.autoEnDash ?? false,
+  set: (v) => { settings.value.autoEnDash = v; },
 });
 
 function getSelectionStorageKey(): string | null {
@@ -170,6 +189,11 @@ function replaceDocBlocks(source: string) {
 }
 
 watch(() => props.item, (v) => {
+  // Skip when the change came from our own `commit()` emit — `localItem` is
+  // already this reference. Without this guard, the post-dungeon-switch
+  // typing path would re-enter `replaceDocBlocks`, remounting every
+  // BlockCard mid-keystroke and yanking focus.
+  if (localItem.value === v) return;
   localItem.value = v;
   replaceDocBlocks(v?.dungeon_content ?? '');
   restoreSelection();
@@ -180,15 +204,38 @@ watch(() => props.item, (v) => {
 // from `content_raw.txt`). The popup's `props.item` is a deep-copy snapshot
 // taken at openPopup time and won't update — so we re-bind localItem to the
 // fresh active object here, then re-parse and restore selection.
+//
+// Deep-clone (don't alias `activeObject`). If localItem and activeObject
+// shared the same reference, popup mutations (commit() writes dungeon_content
+// per keystroke) would mutate activeObject directly, fire the editor's deep
+// watcher, and flip `hasUnsavedChanges` on every typed character. The
+// wrapper does the same clone on initial open ([CustomPopupWrapper.vue]) —
+// keeping consistency here.
 function onDungeonChange() {
   const newItem = editorInstance.activeObject.value;
   if (!newItem || Array.isArray(newItem)) return;
-  localItem.value = newItem;
-  replaceDocBlocks(newItem.dungeon_content ?? '');
+  localItem.value = JSON.parse(JSON.stringify(newItem));
+  replaceDocBlocks(localItem.value.dungeon_content ?? '');
   restoreSelection();
 }
 
 let suppressSelectionPersist = false;
+
+// Match a saved anchor against the current doc. Block id alone isn't unique
+// (multiple rooms can have `@description`, `#scene1`, etc.) — the containing
+// room id is part of the identity.
+function findBlockIndexByAnchor(anchor: BlockAnchor): number {
+  const blocks = doc.value.blocks;
+  const rooms = roomByBlockIndex.value;
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (!b || b.kind !== anchor.kind) continue;
+    if ((b as any).id !== anchor.id) continue;
+    if ((rooms[i] ?? '') !== (anchor.roomId ?? '')) continue;
+    return i;
+  }
+  return -1;
+}
 
 function restoreSelection() {
   const key = getSelectionStorageKey();
@@ -199,16 +246,65 @@ function restoreSelection() {
     return;
   }
   const saved = settings.value.selectedBlock[key];
-  const idx = saved
-    ? doc.value.blocks.findIndex(
-      (b) => b.kind === saved.kind && (b as any).id === saved.id,
-    )
-    : -1;
+  const idx = saved ? findBlockIndexByAnchor(saved) : -1;
   selectedIndex.value = idx >= 0 ? idx : null;
+  // Restore scroll position from the saved anchor (independent of selection).
+  // Selection still highlights the previously-selected block; scroll lands
+  // exactly where the user left off, regardless of where the selected block
+  // sits in the doc.
+  const savedScroll = settings.value.scrollPosition[key];
   nextTick(() => {
     suppressSelectionPersist = false;
+    if (savedScroll && typeof savedScroll === 'object') {
+      const idx = findBlockIndexByAnchor(savedScroll);
+      const el = blocksListRef.value;
+      if (idx >= 0 && el) {
+        const target = el.querySelector(`[data-block-index="${idx}"]`) as HTMLElement | null;
+        if (target) {
+          el.scrollTop = target.offsetTop + savedScroll.offset;
+          return;
+        }
+      }
+    }
+    // Fallback: scroll to the selected block if no anchor or anchor missing.
     if (selectedIndex.value !== null) scrollToBlock(selectedIndex.value);
   });
+}
+
+// Find the topmost visible block and return an anchor describing where the
+// viewport's top is relative to that block.
+function findTopBlockAnchor(): ScrollAnchor | null {
+  const el = blocksListRef.value;
+  if (!el) return null;
+  const scrollTop = el.scrollTop;
+  const children = el.querySelectorAll<HTMLElement>('[data-block-index]');
+  const rooms = roomByBlockIndex.value;
+  for (const child of Array.from(children)) {
+    const top = child.offsetTop;
+    const bottom = top + child.offsetHeight;
+    if (bottom <= scrollTop) continue;
+    const idx = Number(child.dataset.blockIndex);
+    const block = doc.value.blocks[idx];
+    if (!block || block.kind === 'raw') continue;
+    const id = (block as any).id;
+    if (!id) continue;
+    return {
+      kind: block.kind,
+      id,
+      roomId: rooms[idx] ?? '',
+      offset: scrollTop - top,
+    };
+  }
+  return null;
+}
+
+// Persist the blocks-list scroll position (per dungeon) on scroll.
+function onBlocksListScroll() {
+  const key = getSelectionStorageKey();
+  if (!key) return;
+  const anchor = findTopBlockAnchor();
+  if (anchor) settings.value.scrollPosition[key] = anchor;
+  else delete settings.value.scrollPosition[key];
 }
 
 onMounted(() => {
@@ -217,11 +313,28 @@ onMounted(() => {
 
 const serialized = computed(() => serializeAst(doc.value));
 
+// Popup-local dirty flag. Typing in the popup mutates `localItem` (a clone)
+// and `doc` — neither of those flip `editor.hasUnsavedChanges`. Without a
+// separate flag, the Playtest / Load Save buttons would stay enabled while
+// the popup has unsaved edits, and clicking either would reload and drop
+// them. Set true on every `commit()` call, cleared after autosave / manual
+// save (the latter flips `editor.hasUnsavedChanges` from true to false,
+// which we observe with a watcher below).
+const popupDirty = ref(false);
+
 function commit() {
   if (!localItem.value) return;
   localItem.value.dungeon_content = serialized.value;
+  popupDirty.value = true;
   emit('update:item', localItem.value);
 }
+
+// Clear `popupDirty` when a save lands. Manual saves go through the wrapper
+// → `editor.saveActiveObject()` → `editor.hasUnsavedChanges = false`. We
+// observe that transition here. (Autosave clears popupDirty inline below.)
+watch(() => editorInstance.hasUnsavedChanges.value, (now, was) => {
+  if (was && !now) popupDirty.value = false;
+});
 
 // Insert-after-quest helper: if `idx` is inside a quest group, return the
 // group's `endIndex` (one past its last member) so callers splice the new
@@ -328,6 +441,16 @@ function moveBlock(index: number, direction: -1 | 1) {
   compactQuestGroups();
   commit();
 }
+
+// Stable wrappers for the v-for'd BlockCard event listeners. Inline arrows
+// in the template create a new function reference per render and force every
+// BlockCard to re-render on every keystroke; binding plain function refs
+// here avoids that. BlockCard emits its `index` as the first event arg.
+const onBlockUpdate = (idx: number, block: Block) => updateBlock(idx, block);
+const onBlockRemove = (idx: number) => removeBlock(idx);
+const onBlockMoveUp = (idx: number) => moveBlock(idx, -1);
+const onBlockMoveDown = (idx: number) => moveBlock(idx, 1);
+const onBlockInsertScene = (idx: number, sceneId: string) => insertSceneAfter(idx, sceneId);
 
 function addBlock(kind: 'room' | 'encounter' | 'scene' | 'template') {
   const insertAt = selectedIndex.value !== null
@@ -506,7 +629,13 @@ watch(selectedIndex, (idx) => {
   }
   const block = doc.value.blocks[idx];
   if (!block || block.kind === 'raw') return;
-  settings.value.selectedBlock[key] = { kind: block.kind, id: (block as any).id };
+  const id = (block as any).id;
+  if (!id) return;
+  settings.value.selectedBlock[key] = {
+    kind: block.kind,
+    id,
+    roomId: roomByBlockIndex.value[idx] ?? '',
+  };
 });
 
 function insertSceneAfter(blockIndex: number, sceneId: string) {
@@ -604,7 +733,18 @@ function sceneExistsForBlock(blockIndex: number, sceneId: string): boolean {
 }
 provide('sceneExistsForBlock', sceneExistsForBlock);
 
-const docIndex = computed(() => buildDocumentIndex(doc.value));
+// Debounced ref instead of computed: `buildDocumentIndex` does
+// `jsonrepair` + `JSON.parse` for every `{...}` block (~1.8ms per keystroke
+// on dense docs per profiler). Index dropdowns (Actions/Flags/Anchors) are
+// fine with a 300ms staleness — no need to recompute live during typing.
+const docIndex = ref(buildDocumentIndex(doc.value));
+watchDebounced(
+  () => doc.value.blocks,
+  () => {
+    docIndex.value = buildDocumentIndex(doc.value);
+  },
+  { debounce: 300, deep: true },
+);
 
 // Walk doc.blocks and group contiguous quest-shaped `$template` runs into
 // QuestGroup entries; non-quest blocks pass through. Underlying AST
@@ -853,7 +993,8 @@ watchDebounced(
     Object.assign(ao, localItem.value);
     editorInstance.hasUnsavedChanges.value = true;
     try {
-      await editorInstance.saveActiveObject();
+      await editorInstance.saveActiveObject({ silent: true });
+      popupDirty.value = false;
     } catch (err) {
       console.warn('[DungeonContentEditor] Autosave failed:', err);
     }
@@ -890,8 +1031,17 @@ function hasLintIssues(): boolean {
 }
 defineExpose({ hasLintIssues });
 
+// Stable shared empty array. `.filter()` allocates a fresh array on every
+// call, so passing it as a prop forces every BlockCard to re-render on every
+// keystroke (Vue sees a different prop reference). Returning the same
+// reference when there are no issues lets Vue's prop diffing skip the
+// re-render. Massive perf win on big dungeons (~55 BlockCards × ~13ms =
+// ~730ms saved per keystroke per the profiler).
+const EMPTY_ISSUES: LintIssue[] = [];
 function issuesForBlock(blockIndex: number): LintIssue[] {
-  return lintIssues.value.filter((i) => i.blockIndex === blockIndex);
+  if (lintIssues.value.length === 0) return EMPTY_ISSUES;
+  const filtered = lintIssues.value.filter((i) => i.blockIndex === blockIndex);
+  return filtered.length === 0 ? EMPTY_ISSUES : filtered;
 }
 
 useSortable(tocListRef, doc.value.blocks, {
@@ -936,6 +1086,22 @@ function scrollToBlock(index: number) {
   el.classList.add('flash');
   window.setTimeout(() => el.classList.remove('flash'), 1200);
 }
+
+// Keep the TOC viewport showing the currently-selected block. Triggered on
+// selection change (clicking a block, jumping via lint banner, search hits)
+// and on popup open / dungeon switch via the watcher below.
+function scrollTocToSelected(index: number) {
+  const root = tocListRef.value;
+  if (!root) return;
+  const el = root.querySelector(`[data-toc-index="${index}"]`) as HTMLElement | null;
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+}
+
+watch(selectedIndex, (idx) => {
+  if (idx === null) return;
+  nextTick(() => scrollTocToSelected(idx));
+});
 
 function jumpToBlock(index: number) {
   selectedIndex.value = index;
@@ -992,19 +1158,37 @@ function questKindOf(id: string | undefined): QuestKind | null {
   <div class="dungeon-content-editor">
     <div class="editor-toolbar">
       <div class="toolbar-left">
-        <DungeonSelect class="popup-dungeon-select" @change="onDungeonChange" />
-        <label class="auto-open-toggle" title="Open this popup automatically on Dungeon → Config">
+        <DungeonSelect class="popup-dungeon-select" @change="onDungeonChange"
+          :disabled="popupDirty || editorInstance.hasUnsavedChanges.value" v-tooltip.bottom="(popupDirty || editorInstance.hasUnsavedChanges.value)
+            ? 'Save your changes before switching dungeons'
+            : ''" />
+        <label class="auto-open-toggle" v-tooltip.bottom="'Open this popup automatically on Dungeon → Config'">
           <ToggleSwitch v-model="autoOpen" />
           <span class="auto-open-label">Auto-open</span>
         </label>
-        <label class="auto-open-toggle" title="Save to disk automatically on edit (skips error checking)">
+        <label class="auto-open-toggle" v-tooltip.bottom="'Save to disk automatically on edit (skips error checking)'">
           <ToggleSwitch v-model="autosave" />
           <span class="auto-open-label">Autosave</span>
         </label>
-        <label class="auto-open-toggle" title="Convert straight quotes to curly quotes as you type (like Google Docs)">
+        <label class="auto-open-toggle" v-tooltip.bottom="'Convert straight quotes to curly quotes as you type (like Google Docs)'">
           <ToggleSwitch v-model="autoCurlyQuotes" />
           <span class="auto-open-label">Curly quotes</span>
         </label>
+        <label class="auto-open-toggle" v-tooltip.bottom="'Convert `--` to en dash `–` as you type'">
+          <ToggleSwitch v-model="autoEnDash" />
+          <span class="auto-open-label">En dash</span>
+        </label>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <Button icon="pi pi-play" label="Playtest" size="small"
+          :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
+          v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
+            ? 'You have unsaved changes'
+            : 'Start playtesting with dev mode (Ctrl/Cmd+P)'" @click="startPlaytest" />
+        <Button icon="pi pi-file-arrow-up" size="small" text
+          :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
+          v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
+            ? 'You have unsaved changes'
+            : 'Load save in dev mode'" @click="openLoadGamePopup" />
         <!--
         <span class="counts">
           <span>^ {{ stats.room }}</span>
@@ -1102,14 +1286,15 @@ function questKindOf(id: string | undefined): QuestKind | null {
           <template v-for="(block, idx) in doc.blocks" :key="(block as any)">
             <div
               v-show="(tocRoles[idx].questGroup ? isItemVisible({ kind: 'quest', group: tocRoles[idx].questGroup! }) : isBlockVisible(idx)) && !tocRoles[idx].hidden"
+              v-bind="{ 'data-toc-index': idx }"
               class="toc-entry toc-handle" :class="{
-              'toc-entry--room': block.kind === 'room',
-              'toc-entry--indented': indented[idx],
-              'toc-selected': tocRoles[idx].questGroup
-                ? (selectedIndex !== null && selectedIndex >= tocRoles[idx].questGroup!.startIndex && selectedIndex < tocRoles[idx].questGroup!.endIndex)
-                : selectedIndex === idx,
-              'toc-locked': isLockedBlock(block),
-            }" @click="jumpToBlock(idx)">
+                'toc-entry--room': block.kind === 'room',
+                'toc-entry--indented': indented[idx],
+                'toc-selected': tocRoles[idx].questGroup
+                  ? (selectedIndex !== null && selectedIndex >= tocRoles[idx].questGroup!.startIndex && selectedIndex < tocRoles[idx].questGroup!.endIndex)
+                  : selectedIndex === idx,
+                'toc-locked': isLockedBlock(block),
+              }" @click="jumpToBlock(idx)">
               <span class="toc-sigil" :class="[
                 `toc-sigil--${block.kind}`,
                 block.kind === 'encounter' && (block as any).id === 'description' ? 'toc-sigil--description' : '',
@@ -1118,7 +1303,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
                   ? `toc-sigil--quest-${questKindOf((block as any).id)!.replace('_', '-')}` : '',
                 tocRoles[idx].questGroup ? 'toc-sigil--quest-title' : '',
               ]">{{ kindSigil[block.kind] }}</span>
-              <span class="toc-label">{{ tocRoles[idx].questGroup ? `Quest: ${tocRoles[idx].questGroup!.questId}` : labelFor(block) }}</span>
+              <span class="toc-label">{{ tocRoles[idx].questGroup ? `Quest: ${tocRoles[idx].questGroup!.questId}` :
+                labelFor(block) }}</span>
               <template v-if="block.kind === 'scene'">
                 <div v-for="sub in sceneSubEntries(block as SceneBlock)"
                   :key="sub.kind + '-' + sub.rowIdx + '-' + ('colIdx' in sub ? sub.colIdx : '')" class="toc-subentry"
@@ -1151,7 +1337,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
         </div>
       </aside>
 
-      <div v-if="!showRaw" ref="blocksListRef" class="blocks-list">
+      <div v-if="!showRaw" ref="blocksListRef" class="blocks-list" @scroll.passive="onBlocksListScroll">
         <div v-if="doc.blocks.length === 0" class="empty-state">
           <p>Empty dungeon. Start by adding a Room, Encounter, Scene, or Template above.</p>
         </div>
@@ -1162,17 +1348,14 @@ function questKindOf(id: string | undefined): QuestKind | null {
           ? `quest:${(doc.blocks[item.group.startIndex] as any).__uid ?? item.group.startIndex}`
           : (doc.blocks[item.idx] as any).__uid ?? item.idx">
           <template v-if="item.kind === 'block'">
-            <div v-if="isBlockVisible(item.idx)" v-bind="{ 'data-block-index': item.idx }" class="block-anchor"
-              :class="{
-                'block-anchor--selected': selectedIndex === item.idx,
-                'block-anchor--indented': indented[item.idx],
-              }" @click="(e: MouseEvent) => onBlockClick(item.idx, e)">
+            <div v-if="isBlockVisible(item.idx)" v-bind="{ 'data-block-index': item.idx }" class="block-anchor" :class="{
+              'block-anchor--selected': selectedIndex === item.idx,
+              'block-anchor--indented': indented[item.idx],
+            }" @click="(e: MouseEvent) => onBlockClick(item.idx, e)">
               <BlockCard :block="doc.blocks[item.idx]" :index="item.idx" :can-move-up="item.idx > 0"
                 :can-move-down="item.idx < doc.blocks.length - 1" :issues="issuesForBlock(item.idx)"
-                :locked="isLockedBlock(doc.blocks[item.idx])"
-                @update:block="(b: Block) => updateBlock(item.idx, b)" @remove="removeBlock(item.idx)"
-                @move-up="moveBlock(item.idx, -1)" @move-down="moveBlock(item.idx, 1)"
-                @insert-scene="(id: string) => insertSceneAfter(item.idx, id)" />
+                :locked="isLockedBlock(doc.blocks[item.idx])" @update:block="onBlockUpdate" @remove="onBlockRemove"
+                @move-up="onBlockMoveUp" @move-down="onBlockMoveDown" @insert-scene="onBlockInsertScene" />
             </div>
           </template>
           <template v-else>
@@ -1718,6 +1901,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   position: relative;
 }
 
+/*
 .block-anchor--indented::before {
   content: '';
   position: absolute;
@@ -1728,7 +1912,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   background: rgba(245, 127, 23, 0.3);
   border-radius: 1px;
 }
-
+*/
 .block-anchor.flash :deep(.block-card) {
   animation: block-flash 1.2s ease-out;
 }

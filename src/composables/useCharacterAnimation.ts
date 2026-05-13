@@ -18,11 +18,12 @@ export interface CharacterAnimationControls {
   // Position refs for animated positioning
   animatedX: Ref<number>;
   animatedY: Ref<number>;
+  animatedScale: Ref<number>;
 
   // Animation control methods
   playEnter: () => void;
   playExit: () => void;
-  playMove: (from: { x?: number; y?: number }, to: { x?: number; y?: number }) => void;
+  playMove: (from: { x?: number; y?: number; scale?: number }, to: { x?: number; y?: number; scale?: number }) => void;
   startIdle: () => void;
   stopIdle: () => void;
 
@@ -53,6 +54,11 @@ export function useCharacterAnimation(
   // Animated position refs
   const animatedX = ref(slot.x ?? 50);
   const animatedY = ref(slot.y ?? 50);
+  // Animate scale on the same GSAP timeline as x/y so transitions don't desync
+  // Without this, scale used a CSS transition with a slightly
+  // different easing curve and could lift the body briefly mid-zoom, exposing
+  // legs that should stay below viewport bottom.
+  const animatedScale = ref(slot.scale ?? 1);
 
   // Compute transform origin from anchors for GSAP rotation animations
   const transformOrigin = computed(() => {
@@ -305,8 +311,8 @@ export function useCharacterAnimation(
    * Play move transition animation with simple ease
    */
   const playMove = (
-    from: { x?: number; y?: number },
-    to: { x?: number; y?: number }
+    from: { x?: number; y?: number; scale?: number },
+    to: { x?: number; y?: number; scale?: number }
   ) => {
     if (!elementRef.value) return;
 
@@ -326,9 +332,11 @@ export function useCharacterAnimation(
     // Set current position if provided
     if (from.x !== undefined) animatedX.value = from.x;
     if (from.y !== undefined) animatedY.value = from.y;
+    if (from.scale !== undefined) animatedScale.value = from.scale;
 
     const targetX = to.x ?? animatedX.value;
     const targetY = to.y ?? animatedY.value;
+    const targetScale = to.scale ?? animatedScale.value;
 
     const onComplete = () => {
       if (loopAnimation.value) loopAnimation.value.resume();
@@ -336,7 +344,9 @@ export function useCharacterAnimation(
       currentAnimation.value = null;
     };
 
-    // Animate position only — no scale dip (avoids exposing cropped edges during zoom transitions)
+    // Animate x/y/scale on the same timeline so they stay in lockstep — body_bottom
+    // = slot.y + 50 + slot.scale × 50 then interpolates monotonically between the
+    // two endpoints (no mid-flight dip that would expose cropped legs).
     const timeline = gsap.timeline({ onComplete });
 
     timeline.to(animatedX, {
@@ -347,6 +357,12 @@ export function useCharacterAnimation(
 
     timeline.to(animatedY, {
       value: targetY,
+      duration,
+      ease
+    }, 0);
+
+    timeline.to(animatedScale, {
+      value: targetScale,
       duration,
       ease
     }, 0);
@@ -703,6 +719,7 @@ export function useCharacterAnimation(
     }
     gsap.killTweensOf(animatedX);
     gsap.killTweensOf(animatedY);
+    gsap.killTweensOf(animatedScale);
     isAnimating.value = false;
     currentAnimation.value = null;
   };
@@ -719,6 +736,7 @@ export function useCharacterAnimation(
     contentRef,
     animatedX,
     animatedY,
+    animatedScale,
     playEnter,
     playExit,
     playMove,

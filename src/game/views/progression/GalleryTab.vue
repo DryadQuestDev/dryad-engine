@@ -441,13 +441,21 @@ const previewCharacterDiscovered = computed(() => {
   char.skinLayers = new Set(currentCharacterTweaks.value.skinLayers);
   char.skinLayerStyles = new Map(currentCharacterTweaks.value.skinLayerStyles);
 
-  // Apply spine model tweak if set (override the spine config for this view)
+  // Apply spine model tweak if set (override the spine config for this view).
+  // Preserve the existing per-spine art offsets so the override doesn't reset framing.
   const view = currentCharacterTweaks.value.view ?? '';
   const selectedSkeleton = currentCharacterTweaks.value.spineModel;
   if (selectedSkeleton && discoveredCharacterData.value) {
     const cfg = discoveredCharacterData.value.spineConfigs.find(c => c.view === view && c.skeleton === selectedSkeleton);
     if (cfg) {
-      char.spineViews.set(view, { atlas: cfg.atlas, skeleton: cfg.skeleton, animation: cfg.animations[0] || 'idle' });
+      const existing = char.spineViews.get(view);
+      char.spineViews.set(view, {
+        atlas: cfg.atlas,
+        skeleton: cfg.skeleton,
+        artDx: existing?.artDx ?? 0,
+        artDy: existing?.artDy ?? 0,
+        artScale: existing?.artScale ?? 1,
+      });
     }
   }
 

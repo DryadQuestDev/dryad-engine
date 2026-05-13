@@ -191,7 +191,7 @@ async function applyModChanges() {
       </div>
     </div>
 
-    <div class="actions">
+    <div v-if="availableMods.length > 0" class="actions">
       <button @click="applyModChanges" :disabled="isLoading" class="apply-button">
         {{ isLoading ? 'Applying...' : 'Set Mods' }}
       </button>

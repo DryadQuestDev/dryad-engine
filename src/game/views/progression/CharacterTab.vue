@@ -80,6 +80,10 @@ function selectTab(tabId: string) {
   position: relative;
   display: flex;
   align-items: center;
+  /* Center the 100cqh slot in the 50cqh column so the doll's center (where art_dx=0
+     lands the body) is at column-center, not at the column's right edge. The slot
+     overflows the column symmetrically by 25cqh on each side. */
+  justify-content: center;
 }
 
 .character-doll-wrapper :deep(.character-slot) {
@@ -95,10 +99,6 @@ function selectTab(tabId: string) {
   position: relative;
   width: 100%;
   height: 100%;
-}
-
-.character-doll-wrapper :deep(.character-slot-rotation-wrapper) {
-  justify-content: flex-start;
 }
 
 

@@ -8,7 +8,10 @@ export const CharacterSkinLayerSchema = {
     images: { type: 'schema', tooltip: 'Images of the skin layer, dynamically built based on attributes.' }, // change to build imgs dinamically
     masks: { type: 'schema', tooltip: 'Clip all image layers below this layer inside this mask boundaries.' },
     styles: { type: 'string[]', tooltip: 'Custom css classes to apply to the skin layer by default.' },
-    view: { type: 'chooseOne', fromFile: 'character_views', tooltip: 'View this layer belongs to (e.g. back, side). Empty = base layer, always rendered.' },
+    view: { type: 'chooseOne', fromFile: 'character_views', tooltip: 'View this layer belongs to (e.g. back, side). _default or empty = base layer, always rendered.' },
+    art_dx: { type: 'number', tooltip: 'X shift in % for this layer\'s art positioning. Falls back to character art_dx trait when unset.' },
+    art_dy: { type: 'number', tooltip: 'Y shift in % for this layer\'s art positioning. Falls back to character art_dy trait when unset.' },
+    art_scale: { type: 'number', tooltip: 'Scale multiplier for this layer\'s art. Falls back to character art_scale trait when unset.' },
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
 } as const satisfies Schema;
 

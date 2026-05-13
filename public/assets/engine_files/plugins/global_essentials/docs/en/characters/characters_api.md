@@ -296,11 +296,10 @@ const coreStatus = character.getCoreStatus();
 
 ### addStatus(status)
 
-Add a status effect. If status already exists and is stackable, adds stacks instead.
+Add a status effect. If status already exists and is stackable, adds stacks instead. Use `game.createStatus(id)` to build the Status instance from a registered template.
 
 ```js
-const poison = new Status();
-poison.id = "poison";
+const poison = game.createStatus("poison");
 character.addStatus(poison);
 ```
 

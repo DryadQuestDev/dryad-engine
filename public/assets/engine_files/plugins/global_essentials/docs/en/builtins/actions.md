@@ -87,14 +87,26 @@ Column 1 (before `%`) plays on first visit. Column 2 (after `%`) plays on every 
 | `create_character` | Create a new character | `{ id: "npc1", template: "villager" }` | |
 | `update_character` | Update character properties | `{ id: "alice", party: true }` | |
 | `delete_character` | Delete a character | `{ id: "npc1" }` | |
-| `add_status` | Add status effect to character | `{ character: "alice", statusId: "poison" }` | |
+| `status` | Apply / remove status effects per target. `&` separates items; `!` prefix removes | `"alice->buff1 & buff2, bob->!debuff"` | |
 | `char` | Modify character property (`=` set, `>` add, `<` subtract) | `"alice.resource.health>10"` | |
 | | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle` | `"mc.attribute.belly=2"` | |
-| `add_skin_layer` | Add skin layer to character | `"alice.armor"` | |
-| `remove_skin_layer` | Remove skin layer from character | `"alice.armor"` | |
-| `add_item_slot` | Add equipment slot to character | `"alice.ring"` | |
-| `remove_item_slot` | Remove equipment slot from character | `"alice.ring"` | |
+| `skin_layer` | Add / remove skin layers per target. `&` separates layers; `!` prefix removes | `"alice->armor & helmet, bob->!cloak"` | |
+| `item_slot` | Add / remove equipment slots per target. `&` separates slots; `!` prefix removes | `"alice->ring & necklace, bob->!belt"` | |
 | `skill` | Learn a skill for character | `"alice.fire_magic.fireball"` | |
+
+### Targeted-spec syntax (`status`, `skin_layer`, `item_slot`)
+
+Each action takes a string of the form `targetId->item & item & ..., targetId->!item, ...`:
+
+- Comma separates per-target groups.
+- Within a group, `&` separates items.
+- Items prefixed with `!` are **removed**; bare items are **added**.
+
+```javascript
+{ status: "alice->blessed & focused, bob->!cursed" }
+{ skin_layer: "mc->armor_dirty, mc->!armor_clean" }
+{ item_slot: "alice->extra_ring, bob->!ring_3" }
+```
 
 ---
 
