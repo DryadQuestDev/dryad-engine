@@ -7,6 +7,7 @@ import ItemSlots from './ItemSlots.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import { Game } from '../../game';
 import { useCharacterAnimation } from '../../../composables/useCharacterAnimation';
+import { OVERLAY_BASE_SCALE } from '../../utils/characterReference';
 
 const props = defineProps<{
   character: Character;
@@ -17,10 +18,6 @@ const props = defineProps<{
   view?: string; // Character view overrides (e.g. 'back')
   interactive?: boolean; // Enable pointer-events for click handling
   overlaySlot?: string; // Optional slot name for overlay injection (same pattern as CharacterFace)
-  /** Boost factor for the overlay's CSS scale ONLY when slot.scale < 1 (zoomed-out
-   * characters). Default 1 = no boost. Lets the dev keep the overlay readable
-   * for small enemies/inactive players without affecting full-size active ones. */
-  overlayScale?: number;
   /** Dev-tuned fine-adjust offsets in cqh of slot height — added to bodyArtOffset
    * so the overlay sits where the dev placed it via OverlayTuner (or similar).
    * Plugins read their own per-character traits and pass them in; CharacterSlot
@@ -147,16 +144,11 @@ const overlayArtDx = computed(() => {
   return `${(bodyArtOffset.value.dx + tuned) * scale.value}cqh`;
 });
 const overlayArtDy = computed(() => `${(bodyArtOffset.value.dy + (props.overlayOffsetY ?? 0)) * scale.value}cqh`);
-// `overlayScale` prop boosts the overlay's CSS scale for zoomed-out characters,
-// capped at 1 so the active-player overlay never exceeds design size. Capping is
-// important because `scale` is animated smoothly via GSAP; the
-// previous `s < 1 ? s × boost : s` conditional was discontinuous at s=1 and made
-// the overlay balloon to ~2× size mid-transition before snapping back to 1×.
-// `min(s × boost, 1)` is monotonic — overlay grows smoothly to design size and
-// plateaus once `s × boost` reaches 1.
-const effectiveOverlayScale = computed(() =>
-  Math.min(scale.value * (props.overlayScale ?? 1), 1)
-);
+// Single source of truth for overlay (HP bar / name) size: a fixed base scale, so every
+// character's overlay is the SAME on-screen size regardless of slot.scale. The overlay-wrapper
+// is a sibling of the body's scale-wrapper (and its sizes are cqh = viewport-relative), so
+// slot.scale never scales it — only this value does. Position still tracks the head (overlayTop).
+const effectiveOverlayScale = OVERLAY_BASE_SCALE;
 // Body's top edge in the slot's coord frame: slot center − half body height.
 // Always use the actual slot.scale (which determines body height), not the
 // boosted overlay scale — otherwise a boost > 1 would lift the anchor above
@@ -468,6 +460,10 @@ const onLeave = (_el: Element, done: () => void) => {
 }
 
 .character-slot-overlay-wrapper {
+  /* Pin font-size so the overlay (healthbar text, etc.) doesn't scale with the
+     engine's user-configurable font setting. The wrapper's own transform-scale
+     still applies for per-slot zoom. */
+  font-size: 14px;
   position: absolute;
   left: 50%;
   /* Body's top edge in slot's coord frame (= 50cqh − slot.scale × 50cqh). At
@@ -481,9 +477,13 @@ const onLeave = (_el: Element, done: () => void) => {
      translate(art_dx cqh, art_dy cqh): art tracking — matches the body's per-view
      offset (spine entry's art_dx for spine views, traits for static). cqh resolves
      against the slot (container-type:size), same as the canvas's own translate.
-     scale(slot.scale): shrink overlay's intrinsic size with the body, around
-     transform-origin (50% 0 = top-center) so it shrinks toward the head. */
-  transform: translateX(-50%) translate(v-bind("overlayArtDx"), v-bind("overlayArtDy")) scale(v-bind("effectiveOverlayScale"));
+     scale(effectiveOverlayScale): fixed base scale so the overlay is a
+     constant on-screen size for every character, around transform-origin (50% 0 = top-center).
+     --overlay-zoom: an extra multiplier a parent can set (default 1) to enlarge the overlay so it
+     visually matches characters that a sibling camera transform has magnified — e.g. the battle
+     zooms enemies via a camera scale, so the un-camera'd active player sets --overlay-zoom to the
+     camera factor to keep its overlay the same on-screen size. */
+  transform: translateX(-50%) translate(v-bind("overlayArtDx"), v-bind("overlayArtDy")) scale(calc(var(--overlay-zoom, 1) * v-bind("effectiveOverlayScale")));
   /* Anchor the scale at top-center so the overlay shrinks toward the body's
      head, not from the slot's geometric center. */
   transform-origin: 50% 0;

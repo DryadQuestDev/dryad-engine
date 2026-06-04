@@ -3,7 +3,8 @@
     "overview",
     "battle_flow",
     "damage_formula",
-    "tokens",
+    "statuses",
+    "stagger",
     "abilities",
     "ai",
     "music"

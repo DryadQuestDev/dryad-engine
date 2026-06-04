@@ -1,6 +1,6 @@
 import { active } from 'sortablejs';
 import { Schema, SchemaToType } from '../utility/schema';
-import { BaseStatusSchema } from './characterStatusSchema';
+import { AppliedStatusSchema } from './characterStatusSchema';
 
 export const ItemTemplateSchema = {
     uid: { type: 'uid', required: true, tooltip: 'Unique identifier for the item template.' },
@@ -18,7 +18,7 @@ export const ItemTemplateSchema = {
     consume_absolute: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', fromFileTypeAnd: { is_resource: true }, tooltip: 'Flat resource amount to restore/reduce on consume. Positive = restore, negative = reduce.', show: { is_consumable: [true] } },
     status: {
         type: 'schema', tooltip: 'The status to apply to the character when equipped.', objects: {
-            ...BaseStatusSchema
+            ...AppliedStatusSchema
         }
     },
     slots: { type: 'chooseMany', fromFile: 'item_slots', tooltip: 'Equipment slots where this item can be equipped.' },

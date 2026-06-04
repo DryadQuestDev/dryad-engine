@@ -18,113 +18,84 @@ function getScalingStat(caster, damageType) {
   return event.value;
 }
 
-/** Derive the damage type a token scales with from its first scaling-relevant effect. */
-function getTokenDamageType(tokenDef) {
-  const eff = tokenDef.effects?.find(e => e.type === 'dot' || e.type === 'hot' || e.type === 'absorb');
-  if (!eff) return 'absolute';
-  if (eff.type === 'absorb') return 'absolute';
-  if (eff.type === 'hot') return 'sorcery';
-  return eff.damage_type || 'absolute';
+/** Derive the damage type a status scales with from its meta. */
+export function getStatusDamageType(statusDef) {
+  const meta = statusDef?.meta || {};
+  if (meta.absorb) return 'absolute';
+  if (meta.hot) return 'sorcery';
+  if (meta.dot_damage_type) return meta.dot_damage_type;
+  return 'absolute';
 }
 
-// ── Token helpers ──
+// ── Status helpers ──
 
-/** @returns {Map<string, TokenDefinition>} */
-export function getTokenDefinitions() {
-  return game.getData('plugins_data/auto_battler/token_definitions', true);
+/** @returns {Map<string, any>} */
+export function getStatusDefinitions() {
+  return game.getData('character_statuses', true);
 }
 
 /**
- * Apply stacks as a new independent instance. Returns applied count or null.
- * @param {string} characterId
- * @param {string} tokenId
- * @param {number} stacks
- * @param {number} [duration] - turns until this instance expires (omit = permanent)
- * @param {string} [source] - who applied this token (defaults to characterId)
+ * Apply via engine status API. For multi_stack=true statuses appends a new instance
+ * (DD-style); for single-stack refreshes the existing one.
  */
-export function applyToken(characterId, tokenId, stacks, duration, source) {
-  const battle = currentBattle.value;
-  const def = getTokenDefinitions().get(tokenId);
-  if (!def || stacks <= 0) return null;
-  if (!battle.tokens[characterId]) battle.tokens[characterId] = {};
-  if (!battle.tokens[characterId][tokenId]) battle.tokens[characterId][tokenId] = [];
-  const instances = battle.tokens[characterId][tokenId];
-  const max = def.max_stacks || Infinity;
-  const total = instances.reduce((s, i) => s + i.stacks, 0);
-  const allowed = Math.min(stacks, max - total);
-  if (allowed <= 0) return null;
-  /** @type {TokenInstance} */
-  const inst = { stacks: allowed, source: source || characterId };
-  if (duration != null) inst.duration = duration;
-  instances.push(inst);
-  return { applied: allowed, tokenName: def.name };
+export function applyStatusInstance(characterId, statusId, stacks, duration, source) {
+  if (stacks <= 0) return null;
+  const char = game.getCharacter(characterId);
+  if (!char) return null;
+  const def = getStatusDefinitions().get(statusId);
+  if (!def) return null;
+  const status = game.createStatus(statusId);
+  if (!status) return null;
+  char.addStatus(status, { stacks, duration, source });
+  return { applied: stacks, name: def.name };
 }
 
-/** Remove stacks FIFO from oldest instances. Deletes entry if all consumed. */
-export function removeTokenStacks(characterId, tokenId, stacks) {
-  const battle = currentBattle.value;
-  const instances = battle.tokens[characterId]?.[tokenId];
-  if (!instances?.length) return;
-  let remaining = stacks;
-  while (remaining > 0 && instances.length > 0) {
-    const inst = instances[0];
-    if (inst.stacks <= remaining) {
-      remaining -= inst.stacks;
-      instances.shift();
-    } else {
-      inst.stacks -= remaining;
-      remaining = 0;
-    }
-  }
-  if (instances.length === 0) delete battle.tokens[characterId][tokenId];
+/** Remove stacks from a status. Removes the status entirely if it drops to 0. */
+export function removeStatusStacks(characterId, statusId, stacks) {
+  return game.getCharacter(characterId)?.removeStatusStacks(statusId, stacks) ?? 0;
 }
 
-/** Get total stacks of a token on a character (sum across all instances). */
-export function getTokenStacks(characterId, tokenId) {
-  const instances = currentBattle.value.tokens[characterId]?.[tokenId];
-  if (!instances?.length) return 0;
-  return instances.reduce((sum, i) => sum + i.stacks, 0);
+/** Get total stacks of a status on a character. */
+export function getStatusStacks(characterId, statusId) {
+  const char = game.getCharacter(characterId);
+  return char?.getStatus(statusId)?.currentStacks ?? 0;
 }
 
-/** Process DoT and HoT token effects for a character. Uses total stacks across all instances. */
-export function processTokenEffects(characterId) {
-  const battle = currentBattle.value;
-  const charTokens = battle.tokens[characterId];
-  if (!charTokens) return [];
-  const defs = getTokenDefinitions();
+/** Process DoT and HoT status effects for a character. Reads status.meta.dot_damage_type / .hot. */
+export function processStatusEffects(characterId) {
   const character = game.getCharacter(characterId);
   if (!character) return [];
+  const defs = getStatusDefinitions();
 
   /** @type {EffectResult[]} */
   const results = [];
 
-  for (const tokenId in charTokens) {
-    const instances = charTokens[tokenId];
-    const def = defs.get(tokenId);
-    if (!def) continue;
-    const totalStacks = instances.reduce((s, i) => s + i.stacks, 0);
-    const effectiveStacks = Math.round(totalStacks);
-    if (effectiveStacks <= 0) continue;
-    for (const eff of def.effects) {
-      if (eff.type === 'dot') {
-        const rawDmg = Math.round(eff.value * effectiveStacks);
-        const dmgType = eff.damage_type || 'absolute';
-        const dmg = applyDefenses(rawDmg, dmgType, character);
-        if (dmg > 0) {
-          character.addResource('health', -dmg);
-          results.push({ type: 'token_dot', targetId: characterId, amount: dmg, rawAmount: rawDmg, damageType: dmgType, tokenId });
-        }
-      } else if (eff.type === 'hot') {
-        let heal = Math.round(eff.value * effectiveStacks);
-        const rawHeal = heal;
-        const healReceivedMult = character.getStat('heal_received_mult') || 0;
-        if (healReceivedMult) {
-          heal = Math.max(0, Math.round(heal * (1 + healReceivedMult / 100)));
-        }
-        if (heal > 0) {
-          character.addResource('health', heal);
-          results.push({ type: 'token_hot', targetId: characterId, amount: heal, rawAmount: rawHeal, tokenId });
-        }
+  for (const status of character.getStatuses()) {
+    const meta = status.meta || {};
+    const totalStacks = Math.round(status.currentStacks);
+    if (totalStacks <= 0) continue;
+    const isDot = !!meta.dot_damage_type;
+    const isRegen = status.id === 'regen';
+    if (!isDot && !isRegen) continue;
+    const statusName = status.name || defs.get(status.id)?.name || status.id;
+    if (isDot) {
+      const rawDmg = totalStacks;
+      const dmgType = meta.dot_damage_type;
+      const dmg = applyDefenses(rawDmg, dmgType, character);
+      if (dmg > 0) {
+        character.addResource('health', -dmg);
+        results.push({ type: 'status_dot', targetId: characterId, amount: dmg, rawAmount: rawDmg, damageType: dmgType, statusId: status.id, statusName });
+      }
+    } else if (isRegen) {
+      let heal = totalStacks;
+      const rawHeal = heal;
+      const healReceivedMult = character.getStat('heal_received_mult') || 0;
+      if (healReceivedMult) {
+        heal = Math.max(0, Math.round(heal * (1 + healReceivedMult / 100)));
+      }
+      if (heal > 0) {
+        character.addResource('health', heal);
+        results.push({ type: 'status_hot', targetId: characterId, amount: heal, rawAmount: rawHeal, statusId: status.id, statusName });
       }
     }
   }
@@ -158,9 +129,9 @@ export function resolveAbility(casterId, abilityId, targetPos, abilityOverride) 
     }
   }
 
-  // Consume preparation token
+  // Consume preparation status
   if (meta.preparation) {
-    removeTokenStacks(casterId, 'preparation', 1);
+    removeStatusStacks(casterId, 'preparation', 1);
   }
 
   // Determine caster position and target side
@@ -209,9 +180,9 @@ export function resolveAbility(casterId, abilityId, targetPos, abilityOverride) 
 
           // Combo gate: require and consume 1 combo stack per target
           if (aspects.combo) {
-            const stacks = getTokenStacks(t.characterId, 'combo');
+            const stacks = getStatusStacks(t.characterId, 'combo');
             if (stacks <= 0) continue;
-            removeTokenStacks(t.characterId, 'combo', 1);
+            removeStatusStacks(t.characterId, 'combo', 1);
           }
 
           // Damage
@@ -250,47 +221,44 @@ export function resolveAbility(casterId, abilityId, targetPos, abilityOverride) 
             logs.push({ type: 'heal', targetId: target.id, amount: healed, rawAmount: raw });
           }
 
-          // Token apply to target
-          if (aspects.token_apply) {
-            let stacks = aspects.token_stacks || 1;
-            const tokenDef = getTokenDefinitions().get(aspects.token_apply);
-            if (tokenDef?.power_scaling) stacks = Math.round(getScalingStat(caster, getTokenDamageType(tokenDef)) * stacks / 100);
-            const result = applyToken(t.characterId, aspects.token_apply, stacks, aspects.token_duration, casterId);
-            if (result) logs.push({ type: 'token_apply', targetId: t.characterId, tokenId: aspects.token_apply, stacks: result.applied, duration: aspects.token_duration || 0 });
+          // Status apply (each id in the list)
+          if (aspects.status_apply) {
+            const baseStacks = aspects.status_stacks ?? 1;
+            const defs = getStatusDefinitions();
+            for (const statusId of aspects.status_apply) {
+              const def = defs.get(statusId);
+              if (!def) continue;
+              let stacks = baseStacks;
+              if (def.meta?.power_scaling) stacks = Math.round(getScalingStat(caster, getStatusDamageType(def)) * stacks / 100);
+              if (stacks <= 0) continue;
+              const result = applyStatusInstance(t.characterId, statusId, stacks, aspects.status_duration, casterId);
+              if (result) logs.push({ type: 'status_apply', targetId: t.characterId, statusId, statusName: result.name, stacks: result.applied, duration: aspects.status_duration || 0 });
+            }
           }
 
-          // Cleanse: remove polarity-matched tokens
+          // Cleanse: remove polarity-matched battle statuses (reads status.meta directly)
           if (aspects.cleanse) {
             const casterSide = getCharacterPosition(casterId)?.side;
             const tSide = getCharacterPosition(t.characterId)?.side;
             const removePolarity = (casterSide === tSide) ? 'negative' : 'positive';
-            const defs = getTokenDefinitions();
-            const charTokens = battle.tokens[t.characterId];
-            if (charTokens) {
-              for (const tokenId in charTokens) {
-                if (defs.get(tokenId)?.polarity === removePolarity) {
-                  delete charTokens[tokenId];
-                }
-              }
+            const defs = getStatusDefinitions();
+            for (const status of [...target.getStatuses()]) {
+              if (!status.meta?.is_battle) continue;
+              const polarity = status.polarity || defs.get(status.id)?.polarity;
+              if (polarity === removePolarity) target.removeStatus(status.id);
             }
             logs.push({ type: 'cleanse', targetId: t.characterId });
           }
 
-          // Status apply
-          if (aspects.status_apply) {
-            for (const statusId of aspects.status_apply) {
-              const status = game.createStatus(statusId);
-              if (status) {
-                target.addStatus(status);
-                logs.push({ type: 'status_apply', targetId: t.characterId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
-              }
-            }
-          }
-
-          // Status remove
+          // Status remove (each id in the list; status_remove_stacks unset = remove all)
           if (aspects.status_remove) {
             for (const statusId of aspects.status_remove) {
-              target.removeStatus(statusId);
+              const have = getStatusStacks(t.characterId, statusId);
+              if (have <= 0) continue;
+              const toRemove = aspects.status_remove_stacks !== undefined
+                ? Math.min(have, aspects.status_remove_stacks)
+                : have;
+              if (toRemove > 0) removeStatusStacks(t.characterId, statusId, toRemove);
             }
           }
 
@@ -341,24 +309,19 @@ export function resolveAbility(casterId, abilityId, targetPos, abilityOverride) 
           }
         }
 
-        // Status apply self
+        // Status apply to self
         if (aspects.status_apply_self) {
+          const baseStacks = aspects.status_stacks_self ?? 1;
+          const defs = getStatusDefinitions();
           for (const statusId of aspects.status_apply_self) {
-            const status = game.createStatus(statusId);
-            if (status) {
-              caster.addStatus(status);
-              logs.push({ type: 'status_apply', targetId: casterId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
-            }
+            const def = defs.get(statusId);
+            if (!def) continue;
+            let stacks = baseStacks;
+            if (def.meta?.power_scaling) stacks = Math.round(getScalingStat(caster, getStatusDamageType(def)) * stacks / 100);
+            if (stacks <= 0) continue;
+            const result = applyStatusInstance(casterId, statusId, stacks, aspects.status_duration_self, casterId);
+            if (result) logs.push({ type: 'status_apply', targetId: casterId, statusId, statusName: result.name, stacks: result.applied, duration: aspects.status_duration_self || 0 });
           }
-        }
-
-        // Token apply to self
-        if (aspects.token_apply_self) {
-          let stacks = aspects.token_stacks_self || 1;
-          const tokenDef = getTokenDefinitions().get(aspects.token_apply_self);
-          if (tokenDef?.power_scaling) stacks = Math.round(getScalingStat(caster, getTokenDamageType(tokenDef)) * stacks / 100);
-          const result = applyToken(casterId, aspects.token_apply_self, stacks, aspects.token_duration_self, casterId);
-          if (result) logs.push({ type: 'token_apply', targetId: casterId, tokenId: aspects.token_apply_self, stacks: result.applied, duration: aspects.token_duration_self || 0 });
         }
 
         // Self movement
@@ -423,7 +386,8 @@ export function calculateRawDamage(caster, aspects, target) {
   // Focus Fire: bonus damage per own focus_mark stack on target
   const focusFire = caster.getStat('focus_fire');
   if (focusFire) {
-    const markInstances = battle.tokens[target.id]?.['focus_mark'] || [];
+    const markStatus = target.getStatus('focus_mark');
+    const markInstances = markStatus?.getInstances() ?? [];
     const ownMarks = markInstances
       .filter(i => i.source === caster.id)
       .reduce((s, i) => s + i.stacks, 0);
@@ -481,29 +445,41 @@ export function applyDefenses(raw, dmgType, target) {
  * @param {string} [damageType]
  * @returns {{ dealt: number, shieldAbsorbed: number }}
  */
+/** Drain `amount` shield stacks shortest-duration-first (-1 = permanent goes last). */
+function consumeShieldStacks(target, amount) {
+  const status = target.getStatus('shield');
+  if (!status || amount <= 0) return;
+  const instances = status.getInstances();
+  const order = instances
+    .map((inst, idx) => ({ idx, dur: inst.duration < 0 ? Infinity : inst.duration }))
+    .sort((a, b) => a.dur - b.dur)
+    .map(o => o.idx);
+  let remaining = amount;
+  for (const idx of order) {
+    if (remaining <= 0) break;
+    const inst = instances[idx];
+    const take = Math.min(inst.stacks, remaining);
+    inst.stacks -= take;
+    remaining -= take;
+  }
+  /** @type {any} */ (status)._instances = instances.filter(i => i.stacks > 0);
+  if (status.currentStacks <= 0) target.removeStatus('shield');
+}
+
 export function applyDamage(target, amount, damageType) {
-  const battle = currentBattle.value;
   let remaining = amount;
   let shieldAbsorbed = 0;
 
-  const defs = getTokenDefinitions();
-  const charTokens = battle.tokens[target.id];
-  if (charTokens && damageType !== 'absolute') {
-    for (const tokenId in charTokens) {
-      const def = defs.get(tokenId);
-      const absorbEff = def?.effects.find(e => e.type === 'absorb');
-      if (!absorbEff) continue;
-      const perStack = absorbEff.value || 1;
-      const totalStacks = charTokens[tokenId].reduce((s, i) => s + i.stacks, 0);
-      const maxAbsorb = totalStacks * perStack;
-      const absorbed = Math.min(maxAbsorb, remaining);
-      const stacksUsed = Math.ceil(absorbed / perStack);
-      if (stacksUsed > 0) {
+  // Absorb (shield-only) — each stack absorbs 1 damage, consumed shortest-duration first
+  if (damageType !== 'absolute') {
+    const shield = target.getStatus('shield');
+    if (shield && shield.currentStacks > 0) {
+      const absorbed = Math.min(shield.currentStacks, remaining);
+      if (absorbed > 0) {
         shieldAbsorbed += absorbed;
         remaining -= absorbed;
-        removeTokenStacks(target.id, tokenId, stacksUsed);
+        consumeShieldStacks(target, absorbed);
       }
-      if (remaining <= 0) break;
     }
   }
 
@@ -531,12 +507,12 @@ export function applyHealing(caster, target, healPercent) {
 }
 
 /**
- * Add shield (absorb token) to target.
+ * Add shield (absorb status) to target.
  * @param {*} target - Character
  * @param {number} amount
  */
 export function applyShield(target, amount, source) {
-  return applyToken(target.id, 'shield', amount, undefined, source || target.id);
+  return applyStatusInstance(target.id, 'shield', amount, undefined, source || target.id);
 }
 
 /**

@@ -32,7 +32,6 @@ type RpgCharacterBattleState = {
   side: 'player' | 'enemy';
   battleIndex: number;
   abilities: Record<string, RpgAbilityState>;
-  tokens: Record<string, RpgTokenInstance[]>;
   defeated: boolean;
   bonusUsed: number;
 };
@@ -45,6 +44,8 @@ type RpgBattle = {
   playerParty: string[];
   enemyParty: string[];
   turnOrder: string[];
+  /** Ids of mid-battle summoned combatants — deleted from the game on battle end. */
+  summoned: string[];
   actorTurn: number;
   activeCharId: string | null;
   activeSide: 'player' | 'enemy';
@@ -67,30 +68,12 @@ type RpgAbilityState = {
   charges: number;
 };
 
-// ── Token System ──
+// ── Status meta (rpg_battler-consumed flags on character_statuses) ──
 
-type RpgTokenInstance = {
-  stacks: number;
-  duration?: number;
-  source: string;
-};
-
-type RpgTokenEffect = {
-  type: 'dot' | 'hot' | 'absorb' | 'death_defiance' | 'stun' | 'taunt' | 'thorns';
-  value: number;
-  damage_type?: string;
-};
-
-type RpgTokenDefinition = {
-  id: string;
-  name: string;
-  description?: string;
-  icon?: string;
-  color?: string;
-  max_stacks: number;
-  polarity: 'positive' | 'negative' | 'neutral';
+type RpgStatusMeta = {
+  is_battle?: boolean;
   power_scaling?: boolean;
-  effects: RpgTokenEffect[];
+  dot_damage_type?: string;
   source?: string;
 };
 
@@ -98,8 +81,8 @@ type RpgTokenDefinition = {
 
 type RpgEffectResultType =
   'damage' | 'heal' | 'steal' | 'thorns' |
-  'token_apply' | 'token_dot' | 'token_hot' |
-  'cleanse' | 'dodge' | 'status_apply' | 'status_remove';
+  'status_apply' | 'status_remove' | 'status_dot' | 'status_hot' | 'status_dot_heal' |
+  'cleanse' | 'dodge' | 'summon';
 
 type RpgEffectResult = {
   type: RpgEffectResultType;
@@ -110,7 +93,6 @@ type RpgEffectResult = {
   shieldAbsorbed?: number;
   defeated?: boolean;
   isCrit?: boolean;
-  tokenId?: string;
   stacks?: number;
   statusId?: string;
   statusName?: string;
@@ -122,6 +104,8 @@ type RpgEffectResult = {
 type RpgBattleLogEntry = {
   turn: number;
   actorId?: string;
+  /** For text entries, renders this character's face inline before the line (like effect entries). */
+  targetId?: string;
   text?: string;
   effect?: RpgEffectResult;
   abilityId?: string;
@@ -148,13 +132,6 @@ type RpgFloatingTextService = {
   add(opts: RpgFloatingTextOpts): void;
 };
 
-type RpgTokensService = {
-  getStacks(characterId: string, tokenId: string): number;
-  removeStacks(characterId: string, tokenId: string, stacks: number): void;
-  apply(characterId: string, tokenId: string, stacks: number, duration?: number, source?: string): { applied: number; tokenName: string } | null;
-  getDefinitions(): Map<string, RpgTokenDefinition>;
-};
-
 type RpgPartyService = {
   getMaxPartySize(): number;
   isPartyFull(): boolean;
@@ -167,6 +144,30 @@ type RpgBattleService = {
   end(result: RpgBattleResult): void;
   /** Manually mark a battle as defeated (by definition ID). */
   addDefeated(battleId: string): void;
+  /** Stagger threshold check — strips all stagger and applies stun+braced if threshold crossed. */
+  checkStaggerThreshold(charId: string): void;
+  /** Effective (amplifier-aware) power for a character. Stateless — safe to call outside battle (UI/character sheet). */
+  effectivePower(character: Character, ability?: { meta?: any }): number;
+  /** Whether a battle is currently active. */
+  isActive(): boolean;
+  /** Enemy character ids (copy). */
+  getEnemyParty(): string[];
+  /** Player character ids (copy). */
+  getPlayerParty(): string[];
+  /** All combatant ids, players then enemies (copy). */
+  getCombatants(): string[];
+  /** Current turn number (0 if no battle). */
+  getTurn(): number;
+  /** Id of the character whose turn it is, or null. */
+  getActiveCharId(): string | null;
+  /** True if an apply event represents a damage hit that landed (damage > 0, not dodged). Pure. */
+  eventDealtDamage(event: RpgActionApplyEvent): boolean;
+  /** Deal a one-off damage instance to the active battle's target through the full pipeline (defenses, shields, floating text, log, death). For scripted effects like elemental reactions. */
+  dealDamage(casterId: string, targetId: string, amount: number, damageType: string): void;
+  /** Apply N stacks of a status to a target in the active battle through the pipeline (floating text, log, stagger check). Stacks taken as-is (no power-scaling). */
+  applyStatus(casterId: string, targetId: string, statusId: string, stacks: number, duration?: number): void;
+  /** Add an already-created character to the active battle on `side` as a combatant; it joins the turn order and acts this round by speed. Not added to the persistent party. Returns the combatant id (or null). */
+  summon(character: Character, side: 'player' | 'enemy'): string | null;
 };
 
 type RpgBattleLogService = {
@@ -178,7 +179,6 @@ type RpgBattleLogService = {
 
 interface Game {
   getService(id: 'rpg_floating_text'): RpgFloatingTextService;
-  getService(id: 'rpg_tokens'): RpgTokensService;
   getService(id: 'rpg_party'): RpgPartyService;
   getService(id: 'rpg_battle'): RpgBattleService;
   getService(id: 'rpg_battle_log'): RpgBattleLogService;
@@ -193,7 +193,6 @@ type RpgBattleState = 'idle' | 'idle_wounded' | 'attack' | 'cast' | 'hit' | 'dea
 type RpgActionStartEvent = {
   abilityId: string;
   targetId: string;
-  power: number;
 };
 
 type RpgActionApplyEvent = {
@@ -205,12 +204,11 @@ type RpgActionApplyEvent = {
   isCrit: boolean;
   isDodged: boolean;
   healing: number;
-  tokenId: string | null;
-  tokenStacks: number;
-  tokenDuration?: number;
   statusApply: string[];
+  statusStacks: number;
   statusDuration?: number;
   statusRemove: string[];
+  statusRemoveStacks?: number;
   cleanse: boolean;
   cooldownChange: number;
   chargesChange: number;

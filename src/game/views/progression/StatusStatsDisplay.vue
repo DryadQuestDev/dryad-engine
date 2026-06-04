@@ -102,7 +102,7 @@ const getBinaryColor = (statId: string): string => {
 <style scoped>
 .status-stats-display h5 {
   margin: 0 0 6px 0;
-  font-size: 14px;
+  font-size: 1em;
   color: #ffd700;
 }
 

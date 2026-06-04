@@ -69,7 +69,7 @@ export function removeFloatingText(id) {
 
 // ── Floating text from effect results ──
 
-const NEGATIVE_TYPES = new Set(['damage', 'token_dot', 'thorns']);
+const NEGATIVE_TYPES = new Set(['damage', 'status_dot', 'thorns']);
 
 /**
  * Convert a single effect result to a floating text entry.
@@ -85,11 +85,25 @@ export function parseFloatingText(effect) {
     addFloatingText({ characterId: e.targetId, text: game.getLine('float_shield', { amount: e.shieldAbsorbed }), cssClass: 'shield-absorb' });
   }
 
-  // Token apply uses token def for icon/color
-  if (e.type === 'token_apply') {
-    const tokenDefs = game.getData('plugins_data/rpg_battler/token_definitions', true);
-    const def = tokenDefs?.get(e.tokenId);
-    addFloatingText({ characterId: e.targetId, text: `+${e.stacks}`, cssClass: 'token-apply', icon: def?.icon || null, color: def?.color });
+  const statusDefs = game.getData('character_statuses', true);
+
+  // Status apply uses status def for icon/color. Non-stackable (max 1) statuses flash their
+  // duration instead of "+stacks" — mirrors the persistent token badge (RpgCharOverlay).
+  if (e.type === 'status_apply') {
+    const def = statusDefs?.get(e.statusId);
+    const live = game.getCharacter(e.targetId)?.getStatus(e.statusId);
+    const singleStack = live ? live.maxStacks === 1 : (def?.max_stacks ?? 1) === 1;
+    // Show the duration applied THIS time (not the accumulated total — that's the token badge's job).
+    const duration = e.duration ?? 0;
+    const text = (singleStack && duration > 0) ? `${duration}` : `+${e.stacks}`;
+    addFloatingText({ characterId: e.targetId, text, cssClass: 'status-apply', icon: def?.image || null, color: def?.color });
+    return;
+  }
+
+  // Status remove uses status def for icon/color (mirror of status_apply)
+  if (e.type === 'status_remove') {
+    const def = statusDefs?.get(e.statusId);
+    addFloatingText({ characterId: e.targetId, text: `−${e.stacks}`, cssClass: 'status-remove', icon: def?.image || null, color: def?.color });
     return;
   }
 
@@ -99,16 +113,10 @@ export function parseFloatingText(effect) {
 
   const css = {
     damage: e.isCrit ? `${e.damageType || 'physical'} crit` : (e.damageType || 'physical'),
-    token_dot: e.damageType || 'physical', thorns: 'physical',
-    heal: 'heal', steal: 'heal', token_hot: 'heal',
-    dodge: 'dodge', cleanse: 'cleanse', status_apply: 'status-apply', status_remove: 'status-remove', death_defiance: 'death-defiance',
+    status_dot: e.damageType || 'physical', thorns: 'physical',
+    heal: 'heal', steal: 'heal', status_hot: 'heal', status_dot_heal: 'heal',
+    dodge: 'dodge', cleanse: 'cleanse', death_defiance: 'death-defiance',
   }[e.type] || e.type;
 
-  let icon = null;
-  if ((e.type === 'status_apply' || e.type === 'status_remove') && e.statusId) {
-    const statusDefs = game.getData('character_statuses', true);
-    icon = statusDefs?.get(e.statusId)?.image || null;
-  }
-
-  addFloatingText({ characterId: e.targetId, text, cssClass: css, icon });
+  addFloatingText({ characterId: e.targetId, text, cssClass: css });
 }

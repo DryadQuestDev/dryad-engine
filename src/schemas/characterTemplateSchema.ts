@@ -22,6 +22,7 @@ export const CharacterTemplateSchema = {
     gallery: {
         type: 'schema', objects: {
             gallery_id: { type: 'chooseOne', fromFile: 'galleries', fromFileTypeAnd: { type: 'characters' }, tooltip: 'Gallery ID to display a character based on this template in.' },
+            gallery_order: { type: 'number', tooltip: 'Display order within the gallery (ascending). Falls back to ID when unset or tied.', defaultValue: 0 },
             entity_name: { type: 'string', tooltip: 'Name of the character to display in the gallery.' },
             entity_description: { type: 'htmlarea', tooltip: 'Description of the character to display in the gallery.' },
         }

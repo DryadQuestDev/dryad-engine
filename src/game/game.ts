@@ -5,7 +5,7 @@ import { computed, ComputedRef } from 'vue';
 
 import { DungeonSystem, DungeonLine } from './systems/dungeonSystem';
 import { DungeonData } from './core/dungeon/dungeonData';
-import { ActionObject, LogicSystem, PoolSettings, PoolDrawResult, CollectionSettings } from './systems/logicSystem';
+import { ActionObject, AspectRenderer, LogicSystem, PoolSettings, PoolDrawResult, CollectionSettings } from './systems/logicSystem';
 import { NarrativeSystem } from './systems/narrativeSystem';
 import { CharacterSystem, StatComputerFunction, type StatGroupResolverFunction } from './systems/characterSystem';
 import { ItemSystem } from './systems/itemSystem';
@@ -239,6 +239,37 @@ export class Game {
     this.coreSystem.setState(key, value);
   }
 
+  // ============================================
+  // PUBLIC API: Popups (the `popup_state` stack)
+  // ============================================
+
+  /** Open one or more popups (by registered `popup`-slot component id). Pushed on top; ids already open are ignored. */
+  public openPopup(...ids: string[]): void {
+    const open = [...this.getOpenPopups()];
+    for (const id of ids) if (id && !open.includes(id)) open.push(id);
+    this.setState('popup_state', open);
+  }
+
+  /** Close one or more specific popups, leaving the rest of the stack open. */
+  public closePopup(...ids: string[]): void {
+    this.setState('popup_state', this.getOpenPopups().filter(p => !ids.includes(p)));
+  }
+
+  /** Close every open popup. */
+  public closeAllPopups(): void {
+    this.setState('popup_state', []);
+  }
+
+  /** The currently open popup ids, bottom-to-top (last = topmost). */
+  public getOpenPopups(): string[] {
+    return this.getState<string[]>('popup_state') || [];
+  }
+
+  /** Whether a given popup id is currently open. */
+  public isPopupOpen(id: string): boolean {
+    return this.getOpenPopups().includes(id);
+  }
+
   public getDungeonType(): "map" | "screen" | "text" {
     return this.dungeonSystem.currentDungeon.value?.dungeon_type as "map" | "screen" | "text";
   }
@@ -259,8 +290,13 @@ export class Game {
     this.dungeonSystem.enter(val);
   }
 
+  /**
+   * Plays a scene, resolving friendly id forms the same way the `scene` action does:
+   * `scene`, `room.scene`, `dungeon.room.scene` (each optionally `#`-prefixed),
+   * `&anchor`, `&dungeon.anchor`, `next`, `shift:x`, or a full `#room.scene.1.1.1` id.
+   */
   public playScene(sceneId: string | null, dungeonId: string | null = null): void {
-    this.dungeonSystem.playScene(sceneId, dungeonId);
+    this.dungeonSystem.playSceneResolver(sceneId, dungeonId);
   }
 
   public resolveSceneId(value: string): { sceneId: string | null, dungeonId: string | null } {
@@ -419,8 +455,12 @@ export class Game {
   // PUBLIC API: Music & Sound
   // ============================================
 
-  public setMusic(val: string | false, load: boolean = false) {
-    this.coreSystem.setMusic(val, load);
+  /**
+   * Play music by id, or pass `false` to fall back to the current dungeon's music.
+   * @param disableTransition - When true, switch instantly with no crossfade (default 1.0s).
+   */
+  public setMusic(val: string | false, disableTransition: boolean = false) {
+    this.coreSystem.setMusic(val, false, disableTransition);
   }
 
   public playSounds(val: string | string[]) {
@@ -545,6 +585,33 @@ export class Game {
 
   public registerPlaceholder(id: string, func: Function) {
     this.logicSystem.registerPlaceholder(id, func);
+  }
+
+  /**
+   * Register a custom renderer for an ability aspect's `[v]` (and sibling `[id]`) substitution.
+   * The renderer's return value (HTML string) replaces the default `<b>value</b>` wrap.
+   *
+   * Use this to surface derived values (e.g. "20% of power (60)" instead of just "20") in
+   * auto-generated ability tooltips. Renderers receive `{ value, aspects, character? }` —
+   * `character` is present when the tooltip is built with a `characterId`.
+   */
+  public registerAspectRenderer(aspectId: string, fn: AspectRenderer) {
+    this.logicSystem.registerAspectRenderer(aspectId, fn);
+  }
+
+  @Skip()
+  private _abilityUsabilityCheckers: ((characterId: string, abilityId: string) => boolean)[] = [];
+  /**
+   * Register a provider that decides whether a character can currently use an ability (e.g. a battle
+   * system). Each returns true=usable / false=blocks. Multiple systems can register; an ability is
+   * usable only if every checker passes. Used by UI (e.g. AbilityCard) to grey out unusable abilities.
+   */
+  public registerAbilityUsabilityChecker(fn: (characterId: string, abilityId: string) => boolean): void {
+    this._abilityUsabilityCheckers.push(fn);
+  }
+  /** True unless some registered checker blocks the ability. No checkers registered → usable. */
+  public isAbilityUsable(characterId: string, abilityId: string): boolean {
+    return this._abilityUsabilityCheckers.every(fn => typeof fn !== 'function' || fn(characterId, abilityId));
   }
 
   /** Returns the current resolve context set by `resolveString(input, noExecute, context)`. Use inside custom placeholders. */

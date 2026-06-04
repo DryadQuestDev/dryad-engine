@@ -4,27 +4,28 @@ import { Game } from '../game';
 
 const game = Game.getInstance();
 
-const popupComponent = computed(() => {
-  const popupState = game.coreSystem.getState<string>('popup_state');
-  if (popupState) {
-    const components = game.coreSystem.getComponentsBySlot('popup');
-    const component = components.find(c => c.id === popupState);
-    return component?.component;
-  }
-  return null;
+const openPopups = computed(() => {
+  const ids = game.coreSystem.getState<string[]>('popup_state') || [];
+  const components = game.coreSystem.getComponentsBySlot('popup');
+  return ids.map(id => {
+    const cm = components.find(c => c.id === id);
+    return { id, component: cm?.component, mask: cm?.mask };
+  });
 });
 
-const isOpen = computed(() => {
-  return game.coreSystem.getState<string>('popup_state') !== null;
-});
+function maskFor(popup: { mask?: string | boolean }): string {
+  if (popup.mask === false) return 'transparent';
+  return typeof popup.mask === 'string' ? popup.mask : 'rgba(0, 0, 0, 0.7)';
+}
 </script>
 
 <template>
-  <div v-if="isOpen" class="popup-overlay" @click.self="() => { }">
+  <div v-for="(popup, i) in openPopups" :key="popup.id" class="popup-overlay"
+    :style="{ zIndex: 500 + i, backgroundColor: maskFor(popup) }" @click.self="() => { }">
     <div class="popup-content">
-      <component :is="popupComponent" v-if="popupComponent" />
+      <component :is="popup.component" v-if="popup.component" />
       <div v-else class="popup-error">
-        Popup component not found for id: {{ game.coreSystem.getState('popup_state') }}
+        Popup component not found for id: {{ popup.id }}
       </div>
     </div>
   </div>
@@ -37,7 +38,6 @@ const isOpen = computed(() => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -46,17 +46,13 @@ const isOpen = computed(() => {
 }
 
 .popup-content {
-  min-width: 500px;
-  min-height: 300px;
-  background-color: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   overflow: auto;
   max-width: 90vw;
   max-width: 90dvw;
   max-height: 90vh;
   max-height: 90dvh;
   pointer-events: auto;
+  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.45));
 }
 
 .popup-error {

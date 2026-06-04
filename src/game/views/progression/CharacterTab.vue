@@ -70,7 +70,7 @@ function selectTab(tabId: string) {
   width: 100%;
   height: 100%;
   container-type: size;
-  padding-bottom: 1cqh;
+  /*padding-bottom: 1cqh;*/
 }
 
 .character-doll-wrapper {

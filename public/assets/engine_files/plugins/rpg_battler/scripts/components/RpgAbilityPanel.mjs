@@ -1,9 +1,8 @@
 /// <reference path="../dtypes.d.ts" />
 
-const { game, vue, components, floatingUi } = window.engine;
+const { game, vue, components } = window.engine;
 const { computed, ref, watch, defineComponent } = vue;
 const { AbilityCard, CustomComponentContainer } = components;
-const { useFloating, offset, flip, shift, autoUpdate } = floatingUi;
 
 import { currentRpgBattle } from '../rpg-battle-state.mjs';
 import { canUseAbility } from '../rpg-battle-flow.mjs';
@@ -18,48 +17,7 @@ export const RpgAbilityPanel = defineComponent({
     const panelAnimKey = ref(0);
     const panelVisible = ref(false);
     const panelExiting = ref(false);
-    const hoveredAbilityId = ref(null);
     const activeTab = ref('');
-
-    // ── Floating tooltip ──
-    const hoveredSlotRef = ref(null);
-    const tooltipRef = ref(null);
-    let clearHoverTimeout = null;
-
-    const { floatingStyles } = useFloating(hoveredSlotRef, tooltipRef, {
-      placement: 'right-start',
-      strategy: 'fixed',
-      middleware: [
-        offset(8),
-        flip({ padding: 8 }),
-        shift({ padding: 8 }),
-      ],
-      whileElementsMounted: autoUpdate,
-    });
-
-    const showTooltip = computed(() => hoveredAbilityId.value && hoveredSlotRef.value);
-
-    function onAbilityHover(abilityId, event) {
-      if (clearHoverTimeout) { clearTimeout(clearHoverTimeout); clearHoverTimeout = null; }
-      hoveredAbilityId.value = abilityId;
-      hoveredSlotRef.value = event.currentTarget;
-    }
-
-    function onAbilityLeave() {
-      clearHoverTimeout = setTimeout(() => {
-        hoveredAbilityId.value = null;
-        hoveredSlotRef.value = null;
-      }, 80);
-    }
-
-    function onTooltipEnter() {
-      if (clearHoverTimeout) { clearTimeout(clearHoverTimeout); clearHoverTimeout = null; }
-    }
-
-    function onTooltipLeave() {
-      hoveredAbilityId.value = null;
-      hoveredSlotRef.value = null;
-    }
 
     // ── Abilities ──
 
@@ -131,8 +89,6 @@ export const RpgAbilityPanel = defineComponent({
       return abs.filter(a => groupIds.has(a.id));
     });
 
-    const isPlayerTurn = computed(() => props.isPlayerTurn);
-
     function getTabPrefs() {
       return game.getState('rpg_ability_tabs') || {};
     }
@@ -162,11 +118,10 @@ export const RpgAbilityPanel = defineComponent({
       if (availableGroups.value.length > 0) restoreTab();
     }, { immediate: true });
 
-    watch(isPlayerTurn, (val) => {
-      if (val && !panelVisible.value) show();
-    }, { immediate: true });
+    let hideTimer = null;
 
     function show() {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
       panelExiting.value = false;
       panelAnimKey.value++;
       panelVisible.value = true;
@@ -175,32 +130,39 @@ export const RpgAbilityPanel = defineComponent({
     function hide(cb) {
       if (!panelVisible.value) { if (cb) cb(); return; }
       panelExiting.value = true;
-      hoveredAbilityId.value = null;
-      hoveredSlotRef.value = null;
       const panel = abilityPanelRef.value;
       if (!panel) { panelVisible.value = false; if (cb) cb(); return; }
       const items = panel.querySelectorAll('.rpg-ability-item');
       const maxDelay = items.length * 30 + 250;
-      setTimeout(() => {
+      hideTimer = setTimeout(() => {
+        hideTimer = null;
         panelVisible.value = false;
         panelExiting.value = false;
         if (cb) cb();
       }, maxDelay);
     }
 
-    function onSelectAbility(abilityId) {
+    function onSelectAbility(/** @type {string} */ abilityId) {
       const ab = activeAbilities.value.find(a => a.id === abilityId);
       if (!ab?.usable) return;
       emit('select-ability', abilityId, hide);
     }
 
+    function tooltipBinding(/** @type {string} */ abilityId) {
+      if (panelExiting.value) return null;
+      return {
+        component: AbilityCard,
+        props: { abilityId, characterId: props.battle?.activeCharId },
+        placement: 'right-start',
+        dismissOnClick: true,
+      };
+    }
+
     return {
       game, activeAbilities, displayedAbilities,
-      hoveredAbilityId, showTooltip, tooltipRef, floatingStyles,
       abilityPanelRef, panelAnimKey, panelVisible, panelExiting,
       activeTab, useGroups, availableGroups,
-      show, hide, onSelectAbility, setTab,
-      onAbilityHover, onAbilityLeave, onTooltipEnter, onTooltipLeave,
+      show, hide, onSelectAbility, setTab, tooltipBinding,
     };
   },
   template: /*html*/`
@@ -216,27 +178,23 @@ export const RpgAbilityPanel = defineComponent({
         <div v-for="(ab, idx) in displayedAbilities" :key="ab.id"
           class="rpg-ability-item" :class="{ disabled: !ab.usable, 'on-cooldown': ab.cooldown > 0, 'no-charges': ab.charges === 0 }"
           :style="{ '--i': idx }"
-          @click="onSelectAbility(ab.id)"
-          @mouseenter="onAbilityHover(ab.id, $event)"
-          @mouseleave="onAbilityLeave()">
+          v-popover="tooltipBinding(ab.id)"
+          @click="onSelectAbility(ab.id)">
           <img v-if="ab.meta.icon" :src="ab.meta.icon" class="rpg-ability-icon" />
           <span class="rpg-ability-name">{{ ab.meta.name || ab.id }}</span>
-          <span class="rpg-ability-badges">
-            <span v-if="ab.cooldown > 0" class="rpg-ability-cd" :title="ab.cooldown + ' turns'">{{ ab.cooldown }}</span>
-            <span v-if="ab.charges >= 0" class="rpg-ability-charges" :class="{ empty: ab.charges === 0 }" :title="ab.charges + ' charges'">{{ ab.charges }}</span>
-          </span>
-          <span v-if="ab.costs.length" class="rpg-ability-costs">
-            <span v-for="c in ab.costs" :key="c.statId" class="rpg-ability-cost" :class="{ insufficient: c.insufficient }" :style="!c.insufficient && c.color ? { color: c.color } : {}">
-              {{ c.amount }}<img v-if="c.icon" :src="c.icon" class="rpg-cost-icon" /><template v-else>&nbsp;{{ c.name }}</template>
+          <span class="rpg-ability-aside">
+            <span v-if="ab.costs.length" class="rpg-ability-costs">
+              <span v-for="c in ab.costs" :key="c.statId" class="rpg-ability-cost" :class="{ insufficient: c.insufficient }" :style="!c.insufficient && c.color ? { color: c.color } : {}">
+                {{ c.amount }}<img v-if="c.icon" :src="c.icon" class="rpg-cost-icon" /><template v-else>&nbsp;{{ c.name }}</template>
+              </span>
+            </span>
+            <span class="rpg-ability-badges">
+              <span v-if="ab.cooldown > 0" class="rpg-ability-cd" :title="ab.cooldown + ' turns'">{{ ab.cooldown }}</span>
+              <span v-if="ab.charges >= 0" class="rpg-ability-charges" :class="{ empty: ab.charges === 0 }" :title="ab.charges + ' charges'">{{ ab.charges }}</span>
             </span>
           </span>
         </div>
         <CustomComponentContainer :slot="'rpg-ability-panel-bottom'" :context="{ character: activeChar }" />
-      </div>
-      <div v-if="showTooltip" ref="tooltipRef" class="rpg-ability-tooltip"
-        :style="floatingStyles"
-        @mouseenter="onTooltipEnter" @mouseleave="onTooltipLeave">
-        <AbilityCard :abilityId="hoveredAbilityId" :characterId="battle?.activeCharId" />
       </div>
     </template>
   `

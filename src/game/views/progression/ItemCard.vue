@@ -155,7 +155,7 @@ const consumeDurationText = computed(() => {
 
 .item-name {
   margin: 0;
-  font-size: 16px;
+  font-size: 1.15em;
   font-weight: bold;
   color: #42b983;
 }
@@ -181,11 +181,11 @@ const consumeDurationText = computed(() => {
 .cost-amount {
   color: #42b983;
   font-weight: bold;
-  font-size: 13px;
+  font-size: 0.9em;
 }
 
 .card-body {
-  font-size: 14px;
+  font-size: 1em;
 }
 
 .item-description {
@@ -203,7 +203,7 @@ const consumeDurationText = computed(() => {
 }
 
 .consume-effect {
-  font-size: 13px;
+  font-size: 0.9em;
   line-height: 1.5;
 }
 
@@ -216,7 +216,7 @@ const consumeDurationText = computed(() => {
 }
 
 .consume-duration {
-  font-size: 12px;
+  font-size: 0.85em;
   color: #999;
   margin-top: 4px;
 }
@@ -234,13 +234,13 @@ const consumeDurationText = computed(() => {
 
 .weight-label {
   color: #999;
-  font-size: 13px;
+  font-size: 0.9em;
   font-weight: 600;
 }
 
 .weight-value {
   color: #ccc;
-  font-size: 13px;
+  font-size: 0.9em;
   font-weight: bold;
 }
 </style>

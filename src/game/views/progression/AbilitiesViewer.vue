@@ -76,14 +76,13 @@ function selectAbility(abilityId: string) {
 
       <div class="ability-list-wrapper">
         <div v-if="useGroups" class="ability-group-tabs">
-          <button v-for="g in availableGroups" :key="g.id"
-            class="ability-group-tab" :class="{ active: activeTab === g.id }"
-            @click="setTab(g.id)">{{ g.name }}</button>
+          <button v-for="g in availableGroups" :key="g.id" class="ability-group-tab"
+            :class="{ active: activeTab === g.id }" @click="setTab(g.id)">{{ g.name }}</button>
         </div>
 
         <div class="ability-list">
           <div v-for="abilityId in displayedAbilityIds" :key="abilityId" class="ability-item"
-            :class="{ selected: selectedAbilityId === abilityId }" @click="selectAbility(abilityId)">
+            :class="{ selected: selectedAbilityId === abilityId, unusable: !game.isAbilityUsable(character.id, abilityId) }" @click="selectAbility(abilityId)">
             <img v-if="getAbilityMeta(abilityId).icon" :src="getAbilityMeta(abilityId).icon" class="ability-icon"
               @error="(e: Event) => ((e.target as HTMLImageElement).style.display = 'none')" />
             <span class="ability-name">{{ getAbilityMeta(abilityId).name || abilityId }}</span>
@@ -103,6 +102,7 @@ function selectAbility(abilityId: string) {
   flex-direction: column;
   gap: 12px;
   padding: 8px;
+  container-type: inline-size;
 }
 
 .empty-state {
@@ -118,7 +118,7 @@ function selectAbility(abilityId: string) {
 }
 
 .ability-detail {
-  flex: 0 0 auto;
+  flex: 0 0 400px;
 }
 
 .ability-list-wrapper {
@@ -126,6 +126,22 @@ function selectAbility(abilityId: string) {
   flex-direction: column;
   gap: 8px;
   flex: 1;
+  min-width: 0;
+}
+
+@container (max-width: 600px) {
+  .abilities-layout {
+    flex-direction: column;
+  }
+
+  .ability-detail {
+    width: 100%;
+    order: 2;
+  }
+
+  .ability-list-wrapper {
+    order: 1;
+  }
 }
 
 .ability-group-tabs {
@@ -193,5 +209,19 @@ function selectAbility(abilityId: string) {
 
 .ability-item.selected .ability-name {
   color: #42b983;
+}
+
+/* Unusable (a registered gameplay system reports the ability can't be used) — greyed badge. */
+.ability-item.unusable {
+  opacity: 0.55;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.ability-item.unusable .ability-icon {
+  filter: grayscale(1) brightness(0.5);
+}
+
+.ability-item.unusable:not(.selected) .ability-name {
+  color: rgba(255, 255, 255, 0.4);
 }
 </style>

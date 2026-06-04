@@ -1,0 +1,23 @@
+{
+  "id": "tutorial_popup",
+  "name": "Tutorial Hints",
+  "author": "Nekon",
+  "version": "1.0.0",
+  "order": 20,
+  "scripts": [
+    "main.mjs"
+  ],
+  "tabs": [],
+  "data": {
+    "game_settings": [
+      {
+        "id": "show_tutorial",
+        "type": "boolean",
+        "default_value": true,
+        "label": "Show Tutorial Hints",
+        "tooltip": "Show one-time teaching popups during play.",
+        "uid": "TutShow01"
+      }
+    ]
+  }
+}

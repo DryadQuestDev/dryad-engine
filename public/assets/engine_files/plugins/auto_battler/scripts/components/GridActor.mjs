@@ -1,8 +1,5 @@
 /// <reference path="../dtypes.d.ts" />
 
-import { currentBattle } from '../battle-flow.mjs';
-import { getTokenDefinitions } from '../battle-effects.mjs';
-
 const { game, vue } = window.engine;
 const { computed, defineComponent } = vue;
 const { CharacterFace, ProgressBar } = window.engine.components;
@@ -21,39 +18,32 @@ export const GridActor = defineComponent({
     const maxHealth = computed(() => props.character.getStat('health'));
     const isDead = computed(() => health.value <= 0);
 
-    // Battle statuses (tagged 'battle')
+    // Battle statuses (status.meta.is_battle). One brick per instance for multi_stack statuses.
+    // Definition map is still useful for display fallbacks (name/image/polarity), just not for meta.
     const battleStatuses = computed(() => {
       if (!props.character) return [];
       const statusDefs = game.getData("character_statuses", true);
-      return props.character.getStatuses()
-        .filter(s => s.tags?.includes('battle') && !s.isHidden)
-        .map(s => {
-          const obj = statusDefs?.get(s.id);
-          return {
-            id: s.id,
-            name: s.name || obj?.name || s.id,
-            image: s.image || obj?.image,
-            stacks: s.isStackable() ? s.currentStacks : 0,
-            polarity: s.polarity || obj?.polarity || 'neutral'
-          };
-        });
+      const out = [];
+      for (const s of props.character.getStatuses()) {
+        if (s.isHidden) continue;
+        if (!s.meta?.is_battle) continue;
+        const def = statusDefs?.get(s.id);
+        const polarity = s.polarity || def?.polarity || 'neutral';
+        const image = s.image || def?.image;
+        const name = s.name || def?.name || s.id;
+        if (s.multiStack) {
+          const instances = s.getInstances();
+          for (let i = 0; i < instances.length; i++) {
+            out.push({ key: s.id + '_' + i, id: s.id, name, image, stacks: instances[i].stacks, maxStacks: s.maxStacks, polarity });
+          }
+        } else {
+          out.push({ key: s.id, id: s.id, name, image, stacks: s.currentStacks, maxStacks: s.maxStacks, polarity });
+        }
+      }
+      return out;
     });
 
-    const tokens = computed(() => {
-      const battle = currentBattle.value;
-      if (!battle || !props.character) return [];
-      const charTokens = battle.tokens[props.character.id];
-      if (!charTokens) return [];
-      const defs = getTokenDefinitions();
-      return Object.keys(charTokens).filter(id => charTokens[id].length > 0 && defs.has(id)).map(id => {
-        const def = defs.get(id);
-        const instances = charTokens[id];
-        const totalStacks = Math.round(instances.reduce((s, i) => s + i.stacks, 0));
-        return { id, name: def.name, icon: def.icon, stacks: totalStacks, polarity: def.polarity };
-      }).filter(t => t.stacks > 0);
-    });
-
-    return { health, maxHealth, healthStatColor, isDead, battleStatuses, tokens };
+    return { health, maxHealth, healthStatColor, isDead, battleStatuses };
   },
   template: /*html*/`
     <div class="grid-actor" :class="{ active: isActive, dead: isDead }">
@@ -68,16 +58,11 @@ export const GridActor = defineComponent({
             :barColor="healthStatColor" bgColor="rgba(0,0,0,0.5)"
             width="100%" height="16px" :hideMax="true" />
         </div>
-        <div v-if="battleStatuses.length > 0 || tokens.length > 0" class="grid-actor-tokens">
-          <div v-for="s in battleStatuses" :key="'s_' + s.id" class="grid-actor-token"
-            :class="[s.polarity]" :title="s.name">
+        <div v-if="battleStatuses.length > 0" class="grid-actor-tokens">
+          <div v-for="s in battleStatuses" :key="s.key" class="grid-actor-token"
+            :class="[s.polarity]" :title="s.name + ' x' + s.stacks">
             <img v-if="s.image" :src="s.image" class="token-icon" />
-            <span v-if="s.stacks > 0" class="token-stacks">{{ s.stacks }}</span>
-          </div>
-          <div v-for="t in tokens" :key="'t_' + t.id" class="grid-actor-token"
-            :class="[t.polarity]" :title="t.name + ' x' + t.stacks">
-            <img v-if="t.icon" :src="t.icon" class="token-icon" />
-            <span class="token-stacks">{{ t.stacks }}</span>
+            <span v-if="s.maxStacks !== 1" class="token-stacks">{{ s.stacks }}</span>
           </div>
         </div>
       </div>

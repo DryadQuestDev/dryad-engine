@@ -24,17 +24,32 @@ export const BaseStatusSchema = {
 export type BaseStatusObject = SchemaToType<typeof BaseStatusSchema>;
 
 
+/**
+ * Shape for a status that gets *applied* to a character (vs. the character's intrinsic baseline).
+ * Adds `meta` — the per-instance data bag consumed by game/plugin scripts.
+ * Used by CharacterStatusSchema, ItemTemplateSchema.status, SkillSlotSchema.status.
+ */
+export const AppliedStatusSchema = {
+    meta: { type: 'schema', fromFile: 'status_meta', fromFileType: 'custom', tooltip: 'Per-instance metadata flags consumed by game or plugin scripts (e.g. power_scaling, dot_damage_type, is_battle). Keys are defined in the status_meta editor tab.' },
+    ...BaseStatusSchema,
+} as const satisfies Schema;
+
+export type AppliedStatusObject = SchemaToType<typeof AppliedStatusSchema>;
+
+
 export const CharacterStatusSchema = {
     uid: { type: 'uid', required: true, tooltip: 'Unique identifier for the character status effect.' },
     id: { type: 'string', required: true, tooltip: 'Status ID used to reference this status in code.' },
     name: { type: 'string', tooltip: 'Display name of the status effect shown to users.' },
     description: { type: 'htmlarea', tooltip: 'Rich text description of what this status effect does.' },
-    max_stacks: { type: 'number', tooltip: 'Maximum number of times this status can stack on a character.' },
+    max_stacks: { type: 'number', tooltip: 'Maximum stack count. 0, -1, or empty = unlimited.' },
     duration: { type: 'number', tooltip: 'How long the status lasts. -1 = permanent (default). Interpretation depends on the game/plugin (e.g. clock turns in battle).' },
+    multi_stack: { type: 'boolean', tooltip: 'If true, each apply creates an independent instance with its own duration (DD-style). If false, reapply refreshes the single instance.' },
+    duration_increment: { type: 'boolean', show: { multi_stack: '$falsy' }, tooltip: 'Single-stack only: reapplying adds the new duration to the existing one (accumulate) instead of refreshing to the max.' },
     image: { type: 'file', fileType: 'image', tooltip: 'Image to display for the status effect.' },
     polarity: { type: 'chooseOne', options: ['positive', 'neutral', 'negative'], tooltip: 'Visual indicator for the status: positive (green), neutral (gray), negative (red).' },
     is_hidden: { type: 'boolean', tooltip: 'If true, this status is hidden from the UI but still exists in data.' },
-    ...BaseStatusSchema,
+    ...AppliedStatusSchema,
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
 } as const satisfies Schema;
 

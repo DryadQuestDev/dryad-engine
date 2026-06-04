@@ -127,7 +127,7 @@ function selectCharacter(index: number) {
 
 /* Match CharacterTab.vue layout for doll wrapper */
 .viewer-doll-wrapper {
-    width: 50cqh;
+    /* width: 50cqh; */
     flex-shrink: 0;
     height: 100%;
     position: relative;

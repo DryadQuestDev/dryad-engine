@@ -15,29 +15,15 @@ type AbilitySnapshot = {
   chosen: boolean,
 }
 
-type TokenEffect = {
-  type: 'dot' | 'hot' | 'absorb' | 'death_defiance' | 'stun',
-  value: number,
-  damage_type?: string,
-}
-
-type TokenDefinition = {
-  id: string,
-  name: string,
-  description?: string,
-  icon?: string,
-  color?: string,
-  max_stacks: number,
-  polarity: 'positive' | 'negative' | 'neutral',
+type StatusMeta = {
+  is_battle?: boolean,
   power_scaling?: boolean,
-  effects: TokenEffect[],
+  dot_damage_type?: string,
   source?: string,
 }
 
-type TokenInstance = { stacks: number, duration?: number, source: string }
-
 type EffectResult = {
-  type: 'damage' | 'heal' | 'shield' | 'steal' | 'move' | 'token_apply' | 'token_dot' | 'token_hot' | 'death_defiance' | 'cleanse' | 'dodge' | 'status_apply',
+  type: 'damage' | 'heal' | 'shield' | 'steal' | 'move' | 'status_apply' | 'status_dot' | 'status_hot' | 'death_defiance' | 'cleanse' | 'dodge' | 'thorns',
   targetId?: string,
   amount?: number,
   rawAmount?: number,
@@ -45,7 +31,6 @@ type EffectResult = {
   shieldAbsorbed?: number,
   defeated?: boolean,
   isCrit?: boolean,
-  tokenId?: string,
   stacks?: number,
   statusId?: string,
   statusName?: string,
@@ -82,7 +67,6 @@ type Battle = {
   prevDisableSaves: boolean,            // saved state to restore on end
   prevGameState: string,                // saved game_state to restore on end
   abilitiesState: Record<string, Record<string, AbilityState>>,  // charId -> abilityId -> state
-  tokens: Record<string, Record<string, TokenInstance[]>>,       // charId -> tokenId -> instances[]
   chosenAction?: { abilityId: string, targetPos: string } | null,
   defeatedPlayer: string[],              // character IDs defeated on player side
   defeatedEnemy: string[],               // character IDs defeated on enemy side
@@ -91,6 +75,7 @@ type Battle = {
   retreated: string[],                   // character IDs that have successfully retreated
   _firstAction?: boolean,
   _pendingTurnStart?: boolean,
+  _pendingThorns?: BattleLogEntry[],
 }
 
 type EffectStep = {

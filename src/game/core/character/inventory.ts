@@ -28,6 +28,12 @@ export class Inventory {
         status.id = id;
         status.setValues(item.statusObject);
         status.isHidden = true;
+        // Mirror granted-status stacks to the equipped item quantity. Must be set BEFORE
+        // addStatus so the character's reevaluate() inside addStatus sees the right count;
+        // otherwise per-stack stats compute against stacks=1 and stay stale until some
+        // unrelated state change triggers another recompute. Kept in sync at runtime by
+        // reduceItemQuantity → character.setStatusStacks (also recompute-aware).
+        status.currentStacks = item.quantity;
         character.addStatus(status);
     }
 
@@ -365,8 +371,10 @@ export class Inventory {
 
         // Special case: unlimited stack (-1)
         if (maxStack === -1) {
-            // Find existing stack with same id (stacks items of same type)
-            const existingStack = this.items.find(i => i.id === item.id);
+            // Find existing UNEQUIPPED stack with same id — equipped items belong to a slot
+            // (their quantity is governed by slot.max_stack / consume hooks) and must never be
+            // silently inflated by addItem.
+            const existingStack = this.items.find(i => i.id === item.id && !i.isEquipped);
 
             if (existingStack) {
                 existingStack.quantity += actualQuantity;
@@ -397,9 +405,10 @@ export class Inventory {
         // Stackable items with limit (e.g., max_stack = 99)
         let remainingQuantity = actualQuantity;
 
-        // First, try to top off existing stacks
+        // First, try to top off existing UNEQUIPPED stacks. Equipped items are excluded for the
+        // same reason as the unlimited path above — their quantity is owned by their slot.
         const existingStacks = this.items.filter(i =>
-            i.id === item.id && i.quantity < maxStack
+            i.id === item.id && !i.isEquipped && i.quantity < maxStack
         );
 
         for (const existingStack of existingStacks) {
@@ -445,12 +454,34 @@ export class Inventory {
     }
 
     /**
-     * Reduce item quantity by amount. Removes item if quantity reaches 0.
+     * Reduce item quantity by amount. Removes item if quantity reaches 0. When the item is
+     * equipped and `character` is provided, the granted "item_<uid>" status's stacks are
+     * kept in sync with the new quantity; at quantity 0 the slot is fully unequipped
+     * (clears slot.itemUid, removes the granted status, fires item_unequip events).
      * @returns actual amount reduced
      */
-    public reduceItemQuantity(item: Item, amount: number = 1): number {
+    public reduceItemQuantity(item: Item, amount: number = 1, character?: Character): number {
         const reduced = Math.min(item.quantity, amount);
         item.quantity -= reduced;
+
+        if (item.isEquipped && character) {
+            if (item.quantity > 0) {
+                // Sync granted-status stacks to the new quantity. setStatusStacks captures
+                // resources, sets stacks, reevaluates, and adjusts resources — so derived
+                // stats refresh in the same frame (a plain `currentStacks =` would not).
+                const statusId = "item_" + item.uid;
+                if (character.hasStatus(statusId)) {
+                    character.setStatusStacks(statusId, item.quantity);
+                }
+            } else {
+                // Quantity hit 0 — fully unequip via the existing primitive: clears slot.itemUid,
+                // removes the granted status, fires item_unequip events. The qty-0 guard in
+                // unequipSlot skips the merge-back (nothing to merge).
+                const slot = character.getItemSlotByItemUid(item.uid);
+                if (slot) this.unequipSlot(slot, character);
+            }
+        }
+
         if (item.quantity <= 0) {
             this.removeItem(item);
         }
@@ -515,6 +546,19 @@ export class Inventory {
         // The sticky/hover state is now managed by useItemPopup composable
         // and will be automatically cleared via the watcher when equipped state changes
 
+        // Split-on-equip: if the slot caps how many units it accepts and the stack exceeds it,
+        // peel off `cap` doses into a fresh equipped clone and leave the remainder as the
+        // original (now smaller) unequipped stack. Equipping the clone keeps the equipped
+        // Item's quantity exactly at the slot cap.
+        const cap = slot.getSlotObject()?.max_stack;
+        if (cap && cap > 0 && item.quantity > cap) {
+            const equipPart = this.cloneItem(item); // isEquipped:false, fresh uid
+            equipPart.quantity = cap;
+            this.items.push(equipPart);
+            item.quantity -= cap;
+            item = equipPart;
+        }
+
         item.isEquipped = true;
         slot.itemUid = item.uid;
 
@@ -565,6 +609,15 @@ export class Inventory {
         if (itemToUnequip.statusObject) {
             character.removeStatus("item_" + itemToUnequip.uid);
         }
+
+        // Delegate merge-back to the existing stacking primitive. removeItem first so addItem
+        // doesn't see itemToUnequip as a candidate (or duplicate it); addItem then handles
+        // every stacking case (unlimited / capped / non-stackable) the same way it would
+        // for any newly-added Item. Skip the merge when qty is 0 — that's the "consumed to
+        // nothing" path (reduceItemQuantity) and addItem would push a phantom 0-qty clone.
+        const qty = itemToUnequip.quantity;
+        this.removeItem(itemToUnequip);
+        if (qty > 0) this.addItem(itemToUnequip, qty, true);
 
         if (itemToUnequip.actions?.item_unequip_after) {
             game.logicSystem.resolveActions(itemToUnequip.actions.item_unequip_after);

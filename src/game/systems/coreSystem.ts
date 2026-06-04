@@ -31,6 +31,7 @@ export type CustomComponent = {
   title?: string;
   order?: number;
   props?: Record<string, any>; // Optional props
+  mask?: string | boolean; // Popup slot only: backdrop. omit = default dim, false = none, or a CSS color
 }
 
 
@@ -453,10 +454,17 @@ export class CoreSystem {
     }
   }
 
-  public setMusic(val: string | false, load: boolean = false) {
+  public setMusic(val: string | false, load: boolean = false, disableTransition: boolean = false) {
+    const fade = disableTransition ? 0 : 1.0;
+
     if (val === false) {
       const game = Game.getInstance();
       val = game.dungeonSystem.currentDungeon.value?.music || "";
+      if (!val) {
+        this.music = "";
+        MusicPlayer.getInstance().stop({ fade });
+        return;
+      }
     }
 
     if (!val) {
@@ -472,7 +480,7 @@ export class CoreSystem {
     }
 
     const volume = (Global.getInstance().userSettings.value.music_volume || 0) / 100;
-    MusicPlayer.getInstance().play(val, files, { fade: 1.0, volume, force: load });
+    MusicPlayer.getInstance().play(val, files, { fade, volume, force: load });
   }
 
   // ============================================

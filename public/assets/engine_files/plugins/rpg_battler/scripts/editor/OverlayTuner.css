@@ -62,13 +62,25 @@
 }
 
 .tuner-preview {
+    /* Frames the EditorCharacterPreview "slot" within the panel, anchored to the
+       bottom so there's headroom above for the overlay (which sits at the slot top).
+       The slot itself owns the container-type + slot-relative overlay positioning. */
     position: relative;
     flex: 1;
     min-height: 0;
     background: #1a1a1a;
-    container-type: size;
     border-radius: 4px;
     overflow: hidden;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+/* The slot: 85% of the panel height (15% top headroom for the overlay), square. */
+.tuner-slot {
+    position: relative;
+    height: 85%;
+    aspect-ratio: 1 / 1;
 }
 
 .tuner-no-art {
@@ -76,51 +88,14 @@
     font-style: italic;
 }
 
-.tuner-art-wrapper {
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 50cqh;
-    height: 75%;
-    /* Center the doll horizontally inside the column so the body lands at
-       preview-x-50% by default. Without this, the inline-block .tuner-art
-       (75pcq wide, wider than the 50pcq column) hugs the wrapper's left edge,
-       pushing the body center ~12.5pcq right of preview-50% — and making the
-       overlay (anchored at 50%) appear shifted left of the body. */
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-}
-
-.tuner-art {
-    position: relative;
-    display: inline-block;
-    height: 100%;
-}
-
-.tuner-art-img {
-    display: block;
-    height: 100%;
-    width: auto;
-}
-
-.tuner-art-stacked {
-    position: absolute;
-    top: 0;
-    left: 0;
-}
-
 .tuner-overlay-rect {
-    position: absolute;
+    /* Position/scale come from the slot's #overlay wrapper (EditorCharacterPreview);
+       this is just the draggable guide. pointer-events:auto so only the rect drags. */
     width: 100px;
     height: 50px;
     border: 2px dashed rgba(0, 200, 255, 0.7);
     background: rgba(0, 200, 255, 0.1);
-    /* transform is inline (translateX(-50%) scale(effectiveOverlayScale)) so
-       the rect mirrors the in-game zoomed-out size. transform-origin pins the
-       scale to the rect's top-center — matches CharacterSlot's overlay-wrapper. */
-    transform-origin: 50% 0;
+    pointer-events: auto;
     cursor: grab;
     border-radius: 4px;
     display: flex;

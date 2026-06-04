@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { markRaw } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { Status } from '../../core/character/status';
 import { Item } from '../../core/character/item';
-import StatusObjectDisplay from './StatusObjectDisplay.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import ItemCard from './ItemCard.vue';
-import { useHoverPopup } from './useHoverPopup';
+import StatusCard from '../popups/cards/StatusCard.vue';
+import { popover as vPopover } from '../../directives/popoverDirective';
 
 const props = withDefaults(defineProps<{
   character: Character;
@@ -19,35 +20,12 @@ const props = withDefaults(defineProps<{
 });
 const game = Game.getInstance();
 
-// ---- Status popup ----
-const {
-  hovered: hoveredStatus,
-  popupRef: statusPopupRef,
-  floatingStyles: statusFloatingStyles,
-  show: showStatus,
-  scheduleHide: hideStatusPopup,
-  onPopupEnter: onStatusPopupEnter,
-  onPopupLeave: onStatusPopupLeave,
-} = useHoverPopup<Status>({ placement: 'left-start' });
+// One brick per instance for multi-stack statuses; one brick per status otherwise.
+type StatusBrick = { status: Status; key: string; stacks: number; duration: number; instanceIndex?: number };
 
-const showStatusPopup = (event: MouseEvent, status: Status) => {
-  showStatus(status, event.currentTarget as HTMLElement);
-};
-
-// ---- Item popup ----
-const {
-  hovered: hoveredItem,
-  popupRef: itemPopupRef,
-  floatingStyles: itemFloatingStyles,
-  show: showItem,
-  scheduleHide: hideItemPopup,
-  onPopupEnter: onItemPopupEnter,
-  onPopupLeave: onItemPopupLeave,
-} = useHoverPopup<Item>({ placement: 'left-start' });
-
-const showItemPopup = (event: MouseEvent, item: Item) => {
-  showItem(item, event.currentTarget as HTMLElement);
-};
+// markRaw'd so v-popover binding doesn't re-make them reactive on every render.
+const StatusCardComp = markRaw(StatusCard);
+const ItemCardComp = markRaw(ItemCard);
 
 // ---- Status helpers ----
 const getStatusObject = (status: Status) => {
@@ -66,20 +44,10 @@ const getStatusImage = (status: Status): string | undefined => {
   return statusObject?.image;
 };
 
-const getStatusDescription = (status: Status): string => {
-  if (status.description) return status.description;
-  const statusObject = getStatusObject(status);
-  return statusObject?.description || '';
-};
-
 const getStatusPolarity = (status: Status): string => {
   if (status.polarity) return status.polarity;
   const statusObject = getStatusObject(status);
   return statusObject?.polarity || 'positive';
-};
-
-const getStatusRarity = (status: Status): string => {
-  return status.rarity || '';
 };
 
 // Filter visible statuses based on isHidden property
@@ -91,24 +59,20 @@ const visibleStatuses = computed(() => {
   return props.character.getStatuses().filter(status => !status.isHidden);
 });
 
-// Merge static stats with computed stats for the hovered status
-const hoveredStatusStats = computed((): Record<string, number> => {
-  const status = hoveredStatus.value;
-  if (!status) return {};
-
-  const merged: Record<string, number> = { ...status.stats };
-
-  if (status.computedStatsKey) {
-    const computer = game.characterSystem.getStatComputer(status.computedStatsKey);
-    if (computer) {
-      const computedValues = computer(props.character);
-      for (const key in computedValues) {
-        merged[key] = (merged[key] || 0) + computedValues[key];
+// Flattened brick list — single-stack renders one brick; multi-stack renders one brick per instance.
+const statusBricks = computed((): StatusBrick[] => {
+  const out: StatusBrick[] = [];
+  for (const status of visibleStatuses.value) {
+    if (status.multiStack) {
+      const instances = status.getInstances();
+      for (let i = 0; i < instances.length; i++) {
+        out.push({ status, key: status.id + '_' + i, stacks: instances[i].stacks, duration: instances[i].duration, instanceIndex: i });
       }
+    } else {
+      out.push({ status, key: status.id, stacks: status.currentStacks, duration: status.duration });
     }
   }
-
-  return merged;
+  return out;
 });
 
 // ---- Item helpers ----
@@ -144,66 +108,34 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
           { 'has-image': getItemImage(item) },
           ...item.getAttributeClasses()
         ]"
-        @mouseenter="showItemPopup($event, item)"
-        @mouseleave="hideItemPopup">
+        v-popover="{ component: ItemCardComp, props: { item }, placement: 'left-start' }">
         <img v-if="getItemImage(item)" :src="getItemImage(item)!" :alt="getItemName(item)"
           class="item-image" />
         <span v-else class="item-name">{{ getItemName(item) }}</span>
       </div>
 
       <!-- Status bricks -->
-      <div v-for="status in visibleStatuses" :key="'status_' + status.id" class="status-brick"
+      <div v-for="brick in statusBricks" :key="'status_' + brick.key" class="status-brick"
         :class="{
-          'has-image': getStatusImage(status),
-          'polarity-positive': getStatusPolarity(status) === 'positive',
-          'polarity-negative': getStatusPolarity(status) === 'negative',
-          'polarity-neutral': getStatusPolarity(status) === 'neutral'
-        }" @mouseenter="showStatusPopup($event, status)"
-        @mouseleave="hideStatusPopup">
-        <img v-if="getStatusImage(status)" :src="getStatusImage(status)" :alt="getStatusName(status)"
+          'has-image': getStatusImage(brick.status),
+          'polarity-positive': getStatusPolarity(brick.status) === 'positive',
+          'polarity-negative': getStatusPolarity(brick.status) === 'negative',
+          'polarity-neutral': getStatusPolarity(brick.status) === 'neutral'
+        }"
+        v-popover="{ component: StatusCardComp, props: { statusId: brick.status.id, characterId: character.id, statusInstanceIndex: brick.instanceIndex }, placement: 'left-start' }">
+        <img v-if="getStatusImage(brick.status)" :src="getStatusImage(brick.status)" :alt="getStatusName(brick.status)"
           class="status-image" />
-        <span v-else class="status-name">{{ getStatusName(status) }}</span>
-        <span v-if="status.isStackable() && status.currentStacks > 1" class="stack-count">
-          x{{ status.currentStacks }}
+        <span v-else class="status-name">{{ getStatusName(brick.status) }}</span>
+        <span v-if="brick.status.isStackable() && brick.stacks > 1" class="stack-count">
+          x{{ brick.stacks }}
         </span>
-        <span v-if="status.duration > 0" class="duration-count">
-          {{ Math.ceil(status.duration) }}
+        <span v-if="brick.duration > 0" class="duration-count">
+          {{ Math.ceil(brick.duration) }}
         </span>
       </div>
       <!-- Bottom slot -->
       <CustomComponentContainer slot="character-statuses-bottom" :context="{ character }" />
     </div>
-
-    <!-- Status Popup -->
-    <Teleport to="body">
-      <div v-if="hoveredStatus" ref="statusPopupRef" class="status-popup dark-scrollbar" :style="statusFloatingStyles"
-        @mouseenter="onStatusPopupEnter" @mouseleave="onStatusPopupLeave">
-        <div class="popup-header">
-          <h4 :class="getStatusRarity(hoveredStatus) ? ['item-name', 'rarity_' + getStatusRarity(hoveredStatus)] : []">
-            {{ getStatusName(hoveredStatus) }}
-            <span v-if="hoveredStatus.isStackable() && hoveredStatus.currentStacks > 1" class="popup-stack-count">
-              x{{ hoveredStatus.currentStacks }}
-            </span>
-          </h4>
-        </div>
-        <div class="popup-body">
-          <div v-if="getStatusDescription(hoveredStatus)" v-script="getStatusDescription(hoveredStatus)"
-            class="popup-description"></div>
-          <StatusObjectDisplay
-            :data="{ stats: hoveredStatusStats, abilities: [...hoveredStatus.abilities], ability_modifiers: hoveredStatus.abilityModifiers }"
-            :stacks="hoveredStatus.currentStacks"
-            :character-id="character.id" />
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Item Popup -->
-    <Teleport to="body">
-      <div v-if="hoveredItem" ref="itemPopupRef" class="item-popup dark-scrollbar" :style="itemFloatingStyles"
-        @mouseenter="onItemPopupEnter" @mouseleave="onItemPopupLeave">
-        <ItemCard :item="hoveredItem" />
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -274,15 +206,6 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
   color: #ccc;
   padding: 0.2rem 0.4rem;
   white-space: nowrap;
-}
-
-.item-popup {
-  position: fixed;
-  z-index: 9999;
-  width: 350px;
-  pointer-events: auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 /* Status bricks */
@@ -358,50 +281,6 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
   font-weight: bold;
   color: #ffd700;
   line-height: 1.2;
-}
-
-.status-popup {
-  position: fixed;
-  z-index: 9999;
-  background: rgba(26, 26, 26, 0.98);
-  border: 2px solid #444;
-  border-radius: 8px;
-  padding: 12px;
-  width: 350px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  color: #fff;
-  pointer-events: auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.popup-header {
-  border-bottom: 1px solid #555;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-}
-
-.popup-header h4 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: bold;
-  color: #e2c044;
-}
-
-.popup-stack-count {
-  margin-left: 0.5rem;
-  font-weight: bold;
-  color: #ffd700;
-  font-size: 0.9em;
-}
-
-.popup-body {
-  font-size: 14px;
-}
-
-.popup-description {
-  margin: 0 0 6px 0;
-  color: #ccc;
 }
 
 .duration-count {

@@ -11,7 +11,6 @@ import ProgressionContainer from './progression/ProgressionContainer.vue';
 import PopupContainer from './PopupContainer.vue';
 import LogsPopup from './LogsPopup.vue';
 import OverlayContainer from './overlays/OverlayContainer.vue';
-import LorePopup from './lore/LorePopup.vue';
 
 const global = Global.getInstance();
 const game = Game.getInstance();
@@ -92,8 +91,6 @@ const shouldShowDebugPanel = computed(() => {
         </div>
 
         <LogsPopup />
-
-        <LorePopup />
 
       </div>
       <div v-if="shouldShowDebugPanel" :class="['game-body-panel', { expanded: debugPanelExpanded }]">

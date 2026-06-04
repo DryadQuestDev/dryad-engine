@@ -4,6 +4,7 @@ import { EntityAttributeSchema } from "../schemas/entityAttributeSchema";
 import { CharacterSkinLayerSchema } from "../schemas/characterSkinLayerSchema";
 import { PropertySchema } from "../schemas/propertySchema";
 import { EntityTraitSchema } from "../schemas/entityTraitSchema";
+import { StatusMetaSchema } from "../schemas/statusMetaSchema";
 import { CharacterTemplateSchema } from "../schemas/characterTemplateSchema";
 import { DungeonConfigObject, DungeonConfigSchema } from "../schemas/dungeonConfigSchema";
 import { DungeonEncounterSchema } from "../schemas/dungeonEncounterSchema";
@@ -265,6 +266,14 @@ export const EDITOR_TABS: EditorTab[] = [
         isArray: true,
         requiresMod: true,
         customPopups: ['face-picker', 'item-slot-picker'],
+      },
+      {
+        id: 'status_meta',
+        schema: StatusMetaSchema,
+        file: 'status_meta',
+        title: 'status_meta',
+        isArray: true,
+        requiresMod: true,
       },
       {
         id: 'character_statuses',

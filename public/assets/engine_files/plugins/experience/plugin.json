@@ -89,6 +89,15 @@
         "can_overflow": true,
         "color": "f0c040",
         "uid": "xp_stat_xp"
+      },
+      {
+        "id": "xp_modifier",
+        "name": "XP Modifier",
+        "description": "Percent modifier to XP gain. 0 = normal (100%), 20 = +20%, -50 = halved.",
+        "ingame_description": "Modifier to experience gained.",
+        "is_hidden": true,
+        "color": "f0c040",
+        "uid": "xp_stat_xp_modifier"
       }
     ],
     "character_traits": [
@@ -104,12 +113,6 @@
         "fromFile": "character_statuses",
         "tooltip": "Status to apply on each level up. Stacks automatically — each level adds one stack. Use for stat growth per level.",
         "uid": "xp_trait_level_up_status"
-      },
-      {
-        "id": "xp_multiplier",
-        "type": "number",
-        "tooltip": "XP gain multiplier. 1 = normal, 1.5 = 50% bonus, 0.5 = half XP. Leave unset for default (1). Can be modified by statuses/items.",
-        "uid": "xp_trait_xp_multiplier"
       }
     ],
     "locale": [

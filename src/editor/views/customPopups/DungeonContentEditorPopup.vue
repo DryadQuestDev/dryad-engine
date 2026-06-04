@@ -1170,7 +1170,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
           <ToggleSwitch v-model="autosave" />
           <span class="auto-open-label">Autosave</span>
         </label>
-        <label class="auto-open-toggle" v-tooltip.bottom="'Convert straight quotes to curly quotes as you type (like Google Docs)'">
+        <label class="auto-open-toggle"
+          v-tooltip.bottom="'Convert straight quotes to curly quotes as you type (like Google Docs)'">
           <ToggleSwitch v-model="autoCurlyQuotes" />
           <span class="auto-open-label">Curly quotes</span>
         </label>
@@ -1286,8 +1287,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
           <template v-for="(block, idx) in doc.blocks" :key="(block as any)">
             <div
               v-show="(tocRoles[idx].questGroup ? isItemVisible({ kind: 'quest', group: tocRoles[idx].questGroup! }) : isBlockVisible(idx)) && !tocRoles[idx].hidden"
-              v-bind="{ 'data-toc-index': idx }"
-              class="toc-entry toc-handle" :class="{
+              v-bind="{ 'data-toc-index': idx }" class="toc-entry toc-handle" :class="{
                 'toc-entry--room': block.kind === 'room',
                 'toc-entry--indented': indented[idx],
                 'toc-selected': tocRoles[idx].questGroup
@@ -1392,14 +1392,14 @@ function questKindOf(id: string | undefined): QuestKind | null {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: 0.5rem;
+  gap: 0;
 }
 
 .editor-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 5px;
   flex-wrap: wrap;
   padding: 0.5rem 0.25rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);

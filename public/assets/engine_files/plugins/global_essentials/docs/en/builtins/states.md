@@ -10,7 +10,7 @@ All built-in game states you can read and write using `game.getState()` and `gam
 |-------|---------|-------------|
 | `game_state` | `"exploration" but can be set to a custom state in General->Manifest` | Main game view state (used by `game_state` component slot) |
 | `overlay_state` | `"overlay-navigation"` | Overlay layer state |
-| `popup_state` | `null` | Active popup state |
+| `popup_state` | `[]` | Open popup stack (array of popup ids; last = topmost) |
 | `progression_state` | `null` | Side panel tab (quests, character, gallery) |
 | `progression_sub_state` | `null` | Character sheet sub-tab |
 | `suppress_character_progression` | `false` | When true, clicking a character in the character list only updates `selected_character` and skips opening the progression overlay. Use when the game renders the character sheet elsewhere (e.g., a side panel) and doesn't want the full-page overlay on every click. |

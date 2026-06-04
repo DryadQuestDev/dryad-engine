@@ -5,7 +5,7 @@ const { computed, defineComponent, watch, nextTick, ref } = vue;
 const { AbilityCard, CharacterFace } = components;
 
 import { currentBattle, CLOCK_TURN_ACTOR } from '../battle-flow.mjs';
-import { getTokenDefinitions } from '../battle-effects.mjs';
+import { getStatusDefinitions } from '../battle-effects.mjs';
 
 const MAX_VISIBLE_TURNS = 10;
 
@@ -189,40 +189,32 @@ export const BattleLog = defineComponent({
       if (effect.type === 'shield') return game.getLine('log_shield', { name, amount: effect.amount });
       if (effect.type === 'steal') return game.getLine('log_steal', { name, amount: effect.amount });
       if (effect.type === 'move') return game.getLine('log_move');
-      if (effect.type === 'token_apply') {
-        const def = getTokenDefinitions().get(effect.tokenId);
-        const tokenName = def?.name || effect.tokenId;
-        const icon = def?.icon ? `<img src="${def.icon}" class="log-inline-icon" />` : '';
-        let text = game.getLine('log_token_apply', { name, stacks: effect.stacks, tokenName: icon + tokenName });
-        if (effect.duration) text += ` for ${effect.duration} turns`;
-        return text;
-      }
-      if (effect.type === 'token_dot') {
-        const tokenName = getTokenDefinitions().get(effect.tokenId)?.name || effect.tokenId;
+      if (effect.type === 'status_dot') {
+        const statusName = effect.statusName || getStatusDefinitions().get(effect.statusId)?.name || effect.statusId;
         const dmgType = effect.damageType || 'absolute';
         const diff = (effect.rawAmount != null && effect.rawAmount !== effect.amount) ? effect.amount - effect.rawAmount : 0;
         if (diff !== 0) {
-          return game.getLine('log_token_dot_modified', { name, amount: effect.amount, raw: effect.rawAmount, sign: diff > 0 ? '+' : '-', diff: Math.abs(diff), damageType: dmgType, tokenName });
+          return game.getLine('log_status_dot_modified', { name, amount: effect.amount, raw: effect.rawAmount, sign: diff > 0 ? '+' : '-', diff: Math.abs(diff), damageType: dmgType, statusName });
         }
-        return game.getLine('log_token_dot', { name, amount: effect.amount, damageType: dmgType, tokenName });
+        return game.getLine('log_status_dot', { name, amount: effect.amount, damageType: dmgType, statusName });
       }
-      if (effect.type === 'token_hot') {
-        const tokenName = getTokenDefinitions().get(effect.tokenId)?.name || effect.tokenId;
+      if (effect.type === 'status_hot') {
+        const statusName = effect.statusName || getStatusDefinitions().get(effect.statusId)?.name || effect.statusId;
         const diff = (effect.rawAmount != null && effect.rawAmount !== effect.amount) ? effect.amount - effect.rawAmount : 0;
         if (diff !== 0) {
-          return game.getLine('log_token_hot_modified', { name, amount: effect.amount, raw: effect.rawAmount, sign: diff > 0 ? '+' : '-', diff: Math.abs(diff), tokenName });
+          return game.getLine('log_status_hot_modified', { name, amount: effect.amount, raw: effect.rawAmount, sign: diff > 0 ? '+' : '-', diff: Math.abs(diff), statusName });
         }
-        return game.getLine('log_token_hot', { name, amount: effect.amount, tokenName });
+        return game.getLine('log_status_hot', { name, amount: effect.amount, statusName });
       }
       if (effect.type === 'death_defiance') return game.getLine('log_death_defiance', { name });
       if (effect.type === 'cleanse') return game.getLine('log_cleanse', { name });
       if (effect.type === 'thorns') return game.getLine('log_thorns', { name, amount: effect.amount });
       if (effect.type === 'status_apply') {
-        const statusDefs = game.getData("character_statuses", true);
+        const statusDefs = getStatusDefinitions();
         const def = statusDefs?.get(effect.statusId);
         const icon = def?.image ? `<img src="${def.image}" class="log-inline-icon" />` : '';
-        const statusName = icon + (effect.statusName || effect.statusId);
-        let text = game.getLine('log_status_apply', { name, statusName });
+        const statusName = icon + (effect.statusName || def?.name || effect.statusId);
+        let text = game.getLine('log_status_apply', { name, stacks: effect.stacks ?? 1, statusName });
         if (effect.duration) text += ` for ${effect.duration} turns`;
         return text;
       }

@@ -14,7 +14,7 @@ State-based slots show **one component at a time** based on a state value. The s
 |------|-------|-------------|
 | `game_state` | `game_state` | Main game view (exploration, battle, custom screens) |
 | `overlay` | `overlay_state` | Overlay layer (navigation map, exchange UI) |
-| `popup` | `popup_state` | Modal popups |
+| `popup` | `popup_state` | Modal popups. `popup_state` is a **stack** (multiple can be open, rendered on top of each other). Each registered popup may set `mask` on `addComponent` to control its backdrop (omit = default dim, `false` = none, or a CSS color). |
 | `progression-tabs` | `progression_state` | Side panel tabs (quests, characters, gallery) |
 | `character-tabs` | `progression_sub_state` | Sub-tabs within character sheet |
 

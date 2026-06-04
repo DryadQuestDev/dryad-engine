@@ -5,8 +5,22 @@ import { Game } from '../../game/game';
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useStorage } from '@vueuse/core';
 import MarkdownIt from 'markdown-it';
-import hljs from 'highlight.js';
+import hljs from 'highlight.js/lib/core';
+import javascript from 'highlight.js/lib/languages/javascript';
+import typescript from 'highlight.js/lib/languages/typescript';
+import css from 'highlight.js/lib/languages/css';
+import xml from 'highlight.js/lib/languages/xml';
+import json from 'highlight.js/lib/languages/json';
+import bash from 'highlight.js/lib/languages/bash';
 import 'highlight.js/styles/github-dark.css';
+
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('vue', xml);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('bash', bash);
 import Select from 'primevue/select';
 
 const global = Global.getInstance();

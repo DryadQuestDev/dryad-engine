@@ -1,42 +1,48 @@
 <script setup lang="ts">
-import { computed, ref, inject } from 'vue';
+import { computed, markRaw, ref } from 'vue';
+import type { Placement } from '@floating-ui/vue';
 import { Item } from '../../core/character/item';
-import { STICKY_ITEM_UID_KEY, HOVER_ITEM_UID_KEY } from './useItemPopup';
-import type { Ref } from 'vue';
+import ItemPopupCard from '../popups/cards/ItemPopupCard.vue';
+import { isPinned, getPinned } from '../popups/popupStore';
+import { popover as vPopover } from '../../directives/popoverDirective';
 
 const props = defineProps<{
   item: Item;
+  characterId?: string;
   disabled?: boolean; // Disable click/drag while keeping hover tooltips
+  popupPlacement?: Placement; // Where the item popup should anchor. Default: right-start.
+  pinnable?: boolean; // Whether clicking the slot pins its popup. Default: false (hover-only).
 }>();
 
 const emit = defineEmits<{
   click: [item: Item];
   dragstart: [event: DragEvent, item: Item];
-  hover: [item: Item | null, element: HTMLElement | null];
 }>();
 
-// Inject sticky and hover state from parent (provided by useItemPopup)
-const stickyItemUid = inject<Ref<string | null>>(STICKY_ITEM_UID_KEY, ref(null));
-const hoverItemUid = inject<Ref<string | null>>(HOVER_ITEM_UID_KEY, ref(null));
-
-// State for hover behavior
-const isHovered = ref(false);
-const wasJustUnstickied = ref(false);
 const itemSlotRef = ref<HTMLElement | null>(null);
 
-// Computed property to check if this item is the sticky one
+const popupKey = computed(() => `item:${props.item.uid}`);
+
+const ItemPopupCardComp = markRaw(ItemPopupCard);
+
+const popoverBinding = computed(() => ({
+  component: ItemPopupCardComp,
+  props: { item: props.item, characterId: props.characterId, disabled: props.disabled },
+  sticky: props.pinnable === true && !props.disabled,
+  placement: props.popupPlacement ?? ('right-start' as const),
+  key: popupKey.value,
+}));
+
+// Drives the .sticky class. Reactive against the pinned list via getPinned().
+const pinned = getPinned();
 const isSticky = computed(() => {
-  return stickyItemUid.value === props.item.uid;
+  void pinned.value;
+  return isPinned(popupKey.value);
 });
 
-// Computed properties - cached and only re-evaluated when dependencies change
-const icon = computed(() => {
-  return props.item.getTrait('image');
-});
-
-const name = computed(() => {
-  return props.item.getTrait('name') || props.item.id;
-});
+// ── Card data ──
+const icon = computed(() => props.item.getTrait('image'));
+const name = computed(() => props.item.getTrait('name') || props.item.id);
 
 const durability = computed(() => {
   const durabilityProp = props.item.properties['durability'];
@@ -48,79 +54,28 @@ const durability = computed(() => {
 
 const quantity = computed(() => {
   const maxStack = props.item.maxStack();
-  // Show quantity if item is stackable (max_stack > 1 or -1)
-  if (maxStack && (maxStack > 1 || maxStack === -1)) {
-    return props.item.quantity;
-  }
+  if (maxStack && (maxStack > 1 || maxStack === -1)) return props.item.quantity;
   return null;
 });
 
 const weight = computed(() => {
-
-  if (props.item.isEquipped) {
-    return null;
-  }
-
+  if (props.item.isEquipped) return null;
   const itemWeight = props.item.getTrait('weight');
   if (itemWeight && itemWeight > 0) {
-    const totalWeight = itemWeight * props.item.quantity;
-    return totalWeight.toFixed(1);
+    return (itemWeight * props.item.quantity).toFixed(1);
   }
   return null;
 });
 
-// Get CSS classes from item attributes
-const attributeClasses = computed(() => {
-  return props.item.getAttributeClasses();
-});
-
-// Event handlers
-function handleMouseEnter() {
-  isHovered.value = true;
-  // Set this item as the globally hovered item
-  hoverItemUid.value = props.item.uid;
-  // Reset the unstickied flag when mouse re-enters
-  wasJustUnstickied.value = false;
-  // Emit hover event with item and element reference
-  emit('hover', props.item, itemSlotRef.value);
-}
-
-function handleMouseLeave() {
-  isHovered.value = false;
-  // Only clear global hover if this was the hovered item and not just unstickied
-  if (hoverItemUid.value === props.item.uid && !wasJustUnstickied.value) {
-    hoverItemUid.value = null;
-    // Clear hover
-    emit('hover', null, null);
-  }
-}
+const attributeClasses = computed(() => props.item.getAttributeClasses());
 
 function handleClick() {
-  // Guard: disabled items can't be clicked
   if (props.disabled) return;
-
-  // If this item is already sticky, remove sticky state
-  if (isSticky.value) {
-    stickyItemUid.value = null;
-    // Set flag to prevent showing popups until mouse leaves and re-enters
-    wasJustUnstickied.value = true;
-    emit('hover', null, null);
-  } else {
-    // Make this item sticky (this will automatically unstick any other item in the same category)
-    stickyItemUid.value = props.item.uid;
-    // Clear the flag when making item sticky
-    wasJustUnstickied.value = false;
-    emit('hover', props.item, itemSlotRef.value);
-  }
   emit('click', props.item);
 }
 
 function handleDragStart(event: DragEvent) {
-  // Guard: disabled items can't be dragged
-  if (props.disabled) {
-    event.preventDefault();
-    return;
-  }
+  if (props.disabled) { event.preventDefault(); return; }
   emit('dragstart', event, props.item);
 }
 </script>
@@ -130,27 +85,15 @@ function handleDragStart(event: DragEvent) {
     <div ref="itemSlotRef" class="item-slot" :class="{
       'equipped': item.isEquipped,
       'sticky': isSticky,
-      'just-unstickied': wasJustUnstickied,
       'disabled': disabled
-    }" :draggable="!disabled" @click="handleClick" @dragstart="handleDragStart" @mouseenter="handleMouseEnter"
-      @mouseleave="handleMouseLeave">
+    }" :draggable="!disabled" @click="handleClick" @dragstart="handleDragStart"
+      v-popover="popoverBinding">
       <img v-if="icon" :src="icon" :alt="name" class="item-icon" v-persist />
       <span v-else class="item-name-fallback">{{ name }}</span>
 
-      <!-- Durability indicator on the left side -->
-      <span v-if="durability !== null" class="item-durability">
-        {{ durability }}
-      </span>
-
-      <!-- Weight indicator (bottom-left) -->
-      <span v-if="weight !== null" class="item-weight">
-        {{ weight }}
-      </span>
-
-      <!-- Quantity indicator for stackable items -->
-      <span v-if="quantity !== null" class="item-quantity">
-        {{ quantity }}
-      </span>
+      <span v-if="durability !== null" class="item-durability">{{ durability }}</span>
+      <span v-if="weight !== null" class="item-weight">{{ weight }}</span>
+      <span v-if="quantity !== null" class="item-quantity">{{ quantity }}</span>
     </div>
   </div>
 </template>

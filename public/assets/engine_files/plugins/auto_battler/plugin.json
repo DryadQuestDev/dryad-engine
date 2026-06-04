@@ -320,7 +320,7 @@
         "id": "damage",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Deal [v]% [damage_type] damage",
+        "ingame_description": "Deal [v] [damage_type] damage",
         "description": "Damage as % of caster's power (base-100: 120 = 120%)"
       },
       {
@@ -345,84 +345,79 @@
         "id": "healing",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Heal [v]% HP",
+        "ingame_description": "Heal [v]",
         "description": "Healing as % of caster's power (base-100: 100 = 100%)"
       },
       {
         "id": "lifesteal",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Steal [v]% of damage dealt as HP",
+        "ingame_description": "Heal [v]% of damage dealt",
         "description": "Heals caster for this % of damage dealt (after defenses). 50 = heal for half the damage."
-      },
-      {
-        "id": "token_apply",
-        "role": "aspect",
-        "type": "chooseOne",
-        "fromFile": "plugins_data/auto_battler/token_definitions",
-        "ingame_description": "Apply [token_stacks] [v]",
-        "ingame_description_ref": "name",
-        "description": "Token to apply to target(s). Stacks set by token_stacks. Most tokens scale with caster power (stacks = power × token_stacks / 100)."
-      },
-      {
-        "id": "token_stacks",
-        "role": "aspect",
-        "type": "number",
-        "description": "Stacks per turn. For power-scaled tokens: actual = power × value / 100. Total damage = stacks × duration (e.g. 30 stacks × 3 turns = 90 total, comparable to 90% direct damage). For gating tokens (preparation, stun): literal stacks. Default: 1."
-      },
-      {
-        "id": "token_duration",
-        "role": "aspect",
-        "type": "number",
-        "description": "Duration in turns. Total value = token_stacks × duration (e.g. 30 × 3 = 90 total). Omit for permanent tokens (shield, preparation)."
-      },
-      {
-        "id": "token_apply_self",
-        "role": "aspect",
-        "type": "chooseOne",
-        "fromFile": "plugins_data/auto_battler/token_definitions",
-        "ingame_description": "Apply [token_stacks_self] [v] to self",
-        "ingame_description_ref": "name",
-        "description": "Token to apply to caster. Stacks set by token_stacks_self. Most tokens scale with caster power (stacks = power × token_stacks_self / 100)."
-      },
-      {
-        "id": "token_stacks_self",
-        "role": "aspect",
-        "type": "number",
-        "description": "Stacks per turn to self. For power-scaled tokens: actual = power × value / 100. Total value = stacks × duration (e.g. 30 × 3 = 90 total). For gating tokens (preparation, stun): literal stacks. Default: 1."
-      },
-      {
-        "id": "token_duration_self",
-        "role": "aspect",
-        "type": "number",
-        "description": "Duration in turns. Total value = token_stacks_self × duration (e.g. 30 × 3 = 90 total). Omit for permanent tokens."
       },
       {
         "id": "status_apply",
         "role": "aspect",
         "type": "chooseMany",
         "fromFile": "character_statuses",
-        "ingame_description": "Apply [v]",
+        "ingame_description": "Apply [status_stacks] [v] [status_duration]",
         "ingame_description_ref": "name",
-        "description": "Status IDs to apply to target(s)"
+        "description": "Status IDs to apply to target(s). Stacks set by status_stacks (default 1). Power-scaled statuses (meta.power_scaling) multiply stacks by caster power/100."
+      },
+      {
+        "id": "status_stacks",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks per status in status_apply. Default 1. For power-scaled statuses: actual = power × value / 100."
+      },
+      {
+        "id": "status_duration",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "for [v] turns",
+        "ingame_hide": true,
+        "description": "Duration in turns. Overrides the status template's duration. Omit for permanent."
       },
       {
         "id": "status_apply_self",
         "role": "aspect",
         "type": "chooseMany",
         "fromFile": "character_statuses",
-        "ingame_description": "Apply [v] to self",
+        "ingame_description": "Apply [status_stacks_self] [v] to self [status_duration_self]",
         "ingame_description_ref": "name",
         "description": "Status IDs to apply to caster (self). Allows abilities to buff/debuff caster when targeting others."
+      },
+      {
+        "id": "status_stacks_self",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks per status in status_apply_self. Default 1."
+      },
+      {
+        "id": "status_duration_self",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "for [v] turns",
+        "ingame_hide": true,
+        "description": "Duration in turns for self-applied statuses."
       },
       {
         "id": "status_remove",
         "role": "aspect",
         "type": "chooseMany",
         "fromFile": "character_statuses",
-        "ingame_description": "Remove [v]",
+        "ingame_description": "Remove [status_remove_stacks] [v]",
         "ingame_description_ref": "name",
-        "description": "Status IDs to remove/cleanse from target"
+        "description": "Status IDs to remove from target. Omit status_remove_stacks to clear all stacks of each."
+      },
+      {
+        "id": "status_remove_stacks",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to remove per status in status_remove. Unset = remove all stacks."
       },
       {
         "id": "cooldown_change",
@@ -642,24 +637,24 @@
         "val": "<b>|name|</b> heals for <b class=\"heal\">|raw| |sign| |diff| = |amount|</b>"
       },
       {
-        "id": "log_token_apply",
-        "val": "<b>|name|</b> gains <b class=\"token\">|stacks|x |tokenName|</b>"
+        "id": "log_status_apply",
+        "val": "<b>|name|</b> gains <b class=\"status\">|stacks|x |statusName|</b>"
       },
       {
-        "id": "log_token_dot",
-        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|amount| |damageType|</b> damage from <b>|tokenName|</b>"
+        "id": "log_status_dot",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|amount| |damageType|</b> damage from <b>|statusName|</b>"
       },
       {
-        "id": "log_token_dot_modified",
-        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|raw| |sign| |diff| = |amount| |damageType|</b> damage from <b>|tokenName|</b>"
+        "id": "log_status_dot_modified",
+        "val": "<b>|name|</b> takes <b class=\"|damageType|\">|raw| |sign| |diff| = |amount| |damageType|</b> damage from <b>|statusName|</b>"
       },
       {
-        "id": "log_token_hot",
-        "val": "<b>|name|</b> heals <b class=\"heal\">|amount|</b> from <b>|tokenName|</b>"
+        "id": "log_status_hot",
+        "val": "<b>|name|</b> heals <b class=\"heal\">|amount|</b> from <b>|statusName|</b>"
       },
       {
-        "id": "log_token_hot_modified",
-        "val": "<b>|name|</b> heals <b class=\"heal\">|raw| |sign| |diff| = |amount|</b> from <b>|tokenName|</b>"
+        "id": "log_status_hot_modified",
+        "val": "<b>|name|</b> heals <b class=\"heal\">|raw| |sign| |diff| = |amount|</b> from <b>|statusName|</b>"
       },
       {
         "id": "log_death_defiance",
@@ -668,10 +663,6 @@
       {
         "id": "log_cleanse",
         "val": "<b>|name|</b> <b class=\"cleanse\">cleanses</b> tokens"
-      },
-      {
-        "id": "log_status_apply",
-        "val": "<b>|name|</b> gains <b class=\"status\">|statusName|</b>"
       },
       {
         "id": "log_steal",
@@ -844,160 +835,180 @@
             "id": "mark",
             "name": "Mark",
             "aspects": {
-              "token_apply": "focus_mark",
-              "token_stacks": 1
+              "status_apply": [
+                "focus_mark"
+              ],
+              "status_stacks": 1
             }
           }
         ]
       }
     ],
     "character_traits": [],
-    "plugins_data/auto_battler/token_definitions": [
+    "status_meta": [
+      {
+        "id": "is_battle",
+        "type": "boolean",
+        "description": "If true, the status is cleared at end of battle and ticks its duration on the affected character's turn."
+      },
+      {
+        "id": "power_scaling",
+        "type": "boolean",
+        "description": "If true, stacks applied via status_apply are multiplied by caster power/sorcery / 100."
+      },
+      {
+        "id": "dot_damage_type",
+        "type": "chooseOne",
+        "options": [
+          "physical",
+          "fire",
+          "water",
+          "air",
+          "earth",
+          "arcane",
+          "poison",
+          "light",
+          "dark",
+          "absolute"
+        ],
+        "description": "If set, status ticks damage of this type each turn."
+      },
+      {
+        "id": "source",
+        "type": "chooseOne",
+        "fromFile": "character_stats",
+        "fromFileTypeAnd": {
+          "is_resource": false
+        },
+        "description": "Character stat (non-resource) whose value seeds this status's initial stacks at battle start."
+      }
+    ],
+    "character_statuses": [
       {
         "id": "shield",
         "name": "Shield",
         "description": "Absorbs incoming damage. Each stack absorbs 1 point of non-absolute damage.",
-        "icon": "assets/engine_assets/plugins/auto_battler/shield.svg",
-        "color": "a78bfa",
+        "image": "assets/engine_assets/plugins/auto_battler/shield.svg",
         "max_stacks": 0,
         "polarity": "neutral",
-        "power_scaling": true,
-        "source": "shield",
-        "effects": [
-          {
-            "type": "absorb",
-            "value": 1
-          }
-        ]
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true,
+          "source": "shield"
+        }
       },
       {
         "id": "preparation",
         "name": "Preparation",
         "description": "Required to use preparation abilities. Consumed on use.",
-        "icon": "assets/engine_assets/plugins/auto_battler/preparation.svg",
-        "color": "a78bfa",
+        "image": "assets/engine_assets/plugins/auto_battler/preparation.svg",
         "max_stacks": 1,
         "polarity": "neutral",
-        "source": "preparation",
-        "effects": []
+        "meta": {
+          "is_battle": true,
+          "source": "preparation"
+        }
       },
       {
         "id": "combo",
         "name": "Combo",
         "description": "Required to use combo abilities. Consumed on use.",
-        "icon": "assets/engine_assets/plugins/auto_battler/combo.svg",
-        "color": "a78bfa",
+        "image": "assets/engine_assets/plugins/auto_battler/combo.svg",
         "max_stacks": 1,
         "polarity": "neutral",
-        "effects": []
+        "meta": {
+          "is_battle": true
+        }
       },
       {
         "id": "burn",
         "name": "Burn",
         "description": "Deals fire damage per stack each turn.",
-        "icon": "assets/engine_assets/plugins/auto_battler/burn.svg",
-        "color": "ff6b35",
+        "image": "assets/engine_assets/plugins/auto_battler/burn.svg",
         "max_stacks": 0,
         "polarity": "negative",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "dot",
-            "value": 1,
-            "damage_type": "fire"
-          }
-        ]
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true,
+          "dot_damage_type": "fire"
+        }
       },
       {
         "id": "poison",
         "name": "Poison",
         "description": "Deals poison damage per stack each turn.",
-        "icon": "assets/engine_assets/plugins/auto_battler/poison.svg",
-        "color": "66bb6a",
+        "image": "assets/engine_assets/plugins/auto_battler/poison.svg",
         "max_stacks": 0,
         "polarity": "negative",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "dot",
-            "value": 1,
-            "damage_type": "poison"
-          }
-        ]
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true,
+          "dot_damage_type": "poison"
+        }
       },
       {
         "id": "bleed",
         "name": "Bleed",
         "description": "Deals absolute damage per stack each turn. Ignores defenses.",
-        "icon": "assets/engine_assets/plugins/auto_battler/bleed.svg",
-        "color": "ef4444",
+        "image": "assets/engine_assets/plugins/auto_battler/bleed.svg",
         "max_stacks": 0,
         "polarity": "negative",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "dot",
-            "value": 1,
-            "damage_type": "absolute"
-          }
-        ]
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true,
+          "dot_damage_type": "absolute"
+        }
       },
       {
         "id": "regen",
         "name": "Regeneration",
         "description": "Heals per stack each turn.",
-        "icon": "assets/engine_assets/plugins/auto_battler/regen.svg",
-        "color": "42b983",
+        "image": "assets/engine_assets/plugins/auto_battler/regen.svg",
         "max_stacks": 0,
         "polarity": "positive",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "hot",
-            "value": 1
-          }
-        ]
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true
+        }
       },
       {
         "id": "stun",
         "name": "Stun",
         "description": "Prevents acting. Speed is reduced to 0.",
-        "icon": "assets/engine_assets/plugins/auto_battler/stun.svg",
-        "color": "fff59d",
+        "image": "assets/engine_assets/plugins/auto_battler/stun.svg",
         "max_stacks": 5,
         "polarity": "negative",
-        "effects": [
-          {
-            "type": "stun",
-            "value": 0
-          }
-        ]
+        "meta": {
+          "is_battle": true
+        }
       },
       {
         "id": "death_defiance",
         "name": "Death Defiance",
         "description": "Survives lethal damage once per stack, returning to 1 HP.",
-        "icon": "assets/engine_assets/plugins/auto_battler/death_defiance.svg",
-        "color": "fff59d",
+        "image": "assets/engine_assets/plugins/auto_battler/death_defiance.svg",
         "max_stacks": 3,
         "polarity": "positive",
-        "effects": [
-          {
-            "type": "death_defiance",
-            "value": 0
-          }
-        ]
+        "meta": {
+          "is_battle": true
+        }
       },
       {
         "id": "focus_mark",
         "name": "Focus Mark",
         "description": "Marks a target. Attackers with Focus Fire deal bonus damage per mark they own.",
-        "icon": "assets/engine_assets/plugins/auto_battler/focus_mark.svg",
-        "color": "a78bfa",
+        "image": "assets/engine_assets/plugins/auto_battler/focus_mark.svg",
         "max_stacks": 0,
         "polarity": "neutral",
-        "power_scaling": false,
-        "effects": []
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true
+        }
       }
     ],
     "character_stats": [

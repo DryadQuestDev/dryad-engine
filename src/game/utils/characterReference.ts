@@ -28,6 +28,14 @@ export function parseAspectRatio(aspect: string): number {
 export const SPINE_REFERENCE_WIDTH = SPINE_REFERENCE_HEIGHT * parseAspectRatio(CHARACTER_VIEWPORT_ASPECT_RATIO);
 
 /**
+ * On-screen scale of the character overlay (name/HP/status bricks). A single fixed
+ * base so every character's overlay is the same size regardless of slot.scale — the
+ * overlay wrapper is a sibling of the body (cqh = slot-relative), so slot.scale never
+ * scales it. Shared by the in-game `CharacterSlot` and the editor preview/slot.
+ */
+export const OVERLAY_BASE_SCALE = 1;
+
+/**
  * Resolves the per-view spine size multiplier from the active manifest.
  * `viewId` of '', undefined, or '_default' all read the `_default` entry.
  * Returns 1 when unset.

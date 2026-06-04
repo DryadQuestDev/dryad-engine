@@ -105,8 +105,8 @@ async function handleApplyAndSave() {
 </script>
 
 <template>
-  <Dialog :visible="visible" @update:visible="(val) => !val && handleCancel()" modal
-    class="custom-popup-dialog" :style="{ width: '80dvw', height: '100dvh' }">
+  <Dialog :visible="visible" @update:visible="(val) => !val && handleCancel()" modal class="custom-popup-dialog"
+    :style="{ width: '80dvw', height: '100dvh' }">
     <div class="custom-popup-content">
       <div v-if="props.isNewItem && idError && localItem" class="popup-id-fix">
         <label for="popup-id-fix-input">ID</label>
@@ -133,7 +133,7 @@ async function handleApplyAndSave() {
 
 <style scoped>
 .custom-popup-content {
-  padding: 1rem 0;
+  padding: 10px 0;
   flex: 1;
   min-height: 0;
   overflow: hidden;

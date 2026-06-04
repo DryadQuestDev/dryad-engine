@@ -437,9 +437,20 @@ export function useCharacterAnimation(
       case 'breathe':
         loopAnimation.value = gsap.to(element, {
           scale: 1 + (0.04 * intensity),
-          opacity: 1 - (0.15 * intensity),
           transformOrigin: transformOrigin.value,
           duration,
+          yoyo: true,
+          repeat: -1,
+          ease: 'sine.inOut',
+        });
+        break;
+
+      case 'ghost':
+        loopAnimation.value = gsap.to(element, {
+          opacity: 1 - (0.4 * intensity),
+          scale: 1 + (0.04 * intensity),
+          transformOrigin: transformOrigin.value,
+          duration: duration * 1.5,
           yoyo: true,
           repeat: -1,
           ease: 'sine.inOut',

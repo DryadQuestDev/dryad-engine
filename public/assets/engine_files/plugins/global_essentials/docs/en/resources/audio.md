@@ -20,7 +20,7 @@ Music entries contain multiple track files. When you set music, the system:
 | 3 | When track ends, plays next in shuffled order |
 | 4 | When all played, reshuffles and loops |
 
-**Fade transition:** When changing music, the current track fades out over ~1 second before the new music starts.
+**Fade transition:** When changing music, the current track fades out over ~1 second before the new music starts. Pass `true` as the second argument to `game.setMusic(...)` to switch instantly with no crossfade.
 
 ### Playing Music
 
@@ -87,8 +87,9 @@ Volume is controlled by user settings via Menu.
 
 | Method | Description |
 |--------|-------------|
-| `game.setMusic(id)` | Play music by ID |
-| `game.setMusic(false)` | Use dungeon default music |
+| `game.setMusic(id)` | Play music by ID (crossfades from the current track) |
+| `game.setMusic(id, true)` | Play music by ID without the crossfade (instant switch) |
+| `game.setMusic(false)` | Play the current dungeon's music; stops music if the dungeon has none |
 | `game.playSounds(id)` | Play sound effect |
 | `game.playSounds([id1, id2])` | Play multiple sounds in sequence |
 

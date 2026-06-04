@@ -16,6 +16,20 @@ const props = defineProps<{
   isInactive?: boolean;
 }>();
 
+const lineContext = computed(() => {
+  if (!props.characterId) return undefined;
+  const char = game.getCharacter(props.characterId);
+  return char ? { character: char } : undefined;
+});
+
+// Usable check — delegated to whatever gameplay system registered a checker (e.g. the battle plugin).
+// Greys the card when a system reports the ability is currently unusable for this character.
+// No characterId (no owner context) or no checker registered → treated as usable.
+const usable = computed(() => {
+  if (!props.characterId) return true;
+  return game.isAbilityUsable(props.characterId, props.abilityId);
+});
+
 // Auto-detect inactive state from requires_status on the ability template
 const isEffectivelyInactive = computed(() => {
   if (props.isInactive !== undefined) return props.isInactive;
@@ -50,7 +64,7 @@ const description = computed(() => {
         for (const key in mods) displayEffects[effectId][key] = mods[key];
       }
     }
-    return game.buildAbilityEffectsDescription({ effects: displayEffects }) as { name?: string, lines: string[] }[];
+    return game.buildAbilityEffectsDescription({ effects: displayEffects }, props.characterId) as { name?: string, lines: string[] }[];
   }
   return game.buildAbilityEffectsDescription(props.abilityId, props.characterId) as { name?: string, lines: string[] }[];
 });
@@ -60,7 +74,7 @@ const metaDescription = computed(() => {
   if (delta && Object.keys(delta.metaDiff).length > 0) {
     const displayMeta = { ...delta.baseData.meta };
     for (const key in delta.metaDiff) displayMeta[key] = delta.metaDiff[key];
-    return game.buildAbilityMetaDescription({ meta: displayMeta });
+    return game.buildAbilityMetaDescription({ meta: displayMeta }, props.characterId);
   }
   return game.buildAbilityMetaDescription(props.abilityId, props.characterId);
 });
@@ -90,9 +104,10 @@ function getBaseTemplate(): { baseMeta: Record<string, any>, baseEffects: Record
   return { baseMeta: (template.meta || {}) as Record<string, any>, baseEffects };
 }
 
-// Format "X➜Y" with Y in gold (global class since scoped CSS can't reach v-html)
-const deltaStr = (base: number, merged: number) =>
-  `${base}➜<span class="delta-value">${merged}</span>`;
+// Structured delta marker for numeric aspects so renderers (e.g. powerScaledRenderer)
+// can keep the merged value and still scale off it. resolveAspectValue's fallback path
+// renders this object as `base➜merged` for aspects without a renderer.
+const deltaNum = (base: number, merged: number) => ({ _base: base, _merged: merged });
 
 // Resolve a raw value through locale (e.g. "physical" ➜ "Physical")
 const resolveLocale = (val: any): string => {
@@ -116,9 +131,9 @@ function diffEffectsMerged(sourceEffects: Record<string, Record<string, any>>, b
         const sv = aspects[key];
         const bv = baseAspects[key];
         if (typeof sv === 'number' && typeof bv === 'number') {
-          if (sv !== bv) diff[key] = deltaStr(bv, sv);
+          if (sv !== bv) diff[key] = deltaNum(bv, sv);
         } else if (typeof sv === 'number' && bv === undefined) {
-          diff[key] = deltaStr(0, sv);
+          diff[key] = deltaNum(0, sv);
         } else if (JSON.stringify(sv) !== JSON.stringify(bv)) {
           if (typeof sv === 'string' && typeof bv === 'string') {
             diff[key] = `${resolveLocale(bv)}➜${resolveLocale(sv)}`;
@@ -152,7 +167,7 @@ function diffEffectsRaw(sourceEffects: Record<string, Record<string, any>>, base
         const sv = aspects[key];
         if (typeof sv === 'number') {
           const bv = baseAspects[key] || 0;
-          diff[key] = deltaStr(bv, bv + sv);
+          diff[key] = deltaNum(bv, bv + sv);
         } else if (typeof sv === 'string') {
           const bv = baseAspects[key];
           if (typeof bv === 'string') {
@@ -180,9 +195,9 @@ function diffMetaMerged(sourceMeta: Record<string, any>, baseMeta: Record<string
     const sv = sourceMeta[key];
     const bv = baseMeta[key];
     if (typeof sv === 'number' && typeof bv === 'number') {
-      if (sv !== bv) metaDiff[key] = deltaStr(bv, sv);
+      if (sv !== bv) metaDiff[key] = deltaNum(bv, sv);
     } else if (typeof sv === 'number' && bv === undefined) {
-      metaDiff[key] = deltaStr(0, sv);
+      metaDiff[key] = deltaNum(0, sv);
     } else if (bv !== undefined && JSON.stringify(sv) !== JSON.stringify(bv)) {
       if (typeof sv === 'string' && typeof bv === 'string') {
         metaDiff[key] = `${resolveLocale(bv)}➜${resolveLocale(sv)}`;
@@ -201,7 +216,7 @@ function diffMetaRaw(sourceMeta: Record<string, any>, baseMeta: Record<string, a
     const sv = sourceMeta[key];
     if (typeof sv === 'number') {
       const bv = baseMeta[key] || 0;
-      metaDiff[key] = deltaStr(bv, bv + sv);
+      metaDiff[key] = deltaNum(bv, bv + sv);
     } else if (typeof sv === 'string') {
       const bv = baseMeta[key];
       if (typeof bv === 'string') {
@@ -250,7 +265,7 @@ const deltaData = computed((): DeltaResult | null => {
 const deltaNewDesc = computed(() => {
   if (!deltaData.value || !Object.keys(deltaData.value.newEffects).length) return [];
   return game.buildAbilityEffectsDescription(
-    { effects: deltaData.value.newEffects }
+    { effects: deltaData.value.newEffects }, props.characterId
   ) as { name?: string, lines: string[] }[];
 });
 
@@ -275,7 +290,7 @@ function getStatIcon(statId: string): string | undefined {
     Ability "{{ abilityId }}" not found
   </div>
 
-  <div v-else class="ability-card">
+  <div v-else class="ability-card" :class="{ unusable: !usable }">
     <div class="card-header">
       <img v-if="abilityMeta.icon" :src="abilityMeta.icon" class="ability-icon"
         @error="(e) => (e.target as HTMLImageElement).style.display = 'none'" />
@@ -284,7 +299,8 @@ function getStatIcon(statId: string): string | undefined {
         <span v-if="isGranted" class="ability-label granted">{{ global.getString('ability_tag.granted') }}</span>
         <span v-if="improvementData" class="ability-label modified">{{ global.getString('ability_tag.modified')
           }}</span>
-        <span v-if="isEffectivelyInactive" class="ability-label inactive">{{ global.getString('ability_tag.inactive') }}</span>
+        <span v-if="isEffectivelyInactive" class="ability-label inactive">{{ global.getString('ability_tag.inactive')
+        }}</span>
       </div>
       <CustomComponentContainer slot="ability-card-header" :context="{ abilityId, characterId }" />
     </div>
@@ -304,21 +320,25 @@ function getStatIcon(statId: string): string | undefined {
     </div>
 
     <div class="card-body">
-      <div v-if="abilityMeta.description" v-script="abilityMeta.description" class="ability-description"></div>
+      <div v-if="abilityMeta.description"
+        v-script="{ html: abilityMeta.description, context: lineContext }"
+        class="ability-description"></div>
 
       <div class="ability-details"
         v-if="metaDescription.length > 0 || description.length > 0 || deltaNewDesc.length > 0">
         <div v-for="(line, i) in metaDescription" :key="'m' + i" class="meta-desc-line"
-          v-script="{ html: line, resolver: false }"></div>
+          v-script="{ html: line, resolver: false, context: lineContext }"></div>
         <div v-for="(effect, i) in description" :key="'e' + i" class="effect-item">
           <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
           <div v-for="(line, j) in effect.lines" :key="j" class="effect-line"
-            v-script="{ html: line, resolver: false }"></div>
+            v-script="{ html: line, resolver: false, context: lineContext }">
+          </div>
         </div>
         <div v-for="(effect, i) in deltaNewDesc" :key="'dn' + i" class="effect-item new-effect">
           <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
           <div v-for="(line, j) in effect.lines" :key="j" class="effect-line"
-            v-script="{ html: line, resolver: false }"></div>
+            v-script="{ html: line, resolver: false, context: lineContext }">
+          </div>
         </div>
       </div>
     </div>
@@ -333,9 +353,24 @@ function getStatIcon(statId: string): string | undefined {
   border: 2px solid #444;
   border-radius: 8px;
   padding: 12px;
-  width: 320px;
+  max-width: 400px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   color: #fff;
+}
+
+/* Unusable (a registered gameplay system reports the ability can't be used now) — greyed, mirrors
+   the in-battle ability panel's disabled state. */
+.ability-card.unusable {
+  opacity: 0.6;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.ability-card.unusable .ability-icon {
+  filter: grayscale(1) brightness(0.5);
+}
+
+.ability-card.unusable .ability-name {
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .ability-error {
@@ -365,7 +400,7 @@ function getStatIcon(statId: string): string | undefined {
 
 .ability-name {
   margin: 0;
-  font-size: 16px;
+  font-size: 1.15em;
   font-weight: bold;
   color: #42b983;
 }
@@ -375,7 +410,7 @@ function getStatIcon(statId: string): string | undefined {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: 0.9em;
 }
 
 .meta-item {
@@ -412,7 +447,7 @@ function getStatIcon(statId: string): string | undefined {
 }
 
 .card-body {
-  font-size: 14px;
+  font-size: 1em;
 }
 
 .ability-description {
@@ -432,7 +467,7 @@ function getStatIcon(statId: string): string | undefined {
   border-left: 3px solid #42b983;
   margin-bottom: 6px;
   color: #ddd;
-  font-size: 13px;
+  font-size: 0.9em;
   line-height: 1.4;
 }
 
@@ -450,12 +485,12 @@ function getStatIcon(statId: string): string | undefined {
   font-weight: 600;
   color: #e1ff00;
   margin-bottom: 4px;
-  font-size: 13px;
+  font-size: 0.9em;
 }
 
 .effect-line {
   color: #ddd;
-  font-size: 13px;
+  font-size: 0.9em;
   line-height: 1.4;
 }
 
@@ -478,7 +513,7 @@ function getStatIcon(statId: string): string | undefined {
 }
 
 .ability-label {
-  font-size: 11px;
+  font-size: 0.8em;
   font-weight: 600;
   border-radius: 8px;
   padding: 1px 8px;
@@ -501,5 +536,4 @@ function getStatIcon(statId: string): string | undefined {
   background: rgba(136, 136, 136, 0.15);
   border: 1px solid rgba(136, 136, 136, 0.3);
 }
-
 </style>

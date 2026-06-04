@@ -21,15 +21,14 @@ The RPG Battler provides named slots where other plugins or game scripts can inj
 | Slot | Location | Props | Description |
 |---|---|---|---|
 | `rpg-char-overlay-top` | Top of the in-battle character overlay | `character` (Character) | Content injected above the character name and health bar |
-| `rpg-char-overlay-bottom` | Bottom of the in-battle character overlay | `character` (Character) | Content injected below the token icons |
-| `rpg-battle-char-overlay` | CharacterSlot overlay during battle | `character` (Character), `slotScale` (number) | Full overlay component rendered on each battle CharacterSlot (default: RpgCharOverlay with health bar, name, tokens) |
+| `rpg-char-overlay-bottom` | Bottom of the in-battle character overlay | `character` (Character) | Content injected below the status bricks |
+| `rpg-battle-char-overlay` | CharacterSlot overlay during battle | `character` (Character), `slotScale` (number) | Full overlay component rendered on each battle CharacterSlot (default: RpgCharOverlay with health bar, name, status bricks) |
 
 ## Non-Battle Slots
 
 | Slot | Location | Props | Description |
 |---|---|---|---|
 | `character-list-item` | Party list character portrait | `character` (Character) | Overlay on party list portraits. Used by RpgHealthOverlay to show HP loss bar |
-| `character-statuses-bottom` | Bottom of character viewer statuses panel | `character` (Character) | Used by RpgTokenBricks to show active token bricks in the character viewer |
 
 ## Example
 

@@ -2,7 +2,7 @@
 
 import { currentBattle } from './battle-state.mjs';
 import {
-  calculateRawDamage, applyDefenses, applyHealing, getTargets, getCharacterPosition, calculateRange, getTokenStacks, getTokenDefinitions, getEffectiveRange
+  calculateRawDamage, applyDefenses, applyHealing, getTargets, getCharacterPosition, calculateRange, getStatusStacks, getStatusDefinitions, getEffectiveRange
 } from './battle-effects.mjs';
 import {
   getUsableAbilities, getAliveOnSide, isAlive, canUseAbility
@@ -229,7 +229,7 @@ function scoreAbilityTarget(characterId, abilityId, targetPos) {
         totalDmg += dmg;
 
         const targetHp = target.getResource('health');
-        const shield = getTokenStacks(t.characterId, 'shield');
+        const shield = getStatusStacks(t.characterId, 'shield');
         const effectiveHp = targetHp + shield;
 
         // Execute bonus — would kill the target
@@ -265,25 +265,25 @@ function scoreAbilityTarget(characterId, abilityId, targetPos) {
       }
     }
 
-    // Score token_apply effects (shield, buffs, debuffs)
-    if (aspects.token_apply) {
-      const stacks = aspects.token_stacks || 1;
-      score += WEIGHTS.SHIELD * stacks * targets.length;
+    // Score status_apply effects (shield, buffs, debuffs)
+    if (aspects.status_apply) {
+      const stacks = aspects.status_stacks || 1;
+      score += WEIGHTS.SHIELD * stacks * targets.length * (aspects.status_apply.length || 1);
     }
-    if (aspects.token_apply_self) {
-      const stacks = aspects.token_stacks_self || 1;
-      score += WEIGHTS.SHIELD * stacks;
+    if (aspects.status_apply_self) {
+      const stacks = aspects.status_stacks_self || 1;
+      score += WEIGHTS.SHIELD * stacks * (aspects.status_apply_self.length || 1);
     }
 
-    // Token setup scoring: preparation and combo tokens enable gated abilities
-    if (aspects.token_apply_self === 'preparation') {
+    // Setup scoring: preparation and combo statuses enable gated abilities
+    if (aspects.status_apply_self?.includes('preparation')) {
       // Bonus if character has abilities with meta.preparation
       const abilities = character.getAbilities();
       for (const abId in abilities) {
         if (abilities[abId].meta.preparation) { score += WEIGHTS.TOKEN_SETUP; break; }
       }
     }
-    if (aspects.token_apply === 'combo') {
+    if (aspects.status_apply?.includes('combo')) {
       // Bonus if character has abilities with combo-gated effects
       const abilities = character.getAbilities();
       for (const abId in abilities) {
@@ -294,20 +294,19 @@ function scoreAbilityTarget(characterId, abilityId, targetPos) {
       }
     }
 
-    // Cleanse scoring: bonus per cleansable token on targets
+    // Cleanse scoring: bonus per cleansable battle status on targets (reads status.meta)
     if (aspects.cleanse) {
-      const defs = getTokenDefinitions();
+      const defs = getStatusDefinitions();
       const cSide = getCharacterPosition(characterId)?.side;
       for (const t of targets) {
         const tSide = getCharacterPosition(t.characterId)?.side;
         const removePolarity = (cSide === tSide) ? 'negative' : 'positive';
-        const charTokens = battle.tokens[t.characterId];
-        if (charTokens) {
-          for (const tokenId in charTokens) {
-            if (defs.get(tokenId)?.polarity === removePolarity && charTokens[tokenId].length > 0) {
-              score += WEIGHTS.CLEANSE;
-            }
-          }
+        const tChar = game.getCharacter(t.characterId);
+        if (!tChar) continue;
+        for (const status of tChar.getStatuses()) {
+          if (!status.meta?.is_battle || status.currentStacks <= 0) continue;
+          const polarity = status.polarity || defs.get(status.id)?.polarity;
+          if (polarity === removePolarity) score += WEIGHTS.CLEANSE;
         }
       }
     }

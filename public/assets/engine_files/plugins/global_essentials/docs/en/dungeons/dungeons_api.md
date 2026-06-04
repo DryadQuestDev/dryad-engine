@@ -21,14 +21,14 @@ Play a specific scene in a dungeon. Accepts shorthand scene IDs that are resolve
 
 ```js
 // Shorthand formats (resolved to full ID internally)
-game.playScene('#room1.greetings'); // Becomes #room1.greetings.1.1.1
+game.playScene('room1.greetings'); // Becomes #room1.greetings.1.1.1
 game.playScene('greetings'); // Uses current room, becomes #currentRoom.greetings.1.1.1
 
 // Full scene ID format: #room.scene.row.block.paragraph
 game.playScene('#room1.greetings.1.1.1');
 
 // With specific dungeon
-game.playScene('#room1.intro', 'forest_dungeon');
+game.playScene('room1.intro', 'forest_dungeon');
 
 // Using anchors
 game.playScene('&my_anchor'); // Jump to anchor in current dungeon

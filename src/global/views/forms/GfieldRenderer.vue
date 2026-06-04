@@ -9,8 +9,23 @@ import InputNumber from 'primevue/inputnumber';
 import ToggleSwitch from 'primevue/toggleswitch';
 import ColorPicker from 'primevue/colorpicker';
 import { Global } from '../../global';
+import { Game } from '../../../game/game';
 
 const global = Global.getInstance();
+
+// Resolve a localized label for a chooseOne/chooseMany option value (convention `<settingId>.<value>`).
+// In-game, read the merged game/plugin locale via game.getLine (guarded so the Game singleton is
+// never instantiated on the landing/editor); otherwise the engine locale; otherwise the raw value.
+function resolveOptionLabel(settingId: string, value: string): string {
+  const key = `${settingId}.${value}`;
+  if (global.engineState.value === 'game') {
+    const gl = Game.getInstance().getLine(key);
+    if (gl && gl !== `[${key}]`) return gl;
+  }
+  const ev = global.getString(key);
+  if (ev && ev !== `[${key}]`) return ev;
+  return value;
+}
 
 const props = defineProps<{
   option: SettingsObject; // Type for the field's schema/options
@@ -33,11 +48,11 @@ const displayOptions = computed(() => {
   if (props.option.type === 'chooseOne' || props.option.type === 'chooseMany') {
     const values = props.option.values || [];
 
-    // If localizeValues flag is set, use getString for each value
-    // Convention: option_id.value (e.g., "typing_speed.slow")
+    // If localizeValues flag is set, resolve a localized label for each value
+    // (game locale in-game, engine locale otherwise, raw value fallback).
     if (props.option.localizeValues) {
       return values.map(value => ({
-        label: global.getString(`${props.option.id}.${value}`),
+        label: resolveOptionLabel(props.option.id, value),
         value: value
       }));
     }

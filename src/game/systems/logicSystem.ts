@@ -1,5 +1,6 @@
 import { jsonrepair } from "jsonrepair";
 import { Choice } from "../core/content/choice";
+import { Character } from "../core/character/character";
 import { Game } from "../game";
 import { computed, ComputedRef } from "vue";
 import { gameLogger } from "../utils/logger";
@@ -21,6 +22,13 @@ export type CreateChoiceParams = {
     params?: string | Record<string, any>;
 }
 
+export type AspectRenderer = (input: {
+    value: any;
+    aspects: Record<string, any>;
+    character: Character | undefined;
+    ability: { meta?: Record<string, any>, effects?: Record<string, any> } | undefined;
+}) => string;
+
 export class LogicSystem {
 
     get game(): Game {
@@ -35,6 +43,12 @@ export class LogicSystem {
     actionRegistry = new Map<string, ActionObject>(); // make it an object {func: Function}
 
     public customChoiceMap = new Map<string, CustomChoiceObject>();
+
+    public aspectRendererRegistry = new Map<string, AspectRenderer>();
+
+    public registerAspectRenderer(aspectId: string, fn: AspectRenderer): void {
+        this.aspectRendererRegistry.set(aspectId, fn);
+    }
 
     /**
      * Parse a generic `id<op>value` specification into a typed list of ops.
@@ -583,9 +597,9 @@ export class LogicSystem {
 
     public resolveTextStyles(text: string): string {
 
-        let output = text.replace(/\*\*(.*?)\*\*/g, '<i>$1</i>');
+        let output = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
 
-        output = output.replace(/\*(.*?)\*/g, '<b>$1</b>');
+        output = output.replace(/\*(.*?)\*/g, '<i>$1</i>');
 
         return output;
     }
@@ -943,6 +957,9 @@ export class LogicSystem {
     }
 
     public fixJson(str: string): string {
+        str = str
+            .replace(/[“”„‟«»]/g, '"')
+            .replace(/[‘’‚‛]/g, "'");
         str = str.replace(/\.(?!\d)/g, "__dot__");
         str = jsonrepair(str);
         str = str.replace(/__dot__/g, ".");
@@ -1487,11 +1504,13 @@ export class LogicSystem {
             : abilityIdOrData;
         if (!abilityData?.effects) return [];
 
+        const character = (characterId ? this.game.getCharacter(characterId) : undefined) ?? undefined;
+
         const result: { name?: string, lines: string[] }[] = [];
         for (const effectId in abilityData.effects) {
             const aspects = abilityData.effects[effectId];
             const fallback = baseData?.effects?.[effectId];
-            const lines = this.buildDescriptionLines(aspects, definitionsMap, undefined, fallback);
+            const lines = this.buildDescriptionLines(aspects, definitionsMap, undefined, fallback, character, abilityData);
             if (lines.length > 0) {
                 result.push({ name: aspects.__name || fallback?.__name, lines });
             }
@@ -1513,7 +1532,8 @@ export class LogicSystem {
             : abilityIdOrData;
         if (!abilityData?.meta) return [];
 
-        return this.buildDescriptionLines(abilityData.meta, definitionsMap, 'meta', baseData?.meta);
+        const character = (characterId ? this.game.getCharacter(characterId) : undefined) ?? undefined;
+        return this.buildDescriptionLines(abilityData.meta, definitionsMap, 'meta', baseData?.meta, character, abilityData);
     }
 
     /**
@@ -1550,7 +1570,7 @@ export class LogicSystem {
     /**
      * Build description lines from a flat key-value object using ability definitions' ingame_description.
      */
-    private buildDescriptionLines(fields: Record<string, any>, definitionsMap: Map<string, any>, roleFilter?: string, fallbackFields?: Record<string, any>): string[] {
+    private buildDescriptionLines(fields: Record<string, any>, definitionsMap: Map<string, any>, roleFilter?: string, fallbackFields?: Record<string, any>, character?: Character, ability?: { meta?: Record<string, any>, effects?: Record<string, any> }): string[] {
         const lines: string[] = [];
 
         // Sort fields by definition order (lower = first, default 0)
@@ -1569,17 +1589,31 @@ export class LogicSystem {
             if (roleFilter && definition.role !== roleFilter) continue;
 
             let line = definition.ingame_description as string;
-            line = line.replace(/\[v\]/g, `<b>${this.resolveAspectValue(fields[fieldId], definition)}</b>`);
-            line = line.replace(/(?<!\[)\[([a-zA-Z0-9_]+)(?::id)?\](?!\])/g, (match: string, siblingId: string) => {
+            line = line.replace(/\[v(?::(id|status|character))?\]/g, (_m, mode) => {
+                if (mode === 'id') return String(fields[fieldId] ?? '');
+                if (mode === 'status') return this.resolveStatusLinks(fields[fieldId]);
+                if (mode === 'character') return this.resolveCharacterName(fields[fieldId]);
+                const renderer = this.aspectRendererRegistry.get(fieldId);
+                if (renderer) return renderer({ value: fields[fieldId], aspects: fields, character, ability });
+                return `<b>${this.resolveAspectValue(fields[fieldId], definition)}</b>`;
+            });
+            line = line.replace(/(?<!\[)\[([a-zA-Z0-9_]+)(?::(id|status|character))?\](?!\])/g, (match: string, siblingId: string, mode?: string) => {
                 if (siblingId === 'v') return match;
                 const value = fields[siblingId] ?? fallbackFields?.[siblingId];
                 if (value === undefined) return '';
-                if (match.endsWith(':id]')) return String(value);
+                if (mode === 'id') return String(value);
+                if (mode === 'status') return this.resolveStatusLinks(value);
+                if (mode === 'character') return this.resolveCharacterName(value);
                 const sibDef = definitionsMap.get(siblingId);
+                const sibRenderer = this.aspectRendererRegistry.get(siblingId);
                 // If sibling has its own ingame_description, render that template instead of raw value
                 if (sibDef?.ingame_description) {
-                    return (sibDef.ingame_description as string).replace(/\[v\]/g, `<b>${this.resolveAspectValue(value, sibDef)}</b>`);
+                    return (sibDef.ingame_description as string).replace(/\[v\]/g, () => {
+                        if (sibRenderer) return sibRenderer({ value, aspects: fields, character, ability });
+                        return `<b>${this.resolveAspectValue(value, sibDef)}</b>`;
+                    });
                 }
+                if (sibRenderer) return sibRenderer({ value, aspects: fields, character, ability });
                 return `<b>${this.resolveAspectValue(value, sibDef)}</b>`;
             });
             // Clean up extra whitespace from removed siblings
@@ -1591,31 +1625,81 @@ export class LogicSystem {
     }
 
     /**
+     * Render one or more status ids as clickable popup links.
+     * For each id, looks up the status definition's display name and emits
+     * `<span class='lore-link' data-lore-id='ID' data-lore-kind='status' tabindex='0'>NAME</span>`.
+     * Arrays render as comma-joined links. Unknown ids fall back to raw id + warning.
+     */
+    private resolveStatusLinks(value: any): string {
+        if (value === undefined || value === null) return '';
+        const statuses = this.game.getData('character_statuses', true);
+        const renderOne = (id: string): string => {
+            const def = statuses?.get(id);
+            if (!def) {
+                gameLogger.warn(`[v:status] unknown character_statuses id "${id}"`);
+                return id;
+            }
+            const name = def.name || id;
+            return `<span class='lore-link' data-lore-id='${id}' data-lore-kind='status' tabindex='0'>${name}</span>`;
+        };
+        if (Array.isArray(value)) return value.map((id: any) => renderOne(String(id))).join(', ');
+        return renderOne(String(value));
+    }
+
+    /**
+     * Resolve one or more character-template ids to their display name (`traits.name`, then
+     * `name`, then the raw id), as bold text. Arrays render comma-joined.
+     */
+    private resolveCharacterName(value: any): string {
+        if (value === undefined || value === null) return '';
+        const chars = this.game.getData('character_templates', true);
+        const one = (id: string): string => {
+            const def = chars?.get(id);
+            const name = (def && (this.getNestedValue(def, 'traits.name') || def.name)) || id;
+            return `<b>${name}</b>`;
+        };
+        if (Array.isArray(value)) return value.map((id: any) => one(String(id))).join(', ');
+        return one(String(value));
+    }
+
+    /**
      * Resolve an aspect value to a display string.
      * For fromFile definitions, looks up the referenced item's display name.
+     * If a narrative record exists with the same id, emits `[[id>name]]` so the
+     * downstream resolveString pass renders it as a lore link.
      */
     private resolveAspectValue(value: any, definition?: any): string {
         if (value === undefined || value === null) return '';
+
+        // Delta-overlaid numeric values arrive as { _base, _merged } from callers like
+        // AbilityCard's modifier-merge pipeline. Render them as `base➜merged` for the
+        // default (no-renderer) fallback path; aspect renderers handle these themselves.
+        if (typeof value === 'object' && value !== null && '_base' in value && '_merged' in value) {
+            return `${value._base}➜<span class="delta-value">${value._merged}</span>`;
+        }
 
         if (definition?.fromFile) {
             const sourceData = this.game.getData(definition.fromFile, true);
             if (sourceData) {
                 const refPath = definition.ingame_description_ref || 'name';
+                const narrative = this.game.narrativeSystem;
+                const linkify = (id: string, name: string): string => {
+                    return narrative?.getRecord(id) ? `[[${id}>${name}]]` : name;
+                };
 
                 if (Array.isArray(value)) {
                     return value.map((id: string) => {
                         const item = sourceData.get(id);
-                        if (item) {
-                            const name = this.getNestedValue(item, refPath);
-                            return name || id;
-                        }
-                        return id;
+                        if (!item) return id;
+                        const name = this.getNestedValue(item, refPath) || id;
+                        return linkify(id, name);
                     }).join(', ');
                 } else {
-                    const item = sourceData.get(String(value));
+                    const id = String(value);
+                    const item = sourceData.get(id);
                     if (item) {
-                        const name = this.getNestedValue(item, refPath);
-                        return name || String(value);
+                        const name = this.getNestedValue(item, refPath) || id;
+                        return linkify(id, name);
                     }
                 }
             }

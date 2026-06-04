@@ -1,5 +1,5 @@
 import { Schema, SchemaToType } from '../utility/schema';
-import { BaseStatusSchema } from './characterStatusSchema';
+import { AppliedStatusSchema } from './characterStatusSchema';
 
 export const SkillSlotSchema = {
     uid: { type: 'uid' },
@@ -11,7 +11,7 @@ export const SkillSlotSchema = {
     shape: { type: 'chooseOne', options: ['circle', 'square', 'triangle', 'diamond', 'hexagon', 'octagon'], tooltip: 'Shape of the skill slot.' },
     status: {
         type: 'schema', tooltip: 'The status to apply to the character when the skill is learned.', objects: {
-            ...BaseStatusSchema
+            ...AppliedStatusSchema
         }
     },
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },

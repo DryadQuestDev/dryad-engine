@@ -40,6 +40,23 @@ interface GameEvents {
   game_initiated: () => boolean | void;
   /** Triggered when the game is being saved */
   game_save: (saveName: string) => boolean | void;
+  /**
+   * Triggered with the raw save JSON immediately before deserialization (`loadSave`).
+   * Listeners may mutate `saveData` in place to migrate old-shape data — useful for
+   * schema changes that the engine doesn't auto-handle. Return `false` to abort the load.
+   *
+   * @example
+   * game.on('save_load_before', (saveData) => {
+   *   if (saveData?.saveMeta?.engineVersion === '0.9.0') {
+   *     // rewrite an old field shape on every character
+   *     for (const id in saveData.characters || {}) {
+   *       const c = saveData.characters[id];
+   *       if (c?.oldField !== undefined) { c.newField = c.oldField; delete c.oldField; }
+   *     }
+   *   }
+   * });
+   */
+  save_load_before: (saveData: any) => boolean | void;
   /** Triggered when the game HTML mounts to the DOM */
   html_mount: () => boolean | void;
 
@@ -148,6 +165,8 @@ interface CustomComponent {
   order?: number;
   /** Optional props to pass to the component, e.g. { layout: 'row' } */
   props?: Record<string, any>;
+  /** Popup slot only: backdrop behind the popup. Omit = default dim, false = none, or a CSS color (e.g. 'rgba(0,0,0,0.3)'). */
+  mask?: string | boolean;
 }
 
 /**
@@ -549,6 +568,15 @@ interface Game {
    *   component: CustomOverlay,
    *   order: 1
    * });
+   *
+   * @example
+   * // A popup with no backdrop dimming (popup slot only)
+   * game.addComponent({
+   *   id: 'tutorial_hint',
+   *   slot: 'popup',
+   *   component: TutorialModal,
+   *   mask: false // omit = default dim, false = none, or a CSS color
+   * });
    */
   addComponent(component: CustomComponent): void;
 
@@ -651,6 +679,28 @@ interface Game {
   setState<T>(key: string, value: T): void;
 
   /**
+   * Open one or more popups by their registered `popup`-slot component id.
+   * Popups stack (rendered on top of each other); ids already open are ignored.
+   * @example game.openPopup('my_popup');
+   */
+  openPopup(...ids: string[]): void;
+
+  /**
+   * Close one or more specific popups, leaving the rest of the stack open.
+   * @example game.closePopup('my_popup');
+   */
+  closePopup(...ids: string[]): void;
+
+  /** Close every open popup. */
+  closeAllPopups(): void;
+
+  /** The currently open popup ids, bottom-to-top (last = topmost). */
+  getOpenPopups(): string[];
+
+  /** Whether a given popup id is currently open. */
+  isPopupOpen(id: string): boolean;
+
+  /**
    * Get the type of the current dungeon.
    * @returns "map" | "screen" | "text"
    */
@@ -677,11 +727,11 @@ interface Game {
 
   /**
    * Play a specific scene in a dungeon. Accepts shorthand that is resolved internally.
-   * @param sceneId - The scene ID (shorthand like "#room.scene" or full "#room.scene.1.1.1"), or null to exit
+   * @param sceneId - The scene ID (shorthand like "room.scene" or full "#room.scene.1.1.1"), or null to exit
    * @param dungeonId - Optional dungeon ID (uses current dungeon if null)
    * @example
-   * game.playScene('#room1.greetings'); // Shorthand, resolved to #room1.greetings.1.1.1
-   * game.playScene('#room1.intro', 'forest_dungeon'); // With specific dungeon
+   * game.playScene('room1.greetings'); // Shorthand, resolved to #room1.greetings.1.1.1
+   * game.playScene('room1.intro', 'forest_dungeon'); // With specific dungeon
    * game.playScene('&my_anchor'); // Jump to anchor
    * game.playScene(null); // Exit current scene
    */
@@ -1141,15 +1191,15 @@ interface Game {
   // ============================================
 
   /**
-   * Set the currently playing music track.
-   * Includes fade-out transition from previous track.
-   * @param val - Music ID from musicMap, or false to use dungeon's default music
-   * @param load - Whether this is being called during game load
+   * Set the currently playing music track. Crossfades from the previous track by default.
+   * @param val - Music ID from musicMap, or false to use the current dungeon's default music
+   * @param disableTransition - When true, switch instantly with no crossfade
    * @example
    * game.setMusic('battle_theme');
+   * game.setMusic('battle_theme', true); // no crossfade
    * game.setMusic(false); // Use current dungeon's music
    */
-  setMusic(val: string | false, load?: boolean): void;
+  setMusic(val: string | false, disableTransition?: boolean): void;
 
   /**
    * Play sound effect(s).
@@ -1648,6 +1698,41 @@ interface Game {
   buildAbilityMetaDescription(abilityIdOrData: string | { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }, characterId?: string, baseData?: { meta?: Record<string, any>, effects?: Record<string, Record<string, any>> }): string[];
 
   /**
+   * Register a custom renderer for an ability aspect's `[v]` (and sibling `[id]`) substitution.
+   * The renderer's return value (HTML string) replaces the default `<b>value</b>` wrap used by
+   * `buildAbilityEffectsDescription` / `buildAbilityMetaDescription`.
+   *
+   * Use this to surface derived values (e.g. "20% of power (60)" instead of just "20") for
+   * scaled aspects. The renderer is called with `{ value, aspects, character, ability }`:
+   * - `value` — the aspect's literal authored value
+   * - `aspects` — sibling aspects in the same effect (e.g. to read `damage_type`, `status_apply`)
+   * - `character` — present when the tooltip is built with a `characterId`; use it to compute
+   *   scaled values and append them in parens
+   * - `ability` — the merged ability data (`{ meta, effects }`); useful to branch on
+   *   `meta.costs`, `meta.cooldown`, etc.
+   *
+   * Renderers return already-formatted HTML (with `<b>` etc.); the engine doesn't add wrapping.
+   * @example
+   * game.registerAspectRenderer('damage', ({ value, character }) => {
+   *   let txt = `<b>${value}% of power</b>`;
+   *   if (character) txt += ` <b>(${Math.round(character.getStat('power') * value / 100)})</b>`;
+   *   return txt;
+   * });
+   */
+  registerAspectRenderer(aspectId: string, fn: (input: { value: any, aspects: Record<string, any>, character: Character | undefined, ability: { meta?: Record<string, any>, effects?: Record<string, any> } | undefined }) => string): void;
+
+  /**
+   * Register a provider that decides whether a character can currently use an ability (e.g. a battle
+   * system). The fn returns true=usable / false=blocks. Multiple systems may register; an ability is
+   * usable only if every checker passes. UI (e.g. AbilityCard) uses isAbilityUsable() to grey out
+   * abilities the active gameplay system reports as unusable.
+   */
+  registerAbilityUsabilityChecker(fn: (characterId: string, abilityId: string) => boolean): void;
+
+  /** True unless some registered usability checker blocks the ability. No checkers → usable. */
+  isAbilityUsable(characterId: string, abilityId: string): boolean;
+
+  /**
    * Merge two ability data objects (base + modifier) using type-aware logic.
    * Numbers are summed, chooseMany arrays are concatenated and deduped, other fields use last-wins.
    * @param base - Base ability data (e.g., from ability template)
@@ -1928,14 +2013,21 @@ interface Character {
 
   /**
    * Add a status effect to the character.
-   * If status already exists and is stackable, adds stacks instead.
-   * @param status - The status to add
+   * If status already exists, calls applyInstance (refresh single-stack / append multi-stack).
+   * @param status - The status to add (typically from game.createStatus(id))
+   * @param applyArgs - Optional stacks / duration / source overrides for this apply
    * @example
-   * const poisonStatus = new Status();
-   * poisonStatus.id = 'poison';
-   * character.addStatus(poisonStatus);
+   * character.addStatus(game.createStatus('poison'), { stacks: 3, duration: 5, source: caster.id });
    */
-  addStatus(status: Status): void;
+  addStatus(status: Status, applyArgs?: { stacks?: number; duration?: number; source?: string }): void;
+
+  /**
+   * Tick one status's duration by `amount` and drop expired instances.
+   * Removes the whole status if no instances remain. Fires `status_expired` per expired instance.
+   * @example
+   * character.tickStatusDuration('poison', 1);
+   */
+  tickStatusDuration(id: string, amount?: number): void;
 
   /**
    * Remove a status effect by ID.
@@ -1946,12 +2038,14 @@ interface Character {
   removeStatus(id: string): void;
 
   /**
-   * Get a status by ID.
+   * Get a status by ID, or undefined if the character doesn't have it.
    * @param id - The status ID
-   * @returns The status
-   * @throws Error if status doesn't exist
+   * @returns The status, or undefined if not present
+   * @example
+   * const stacks = character.getStatus('poison')?.currentStacks ?? 0;
+   * if (!character.hasStatus('haste')) { ... }
    */
-  getStatus(id: string): Status;
+  getStatus(id: string): Status | undefined;
 
   /** Check if the character has a status with the given ID. */
   hasStatus(id: string): boolean;
@@ -1989,6 +2083,18 @@ interface Character {
    * character.addStatusStacks("poison", 2);
    */
   addStatusStacks(statusId: string, amount?: number): boolean;
+
+  /**
+   * Remove stacks from a status (oldest instances first) with proper resource adjustment.
+   * Removes the status entirely if it drops to 0 stacks. Use this instead of reaching into
+   * the Status object — status mutation is engine-level.
+   * @param statusId - The status ID
+   * @param amount - Number of stacks to remove (default: 1)
+   * @returns the number of stacks actually removed (0 if the status isn't present)
+   * @example
+   * character.removeStatusStacks("stagger", 2);
+   */
+  removeStatusStacks(statusId: string, amount?: number): number;
 
   // ============================================
   // Trait & Attribute Methods
@@ -2980,12 +3086,17 @@ interface Inventory {
   removeItem(item: Item): void;
 
   /**
-   * Reduce item quantity by amount. Removes item if quantity reaches 0.
+   * Reduce item quantity by amount. Removes item if quantity reaches 0. When the item is
+   * equipped and `character` is provided, the granted "item_<uid>" status's stacks are
+   * kept in sync with the new quantity; at quantity 0 the slot is fully unequipped
+   * (clears slot.itemUid, removes the granted status, fires item_unequip events).
    * @param item - The item instance
    * @param amount - Amount to reduce (default: 1)
+   * @param character - Optional. When the item is equipped, pass the character to keep
+   *                   the granted equip-status synced and fully unequip the slot at 0.
    * @returns Actual amount reduced
    */
-  reduceItemQuantity(item: Item, amount?: number): number;
+  reduceItemQuantity(item: Item, amount?: number, character?: Character): number;
 
   /**
    * Remove all unequipped items from the inventory.
@@ -3169,11 +3280,8 @@ interface Inventory {
  * character.addStatus(poisonStatus);
  *
  * @example
- * // Check and modify stacks
- * const status = character.getStatus('poison');
- * if (status.isStackable()) {
- *   status.addStacks(1);
- * }
+ * // Read stacks (mutate via character.addStatusStacks / setStatusStacks / removeStatusStacks)
+ * const stacks = character.getStatus('poison')?.currentStacks ?? 0;
  */
 interface Status {
   /** Unique identifier for this status instance */
@@ -3193,12 +3301,21 @@ interface Status {
 
   /**
    * Maximum stack count for this status.
-   * 1 = non-stackable, -1 = unlimited stacks
+   * 0, -1, or undefined = unlimited. 1 = single-stack non-stackable. >1 = capped.
    */
   maxStacks: number;
 
-  /** Current stack count (for stackable statuses) */
-  currentStacks: number;
+  /**
+   * If true, each apply creates an independent instance with its own duration (DD-style).
+   * If false (default), reapply refreshes the single instance.
+   */
+  multiStack: boolean;
+
+  /**
+   * Current stack count (read-only). Sums across all instances.
+   * Mutate via character.addStatusStacks / setStatusStacks / removeStatusStacks.
+   */
+  readonly currentStacks: number;
 
   /** Whether this status is hidden from the UI */
   isHidden: boolean;
@@ -3206,12 +3323,20 @@ interface Status {
   /** Visual polarity: 'positive' (green), 'neutral' (gray), or 'negative' (red) border */
   polarity: string;
 
-  /** Tags for categorizing and filtering (e.g. 'battle' for combat-timed statuses) */
+  /** Tags for categorizing and filtering. */
   tags: string[];
 
   /**
-   * Duration of the status effect.
-   * -1 means permanent (default). Interpretation depends on the game/plugin.
+   * Metadata bag consumed by game or plugin scripts (e.g. power_scaling, dot_damage_type,
+   * is_battle). Keys are defined in the status_meta editor tab. The engine doesn't read this.
+   */
+  meta: Record<string, any>;
+
+  /**
+   * Effective duration of the status.
+   * For single-stack: the only instance's duration.
+   * For multi-stack: the max remaining across all instances. -1 = permanent.
+   * Setter throws on multi-stack statuses.
    */
   duration: number;
 
@@ -3265,14 +3390,11 @@ interface Status {
   isStackable(): boolean;
 
   /**
-   * Add stacks to this status.
-   * Will not exceed maxStacks unless unlimited (-1).
-   * @param amount - Number of stacks to add (default: 1)
-   * @returns true if all stacks were added, false if capped at max
-   * @example
-   * status.addStacks(2); // Add 2 stacks
+   * Returns the per-instance internal storage (read-only).
+   * For single-stack statuses length is always 1.
+   * Mutate stacks via character.addStatusStacks / setStatusStacks / removeStatusStacks.
    */
-  addStacks(amount?: number): boolean;
+  getInstances(): ReadonlyArray<{ stacks: number; duration: number; source?: string }>;
 
   // ============================================
   // Stat Methods

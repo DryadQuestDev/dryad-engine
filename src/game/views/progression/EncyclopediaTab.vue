@@ -537,6 +537,7 @@ function onLinkNavigate(recordId: string) {
 }
 
 .encyclopedia-content {
+    max-width: 900px;
     overflow-y: auto;
     padding: 24px 28px;
     background-color: #1a1a1a;

@@ -1,6 +1,14 @@
-import type { Directive } from 'vue';
+import { markRaw, type Directive } from 'vue';
 import { Game } from '../game';
-import { notifyLinkEnter, notifyLinkLeave, pushClick } from '../views/lore/lorePopupStore';
+import {
+    pushTransient,
+    hideTransient,
+    clickTransient,
+    registerLoreKindCard,
+    resolveLoreKindCard,
+} from '../views/popups/popupStore';
+import RecordCard from '../views/popups/cards/RecordCard.vue';
+import StatusCard from '../views/popups/cards/StatusCard.vue';
 
 /**
  * Directive `v-script` — render DryadScript text on any element with full lore-link interactivity.
@@ -24,6 +32,16 @@ import { notifyLinkEnter, notifyLinkLeave, pushClick } from '../views/lore/loreP
 export type ScriptDirectiveValue = string | {
     html: string;
     resolver?: boolean;
+    /**
+     * Resolve context passed through to `resolveString` as its third argument. Use this
+     * when the text contains context-aware placeholders like `|stat(...)|` that read from
+     * `game.getResolveContext()?.character`. Required for any popup that renders a
+     * character-bound description (status / ability / skill descriptions).
+     *
+     * @example
+     * <div v-script="{ html: status.description, context: { character: props.character } }" />
+     */
+    context?: Record<string, any>;
     navMode?: boolean;
     onNavigate?: (recordId: string) => void;
     disabled?: boolean;
@@ -31,14 +49,34 @@ export type ScriptDirectiveValue = string | {
 
 const OPTS = Symbol('de-script-opts');
 const HANDLERS = Symbol('de-script-handlers');
+const LAST_HTML = Symbol('de-script-last-html');
 
 type NormalizedOpts = {
     html: string;
     resolver: boolean;
+    context?: Record<string, any>;
     navMode: boolean;
     onNavigate?: (recordId: string) => void;
     disabled: boolean;
 };
+
+// ── Built-in lore-link kind → card factories ──
+// scriptDirective owns these registrations because it's where the .lore-link delegation lives.
+
+registerLoreKindCard('record', {
+    component: markRaw(RecordCard),
+    mapProps: (id) => ({ recordId: id }),
+    closable: true,
+});
+
+registerLoreKindCard('status', {
+    component: markRaw(StatusCard),
+    mapProps: (id, ctx) => {
+        const character = ctx?.character as { id: string } | undefined;
+        return { statusId: id, characterId: character?.id };
+    },
+    closable: true,
+});
 
 function normalize(value: ScriptDirectiveValue | undefined): NormalizedOpts {
     if (typeof value === 'string') {
@@ -47,6 +85,7 @@ function normalize(value: ScriptDirectiveValue | undefined): NormalizedOpts {
     return {
         html: value?.html ?? '',
         resolver: value?.resolver !== false,
+        context: value?.context,
         navMode: value?.navMode === true,
         onNavigate: value?.onNavigate,
         disabled: value?.disabled === true,
@@ -55,14 +94,36 @@ function normalize(value: ScriptDirectiveValue | undefined): NormalizedOpts {
 
 function applyBinding(el: HTMLElement, value: ScriptDirectiveValue | undefined) {
     const opts = normalize(value);
-    const html = opts.resolver ? Game.getInstance().resolveString(opts.html, true).output : opts.html;
-    el.innerHTML = html;
     (el as any)[OPTS] = opts;
+
+    if (!opts.resolver && (el as any)[LAST_HTML] === opts.html) {
+        return;
+    }
+
+    const html = opts.resolver
+        ? Game.getInstance().resolveString(opts.html, true, opts.context).output
+        : opts.html;
+    el.innerHTML = html;
+    (el as any)[LAST_HTML] = opts.html;
 }
 
 function findLink(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof HTMLElement)) return null;
     return target.closest('.lore-link') as HTMLElement | null;
+}
+
+function buildEntry(link: HTMLElement, opts: NormalizedOpts): { key: string; component: any; props: any; closable?: boolean } | null {
+    const id = link.getAttribute('data-lore-id');
+    if (!id) return null;
+    const kind = link.getAttribute('data-lore-kind') || 'record';
+    const factory = resolveLoreKindCard(kind);
+    if (!factory) return null;
+    return {
+        key: `${kind}:${id}`,
+        component: factory.component,
+        props: factory.mapProps(id, opts.context),
+        closable: factory.closable,
+    };
 }
 
 function attachListeners(el: HTMLElement) {
@@ -71,14 +132,14 @@ function attachListeners(el: HTMLElement) {
         if (!opts || opts.disabled || opts.navMode) return;
         const link = findLink(e.target);
         if (!link) return;
-        const id = link.getAttribute('data-lore-id');
-        if (id) notifyLinkEnter(link, id);
+        const entry = buildEntry(link, opts);
+        if (entry) pushTransient({ ...entry, anchorEl: link });
     };
     const onOut = (e: MouseEvent) => {
         const opts = (el as any)[OPTS] as NormalizedOpts | undefined;
         if (!opts || opts.disabled || opts.navMode) return;
         const link = findLink(e.target);
-        if (link) notifyLinkLeave(link);
+        if (link) hideTransient(link);
     };
     const onClick = (e: MouseEvent) => {
         const opts = (el as any)[OPTS] as NormalizedOpts | undefined;
@@ -89,8 +150,12 @@ function attachListeners(el: HTMLElement) {
         if (!id) return;
         e.preventDefault();
         e.stopPropagation();
-        if (opts.navMode) opts.onNavigate?.(id);
-        else pushClick(id, link);
+        if (opts.navMode) {
+            opts.onNavigate?.(id);
+            return;
+        }
+        const entry = buildEntry(link, opts);
+        if (entry) clickTransient({ ...entry, anchorEl: link });
     };
     el.addEventListener('mouseover', onOver);
     el.addEventListener('mouseout', onOut);

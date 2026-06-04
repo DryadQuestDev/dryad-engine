@@ -26,6 +26,42 @@
           "type": "number",
           "defaultValue": 4,
           "tooltip": "Maximum number of characters on the player side."
+        },
+        "projectile_travel_size": {
+          "type": "number",
+          "defaultValue": 48,
+          "tooltip": "On-screen size in px of the traveling projectile sprite."
+        },
+        "projectile_hit_size": {
+          "type": "number",
+          "defaultValue": 48,
+          "tooltip": "On-screen size in px of the hit/impact VFX."
+        },
+        "difficulty": {
+          "type": "schema",
+          "tooltip": "Enemy health/power change per difficulty (%). Medium 0 = no status.",
+          "objects": {
+            "easy": {
+              "type": "number",
+              "defaultValue": -30,
+              "tooltip": "Easy (%)."
+            },
+            "medium": {
+              "type": "number",
+              "defaultValue": 0,
+              "tooltip": "Medium (%). 0 = no status."
+            },
+            "hard": {
+              "type": "number",
+              "defaultValue": 30,
+              "tooltip": "Hard (%)."
+            },
+            "very_hard": {
+              "type": "number",
+              "defaultValue": 60,
+              "tooltip": "Very Hard (%)."
+            }
+          }
         }
       }
     },
@@ -73,102 +109,158 @@
       }
     },
     {
-      "id": "token_definitions",
-      "name": "Token Definitions",
+      "id": "schools",
+      "name": "Schools",
       "isArray": true,
       "schema": {
         "id": {
           "type": "string",
           "required": true,
-          "tooltip": "Unique token identifier (e.g. 'burn', 'shield', 'taunt')"
-        },
-        "source": {
-          "type": "chooseOne",
-          "fromFile": "character_stats",
-          "tooltip": "Character stat that sets initial stacks at battle start. Empty = starts at 0."
+          "tooltip": "Unique school identifier (e.g. 'fire', 'water', 'light')."
         },
         "name": {
           "type": "string",
           "required": true,
-          "tooltip": "Display name shown in UI"
+          "tooltip": "Display name shown in UI."
         },
-        "description": {
-          "type": "htmlarea",
-          "tooltip": "Description shown on hover in character viewer"
+        "color": {
+          "type": "color",
+          "tooltip": "Accent color for this school (hex)."
         },
         "icon": {
           "type": "file",
           "fileType": "image",
-          "tooltip": "Icon displayed on character"
+          "tooltip": "Icon representing this school."
         },
-        "color": {
-          "type": "color",
-          "tooltip": "Color for floating combat text (hex). Overrides default."
+        "description": {
+          "type": "htmlarea",
+          "tooltip": "Description shown on hover / in the encyclopedia."
+        }
+      }
+    },
+    {
+      "id": "projectiles",
+      "name": "Projectiles",
+      "isArray": true,
+      "schema": {
+        "id": {
+          "type": "string",
+          "required": true,
+          "tooltip": "Unique projectile/VFX identifier referenced by an ability's meta.projectile."
         },
-        "max_stacks": {
-          "type": "number",
-          "defaultValue": 0,
-          "tooltip": "Maximum stacks allowed. 0 = unlimited."
+        "name": {
+          "type": "string",
+          "tooltip": "Display name."
         },
-        "polarity": {
+        "travel_type": {
           "type": "chooseOne",
           "options": [
-            "positive",
-            "negative",
-            "neutral"
+            "single",
+            "sheet"
           ],
-          "defaultValue": "neutral",
-          "tooltip": "positive = buff (cleansable by enemies), negative = debuff (cleansable by allies), neutral = non-cleansable"
+          "defaultValue": "single",
+          "tooltip": "Travel sprite format. single = one image (PNG/GIF). sheet = horizontal spritesheet animated by travel_frames/travel_fps."
         },
-        "power_scaling": {
+        "travel_image": {
+          "type": "file",
+          "fileType": "image",
+          "tooltip": "Travel sprite that flies from caster to target (single image or spritesheet strip). Leave empty for an on-hit-only effect (the hit VFX manifests at the target, no travel)."
+        },
+        "travel_frames": {
+          "type": "number",
+          "show": {
+            "travel_type": [
+              "sheet"
+            ]
+          },
+          "tooltip": "Number of frames in the travel spritesheet."
+        },
+        "travel_fps": {
+          "type": "number",
+          "defaultValue": 12,
+          "show": {
+            "travel_type": [
+              "sheet"
+            ]
+          },
+          "tooltip": "Travel spritesheet playback frames per second."
+        },
+        "travel_cols": {
+          "type": "number",
+          "show": {
+            "travel_type": [
+              "sheet"
+            ]
+          },
+          "tooltip": "Frames per row in the travel sheet (for grid sheets). Leave empty for a single horizontal row. A partial last row is trimmed."
+        },
+        "starting_rotation": {
+          "type": "number",
+          "defaultValue": 0,
+          "tooltip": "Degrees to correct the travel sprite's drawn orientation. Baseline 0 = the sprite points at the top."
+        },
+        "speed": {
+          "type": "number",
+          "defaultValue": 1200,
+          "tooltip": "Travel speed in px/sec. Flight duration = distance / speed."
+        },
+        "arc": {
           "type": "boolean",
-          "tooltip": "When true, applied stacks scale with caster power: stacks = round(power × aspectStacks / 100). Use for damage/healing tokens. Leave false for gating tokens (preparation, combo)."
+          "tooltip": "Lob the travel sprite along an arc instead of a straight line."
         },
-        "effects": {
-          "type": "schema[]",
-          "tooltip": "Composable effects that define token behavior",
-          "objects": {
-            "type": {
-              "type": "chooseOne",
-              "required": true,
-              "options": [
-                "dot",
-                "hot",
-                "absorb",
-                "death_defiance",
-                "stun",
-                "taunt",
-                "thorns"
-              ],
-              "tooltip": "dot = damage over time, hot = heal over time, absorb = shield, stun = skip turn, death_defiance = survive lethal at 1 HP, taunt = force enemies to target this character, thorns = reflect % of incoming damage"
-            },
-            "value": {
-              "type": "number",
-              "defaultValue": 0,
-              "tooltip": "Effect value per stack. For thorns: % of damage reflected."
-            },
-            "damage_type": {
-              "type": "chooseOne",
-              "options": [
-                "physical",
-                "fire",
-                "water",
-                "air",
-                "earth",
-                "arcane",
-                "poison",
-                "light",
-                "dark",
-                "absolute"
-              ],
-              "show": {
-                "type": [
-                  "dot"
-                ]
-              },
-              "tooltip": "Damage type for DoT effects."
-            }
-          }
+        "hit_type": {
+          "type": "chooseOne",
+          "options": [
+            "single",
+            "sheet"
+          ],
+          "defaultValue": "single",
+          "tooltip": "Hit/impact VFX format. single = one image. sheet = horizontal spritesheet animated by hit_frames/hit_fps."
+        },
+        "hit_image": {
+          "type": "file",
+          "fileType": "image",
+          "tooltip": "Impact VFX shown at the target on land (single image or spritesheet). Optional."
+        },
+        "hit_frames": {
+          "type": "number",
+          "show": {
+            "hit_type": [
+              "sheet"
+            ]
+          },
+          "tooltip": "Number of frames in the hit spritesheet."
+        },
+        "hit_fps": {
+          "type": "number",
+          "defaultValue": 12,
+          "show": {
+            "hit_type": [
+              "sheet"
+            ]
+          },
+          "tooltip": "Hit spritesheet playback frames per second."
+        },
+        "hit_cols": {
+          "type": "number",
+          "show": {
+            "hit_type": [
+              "sheet"
+            ]
+          },
+          "tooltip": "Frames per row in the hit sheet (for grid sheets). Leave empty for a single horizontal row. A partial last row is trimmed."
+        },
+        "css_class": {
+          "type": "string",
+          "tooltip": "Extra CSS class on the spawned sprites (glow, scale, tint)."
+        },
+        "sound": {
+          "type": "string[]",
+          "tooltip": "Sound id(s) played on launch (travel) / appear (on-target). Passed straight to game.playSounds."
+        },
+        "hit_sound": {
+          "type": "string[]",
+          "tooltip": "Sound id(s) played on impact / land."
         }
       }
     }
@@ -186,7 +278,23 @@
         ],
         "label": "Battle Animation Speed",
         "tooltip": "Controls the speed of battle animations and action delays.",
+        "localizeValues": true,
         "uid": "RpgBattleSpeed01"
+      },
+      {
+        "id": "rpg_battle_difficulty",
+        "type": "chooseOne",
+        "default_value": "medium",
+        "values": [
+          "easy",
+          "medium",
+          "hard",
+          "very_hard"
+        ],
+        "label": "Battle Difficulty",
+        "tooltip": "How tough the enemies are during the battle. Medium is default.",
+        "localizeValues": true,
+        "uid": "RpgBattleDifficulty01"
       }
     ],
     "character_attributes": [
@@ -215,6 +323,14 @@
         "tooltip": "Vertical offset (%) for the battle overlay (health bar, tokens). Positive = down."
       }
     ],
+    "item_traits": [
+      {
+        "id": "battle_consumable",
+        "type": "boolean",
+        "description": "When the ability granted by this item is cast in battle, one dose (quantity) is consumed.",
+        "uid": "RpgItBattleConsumable01"
+      }
+    ],
     "ability_definitions": [
       {
         "id": "target",
@@ -231,14 +347,22 @@
         ],
         "ingame_description": "Target: [v]",
         "description": "What this ability can target.",
-        "order": -10
+        "order": -97.8
       },
       {
-        "id": "preparation",
+        "id": "require_status_self",
+        "role": "meta",
+        "type": "chooseOne",
+        "fromFile": "character_statuses",
+        "ingame_description": "Requires [v:status]",
+        "description": "Usability gate: the caster must have at least 1 stack of this status or the ability is unusable (greyed out)."
+      },
+      {
+        "id": "require_status_self_consume",
         "role": "meta",
         "type": "boolean",
-        "ingame_description": "Requires Preparation",
-        "description": "Requires 1 Preparation stack on caster. Consumed on cast."
+        "ingame_description": "Consume on cast",
+        "description": "When true, removes 1 stack of require_status_self from the caster on cast."
       },
       {
         "id": "bonus_action",
@@ -305,6 +429,42 @@
         "description": "Shared cooldown group. When this ability is cast, all abilities with the same cd_group on this character also go on cooldown."
       },
       {
+        "id": "unamplified",
+        "role": "meta",
+        "type": "boolean",
+        "ingame_description": "Not affected by power amplifiers",
+        "description": "When true, this ability uses raw `power` only; `power_amplifier` is ignored."
+      },
+      {
+        "id": "flat",
+        "role": "meta",
+        "type": "boolean",
+        "description": "When true, this ability's damage / heal / status-stack values are taken as-is and do NOT scale with the caster's `power` (overrides `power_amplifier` too — implies `unamplified`). Target armor / resists and heal amplifier stats still apply. Use for items, scrolls, environmental triggers, or anything where the caster is the user rather than the source."
+      },
+      {
+        "id": "channel",
+        "role": "meta",
+        "type": "boolean",
+        "ingame_description": "Channelled",
+        "description": "Channelled ability. On cast, a channel token showing this ability's icon is placed on the caster; the ability re-fires on each of the caster's turns at its cast-time power and effects until the caster is stunned. Casting a channel replaces any channel the caster already has."
+      },
+      {
+        "id": "school",
+        "role": "meta",
+        "type": "chooseOne",
+        "fromFile": "plugins_data/rpg_battler/schools",
+        "order": -90,
+        "description": "Flavour/synergy tag for this ability (fire, water, light, ...). Does not affect mitigation — mitigation follows damage_type. Reserved for future school-synergy systems."
+      },
+      {
+        "id": "projectile",
+        "role": "meta",
+        "type": "chooseOne",
+        "fromFile": "plugins_data/rpg_battler/projectiles",
+        "order": -97.6,
+        "description": "Projectile/VFX definition (from the Projectiles tab). Leave empty for a melee cast (caster lunges). If set: a travel sprite (travel_image) flies caster→target then plays the hit VFX; a def with only a hit_image manifests the VFX at the target (no travel)."
+      },
+      {
         "id": "chance",
         "role": "aspect",
         "type": "number",
@@ -315,7 +475,7 @@
         "id": "damage",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Deal [v]% [damage_type] damage",
+        "ingame_description": "Deal [v] [damage_type] damage",
         "description": "Damage as % of caster's power (base-100: 120 = 120%)"
       },
       {
@@ -324,24 +484,24 @@
         "type": "chooseOne",
         "options": [
           "physical",
-          "fire",
-          "water",
-          "air",
-          "earth",
-          "arcane",
-          "poison",
-          "light",
-          "dark",
+          "magic",
           "absolute"
         ],
-        "description": "Damage type. 'absolute' ignores resistances."
+        "description": "Hit damage type. 'physical' is reduced by physical_armor, 'magic' by magical_armor (both flat, min 1 dmg), 'absolute' ignores armor. Elemental flavour is carried by the ability's school, not the damage type."
       },
       {
         "id": "healing",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Heal [v]% HP",
-        "description": "Healing as % of caster's power (base-100: 100 = 100%)"
+        "ingame_description": "Heal [v]",
+        "description": "Healing as % of caster's power (base-100: 100 = 100%), applied to the effect's target(s)."
+      },
+      {
+        "id": "healing_self",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Heal self for [v]% power",
+        "description": "Heal the caster for this % of caster power. Independent of the ability's target (useful on offensive abilities)."
       },
       {
         "id": "lifesteal",
@@ -351,76 +511,44 @@
         "description": "Heals caster for this % of damage dealt (after defenses)."
       },
       {
-        "id": "token_apply",
-        "role": "aspect",
-        "type": "chooseOne",
-        "fromFile": "plugins_data/rpg_battler/token_definitions",
-        "ingame_description": "Apply [token_stacks] [v] [token_duration]",
-        "ingame_description_ref": "name",
-        "description": "Token to apply to target(s). Stacks set by token_stacks."
-      },
-      {
-        "id": "token_stacks",
-        "role": "aspect",
-        "type": "number",
-        "description": "Stacks to apply. For power-scaled tokens: actual = power × value / 100."
-      },
-      {
-        "id": "token_duration",
-        "role": "aspect",
-        "type": "number",
-        "ingame_description": "for [v] turns",
-        "ingame_hide": true,
-        "description": "Duration in turns. Omit for permanent tokens (shield, preparation)."
-      },
-      {
-        "id": "token_apply_self",
-        "role": "aspect",
-        "type": "chooseOne",
-        "fromFile": "plugins_data/rpg_battler/token_definitions",
-        "ingame_description": "Apply [token_stacks_self] [v] to self [token_duration_self]",
-        "ingame_description_ref": "name",
-        "description": "Token to apply to caster."
-      },
-      {
-        "id": "token_stacks_self",
-        "role": "aspect",
-        "type": "number",
-        "description": "Stacks to apply to self."
-      },
-      {
-        "id": "token_duration_self",
-        "role": "aspect",
-        "type": "number",
-        "ingame_description": "for [v] turns",
-        "ingame_hide": true,
-        "description": "Duration in turns for self-applied token."
-      },
-      {
-        "id": "status_apply",
+        "id": "status_apply_target",
         "role": "aspect",
         "type": "chooseMany",
         "fromFile": "character_statuses",
-        "ingame_description": "Apply [v] [status_duration]",
+        "ingame_description": "Apply [status_stacks_target] [v:status] to target [status_duration_target]",
         "ingame_description_ref": "name",
-        "description": "Status IDs to apply to target(s)"
+        "description": "Status IDs to apply to the ability's target(s). Stacks set by status_stacks_target (default 1)."
       },
       {
-        "id": "status_duration",
+        "id": "status_stacks_target",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to apply per status in status_apply_target. Default 1. For power-scaled statuses: actual = power × value / 100."
+      },
+      {
+        "id": "status_duration_target",
         "role": "aspect",
         "type": "number",
         "ingame_description": "for [v] turns",
         "ingame_hide": true,
-        "description": "Duration in turns for applied statuses. Overrides the status template duration. Omit to use template default."
+        "description": "Duration in turns for target-applied statuses. Overrides the status template duration. Omit to use template default."
       },
       {
         "id": "status_apply_self",
         "role": "aspect",
         "type": "chooseMany",
         "fromFile": "character_statuses",
-        "ingame_description": "Apply [v] to self [status_duration_self]",
+        "ingame_description": "Apply [status_stacks_self] [v:status] to self [status_duration_self]",
         "ingame_description_ref": "name",
         "description": "Status IDs to apply to caster."
+      },
+      {
+        "id": "status_stacks_self",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to apply per status in status_apply_self. Default 1."
       },
       {
         "id": "status_duration_self",
@@ -431,13 +559,20 @@
         "description": "Duration in turns for self-applied statuses. Overrides the status template duration. Omit to use template default."
       },
       {
-        "id": "status_remove",
+        "id": "status_remove_target",
         "role": "aspect",
         "type": "chooseMany",
         "fromFile": "character_statuses",
-        "ingame_description": "Remove [v]",
+        "ingame_description": "Remove [status_remove_stacks_target] [v:status] from target",
         "ingame_description_ref": "name",
-        "description": "Status IDs to remove/cleanse from target"
+        "description": "Status IDs to remove from the ability's target(s). Omit status_remove_stacks_target to clear all stacks of each."
+      },
+      {
+        "id": "status_remove_stacks_target",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to remove per status in status_remove_target. Unset = remove all stacks. Must be >= 1 when set."
       },
       {
         "id": "cooldown_change",
@@ -454,11 +589,19 @@
         "description": "Modify ability charges (signed). Positive = add, negative = reduce."
       },
       {
-        "id": "combo",
+        "id": "require_status_target",
+        "role": "aspect",
+        "type": "chooseOne",
+        "fromFile": "character_statuses",
+        "ingame_description": "Requires [v:status] on target",
+        "description": "The effect only applies to targets that have at least 1 stack of this status; others are skipped."
+      },
+      {
+        "id": "require_status_target_consume",
         "role": "aspect",
         "type": "boolean",
-        "ingame_description": "Requires Combo",
-        "description": "Requires 1 Combo stack per target. Consumed per target hit."
+        "ingame_description": "Consume per target",
+        "description": "When true, removes 1 stack of require_status_target from each target the effect applies to."
       },
       {
         "id": "cleanse",
@@ -466,6 +609,102 @@
         "type": "boolean",
         "ingame_description": "Cleanse",
         "description": "Remove cleansable tokens. Ally: remove negative. Enemy: remove positive."
+      },
+      {
+        "id": "status_remove_self",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Remove [status_remove_stacks_self] [v:status] from self",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to remove from the caster."
+      },
+      {
+        "id": "status_remove_stacks_self",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to remove per status in status_remove_self. Unset = remove all stacks."
+      },
+      {
+        "id": "status_apply_allies",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Apply [status_stacks_allies] [v:status] to all allies [status_duration_allies]",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to apply to all of the caster's living allies (includes the caster)."
+      },
+      {
+        "id": "status_stacks_allies",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to apply per status in status_apply_allies. Default 1."
+      },
+      {
+        "id": "status_duration_allies",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "for [v] turns",
+        "ingame_hide": true,
+        "description": "Duration in turns for ally-applied statuses. Omit to use template default."
+      },
+      {
+        "id": "status_remove_allies",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Remove [status_remove_stacks_allies] [v:status] from all allies",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to remove from all of the caster's living allies (includes the caster). Omit status_remove_stacks_allies to clear all stacks."
+      },
+      {
+        "id": "status_remove_stacks_allies",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to remove per status in status_remove_allies. Unset = remove all stacks."
+      },
+      {
+        "id": "status_apply_enemies",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Apply [status_stacks_enemies] [v:status] to all enemies [status_duration_enemies]",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to apply to all of the caster's living enemies."
+      },
+      {
+        "id": "status_stacks_enemies",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to apply per status in status_apply_enemies. Default 1."
+      },
+      {
+        "id": "status_duration_enemies",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "for [v] turns",
+        "ingame_hide": true,
+        "description": "Duration in turns for enemy-applied statuses. Omit to use template default."
+      },
+      {
+        "id": "status_remove_enemies",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Remove [status_remove_stacks_enemies] [v:status] from all enemies",
+        "ingame_description_ref": "name",
+        "description": "Status IDs to remove from all of the caster's living enemies. Omit status_remove_stacks_enemies to clear all stacks."
+      },
+      {
+        "id": "status_remove_stacks_enemies",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks to remove per status in status_remove_enemies. Unset = remove all stacks."
       },
       {
         "id": "splash",
@@ -480,44 +719,78 @@
         "type": "boolean",
         "ingame_description": "Skip primary target",
         "description": "When true, the primary target is excluded from this effect — only splash neighbors are hit. Requires splash."
+      },
+      {
+        "id": "bounce",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Bounces to [v] random targets",
+        "description": "After the ability resolves, the whole ability re-resolves this many more times on random targets of the same side (random enemies if it targets enemies, random allies if it targets allies), with a short delay between bounces. By default a hop cannot land on the previous target (see bounce_same); the chain ends early if no valid target remains. Bounces re-apply the effects only — they do NOT re-pay cost or trigger cooldown/charges again."
+      },
+      {
+        "id": "bounce_same",
+        "role": "aspect",
+        "type": "boolean",
+        "ingame_description": "Can bounce to the same target",
+        "description": "When true, a bounce may land on the same target as the previous hop. When false (default), consecutive hops must hit different targets and the chain ends early if none remain."
+      },
+      {
+        "id": "summon",
+        "role": "aspect",
+        "type": "chooseOne",
+        "fromFile": "character_templates",
+        "ingame_description": "Summon [v:character]",
+        "description": "Spawn a combatant from this character template onto the caster's side. It joins the battle and acts this round based on its speed (not added to the persistent party). One summon per effect — add more effects to summon multiple. Ignored on bounces."
       }
     ],
     "locale": [
+      {
+        "id": "rpg_battle_difficulty.easy",
+        "val": "Easy"
+      },
+      {
+        "id": "rpg_battle_difficulty.medium",
+        "val": "Medium"
+      },
+      {
+        "id": "rpg_battle_difficulty.hard",
+        "val": "Hard"
+      },
+      {
+        "id": "rpg_battle_difficulty.very_hard",
+        "val": "Very Hard"
+      },
+      {
+        "id": "rpg_battle_speed.slow",
+        "val": "Slow"
+      },
+      {
+        "id": "rpg_battle_speed.medium",
+        "val": "Medium"
+      },
+      {
+        "id": "rpg_battle_speed.fast",
+        "val": "Fast"
+      },
       {
         "id": "physical",
         "val": "<span class=\"physical\">Physical</span>"
       },
       {
-        "id": "fire",
-        "val": "<span class=\"fire\">Fire</span>"
+        "id": "magic",
+        "val": "<span class=\"magic\">Magical</span>"
       },
       {
-        "id": "water",
-        "val": "<span class=\"water\">Water</span>"
-      },
-      {
-        "id": "air",
-        "val": "<span class=\"air\">Air</span>"
-      },
-      {
-        "id": "earth",
-        "val": "<span class=\"earth\">Earth</span>"
-      },
-      {
-        "id": "arcane",
-        "val": "<span class=\"arcane\">Arcane</span>"
+        "id": "burn",
+        "val": "<span class=\"burn\">Burn</span>"
       },
       {
         "id": "poison",
         "val": "<span class=\"poison\">Poison</span>"
       },
       {
-        "id": "light",
-        "val": "<span class=\"light\">Light</span>"
-      },
-      {
-        "id": "dark",
-        "val": "<span class=\"dark\">Dark</span>"
+        "id": "bleeding",
+        "val": "<span class=\"bleeding\">Bleeding</span>"
       },
       {
         "id": "absolute",
@@ -544,20 +817,12 @@
         "val": "<span class=\"rpg-log-dodge\">dodges the attack!</span>"
       },
       {
-        "id": "log_token_apply",
-        "val": "gains |tokenIcon|<b>|stacks|x |tokenName|</b>"
+        "id": "log_status_dot",
+        "val": "suffers <b class=\"rpg-dmg-|damageType|\">|amount|</b> damage from <b>|statusName|</b>"
       },
       {
-        "id": "log_token_apply_duration",
-        "val": "gains |tokenIcon|<b>|stacks|x |tokenName|</b> for |duration| turns"
-      },
-      {
-        "id": "log_token_dot",
-        "val": "suffers <b class=\"rpg-dmg-|damageType|\">|amount|</b> damage from <b>|tokenName|</b>"
-      },
-      {
-        "id": "log_token_hot",
-        "val": "recovers <b class=\"rpg-log-heal\">|amount|</b> HP from <b>|tokenName|</b>"
+        "id": "log_status_hot",
+        "val": "recovers <b class=\"rpg-log-heal\">|amount|</b> HP from <b>|statusName|</b>"
       },
       {
         "id": "log_cleanse",
@@ -565,11 +830,11 @@
       },
       {
         "id": "log_status_apply",
-        "val": "gains status <b>|statusName|</b>"
+        "val": "gains |statusIcon|<b>|stacks|x |statusName|</b>"
       },
       {
         "id": "log_status_apply_duration",
-        "val": "gains status <b>|statusName|</b> for |duration| turns"
+        "val": "gains |statusIcon|<b>|stacks|x |statusName|</b> for |duration| turns"
       },
       {
         "id": "log_defeated",
@@ -581,7 +846,15 @@
       },
       {
         "id": "log_stunned",
-        "val": "<b>|name|</b> is stunned!"
+        "val": "recovers from stun"
+      },
+      {
+        "id": "log_stun_applied",
+        "val": "is <b>stunned</b>"
+      },
+      {
+        "id": "log_status_removed",
+        "val": "loses |statusIcon|<b>|stacks|x |statusName|</b>"
       },
       {
         "id": "log_turn_start",
@@ -648,6 +921,14 @@
         "val": "Defeat"
       },
       {
+        "id": "ui_channeling",
+        "val": "Channeling"
+      },
+      {
+        "id": "ui_channel_cancel_tip",
+        "val": "Stop channelling – ends its ongoing effects, such as recurring damage and upkept statuses."
+      },
+      {
         "id": "ui_taunt_blocked",
         "val": "Must target the taunting enemy!"
       },
@@ -660,8 +941,8 @@
         "val": "Target HP is too low!"
       },
       {
-        "id": "log_status_remove",
-        "val": "lost status <b>|statusName|</b>"
+        "id": "ui_incorrect_target",
+        "val": "Incorrect target."
       },
       {
         "id": "log_thorns",
@@ -684,6 +965,14 @@
         "val": "DEFIED DEATH"
       },
       {
+        "id": "float_stunned",
+        "val": "Stunned!"
+      },
+      {
+        "id": "float_recover",
+        "val": "Recovers!"
+      },
+      {
         "id": "combat_power",
         "val": "Power"
       },
@@ -696,175 +985,41 @@
         "val": "Crit Multi"
       }
     ],
-    "plugins_data/rpg_battler/token_definitions": [
+    "status_meta": [
       {
-        "id": "burn",
-        "name": "Burn",
-        "description": "<p>Takes fire damage each turn.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/burn.svg",
-        "color": "FF6B00",
-        "max_stacks": 0,
-        "polarity": "negative",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "dot",
-            "value": 1,
-            "damage_type": "fire"
-          }
-        ]
+        "id": "is_battle",
+        "type": "boolean",
+        "description": "If true, the status is cleared at end of battle (rpg_battler cleanup hook)."
       },
       {
-        "id": "poison",
-        "name": "Poison",
-        "description": "<p>Takes poison damage each turn.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/poison.svg",
-        "color": "22C55E",
-        "max_stacks": 0,
-        "polarity": "negative",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "dot",
-            "value": 1,
-            "damage_type": "poison"
-          }
-        ]
+        "id": "power_scaling",
+        "type": "boolean",
+        "description": "If true, stacks scale with caster's power/sorcery on apply (rpg_battler combat math)."
       },
       {
-        "id": "bleed",
-        "name": "Bleed",
-        "description": "<p>Takes physical damage each turn.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/bleed.svg",
-        "color": "DC2626",
-        "max_stacks": 0,
-        "polarity": "negative",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "dot",
-            "value": 1,
-            "damage_type": "physical"
-          }
-        ]
+        "id": "is_channel",
+        "type": "boolean",
+        "description": "If true, this status is a channel: it is removed from whoever holds it the moment its CASTER (the live instance's source) is stunned. Works for self-buffs and enemy debuffs alike."
       },
       {
-        "id": "regen",
-        "name": "Regen",
-        "description": "<p>Restores health each turn.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/regen.svg",
-        "color": "4ADE80",
-        "max_stacks": 0,
-        "polarity": "positive",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "hot",
-            "value": 1
-          }
-        ]
+        "id": "dot_damage_type",
+        "type": "chooseOne",
+        "options": [
+          "burn",
+          "poison",
+          "bleeding",
+          "absolute"
+        ],
+        "description": "If set, the status ticks damage of this type on the affected character's turn, mitigated by the matching % resist (resist_burn / resist_poison / resist_bleed); 'absolute' ignores resists. Resist above 100% turns the tick into healing. Combined with power_scaling for caster-scaled DoT magnitude."
       },
       {
-        "id": "shield",
-        "name": "Shield",
-        "description": "<p>Absorbs incoming damage.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/shield.svg",
-        "color": "60A5FA",
-        "max_stacks": 0,
-        "polarity": "positive",
-        "power_scaling": true,
-        "effects": [
-          {
-            "type": "absorb",
-            "value": 1
-          }
-        ]
-      },
-      {
-        "id": "stun",
-        "name": "Stun",
-        "description": "<p>Cannot act this turn.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/stun.svg",
-        "color": "FBBF24",
-        "max_stacks": 1,
-        "polarity": "negative",
-        "power_scaling": false,
-        "effects": [
-          {
-            "type": "stun",
-            "value": 0
-          }
-        ]
-      },
-      {
-        "id": "taunt",
-        "name": "Taunt",
-        "description": "<p>Forces enemies to target this character.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/damage.svg",
-        "color": "F97316",
-        "max_stacks": 1,
-        "polarity": "positive",
-        "power_scaling": false,
-        "effects": [
-          {
-            "type": "taunt",
-            "value": 0
-          }
-        ]
-      },
-      {
-        "id": "thorns",
-        "name": "Thorns",
-        "description": "<p>Reflects a portion of incoming damage back to the attacker.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/speed.svg",
-        "color": "A78BFA",
-        "max_stacks": 0,
-        "polarity": "positive",
-        "power_scaling": false,
-        "effects": [
-          {
-            "type": "thorns",
-            "value": 20
-          }
-        ]
-      },
-      {
-        "id": "death_defiance",
-        "name": "Death Defiance",
-        "description": "<p>Survives a lethal blow with 1 HP. Consumed on trigger.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/death_defiance.svg",
-        "color": "F59E0B",
-        "max_stacks": 1,
-        "polarity": "positive",
-        "power_scaling": false,
-        "effects": [
-          {
-            "type": "death_defiance",
-            "value": 0
-          }
-        ]
-      },
-      {
-        "id": "preparation",
-        "name": "Preparation",
-        "description": "<p>Required to use certain powerful abilities.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/preparation.svg",
-        "color": "818CF8",
-        "max_stacks": 0,
-        "polarity": "positive",
-        "power_scaling": false,
-        "effects": []
-      },
-      {
-        "id": "combo",
-        "name": "Combo",
-        "description": "<p>Required for combo attacks. Consumed on use.</p>",
-        "icon": "assets/engine_assets/plugins/rpg_battler/combo.svg",
-        "color": "FB923C",
-        "max_stacks": 0,
-        "polarity": "positive",
-        "power_scaling": false,
-        "effects": []
+        "id": "source",
+        "type": "chooseOne",
+        "fromFile": "character_stats",
+        "fromFileTypeAnd": {
+          "is_resource": false
+        },
+        "description": "Character stat (non-resource) whose value seeds this status's initial stacks at battle start. Empty = starts at 0."
       }
     ],
     "character_views": [
@@ -897,6 +1052,15 @@
         "ingame_description": "Base damage multiplier for abilities and healing."
       },
       {
+        "id": "power_amplifier",
+        "name": "Power Amplifier",
+        "tags": [
+          "battle"
+        ],
+        "order": -98,
+        "ingame_description": "Percentage boost applied to power for ability scaling. 100 = +100% = doubles power."
+      },
+      {
         "id": "speed",
         "name": "Speed",
         "tags": [
@@ -906,13 +1070,22 @@
         "ingame_description": "Determines turn order in battle. Higher speed acts first."
       },
       {
-        "id": "armor",
-        "name": "Armor",
+        "id": "physical_armor",
+        "name": "Physical Armor",
         "tags": [
           "battle"
         ],
-        "order": -56,
-        "ingame_description": "Flat reduction to physical damage received."
+        "order": -97,
+        "ingame_description": "Flat reduction to physical hit damage. Always leaves at least 1 damage; negative values increase damage taken."
+      },
+      {
+        "id": "magical_armor",
+        "name": "Magical Armor",
+        "tags": [
+          "battle"
+        ],
+        "order": -96,
+        "ingame_description": "Flat reduction to magic hit damage. Always leaves at least 1 damage; negative values increase damage taken."
       },
       {
         "id": "crit_chance",
@@ -942,49 +1115,13 @@
         "ingame_description": "Chance to avoid incoming damage entirely (0-100%)."
       },
       {
-        "id": "resist_fire",
-        "name": "Fire Resist",
+        "id": "resist_burn",
+        "name": "Burn Resist",
         "tags": [
           "battle"
         ],
-        "order": -50,
-        "ingame_description": "Reduces fire damage received (%)."
-      },
-      {
-        "id": "resist_water",
-        "name": "Water Resist",
-        "tags": [
-          "battle"
-        ],
-        "order": -50,
-        "ingame_description": "Reduces water damage received (%)."
-      },
-      {
-        "id": "resist_air",
-        "name": "Air Resist",
-        "tags": [
-          "battle"
-        ],
-        "order": -50,
-        "ingame_description": "Reduces air damage received (%)."
-      },
-      {
-        "id": "resist_earth",
-        "name": "Earth Resist",
-        "tags": [
-          "battle"
-        ],
-        "order": -50,
-        "ingame_description": "Reduces earth damage received (%)."
-      },
-      {
-        "id": "resist_arcane",
-        "name": "Arcane Resist",
-        "tags": [
-          "battle"
-        ],
-        "order": -50,
-        "ingame_description": "Reduces arcane damage received (%)."
+        "order": -95,
+        "ingame_description": "Reduces burn DoT damage (%). Above 100% the burn heals instead."
       },
       {
         "id": "resist_poison",
@@ -992,26 +1129,17 @@
         "tags": [
           "battle"
         ],
-        "order": -50,
-        "ingame_description": "Reduces poison damage received (%)."
+        "order": -94,
+        "ingame_description": "Reduces poison DoT damage (%). Above 100% the poison heals instead."
       },
       {
-        "id": "resist_light",
-        "name": "Light Resist",
+        "id": "resist_bleed",
+        "name": "Bleed Resist",
         "tags": [
           "battle"
         ],
-        "order": -50,
-        "ingame_description": "Reduces light damage received (%)."
-      },
-      {
-        "id": "resist_dark",
-        "name": "Dark Resist",
-        "tags": [
-          "battle"
-        ],
-        "order": -50,
-        "ingame_description": "Reduces dark damage received (%)."
+        "order": -93,
+        "ingame_description": "Reduces bleed DoT damage (%). Above 100% the bleed heals instead."
       },
       {
         "id": "damage_dealt_mult",
@@ -1102,6 +1230,340 @@
         ],
         "order": -5,
         "ingame_description": "Marks target on attack. Each mark increases damage from this attacker by this stat's value %."
+      },
+      {
+        "id": "stagger_threshold",
+        "name": "Stagger Threshold",
+        "tags": [
+          "battle"
+        ],
+        "order": -30,
+        "ingame_description": "Stagger tokens needed to trigger a stun. Higher = harder to stagger."
+      },
+      {
+        "id": "stagger_threshold_pct",
+        "name": "Stagger Threshold %",
+        "tags": [
+          "battle"
+        ],
+        "order": -29,
+        "ingame_description": "Additive % bonus to stagger threshold. Granted by Braced and similar effects."
+      },
+      {
+        "id": "bonus_stun_damage",
+        "name": "Bonus Stun Damage",
+        "tags": [
+          "battle"
+        ],
+        "order": -41,
+        "ingame_description": "Extra damage % dealt to staggered targets — while stunned and through the braced recovery."
+      }
+    ],
+    "character_statuses": [
+      {
+        "id": "difficulty",
+        "name": "Difficulty",
+        "is_hidden": true,
+        "meta": {
+          "is_battle": true
+        },
+        "uid": "RpgStDifficulty01"
+      },
+      {
+        "id": "braced",
+        "name": "Braced",
+        "description": "<p>Recovering from a stun: stagger threshold doubled, but exposed to bonus stun damage.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/braced.svg",
+        "duration": 3,
+        "tags": [
+          "buff"
+        ],
+        "meta": {
+          "is_battle": true
+        },
+        "stats": {
+          "stagger_threshold_pct": 100
+        }
+      },
+      {
+        "id": "burn",
+        "name": "Burn",
+        "description": "<p>Searing damage each turn. Burns hot but burns out fast in 3 turns.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/burn.svg",
+        "duration": 3,
+        "max_stacks": 0,
+        "polarity": "negative",
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true,
+          "dot_damage_type": "burn"
+        }
+      },
+      {
+        "id": "poison",
+        "name": "Poison",
+        "description": "<p>A slow trickle of poison damage each turn. Does not expire on its own – only an <strong>Antidote</strong> or a cleansing spell removes it.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/poison.svg",
+        "max_stacks": 0,
+        "polarity": "negative",
+        "multi_stack": false,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true,
+          "dot_damage_type": "poison"
+        }
+      },
+      {
+        "id": "bleed",
+        "name": "Bleed",
+        "description": "<p>Bleeds each turn. Lasts 5 turns by default.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/bleed.svg",
+        "duration": 5,
+        "max_stacks": 0,
+        "polarity": "negative",
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true,
+          "dot_damage_type": "bleeding"
+        }
+      },
+      {
+        "id": "regen",
+        "name": "Regen",
+        "description": "<p>Restores health each turn.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/regen.svg",
+        "max_stacks": 0,
+        "polarity": "positive",
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true
+        }
+      },
+      {
+        "id": "shield",
+        "name": "Shield",
+        "description": "<p>Absorbs incoming damage. Each stack absorbs 1 damage.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/shield.svg",
+        "max_stacks": 0,
+        "polarity": "positive",
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "power_scaling": true
+        }
+      },
+      {
+        "id": "stun",
+        "name": "Stun",
+        "description": "<p>Cannot act this turn.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/stun.svg",
+        "max_stacks": 1,
+        "polarity": "negative",
+        "meta": {
+          "is_battle": true
+        }
+      },
+      {
+        "id": "stagger",
+        "name": "Stagger",
+        "description": "<p>Accumulating pressure toward a stun. When stacks reach the target's stagger threshold, the target is stunned and all stagger is consumed.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/stagger.svg",
+        "max_stacks": 0,
+        "polarity": "negative",
+        "meta": {
+          "is_battle": true
+        }
+      },
+      {
+        "id": "taunt",
+        "name": "Taunt",
+        "description": "<p>Forces enemies to target this character.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/damage.svg",
+        "max_stacks": 1,
+        "polarity": "positive",
+        "meta": {
+          "is_battle": true
+        }
+      },
+      {
+        "id": "thorns",
+        "name": "Thorns",
+        "description": "<p>Reflects <b>1</b> damage per stack back to the attacker on every incoming hit. Stacks are not consumed; each apply tracks its own duration independently.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/speed.svg",
+        "max_stacks": 0,
+        "polarity": "positive",
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true
+        }
+      },
+      {
+        "id": "death_defiance",
+        "name": "Death Defiance",
+        "description": "<p>Survives a lethal blow with 1 HP. Consumed on trigger.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/death_defiance.svg",
+        "max_stacks": 1,
+        "polarity": "positive",
+        "meta": {
+          "is_battle": true
+        }
+      },
+      {
+        "id": "preparation",
+        "name": "Preparation",
+        "description": "<p>Required to use certain powerful abilities.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/preparation.svg",
+        "max_stacks": 0,
+        "polarity": "positive",
+        "meta": {
+          "is_battle": true
+        }
+      },
+      {
+        "id": "combo",
+        "name": "Combo",
+        "description": "<p>Required for combo attacks. Consumed on use.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/combo.svg",
+        "max_stacks": 0,
+        "polarity": "positive",
+        "meta": {
+          "is_battle": true
+        }
+      }
+    ],
+    "records": [
+      {
+        "id": "burn",
+        "title": "Burn",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Hot fire damage each turn for 3 turns. Cleansed by Salve.</p>"
+      },
+      {
+        "id": "poison",
+        "title": "Poison",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Trickle of damage each turn. Does not expire until cleansed with an Antidote (or battle ends). Reapplications stack into the same dose.</p>"
+      },
+      {
+        "id": "bleed",
+        "title": "Bleed",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Bleeds each turn for 5 turns. Cleansed by Bandage.</p>"
+      },
+      {
+        "id": "regen",
+        "title": "Regen",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Restores health each turn.</p>"
+      },
+      {
+        "id": "shield",
+        "title": "Shield",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Absorbs incoming damage.</p>"
+      },
+      {
+        "id": "stun",
+        "title": "Stun",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>The character cannot act on their next turn.</p>"
+      },
+      {
+        "id": "stagger",
+        "title": "Stagger",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Accumulating pressure toward a stun. When the count reaches the target's stagger threshold, the target is stunned and all stagger is consumed.</p>"
+      },
+      {
+        "id": "taunt",
+        "title": "Taunt",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Forces enemies to target this character.</p>"
+      },
+      {
+        "id": "thorns",
+        "title": "Thorns",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Reflects a portion of incoming damage back to the attacker.</p>"
+      },
+      {
+        "id": "death_defiance",
+        "title": "Death Defiance",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Survives a lethal blow with 1 HP. Consumed on trigger.</p>"
+      },
+      {
+        "id": "preparation",
+        "title": "Preparation",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Required to use certain powerful abilities. Consumed on use.</p>"
+      },
+      {
+        "id": "combo",
+        "title": "Combo",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Required for combo attacks. Consumed on use.</p>"
+      },
+      {
+        "id": "braced",
+        "title": "Braced",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Recovering from a stun. Stagger threshold doubled for the duration.</p>"
       }
     ]
   }

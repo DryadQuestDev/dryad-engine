@@ -5,7 +5,7 @@ const { computed, watch, nextTick, ref, reactive, defineComponent } = vue;
 const { CharacterFace } = components;
 
 import { currentRpgBattle, getBattleDisplayName } from '../rpg-battle-state.mjs';
-import { getTokenDefinitions, getSide } from '../rpg-battle-effects.mjs';
+import { getStatusDefinitions, getSide } from '../rpg-battle-effects.mjs';
 
 // @ts-ignore
 export const RpgBattleLog = defineComponent({
@@ -97,7 +97,6 @@ export const RpgBattleLog = defineComponent({
           name: getBattleDisplayName(actorId),
           side,
           lines: [],
-          _insertAt: 0,
         });
         // Insert at top of this turn's actors (newest first)
         currentTurn.actors.unshift(actorGroup);
@@ -111,25 +110,20 @@ export const RpgBattleLog = defineComponent({
         const icon = ability?.meta?.icon;
         const name = ability?.meta?.name || entry.abilityId;
         const iconHtml = icon ? `<img src="${icon}" class="rpg-log-inline-icon" />` : '';
-        // New ability at top, effects will follow below it
-        actorGroup._insertAt = 0;
-        actorGroup.lines.splice(0, 0, { lid: lineIdCounter++, html: `${iconHtml}<b>${name}</b>`, isAbility: true, targetChar: null, targetSide: null });
-        actorGroup._insertAt = 1;
+        actorGroup.lines.push({ lid: lineIdCounter++, html: `${iconHtml}<b>${name}</b>`, isAbility: true, targetChar: null, targetSide: null });
       } else if (entry.effect) {
         const html = effectText(entry.effect);
         const targetChar = entry.effect.targetId ? game.getCharacter(entry.effect.targetId) : null;
         const targetSide = entry.effect.targetId ? getSide(entry.effect.targetId) : null;
         const targetName = entry.effect.targetId ? getBattleDisplayName(entry.effect.targetId) : '';
         if (html) {
-          actorGroup.lines.splice(actorGroup._insertAt, 0, { lid: lineIdCounter++, html, isAbility: false, targetChar, targetSide, targetName });
-          actorGroup._insertAt++;
+          actorGroup.lines.push({ lid: lineIdCounter++, html, isAbility: false, targetChar, targetSide, targetName });
         }
       } else if (entry.text) {
         const targetChar = entry.targetId ? game.getCharacter(entry.targetId) : null;
         const targetSide = entry.targetId ? getSide(entry.targetId) : null;
         const targetName = entry.targetId ? getBattleDisplayName(entry.targetId) : '';
-        actorGroup.lines.splice(actorGroup._insertAt, 0, { lid: lineIdCounter++, html: entry.text, isAbility: false, targetChar, targetSide, targetName });
-        actorGroup._insertAt++;
+        actorGroup.lines.push({ lid: lineIdCounter++, html: entry.text, isAbility: false, targetChar, targetSide, targetName });
       }
     }
 
@@ -140,16 +134,15 @@ export const RpgBattleLog = defineComponent({
     function effectText(e) {
       const defeated = e.defeated ? game.getLine('log_defeated') : '';
       const damageType = e.damageType || 'physical';
-      const tokenDef = e.tokenId ? getTokenDefinitions()?.get(e.tokenId) : null;
-      const tokenIcon = tokenDef?.icon ? `<img src="${tokenDef.icon}" class="rpg-log-inline-icon" />` : '';
+      const statusDef = e.statusId ? getStatusDefinitions()?.get(e.statusId) : null;
+      const statusIcon = statusDef?.image ? `<img src="${statusDef.image}" class="rpg-log-inline-icon" />` : '';
 
       const params = {
         amount: e.amount || 0,
         damageType,
         stacks: e.stacks || 0,
-        tokenName: tokenDef?.name || e.tokenId || '',
-        tokenIcon,
-        statusName: e.statusName || e.statusId || '',
+        statusName: e.statusName || statusDef?.name || e.statusId || '',
+        statusIcon,
         duration: e.duration || 0,
       };
 
@@ -158,12 +151,12 @@ export const RpgBattleLog = defineComponent({
         heal: 'log_heal',
         steal: 'log_steal',
         dodge: 'log_dodge',
-        token_apply: e.duration ? 'log_token_apply_duration' : 'log_token_apply',
-        token_dot: 'log_token_dot',
-        token_hot: 'log_token_hot',
-        cleanse: 'log_cleanse',
         status_apply: e.duration ? 'log_status_apply_duration' : 'log_status_apply',
-        status_remove: 'log_status_remove',
+        status_remove: 'log_status_removed',
+        status_dot: 'log_status_dot',
+        status_hot: 'log_status_hot',
+        status_dot_heal: 'log_status_hot',
+        cleanse: 'log_cleanse',
         thorns: 'log_thorns',
       }[e.type];
 

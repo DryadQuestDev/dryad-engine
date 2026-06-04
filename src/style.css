@@ -294,6 +294,10 @@ p {
   color: #fff !important;
 }
 
+.custom-popup-dialog .p-dialog-content {
+  padding: 0px 10px !important;
+}
+
 .p-confirmdialog .p-dialog-content {
   background: transparent !important;
   color: rgba(216, 221, 228, 0.92) !important;
@@ -416,6 +420,11 @@ span.lore-link:focus-visible,
 
 .flash-content .special {
   color: #17ff32;
+}
+
+.flash-content .flash-small {
+  font-size: 0.85em;
+  color: #9ca3af;
 }
 
 .positive {

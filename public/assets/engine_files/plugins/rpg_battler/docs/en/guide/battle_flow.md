@@ -23,25 +23,25 @@ When a character's turn begins, the following steps happen in order:
 
 All of this character's ability cooldowns are reduced by 1.
 
-### 2. Tick Token Durations
+### 2. Process DoT/HoT
 
-All token instances on this character have their duration reduced by 1. Instances that reach 0 are removed.
+Damage-over-time and heal-over-time status effects are processed using the pre-tick stack counts. DoT damage respects defenses (armor, resistances). HoT healing respects `heal_received_mult`. DoT damage type is read from `meta.dot_damage_type`; HoT statuses are flagged with `meta.hot`.
 
 ### 3. Tick Status Durations
 
-All battle-tagged statuses on this character have their duration reduced by 1. Statuses that reach 0 are removed.
+Every status flagged `meta.is_battle` on this character has each of its instances' duration reduced by 1. Instances that reach 0 are removed; statuses whose last instance expires are dropped entirely.
 
-### 4. Process DoT/HoT
+### 4. Stagger Bonus-Loss Bookkeeping
 
-Damage-over-time and heal-over-time token effects are processed. DoT damage respects defenses (armor, resistances). HoT healing respects `heal_received_mult`.
+If a threshold-bonus status (Braced) expired during step 3, any stagger that was accumulated in the bonus zone is removed proportionally. See [Stagger](stagger.md) for the math.
 
 ### 5. Death Check
 
-If the character died from DoT damage, their death is processed (including death defiance check) and the turn is skipped.
+If the character died from DoT damage, their death is processed (including the `death_defiance` check) and the turn is skipped.
 
 ### 6. Stun Check
 
-If the character has stun stacks, one stack is consumed and the turn is skipped. A "stunned" message appears in the battle log.
+If the character has stun stacks, one stack is consumed and the turn is skipped. A "recovers from stun" message appears in the battle log.
 
 ### 7. Action Phase
 
@@ -72,7 +72,7 @@ When a battle starts:
 1. Enemies are spawned from templates (or fetched if `is_live_instance` is true)
 2. Turn order is calculated from all combatants' speed stats
 3. Ability states are initialized (cooldowns from `cd_on_battle_start`, charges from ability meta)
-4. Tokens are initialized from source stats (e.g., a character with `shield: 50` starts with 50 shield token stacks)
+4. Statuses with `meta.source` are seeded from the named character stat (e.g., a character with `wind_mantle: 5` starts the fight with the Wind Mantle status at 5 stacks)
 5. The `battle_start` emitter fires (return false to cancel)
 6. Saves are disabled and the battle screen is shown
 7. The first character's turn begins
@@ -97,7 +97,7 @@ When the battle ends:
 1. The result overlay appears (Victory or Defeat)
 2. The player clicks Continue
 3. The `battle_end` emitter fires
-4. All battle-tagged statuses are removed from all participants
+4. All `meta.is_battle` statuses are removed from all participants
 5. Spawned enemies are deleted
 6. Saves are re-enabled and the previous game state is restored
 

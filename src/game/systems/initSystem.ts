@@ -4,7 +4,7 @@ import { gameLogger } from '../utils/logger';
 import { Character } from '../core/character/character';
 import { AssetObject } from '../../schemas/assetSchema';
 import { CharacterSceneSlotObject } from '../../schemas/characterSceneSlotSchema';
-import { Status } from '../core/character/status';
+import { Status, StatusInstance } from '../core/character/status';
 // Import Vue components for registration
 import ExplorationComponent from '../views/states/exploration/Exploration.vue';
 import BattleComponent from '../views/states/battle/Battle.vue';
@@ -24,6 +24,7 @@ import DebugRegistry from '../views/debug_containers/DebugRegistry.vue';
 import DebugInventories from '../views/debug_containers/DebugInventories.vue';
 import DebugStores from '../views/debug_containers/DebugStores.vue';
 import DebugProperties from '../views/debug_containers/DebugProperties.vue';
+import DebugActors from '../views/debug_containers/DebugActors.vue';
 import OverlayNavigation from '../views/overlays/OverlayNavigation.vue';
 import OverlayExchange from '../views/overlays/OverlayExchange.vue';
 import BackComponent from '../views/navigation-toolbar/Back.vue';
@@ -50,6 +51,7 @@ import { Choice } from '../core/content/choice';
 export const CORE_EMITTER_SIGNATURES = {
     "game_initiated": (): boolean | void => { },
     "game_save": (saveName: string): boolean | void => { },
+    "save_load_before": (saveData: any): boolean | void => { }, // fires with the raw save JSON immediately before deserialization. Listeners may mutate saveData in place to migrate old-shape data. Return false to abort the load entirely.
     "html_mount": (): boolean | void => { },
     "state_change": (stateId: string, newValue: any, oldValue: any): boolean | void => { },
     "dungeon_create": (dungeon: Dungeon): boolean | void => { }, // will be triggered when a dungeon is created, including on loading a save file(because dungeons are not serialized).
@@ -89,6 +91,10 @@ export const CORE_EMITTER_SIGNATURES = {
     "recipe_learned": (recipeId: string): boolean | void => { }, // triggered when a recipe is learned
     "skill_learned": (skillTreeId: string, skillId: string, level: number): boolean | void => { }, // triggered when a skill is learned
     "skill_unlearned": (skillTreeId: string, skillId: string): boolean | void => { }, // triggered when a skill is unlearned
+
+    "status_added": (character: Character, status: Status): boolean | void => { }, // triggered after a new status is added to a character (reapplies don't fire this)
+    "status_removed": (character: Character, status: Status): boolean | void => { }, // triggered after a status is removed from a character
+    "status_expired": (character: Character, status: Status, instance: StatusInstance): boolean | void => { }, // triggered per expired instance when tickStatusDuration drops its duration to <= 0
 };
 
 /**
@@ -218,7 +224,7 @@ export class InitSystem {
         this.game.registerState('active_character', null);
         this.game.registerState('active_inventory', null);
         this.game.registerState('active_item', null);
-        this.game.registerState('popup_state', null);
+        this.game.registerState('popup_state', []);
         this.game.registerState('overlay_state', 'overlay-navigation');
         this.game.registerState('previous_overlay_state', null);
 
@@ -436,6 +442,14 @@ export class InitSystem {
             title: 'Properties',
             component: DebugProperties,
             order: 8
+        });
+
+        this.game.coreSystem.addComponent({
+            id: 'debug-actors',
+            slot: 'debug-tabs',
+            title: 'Actors',
+            component: DebugActors,
+            order: 9
         });
     }
 
@@ -805,8 +819,15 @@ export class InitSystem {
         });
 
         this.game.registerAction("flash", {
-            action: (text: string) => {
-                this.game.dungeonSystem.addFlash(text);
+            // Accepts a plain string or `{ text, class? }` — the object form wraps the text in
+            // <span class="..."> so callers can use e.g. `.flash-small` for a gray sub-line.
+            action: (value: string | { text: string; class?: string }) => {
+                if (typeof value === 'string') {
+                    this.game.dungeonSystem.addFlash(value);
+                } else if (value && typeof value === 'object' && typeof value.text === 'string') {
+                    const cls = value.class ? ` class="${value.class}"` : '';
+                    this.game.dungeonSystem.addFlash(`<span${cls}>${value.text}</span>`);
+                }
             }
         });
 
@@ -944,12 +965,14 @@ export class InitSystem {
         this.game.registerAction("popup", {
             action: (popupId: string | false) => {
                 if (popupId === false) {
-                    this.game.coreSystem.setState('popup_state', null);
-                    gameLogger.info('[popup] Closed popup');
+                    this.game.closeAllPopups();
                 } else {
-                    this.game.coreSystem.setState('popup_state', popupId);
-                    gameLogger.info(`[popup] Opened popup: "${popupId}"`);
+                    for (const token of String(popupId).split(',').map(s => s.trim()).filter(Boolean)) {
+                        if (token.startsWith('!')) this.game.closePopup(token.slice(1).trim());
+                        else this.game.openPopup(token);
+                    }
                 }
+                gameLogger.info(`[popup] Popup stack: [${this.game.getOpenPopups().join(', ')}]`);
             },
             eventDelayed: true
         });
@@ -1363,36 +1386,31 @@ export class InitSystem {
     private registerCharacterActions(): void {
 
 
-        this.game.registerAction("join_party", (data: string) => {
+        this.game.registerAction("party", (data: string) => {
             for (let part of this.game.logicSystem.getParts(data, true)) {
-                let character = this.game.characterSystem.getCharacter(part);
+                const leave = part.startsWith('!');
+                const id = leave ? part.slice(1).trim() : part;
+                let character = this.game.characterSystem.getCharacter(id);
                 if (!character) {
-                    throw new Error(`Character with id "${part}" not found.`);
+                    throw new Error(`Character with id "${id}" not found.`);
                 }
-                if (this.game.characterSystem.isCharacterInParty(character)) {
-                    gameLogger.warn(`[join_party] Character "${part}" is already in the party, skipping`);
-                    continue;
+                if (leave) {
+                    if (!this.game.characterSystem.isCharacterInParty(character)) {
+                        gameLogger.warn(`[party] Character "${id}" is not in the party, skipping`);
+                        continue;
+                    }
+                    this.game.characterSystem.removeFromParty(character);
+                    gameLogger.info(`[party] Removed character "${id}" from party`);
+                    this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.left', { character: character.getName() }));
+                } else {
+                    if (this.game.characterSystem.isCharacterInParty(character)) {
+                        gameLogger.warn(`[party] Character "${id}" is already in the party, skipping`);
+                        continue;
+                    }
+                    this.game.characterSystem.addToParty(character);
+                    gameLogger.info(`[party] Added character "${id}" to party`);
+                    this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.joined', { character: character.getName() }));
                 }
-                this.game.characterSystem.addToParty(character);
-                gameLogger.info(`[join_party] Added character "${part}" to party`);
-                this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.joined', { character: character.getName() }));
-            }
-
-        });
-
-        this.game.registerAction("leave_party", (data: string) => {
-            for (let part of this.game.logicSystem.getParts(data, true)) {
-                let character = this.game.characterSystem.getCharacter(part);
-                if (!character) {
-                    throw new Error(`Character with id "${part}" not found.`);
-                }
-                if (!this.game.characterSystem.isCharacterInParty(character)) {
-                    gameLogger.warn(`[leave_party] Character "${part}" is not in the party, skipping`);
-                    continue;
-                }
-                this.game.characterSystem.removeFromParty(character);
-                gameLogger.info(`[leave_party] Removed character "${part}" from party`);
-                this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.left', { character: character.getName() }));
             }
         });
 

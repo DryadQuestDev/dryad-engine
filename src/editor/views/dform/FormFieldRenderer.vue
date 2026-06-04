@@ -346,6 +346,10 @@ const isVisible = computed(() => {
       actualValue = props.parentCoreDataItem[dependentFieldKey];
     }
 
+    // Truthy/falsy sentinels (same convention as fromFileTypeAnd/Or filters)
+    if (expectedValues === '$truthy') { if (!actualValue) return false; continue; }
+    if (expectedValues === '$falsy') { if (actualValue) return false; continue; }
+
     if (!Array.isArray(expectedValues)) {
       // console.warn(`[FormFieldRenderer] Expected values for '${dependentFieldKey}' in 'show' condition of '${props.fieldKey.toString()}' is not an array. Field will be hidden.`);
       return false;

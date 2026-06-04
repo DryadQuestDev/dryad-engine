@@ -7,7 +7,7 @@ import MenuContainer from './global/views/MenuContainer.vue'
 import DocsViewer from './global/views/DocsViewer.vue'
 import RotatePhoneOverlay from './global/views/RotatePhoneOverlay.vue'
 import ConfirmDialog from 'primevue/confirmdialog';
-import DPopoverHost from './game/views/DPopoverHost.vue';
+import PopupHost from './game/views/popups/PopupHost.vue';
 import gsap from 'gsap';
 
 import { Global } from './global/global';
@@ -228,7 +228,7 @@ onUnmounted(() => {
 
     <RotatePhoneOverlay v-if="showRotateOverlay" />
 
-    <DPopoverHost />
+    <PopupHost />
 
   </div>
 </template>
@@ -245,7 +245,7 @@ onUnmounted(() => {
   position: fixed;
   top: 5px;
   left: 5px;
-  z-index: 3000;
+  z-index: 30000;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

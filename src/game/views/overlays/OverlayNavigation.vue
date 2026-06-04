@@ -9,6 +9,7 @@ import CharacterFace from '../CharacterFace.vue';
 import { useTypingAnimation } from '../../../composables/useTypingAnimation';
 import gsap from 'gsap';
 import TextEncounter from '../TextEncounter.vue';
+import DialogueDisplay from './DialogueDisplay.vue';
 
 const global = Global.getInstance();
 const game = Game.getInstance();
@@ -20,7 +21,7 @@ const isTextSelectable = ref(false);
 const isDialogueCollapsed = ref(false);
 const showAnimatedContinueIndicator = ref(false);
 const showFlashContent = ref(false);
-const flashContentElement = ref<HTMLElement | null>(null);
+const dialogueDisplayRef = ref<InstanceType<typeof DialogueDisplay> | null>(null);
 
 function toggleDialogueCollapse() {
   isDialogueCollapsed.value = !isDialogueCollapsed.value;
@@ -251,8 +252,9 @@ const typingAnimation = useTypingAnimation({
       await nextTick();
 
       // Animate flash content in
-      if (flashContentElement.value) {
-        gsap.fromTo(flashContentElement.value,
+      const flashEl = dialogueDisplayRef.value?.flashContentElement ?? null;
+      if (flashEl) {
+        gsap.fromTo(flashEl,
           {
             opacity: 0,
             y: -10
@@ -312,6 +314,10 @@ const displayContent = computed(() => {
 
   return baseText + (shouldShowIndicator ? ' ➢' : '');
 });
+
+const fullDialogueHtml = computed(() => processedEventContent.value + ' ➢');
+
+const flashHtml = computed(() => game.dungeonSystem.cachedFlashArray.value.join('<br>'));
 /*
 const isRoomDescription = computed(() => {
   return !game.dungeonSystem.selectedEncounter.value;
@@ -395,21 +401,19 @@ const isTextDungeon = computed(() => {
               <CustomComponentContainer :slot="'scene-content-top'"
                 :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
               <!-- events scenes-->
-              <div v-if="game.dungeonSystem.currentSceneId.value" class="dialogue-content event-content"
-                :style="dialogueContentStyle">
-                <span v-if="talkingCharacterHasNoArt" class="inline-character-name" :style="characterNameStyle">{{
-                  characterName }}: </span>
-                <span v-script="{ html: displayContent, resolver: false, disabled: typingAnimation.isAnimating.value }"
-                  style="display:inline"></span>
-              </div>
+              <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" ref="dialogueDisplayRef"
+                :display-content="displayContent" :full-content="fullDialogueHtml" :flash-html="flashHtml"
+                :show-flash="showFlashContent" :selectable="isTextSelectable"
+                :character-name="characterName" :show-inline-name="talkingCharacterHasNoArt"
+                :content-style="dialogueContentStyle" :name-style="characterNameStyle" />
               <!-- encounters-->
               <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
                 <TextEncounter />
               </div>
-              <!-- flash messages-->
-              <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
-                ref="flashContentElement" class="flash-content"
-                v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>') }"></div>
+              <!-- flash messages (encounter only; scene flash is handled by DialogueDisplay) -->
+              <div
+                v-if="!game.dungeonSystem.currentSceneId.value && showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
+                class="flash-content" v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>') }"></div>
 
               <!-- Scene choices for text dungeons -->
               <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
@@ -434,9 +438,11 @@ const isTextDungeon = computed(() => {
           <CustomComponentContainer :slot="'scene-content-top'"
             :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
           <!-- events scenes-->
-          <div v-if="game.dungeonSystem.currentSceneId.value" class="dialogue-content event-content"
-            :style="dialogueContentStyle"
-            v-script="{ html: displayContent, resolver: false, disabled: typingAnimation.isAnimating.value }"></div>
+          <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" ref="dialogueDisplayRef"
+            :display-content="displayContent" :full-content="fullDialogueHtml" :flash-html="flashHtml"
+            :show-flash="showFlashContent" :selectable="isTextSelectable"
+            :character-name="characterName" :show-inline-name="false" :content-style="dialogueContentStyle"
+            :name-style="characterNameStyle" />
           <!-- encounters-->
           <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
             <!-- Map/Screen dungeon: original layout -->
@@ -454,8 +460,9 @@ const isTextDungeon = computed(() => {
               <div class="encounter-text" v-script="{ html: encounterContent, resolver: false }"></div>
             </div>
           </div>
-          <!-- flash messages-->
-          <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0" ref="flashContentElement"
+          <!-- flash messages (encounter only; scene flash is handled by DialogueDisplay) -->
+          <div
+            v-if="!game.dungeonSystem.currentSceneId.value && showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
             class="flash-content" v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>') }">
           </div>
 

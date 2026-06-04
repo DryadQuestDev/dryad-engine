@@ -12,7 +12,8 @@ export const AbilityTemplateSchema = {
             name: { type: 'string', tooltip: 'Display name for this effect shown in auto-generated descriptions.' },
             aspects: { type: 'schema', fromFile: 'ability_definitions', fromFileType: 'custom', fromFileTypeAnd: { role: "aspect" }, tooltip: 'Aspects of the ability effect when used.' },
         }
-    }
+    },
+    tags: { type: 'string[]', tooltip: 'Tags for the ability templates. Used for filtering and grouping.' },
 } as const satisfies Schema;
 
 export type AbilityTemplateObject = SchemaToType<typeof AbilityTemplateSchema>;

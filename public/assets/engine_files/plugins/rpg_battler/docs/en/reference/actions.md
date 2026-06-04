@@ -52,8 +52,8 @@ The action is `delayed`, meaning it executes after the current DryadScript seque
 
 | Trait | Type | Description |
 |---|---|---|
-| `battle_overlay_x_offset` | number | Horizontal offset (%) for the battle overlay (health bar, tokens). Positive = right |
-| `battle_overlay_y_offset` | number | Vertical offset (%) for the battle overlay (health bar, tokens). Positive = up |
+| `battle_overlay_x_offset` | number | Horizontal offset (%) for the battle overlay (health bar, status bricks). Positive = right |
+| `battle_overlay_y_offset` | number | Vertical offset (%) for the battle overlay (health bar, status bricks). Positive = up |
 
 ## Character Views
 

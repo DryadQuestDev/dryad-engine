@@ -65,8 +65,7 @@ function hasAllyAoE(characterIds) {
 
       for (const effId in effects) {
         const asp = effects[effId];
-        if (asp.healing || asp.status_apply?.length || asp.status_remove?.length
-          || asp.token_apply || asp.cleanse) {
+        if (asp.healing || asp.status_apply?.length || asp.status_remove?.length || asp.cleanse) {
           return true;
         }
       }

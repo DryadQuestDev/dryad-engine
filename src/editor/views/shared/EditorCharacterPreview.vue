@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { Editor } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { useEditorSpinePlayer } from '../../../composables/useEditorSpinePlayer';
-import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../../game/utils/characterReference';
+import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO, OVERLAY_BASE_SCALE } from '../../../game/utils/characterReference';
 
 const props = defineProps<{
   /** Character template object (with skin_layers, attributes, spine, traits) */
@@ -12,6 +12,13 @@ const props = defineProps<{
   coreCharacter?: any;
   /** View name (e.g., 'back'). Undefined = default view. */
   view?: string;
+  /** Slot scale (body size as a fraction of the slot). Default 1 = body fills the slot. */
+  slotScale?: number;
+  /** Dev-tuned fine-adjust for the `overlay` slot, in cqh of slot height (mirror-aware on X). */
+  overlayOffsetX?: number;
+  overlayOffsetY?: number;
+  /** Mirror the body horizontally (flips art_dx tracking for the overlay). */
+  mirror?: boolean;
 }>();
 
 const editor = Editor.getInstance();
@@ -65,6 +72,34 @@ const gameScale = computed(() => getSpineCharacterScale(props.view, editor.getMe
 
 const isSpine = computed(() => !!(atlasUrl.value && skeletonUrl.value));
 
+// Per-view body art offset for the `overlay` slot — mirrors CharacterSlot.bodyArtOffset.
+// Spine: the spine entry's art_dx/dy (already resolved per view in spineConfig).
+// Static: the character's traits.art_dx/dy with coreCharacter fallback. Mirror-aware on dx.
+function trait(key: string, fallback: number): number {
+  const v = props.character?.traits?.[key] ?? props.coreCharacter?.traits?.[key];
+  return typeof v === 'number' ? v : fallback;
+}
+const bodyArtOffset = computed(() => {
+  const m = props.mirror ? -1 : 1;
+  if (isSpine.value) return { dx: m * spineConfig.value.art_dx, dy: spineConfig.value.art_dy };
+  return { dx: m * trait('art_dx', 0), dy: trait('art_dy', 0) };
+});
+
+// Slot-relative overlay wrapper, identical to CharacterSlot's model:
+// overlayTop = slot-top of the centered body box; translate tracks the body's
+// art_dx/dy plus the dev-tuned offset; scale = the shared overlay base size.
+const slotScale = computed(() => props.slotScale ?? 1);
+const overlayWrapperStyle = computed(() => {
+  const s = slotScale.value;
+  const m = props.mirror ? -1 : 1;
+  const dx = (bodyArtOffset.value.dx + m * (props.overlayOffsetX ?? 0)) * s;
+  const dy = (bodyArtOffset.value.dy + (props.overlayOffsetY ?? 0)) * s;
+  return {
+    top: `${50 - 50 * s}cqh`,
+    transform: `translateX(-50%) translate(${dx}cqh, ${dy}cqh) scale(${OVERLAY_BASE_SCALE})`,
+  };
+});
+
 const { init: initSpinePlayer } = useEditorSpinePlayer({
   containerRef: spineContainerRef,
   atlasUrl,
@@ -102,6 +137,9 @@ watch(spineContainerRef, (newRef) => {
     <div v-else class="editor-char-empty">
       <slot name="empty">No art layers</slot>
     </div>
+    <div v-if="$slots.overlay" class="editor-char-overlay" :style="overlayWrapperStyle">
+      <slot name="overlay" />
+    </div>
   </div>
 </template>
 
@@ -111,6 +149,19 @@ watch(spineContainerRef, (newRef) => {
   display: inline-block;
   height: 100%;
   aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
+  /* This box IS the slot (at slotScale=1 the body fills it). container-type:size
+     makes child cqh resolve against the slot height — same basis the game uses. */
+  container-type: size;
+}
+
+/* Slot-relative overlay anchor — mirrors CharacterSlot's overlay-wrapper.
+   transform-origin top-center so the overlay grows downward from the body top.
+   pointer-events:none so only the slotted content opts back in. */
+.editor-char-overlay {
+  position: absolute;
+  left: 50%;
+  transform-origin: 50% 0;
+  pointer-events: none;
 }
 
 .editor-char-spine {

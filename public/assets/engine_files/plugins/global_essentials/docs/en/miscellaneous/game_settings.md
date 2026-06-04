@@ -52,9 +52,28 @@ Open the engine editor and navigate to **Game Settings**. Each entry has:
 | `default_value` | Initial value (as string) |
 | `values` | Available options (for chooseOne/chooseMany) |
 | `order` | Display order in the menu |
-| `localizeValues` | Whether option values should be passed through locale |
+| `localizeValues` | For `chooseOne`/`chooseMany`: resolve each option's menu label from locale instead of showing the raw value (see [Localizing option labels](#localizing-option-labels)) |
 
 The `title` type creates a section header (not a setting) to organize the menu visually.
+
+### Localizing option labels
+
+By default a `chooseOne`/`chooseMany` setting shows its raw option values in the menu (e.g. `very_hard`, `fast`). Set `localizeValues: true` to display human-readable labels instead.
+
+Labels are looked up by the key convention **`<settingId>.<value>`**. For a setting `difficulty` with values `easy`/`hard`, add locale entries `difficulty.easy`, `difficulty.hard`:
+
+| id | val |
+|----|-----|
+| `difficulty.easy` | Easy |
+| `difficulty.hard` | Hard |
+
+Resolution order (first match wins):
+
+1. **Game locale** (`game.getLine`) — your game's and plugins' merged locale. Use this for game-defined settings. Only consulted while a game is running.
+2. **Engine locale** — built-in engine strings; used for engine-level settings.
+3. **Raw value** — fallback when no locale entry exists, so a missing label degrades to the value rather than showing `[difficulty.easy]`.
+
+Because the lookup uses `game.getLine`, the same key works from scripts (e.g. `game.getLine('difficulty.' + game.getGameSetting('difficulty'))` to show the current difficulty's label in your own UI).
 
 ### API
 

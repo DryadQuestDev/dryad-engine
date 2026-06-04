@@ -344,7 +344,15 @@ Add stacks to a status with proper resource adjustment. Returns true if stacks w
 character.addStatusStacks("poison", 2);
 ```
 
-> **Note:** Use `setStatusStacks()` and `addStatusStacks()` instead of `status.currentStacks` or `status.addStacks()` directly when you need replenishable resources (like health) to adjust with the stat change.
+### removeStatusStacks(statusId, amount?)
+
+Remove stacks from a status (oldest instances first) with proper resource adjustment. Removes the status entirely if it drops to 0 stacks. Returns the number of stacks actually removed.
+
+```js
+character.removeStatusStacks("poison", 2);
+```
+
+> **Note:** Status stacks are mutated only through the character — `addStatusStacks()` / `setStatusStacks()` / `removeStatusStacks()`. These keep replenishable resources (like health) and computed stats in sync; `Status` is read-only from scripts (`getStatus(id)?.currentStacks`).
 
 ---
 
@@ -686,13 +694,10 @@ Status effects applied to characters.
 ### Status Methods
 
 ```js
-// Check if stackable and add stacks
+// Stacks are mutated through the character (keeps resources/stats in sync); Status is read-only.
 if (status.isStackable()) {
-  // Use character.addStatusStacks() for proper resource adjustment
   character.addStatusStacks(status.id, 2);
-
-  // Or use status.addStacks() directly if you don't need resource adjustment
-  // status.addStacks(2);
+  character.removeStatusStacks(status.id, 1);
 }
 
 // Add stat modifier

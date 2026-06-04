@@ -13,6 +13,7 @@ export const AssetSchema = {
     gallery: {
         type: 'schema', objects: {
             gallery_id: { type: 'chooseOne', fromFile: 'galleries', fromFileTypeAnd: { type: 'assets' }, tooltip: 'Gallery ID to display the asset in.' },
+            gallery_order: { type: 'number', tooltip: 'Display order within the gallery (ascending). Falls back to ID when unset or tied.', defaultValue: 0 },
             entity_name: { type: 'string', tooltip: 'Name of the asset to display in the gallery.' },
             entity_description: { type: 'htmlarea', tooltip: 'Description of the asset to display in the gallery.' },
         }

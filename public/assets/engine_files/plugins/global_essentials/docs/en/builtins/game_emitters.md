@@ -34,6 +34,30 @@ game.on("game_save", (saveName) => {
 });
 ```
 
+### save_load_before
+
+Triggered with the raw save JSON immediately before deserialization. Listeners may mutate `saveData` in place to migrate old-shape data. Return `false` to abort the load entirely.
+
+**Use cases:**
+- Schema migration of saved data when the engine or game has changed in ways the engine doesn't auto-handle (renamed fields, restructured per-character data, etc.)
+- Stripping legacy fields from imported saves
+- Abort-with-warning on saves from an incompatible version
+
+```js
+game.on("save_load_before", (saveData) => {
+  if (saveData?.saveMeta?.engineVersion === "0.9.0") {
+    // rewrite an old field shape on every character
+    for (const id in saveData.characters || {}) {
+      const c = saveData.characters[id];
+      if (c?.oldField !== undefined) {
+        c.newField = c.oldField;
+        delete c.oldField;
+      }
+    }
+  }
+});
+```
+
 ### html_mount
 
 Triggered when the game HTML mounts to the DOM. Note: though available for possible edge cases, it's strongly recommended you use slot-based component system instead of relying on this event as most of the html content is rerendered during the game cycle.

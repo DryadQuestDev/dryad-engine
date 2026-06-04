@@ -436,14 +436,15 @@ export class DungeonSystem {
       realSceneId = "#" + parts[1] + "." + parts[2] + "." + parts[3] + "." + parts[4] + "." + parts[5];
       dungeonId = firstPart;
     }
-    // case 4a: scene name without dungeon: my_room.my_scene
+    // case 4a: scene name without dungeon: my_room.my_scene (leading # tolerated)
     else if (parts.length == 2) {
-      sceneId = parts[0] + "." + parts[1];
+      const room = parts[0].startsWith("#") ? parts[0].slice(1) : parts[0];
+      sceneId = room + "." + parts[1];
       dungeonId = null;
-      // case 4b: scene name with dungeon: my_dungeon.my_room.my_scene
+      // case 4b: scene name with dungeon: my_dungeon.my_room.my_scene (leading # tolerated)
     } else if (parts.length == 3) {
       sceneId = parts[1] + "." + parts[2];
-      dungeonId = parts[0];
+      dungeonId = parts[0].startsWith("#") ? parts[0].slice(1) : parts[0];
     }
     if (!realSceneId) {
       realSceneId = "#" + sceneId + ".1.1.1";
@@ -454,6 +455,18 @@ export class DungeonSystem {
 
   // 0 - no choices, 1 - choices, 2 - choices over
   isChoices: number = 0;
+
+  // Resolves a friendly scene id (scene / room.scene / dungeon.room.scene / &anchor /
+  // next / shift:x / full #id) then plays it — the same two steps the `scene` action does.
+  public playSceneResolver(value: string | null, dungeonId: string | null = null) {
+    if (!value) {
+      this.playScene(null, dungeonId);
+      return;
+    }
+    const resolved = this.resolveSceneId(value);
+    this.playScene(resolved.sceneId, dungeonId ?? resolved.dungeonId);
+  }
+
   public playScene(sceneId: string | null, dungeonId: string | null) {
 
     this.game.setState('hide_events', false);

@@ -6,17 +6,24 @@ import { BaseStatusObject } from '../../../schemas/characterStatusSchema';
 // Character.reevaluate() can distinguish "not set on this status" (inherit
 // from prior layer) from "explicitly 0" (reset).
 export type SpineViewConfig = {
-  atlas: string;
-  skeleton: string;
-  artDx?: number;
-  artDy?: number;
-  artScale?: number;
+    atlas: string;
+    skeleton: string;
+    artDx?: number;
+    artDy?: number;
+    artScale?: number;
+};
+
+export type StatusInstance = {
+    stacks: number;
+    duration: number;   // -1 = permanent
+    source?: string;    // optional caster id / origin per apply
 };
 
 export class Status {
     public id: string = "";
-    public maxStacks: number = 1; // -1 for unlimited
-    public currentStacks: number = 1;
+    public maxStacks: number = 1; // 0, -1, or undefined => unlimited
+    public multiStack: boolean = false;
+    public durationIncrement: boolean = false; // single-stack: reapply adds duration instead of refreshing
     public image: string = "";
     public name: string = "";
     public description: string = "";
@@ -26,7 +33,7 @@ export class Status {
     public isHidden: boolean = false;
 
     public tags: string[] = [];
-    public duration: number = -1;
+    public meta: Record<string, any> = {};
 
     public stats: Record<string, number> = {};
     public traits: Record<string, any> = {};
@@ -36,8 +43,59 @@ export class Status {
     public abilityModifiers: any[] = [];
 
     // Spine configs keyed by view ('' = default, 'back' = back view, etc.)
-    // _default and empty view normalize to '' at this layer.
     public spineViews: Map<string, SpineViewConfig> = new Map();
+
+    // Per-instance storage. Single-stack statuses always have length 1.
+    // Multi-stack statuses append a new instance per apply (DD-style).
+    public _instances: StatusInstance[] = [{ stacks: 1, duration: -1 }];
+
+    public computedStatsKeys: string[] = [];
+
+    constructor(initialStats: Record<string, number> = {}) {
+        this.stats = { ...initialStats };
+    }
+
+    // ===== currentStacks / duration are proxied through _instances. =====
+    // For single-stack: sum across instances == _instances[0].stacks.
+    // For multi-stack: getter sums; setter throws (use applyInstance / removeStacks).
+
+    public get currentStacks(): number {
+        if (this._instances.length === 0) return 0;
+        if (this.multiStack) {
+            let sum = 0;
+            for (const i of this._instances) sum += i.stacks;
+            return sum;
+        }
+        return this._instances[0].stacks;
+    }
+
+    public set currentStacks(value: number) {
+        if (this.multiStack) {
+            throw new Error(`Cannot set currentStacks on multi-stack status "${this.id}" — use applyInstance() / addStacks() / removeStacks()`);
+        }
+        if (this._instances.length === 0) this._instances.push({ stacks: value, duration: -1 });
+        else this._instances[0].stacks = value;
+    }
+
+    public get duration(): number {
+        if (this._instances.length === 0) return 0;
+        if (this.multiStack) {
+            let max = this._instances[0].duration;
+            for (let i = 1; i < this._instances.length; i++) {
+                if (this._instances[i].duration > max) max = this._instances[i].duration;
+            }
+            return max;
+        }
+        return this._instances[0].duration;
+    }
+
+    public set duration(value: number) {
+        if (this.multiStack) {
+            throw new Error(`Cannot set duration directly on multi-stack status "${this.id}" — use applyInstance()`);
+        }
+        if (this._instances.length === 0) this._instances.push({ stacks: 1, duration: value });
+        else this._instances[0].duration = value;
+    }
 
 
     public setValues(obj: CharacterStatusObject | BaseStatusObject) {
@@ -89,6 +147,9 @@ export class Status {
             this.maxStacks = obj.max_stacks;
             this.image = obj.image || "";
         }
+        if ('multi_stack' in obj && obj.multi_stack) this.multiStack = true;
+        if ('duration_increment' in obj && obj.duration_increment) this.durationIncrement = true;
+        if ('meta' in obj && obj.meta) this.meta = obj.meta as Record<string, any>;
 
         if ('name' in obj && obj.name) this.name = obj.name;
         if ('description' in obj && obj.description) this.description = obj.description;
@@ -96,7 +157,9 @@ export class Status {
         if ('rarity' in obj && typeof obj.rarity === 'string') this.rarity = obj.rarity;
         if ('polarity' in obj && obj.polarity) this.polarity = obj.polarity;
         if ('tags' in obj && obj.tags) this.tags = obj.tags as string[];
-        if ('duration' in obj && typeof obj.duration === 'number') this.duration = obj.duration;
+        if ('duration' in obj && typeof obj.duration === 'number') {
+            this._instances = [{ stacks: this._instances[0]?.stacks ?? 1, duration: obj.duration }];
+        }
         if ('is_hidden' in obj && obj.is_hidden) this.isHidden = true;
 
         // set computed stats
@@ -108,41 +171,151 @@ export class Status {
 
     }
 
+    public isStackable(): boolean {
+        const m = this.maxStacks;
+        return m === undefined || m <= 0 || m > 1;
+    }
+
+    public isUnlimited(): boolean {
+        const m = this.maxStacks;
+        return m === undefined || m <= 0;
+    }
+
     public addStacks(amount: number = 1): boolean {
-        if (!this.isStackable()) {
-            return false;
+        if (!this.isStackable()) return false;
+        if (this._instances.length === 0) this._instances.push({ stacks: 0, duration: -1 });
+
+        if (this.multiStack) {
+            // Legacy callers that addStacks on a multi-stack status bump the first instance.
+            // New callers should use applyInstance() to append a fresh per-instance entry.
+            const inst = this._instances[0];
+            if (this.isUnlimited()) {
+                inst.stacks += amount;
+                return true;
+            }
+            const total = this.currentStacks;
+            const allowed = Math.min(amount, this.maxStacks - total);
+            if (allowed <= 0) return false;
+            inst.stacks += allowed;
+            return allowed === amount;
         }
 
-        const newStacks = this.currentStacks + amount;
-
-        // -1 means unlimited stacks
-        if (this.maxStacks === -1) {
-            this.currentStacks = newStacks;
+        const inst = this._instances[0];
+        const newStacks = inst.stacks + amount;
+        if (this.isUnlimited()) {
+            inst.stacks = newStacks;
             return true;
         }
-
-        // Check if we would exceed max stacks
         if (newStacks > this.maxStacks) {
-            this.currentStacks = this.maxStacks;
-            return false; // Couldn't add all stacks
+            inst.stacks = this.maxStacks;
+            return false;
         }
-
-        this.currentStacks = newStacks;
+        inst.stacks = newStacks;
         return true;
     }
 
+    /**
+     * Apply: for multi_stack=true appends a new instance (DD-style). For
+     * multi_stack=false refreshes the single instance — duration goes to
+     * max(existing, new), stacks add and clamp to max_stacks.
+     * Returns the number of stacks that were actually applied (clamped).
+     */
+    public applyInstance(opts: { stacks?: number; duration?: number; source?: string } = {}): { applied: number } {
+        const stacks = opts.stacks ?? 1;
+        const duration = opts.duration ?? (this._instances[0]?.duration ?? -1);
+        const source = opts.source;
 
+        if (this.multiStack) {
+            if (this.isUnlimited()) {
+                this._instances.push({ stacks, duration, source });
+                return { applied: stacks };
+            }
+            const total = this.currentStacks;
+            const allowed = Math.min(stacks, this.maxStacks - total);
+            if (allowed <= 0) return { applied: 0 };
+            this._instances.push({ stacks: allowed, duration, source });
+            return { applied: allowed };
+        }
 
-    public computedStatsKey?: string;
+        // Single-stack: refresh
+        if (this._instances.length === 0) {
+            this._instances.push({ stacks, duration, source });
+            return { applied: stacks };
+        }
+        const existing = this._instances[0];
+        const max = this.isUnlimited() ? Infinity : this.maxStacks;
+        const before = existing.stacks;
+        existing.stacks = Math.min(max, before + stacks);
+        // Re-apply duration: accumulate when durationIncrement, else refresh to the longer
+        // of the two (both -1 = permanent stays permanent).
+        if (duration > 0) {
+            if (this.durationIncrement && existing.duration > 0) existing.duration += duration;
+            else if (existing.duration <= 0 || duration > existing.duration) existing.duration = duration;
+        }
+        if (source) existing.source = source;
+        return { applied: existing.stacks - before };
+    }
 
-    constructor(initialStats: Record<string, number> = {}) {
-        this.stats = { ...initialStats };
+    /**
+     * Tick all instances' durations by `amount`. Drops expired instances
+     * (those whose duration falls to 0 or below, excluding permanent -1).
+     * Returns the array of expired instances (for emitter triggering).
+     */
+    public tickDuration(amount: number = 1): StatusInstance[] {
+        const expired: StatusInstance[] = [];
+        const kept: StatusInstance[] = [];
+        for (const inst of this._instances) {
+            if (inst.duration < 0) {
+                // permanent
+                kept.push(inst);
+                continue;
+            }
+            if (inst.duration === 0) {
+                kept.push(inst);
+                continue;
+            }
+            inst.duration -= amount;
+            if (inst.duration <= 0) expired.push(inst);
+            else kept.push(inst);
+        }
+        this._instances = kept;
+        return expired;
+    }
+
+    /**
+     * Remove `amount` stacks across instances, starting from the oldest.
+     * Returns the number actually removed. Empties / removes instances that
+     * drop to 0 stacks. Does NOT remove the status from the character.
+     */
+    public removeStacks(amount: number): number {
+        let remaining = amount;
+        let removed = 0;
+        const kept: StatusInstance[] = [];
+        for (const inst of this._instances) {
+            if (remaining <= 0) { kept.push(inst); continue; }
+            if (inst.stacks <= remaining) {
+                remaining -= inst.stacks;
+                removed += inst.stacks;
+                // drop this instance
+                continue;
+            }
+            inst.stacks -= remaining;
+            removed += remaining;
+            remaining = 0;
+            kept.push(inst);
+        }
+        this._instances = kept;
+        return removed;
+    }
+
+    public getInstances(): readonly StatusInstance[] {
+        return this._instances;
     }
 
     public addStat(name: string, value: number) {
 
         if (!Game.getInstance().characterSystem.statsMap.has(name)) {
-            throw new Error(`Stat "${name}" does not exist in characterStatsMap.`);
+            throw new Error(`Stat "${name}" does not exist.`);
         }
         this.stats[name] = (this.stats[name] || 0) + value;
     }
@@ -152,10 +325,6 @@ export class Status {
         if (!Game.getInstance().characterSystem.getStatComputer(key)) {
             throw new Error(`Stat computer with key "${key}" is not registered.`);
         }
-        this.computedStatsKey = key;
-    }
-
-    public isStackable(): boolean {
-        return this.maxStacks > 1 || this.maxStacks === -1;
+        if (!this.computedStatsKeys.includes(key)) this.computedStatsKeys.push(key);
     }
 }

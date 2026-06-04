@@ -1,15 +1,15 @@
 /// <reference path="../dtypes.d.ts" />
 
 const { game, vue, components } = window.engine;
-const { computed, ref, watch, defineComponent } = vue;
+const { computed, ref, onMounted, nextTick, defineComponent } = vue;
 const { CharacterSlot, BackgroundAsset, CharacterViewerPopup, CustomComponentContainer } = components;
 
 import { currentRpgBattle, getSpeedMult, getBattleDisplayName } from '../rpg-battle-state.mjs';
 import { endRpgBattle } from '../main.mjs';
-import { executeAction, advanceToNextTurn, canUseAbility, processDeaths } from '../rpg-battle-flow.mjs';
-import { isCharAlive, getTokenStacks, expandSplashTargets } from '../rpg-battle-effects.mjs';
+import { executeAction, advanceToNextTurn, tickActiveCharacter, canUseAbility, processDeaths, refireChannels, consumeStun, flashAbilityName, consumeBattleConsumable } from '../rpg-battle-flow.mjs';
+import { isCharAlive, getStatusStacks, expandSplashTargets, resolveAbility, getAliveEnemies, getAliveAllies } from '../rpg-battle-effects.mjs';
 import { decideAction, getValidTargets } from '../rpg-battle-ai.mjs';
-import { animateCaster, animateEffects, setIdleState } from '../rpg-battle-anims.mjs';
+import { animateCast, animateEffects, setIdleState, prepSummon, animateSummonIn } from '../rpg-battle-anims.mjs';
 /** @param {RpgBattle} b */
 function isBattleFinished(b) { return b.phase === 'finished'; }
 
@@ -36,7 +36,9 @@ export const RpgBattleScreen = defineComponent({
     const battle = computed(() => currentRpgBattle.value);
     const forceZoomOut = ref(false);
     const abilityPanelRef = ref(null);
-    const enemyTurnRunning = ref(false);
+    const turnBusy = ref(false);
+    const ZOOM_MS = 500;
+    function waitZoom() { return new Promise(resolve => setTimeout(resolve, ZOOM_MS)); }
     const viewerCharacters = ref(null);
     const viewerInitialIndex = ref(0);
 
@@ -158,22 +160,38 @@ export const RpgBattleScreen = defineComponent({
     // CharacterSlot positions the overlay above the body's head, scales it with slot.scale,
     // and translates by the per-view body art_dx — no manual positioning math here.
 
+    // World camera: background + enemies live in one wrapper that scales together via a single
+    // GPU transform (see .rpg-world-camera). worldCam = the zoom factor (1 out, WORLD_ZOOM_IN in).
+    // Enemy slots are STATIC (base positions/scale) — the wrapper transform does the camera, so no
+    // per-slot left/top animation (which thrashes layout and flickers with many canvas slots).
+    // The player character is intentionally NOT in the wrapper (its own front-center pop).
+    const WORLD_ZOOM_IN = 1.12;
+    const worldCam = computed(() => zoomedIn.value ? WORLD_ZOOM_IN : 1);
+
     const enemySlots = computed(() => {
       const enemies = aliveEnemies.value;
       if (enemies.length === 0) return [];
 
-      const startX = 10, startY = -27, dx = 15, dy = 25, cols = 3;
-      const scale = 0.35; // up from 0.2
+      const startX = 0, dx = 15, dy = 25, cols = 3;
+      const floorY = 0; // front/bottom row sits on the floor line; deeper rows stack upward
+      const baseScale = 0.35; // up from 0.2
+      // Fake perspective: each row farther back is smaller (size only — a slot filter would
+      // also dim the HP-bar overlay).
+      const DEPTH_SCALE = 0.8;
 
-      return enemies.map((id, i) => ({
-        charId: id,
-        slot: {
-          char: id,
-          x: startX + (i % cols) * dx,
-          y: startY + Math.floor(i / cols) * dy,
-          scale,
-        },
-      }));
+      return enemies.map((id, i) => {
+        const row = Math.floor(i / cols);
+        return {
+          charId: id,
+          slot: {
+            char: id,
+            x: startX + (i % cols) * dx,
+            y: floorY - row * dy,
+            z: -row,
+            scale: baseScale * Math.pow(DEPTH_SCALE, row),
+          },
+        };
+      });
     });
 
     // Player slots: single set, position changes based on zoom state
@@ -208,7 +226,11 @@ export const RpgBattleScreen = defineComponent({
 
     /** After ability resolves: bonus → stay, main → end turn. */
     function handlePostResolve(b, abilityId) {
-      if (isBonusAction(abilityId)) {
+      // A bonus action re-opens the panel; if the bonus just stunned the caster (self-stagger, etc.),
+      // consume the stun and end the turn — it forfeits this turn's main action, not also the next.
+      // A main action is short-circuited (not a bonus) → ends the turn with its stun left to skip the
+      // next turn normally.
+      if (isBonusAction(abilityId) && !consumeStun(b.activeCharId)) {
         b.charState[b.activeCharId].bonusUsed++;
         b.battlePhase = 'choosing_ability';
       } else {
@@ -217,6 +239,90 @@ export const RpgBattleScreen = defineComponent({
     }
 
     // ── Ability panel events ──
+
+    async function finishPlayerCast(b, casterId, abilityId, targetId, targetType, delayed) {
+      const caster = game.getCharacter(casterId);
+      const ok = await performAbility(casterId, abilityId, targetId, targetType);
+      const consume = () => { if (ok) consumeBattleConsumable(caster, abilityId); };
+
+      if (isBattleFinished(b)) { consume(); return; }
+      if (!isCharAlive(b.activeCharId)) { onEndTurn(null); consume(); return; }
+
+      const finish = () => {
+        if (delayed) forceZoomOut.value = false;
+        handlePostResolve(b, abilityId);
+        consume();
+        if (b.battlePhase === 'choosing_ability') abilityPanelRef.value?.show();
+      };
+      if (delayed) {
+        const delay = forceZoomOut.value ? getActionDelay() : 0;
+        setTimeout(finish, delay);
+      } else {
+        finish();
+      }
+    }
+
+    // Resolve an ability on a target with full caster+effect animation, then run any bounces.
+    // Shared by player (auto + targeted) and AI paths so bounce behaves identically everywhere.
+    // Returns true if the cast resolved, false if executeAction returned null (veto / guard).
+    async function performAbility(casterId, abilityId, targetId, targetType) {
+      const ability = game.getCharacter(casterId)?.getAbility(abilityId);
+      const landPos = await animateCast(casterId, targetId ?? casterId, targetType, ability,
+        { onCast: () => flashAbilityName(casterId, abilityId) });
+      const results = executeAction(abilityId, targetId);
+      if (results === null) return false;
+
+      const summonIds = results.filter(r => r.type === 'summon').map(r => r.targetId);
+      if (summonIds.length) {
+        await nextTick();
+        for (const id of summonIds) prepSummon(id);
+        if (isPlayerTurn.value) { forceZoomOut.value = true; await waitZoom(); }
+        for (const id of summonIds) await animateSummonIn(id);
+      }
+
+      await animateEffects(results);
+      processDeaths();
+      await runBounces(casterId, abilityId, targetType, targetId ?? casterId, landPos);
+      // Action + its animations are fully done — distinct from battle_action_end (pre-animation).
+      game.trigger('battle_action_complete', game.getCharacter(casterId), abilityId, results);
+      return true;
+    }
+
+    // bounce aspect: re-resolve the whole ability on N random same-side targets, with a chain
+    // delay each. Bounces skip cost/cooldown (resolveAbility isBounce) and don't re-fire
+    // battle_action_start/end (no double rage/semen bookkeeping). bounce_same (default false)
+    // controls whether two consecutive hops may land on the same target.
+    async function runBounces(casterId, abilityId, targetType, originTargetId, originPos) {
+      const ability = game.getCharacter(casterId)?.getAbility(abilityId);
+      if (!ability) return;
+      let bounce = 0;
+      let bounceSame = false;
+      for (const eid in ability.effects) {
+        bounce += ability.effects[eid].bounce || 0;
+        if (ability.effects[eid].bounce_same) bounceSame = true;
+      }
+      if (bounce <= 0) return;
+      const allySide = ['ally', 'all_allies', 'self', 'self_and_ally'].includes(targetType);
+      let prevTarget = originTargetId;
+      let fromPos = originPos;
+      for (let i = 0; i < bounce; i++) {
+        const b = battle.value;
+        if (!b || isBattleFinished(b)) break;
+        const pool = (allySide ? getAliveAllies(casterId) : getAliveEnemies(casterId))
+          .filter(id => bounceSame || id !== prevTarget);
+        if (!pool.length) break;
+        const rt = pool[Math.floor(Math.random() * pool.length)];
+        await new Promise(resolve => setTimeout(resolve, getChainDelay()));
+        // Melee lunges (animateCast ignores casterPose); a projectile launches from the previous
+        // landing position and suppresses the caster pose on bounces.
+        const landPos = await animateCast(casterId, rt, targetType, ability, { originId: prevTarget, originPos: fromPos, casterPose: false });
+        if (landPos) fromPos = landPos;
+        prevTarget = rt;
+        const res = resolveAbility(casterId, abilityId, rt, { isBounce: true });
+        await animateEffects(res);
+        processDeaths();
+      }
+    }
 
     function onSelectAbility(abilityId, hidePanel) {
       const b = battle.value;
@@ -234,17 +340,9 @@ export const RpgBattleScreen = defineComponent({
       // Auto-execute abilities that don't need target selection
       if (target === 'self' || target === 'all_enemies' || target === 'all_allies') {
         b.battlePhase = 'resolving';
+        hidePanel?.();
         const targetId = target === 'self' ? b.activeCharId : undefined;
-        (async () => {
-          await animateCaster(b.activeCharId, targetId || b.activeCharId, target);
-          const results = executeAction(abilityId, targetId);
-          await animateEffects(results);
-          processDeaths();
-          if (!isBattleFinished(b)) {
-            if (!isCharAlive(b.activeCharId)) { onEndTurn(null); return; }
-            handlePostResolve(b, abilityId);
-          }
-        })();
+        finishPlayerCast(b, b.activeCharId, abilityId, targetId, target, false);
         return;
       }
 
@@ -271,7 +369,7 @@ export const RpgBattleScreen = defineComponent({
         const abId = selectedAbilityId.value;
         const char = activeChar.value;
         const ab = char?.getAbility(abId);
-        const taunters = aliveEnemies.value.filter(id => getTokenStacks(id, 'taunt') > 0);
+        const taunters = aliveEnemies.value.filter(id => getStatusStacks(id, 'taunt') > 0);
         if (taunters.length > 0 && !taunters.includes(charId)) {
           game.showNotification(game.getLine('ui_taunt_blocked'));
         } else if (ab?.meta?.target_min_health) {
@@ -298,22 +396,7 @@ export const RpgBattleScreen = defineComponent({
       const ability = game.getCharacter(casterId)?.getAbility(abilityId);
       const targetType = ability?.meta?.target || 'enemy';
 
-      (async () => {
-        await animateCaster(casterId, charId, targetType);
-        const results = executeAction(abilityId, charId);
-        await animateEffects(results);
-        processDeaths();
-
-        if (!isBattleFinished(b)) {
-          if (!isCharAlive(b.activeCharId)) { onEndTurn(null); return; }
-          const delay = forceZoomOut.value ? getActionDelay() : 0;
-          setTimeout(() => {
-            forceZoomOut.value = false;
-            handlePostResolve(b, abilityId);
-            if (b.battlePhase === 'choosing_ability') abilityPanelRef.value?.show();
-          }, delay);
-        }
-      })();
+      finishPlayerCast(b, casterId, abilityId, charId, targetType, true);
     }
 
     function cancelTarget() {
@@ -330,111 +413,88 @@ export const RpgBattleScreen = defineComponent({
     function onEndTurn(hidePanel) {
       const b = battle.value;
       if (!b || isBattleFinished(b)) return;
-
-      const doAdvance = async () => {
-        const { charId: nextId, dotResults } = advanceToNextTurn();
-        if (dotResults.length > 0) {
-          await animateEffects(dotResults);
-        }
-        processDeaths();
-        if (!nextId || isBattleFinished(b)) return;
-
-        if (b.activeSide === 'player') {
-          b.battlePhase = 'choosing_ability';
-          forceZoomOut.value = false;
-          abilityPanelRef.value?.show();
-        } else {
-          runEnemyTurns();
-        }
-      };
-
-      if (hidePanel) {
-        hidePanel(doAdvance);
-      } else {
-        doAdvance();
-      }
+      const go = () => driveTurns();
+      if (hidePanel) hidePanel(go); else go();
     }
 
+    // ── Turn pipeline ──
 
-
-    // ── Enemy AI ──
-
-    function runEnemyTurns() {
+    // Unified driver: advance one character at a time. Player turns zoom in, tick DoT/stun
+    // (flash + death awaited), and either slide in the panel (can act → stop for input) or
+    // zoom out and skip (dead/stunned). Enemies run the same pipeline minus zoom/panel.
+    // Resumed by onEndTurn after the player's main action.
+    async function driveTurns() {
       const b = battle.value;
-      if (!b || isBattleFinished(b) || enemyTurnRunning.value) return;
+      if (!b || isBattleFinished(b) || turnBusy.value) return;
+      turnBusy.value = true;
 
-      enemyTurnRunning.value = true;
+      while (b.phase === 'active' && !isBattleFinished(b)) {
+        const wasZoomed = zoomedIn.value && !!b.activeCharId;
+        const charId = advanceToNextTurn();
+        if (!charId || isBattleFinished(b)) break;
+        const isPlayer = b.activeSide === 'player';
 
-      async function step() {
-        if (!b || isBattleFinished(b) || b.activeSide !== 'enemy') {
-          enemyTurnRunning.value = false;
-          if (b && !isBattleFinished(b) && b.activeSide === 'player') {
-            b.battlePhase = 'choosing_ability';
-            forceZoomOut.value = false;
-            abilityPanelRef.value?.show();
-          }
+        if (isPlayer) { forceZoomOut.value = false; await waitZoom(); }
+        else if (wasZoomed) { await waitZoom(); }
+
+        const { canAct, dotResults } = tickActiveCharacter(charId);
+        if (dotResults.length > 0) await animateEffects(dotResults);
+        processDeaths();
+        if (isBattleFinished(b)) break;
+
+        if (!canAct) {
+          if (isPlayer) { forceZoomOut.value = true; await waitZoom(); }
+          continue;
+        }
+
+        // Channel autocast: re-fire active channels with flash + animation, awaited; the caster still acts after.
+        const channelResults = refireChannels(charId);
+        if (channelResults.length > 0) await animateEffects(channelResults);
+        processDeaths();
+        if (isBattleFinished(b)) break;
+
+        // A channel's self-stagger can cross the stun threshold mid-autocast (and a thorns reflect could
+        // kill the caster). Re-check before handing over control — otherwise the turn proceeds with the
+        // panel up but every ability greyed by the stun gate. Consume the stun now so it forfeits THIS
+        // turn's action (not also the next); death short-circuits before the consume.
+        if (!isCharAlive(charId) || consumeStun(charId)) {
+          if (isPlayer) { forceZoomOut.value = true; await waitZoom(); }
+          continue;
+        }
+
+        if (isPlayer) {
+          b.battlePhase = 'choosing_ability';
+          abilityPanelRef.value?.show();
+          turnBusy.value = false;
           return;
         }
 
         b.battlePhase = 'enemy_turn';
-        const charId = b.activeCharId;
-        const action = decideAction(charId);
-
-        if (action) {
-          const ability = game.getCharacter(charId)?.getAbility(action.abilityId);
-          const targetType = ability?.meta?.target || 'enemy';
-
-          await animateCaster(charId, action.targetId, targetType);
-          const results = executeAction(action.abilityId, action.targetId);
-          await animateEffects(results);
-          processDeaths();
-
-          // Bonus action: loop back for another action
-          if (ability?.meta?.bonus_action && !isBattleFinished(b) && isCharAlive(charId)) {
-            b.charState[charId].bonusUsed++;
-            await new Promise(resolve => setTimeout(resolve, getChainDelay()));
-            setTimeout(step, 0);
-            return;
-          }
-        }
-
-        if (isBattleFinished(b)) {
-          enemyTurnRunning.value = false;
-          return;
-        }
-
-        // Wait for floating text before advancing
+        await runEnemyAction(charId);
+        if (isBattleFinished(b)) break;
         await new Promise(resolve => setTimeout(resolve, getActionDelay()));
-
-        const { charId: nextId, dotResults } = advanceToNextTurn();
-        if (dotResults.length > 0) {
-          await animateEffects(dotResults);
-        }
-        processDeaths();
-        if (!nextId || isBattleFinished(b)) {
-          enemyTurnRunning.value = false;
-          return;
-        }
-
-        if (b.activeSide === 'enemy') {
-          setTimeout(step, getChainDelay());
-        } else {
-          enemyTurnRunning.value = false;
-          b.battlePhase = 'choosing_ability';
-          forceZoomOut.value = false;
-          abilityPanelRef.value?.show();
-        }
       }
 
-      setTimeout(step, getActionDelay());
+      turnBusy.value = false;
     }
 
-    // Auto-run enemy turns when battle starts on enemy turn
-    watch(isPlayerTurn, (val) => {
-      if (!val && battle.value?.phase === 'active' && !enemyTurnRunning.value) {
-        runEnemyTurns();
+    async function runEnemyAction(charId) {
+      const b = battle.value;
+      const action = decideAction(charId);
+      if (!action) return;
+      const caster = game.getCharacter(charId);
+      const ability = caster?.getAbility(action.abilityId);
+      const targetType = ability?.meta?.target || 'enemy';
+      const ok = await performAbility(charId, action.abilityId, action.targetId, targetType);
+      if (ok) consumeBattleConsumable(caster, action.abilityId);
+      if (ability?.meta?.bonus_action && !isBattleFinished(b) && isCharAlive(charId)) {
+        b.charState[charId].bonusUsed++;
+        await new Promise(resolve => setTimeout(resolve, getChainDelay()));
+        await runEnemyAction(charId);
       }
-    }, { immediate: true });
+    }
+
+    onMounted(() => { driveTurns(); });
 
     // ── Actions ──
 
@@ -496,12 +556,19 @@ export const RpgBattleScreen = defineComponent({
     }
 
     function onSlotClick(charId, side) {
-      if (isTargeting.value) return;
+      if (isTargeting.value) {
+        // The template routes correct-side clicks to onEnemyTargetClick / selectTarget.
+        // Anything reaching onSlotClick while targeting = wrong-side click — surface it
+        // instead of silently swallowing. Targeting state is left intact so the player
+        // can click a valid target next.
+        game.showNotification(game.getLine('ui_incorrect_target'));
+        return;
+      }
       openViewer(charId, side);
     }
 
     return {
-      battle, activeChar, backgroundAsset, enemySlots, playerSlots, getBattleDisplayName,
+      battle, activeChar, backgroundAsset, enemySlots, playerSlots, getBattleDisplayName, worldCam,
       zoomedIn, isPlayerTurn, forceZoomOut, showZone,
       battlePhase, selectedAbilityName, activeBattleState, isBattleOver,
       isTargeting, targetsEnemies, targetsAllies, targetIncludesSelf,
@@ -514,7 +581,10 @@ export const RpgBattleScreen = defineComponent({
   },
   template: /*html*/`
     <div v-if="battle" class="rpg-battle-screen">
-      <BackgroundAsset v-if="backgroundAsset" :asset="backgroundAsset" />
+      <!-- Full-screen background, scaled by worldCam so it zooms with the enemies. -->
+      <div class="rpg-bg-camera" :style="{ transform: 'scale(' + worldCam + ') translateZ(0)' }">
+        <BackgroundAsset v-if="backgroundAsset" :asset="backgroundAsset" />
+      </div>
 
       <div class="rpg-battle-body">
         <div class="rpg-battle-arena">
@@ -522,6 +592,10 @@ export const RpgBattleScreen = defineComponent({
           <RpgBattleLog @select="(charId, side) => onSlotClick(charId, side)" />
 
           <div class="rpg-viewport" :class="{ 'events-zone': showZone }">
+            <!-- Enemy camera: enemy slots scale together via ONE GPU transform on this
+                 wrapper (same worldCam as the bg). No per-slot animation → no flicker.
+                 Players + UI live OUTSIDE it. -->
+            <div class="rpg-world-camera" :style="{ transform: 'scale(' + worldCam + ') translateZ(0)' }">
             <!-- Enemies. Overlay (name + HP + tokens) is rendered by CharacterSlot
                  via overlaySlot="rpg-battle-char-overlay" — it auto-tracks the
                  body's per-view art_dx and shrinks with slot.scale. -->
@@ -529,7 +603,7 @@ export const RpgBattleScreen = defineComponent({
               <CharacterSlot
                 :character="game.getCharacter(es.charId)" :slot="es.slot"
                 :interactive="true" :instantLayers="true"
-                overlaySlot="rpg-battle-char-overlay" :overlayScale="4"
+                overlaySlot="rpg-battle-char-overlay"
                 :overlayOffsetX="game.getCharacter(es.charId)?.getTrait('battle_overlay_x_offset') || 0"
                 :overlayOffsetY="game.getCharacter(es.charId)?.getTrait('battle_overlay_y_offset') || 0"
                 :class="{
@@ -540,15 +614,18 @@ export const RpgBattleScreen = defineComponent({
                 @mouseleave="hoveredTargetId = null"
                 @click="isTargeting && targetsEnemies ? onEnemyTargetClick(es.charId) : onSlotClick(es.charId, 'enemy')" />
             </div>
+            </div>
+            <!-- /.rpg-world-camera -->
 
             <!-- Players. view="back" → CharacterSlot resolves bodyArtOffset from
                  the back spine entry, so the overlay tracks the back spine's center. -->
             <div v-for="ps in playerSlots" :key="'p_' + ps.charId" :data-rpg-char-id="ps.charId"
-              v-show="!zoomedIn || ps.charId === battle.activeCharId">
+              v-show="!zoomedIn || ps.charId === battle.activeCharId"
+              :style="{ '--overlay-zoom': ps.charId === battle.activeCharId ? worldCam : 1 }">
               <CharacterSlot
                 :character="game.getCharacter(ps.charId)" :slot="ps.slot" view="back"
                 :interactive="true" :instantLayers="true"
-                overlaySlot="rpg-battle-char-overlay" :overlayScale="2"
+                overlaySlot="rpg-battle-char-overlay"
                 :overlayOffsetX="game.getCharacter(ps.charId)?.getTrait('battle_overlay_x_offset') || 0"
                 :overlayOffsetY="game.getCharacter(ps.charId)?.getTrait('battle_overlay_y_offset') || 0"
                 :class="{
@@ -568,7 +645,8 @@ export const RpgBattleScreen = defineComponent({
             <!-- Target selection overlay -->
             <div v-if="battlePhase === 'choosing_target'" class="rpg-target-overlay">
               <div class="rpg-target-message">
-                {{ game.getLine('ui_choose_target') }} <strong>{{ selectedAbilityName }}</strong>
+                <div>{{ game.getLine('ui_choose_target') }}</div>
+                <div class="rpg-target-message-for">{{ selectedAbilityName }}</div>
               </div>
               <button class="rpg-btn rpg-btn-cancel" @click="cancelTarget">{{ game.getLine('ui_cancel') }}</button>
             </div>

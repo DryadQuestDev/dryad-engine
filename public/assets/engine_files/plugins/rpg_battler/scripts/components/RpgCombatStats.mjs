@@ -3,6 +3,8 @@
 const { game, vue } = window.engine;
 const { computed, defineComponent } = vue;
 
+import { getEffectivePower } from '../rpg-battle-effects.mjs';
+
 // @ts-ignore - Vue overload resolution false positive in .mjs
 export const RpgCombatStats = defineComponent({
   props: ['character', 'power'],
@@ -11,7 +13,9 @@ export const RpgCombatStats = defineComponent({
 
     const displayPower = computed(() => {
       if (props.power !== undefined && props.power !== null) return props.power;
-      return char.value?.getStat('power') || 0;
+      const c = char.value;
+      if (!c) return 0;
+      return Math.round(getEffectivePower(c, undefined));
     });
 
     const critChance = computed(() => char.value?.getStat('crit_chance') ?? undefined);

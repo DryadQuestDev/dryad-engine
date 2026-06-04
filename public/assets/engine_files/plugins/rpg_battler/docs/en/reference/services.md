@@ -82,6 +82,44 @@ game.getService('rpg_battle').addDefeated('forest_ambush');
 
 Victories from `end('victory')` are tracked automatically -- this is for cases where you want to mark a battle defeated without fighting it.
 
+### `checkStaggerThreshold(characterId)`
+
+Check whether the character's `stagger` status has crossed their effective threshold; if so, strip stagger, apply `stun` (1 stack), and refresh `braced`. Same logic that runs automatically inside the ability pipeline — exposed here for game scripts that apply stagger from custom listeners (e.g. an on-damage reactive like Brittle).
+
+```js
+const battle = game.getService('rpg_battle');
+const target = game.getCharacter(targetId);
+
+target.addStatus(game.createStatus('stagger'), { stacks: 1, source: casterId });
+battle.checkStaggerThreshold(targetId);
+```
+
+
+## Status operations (engine API)
+
+The plugin no longer has a `rpg_tokens` service. Combat statuses are regular engine statuses — read and mutate them via the standard `Character` API. See [Statuses](../guide/statuses.md) for the full data model.
+
+```js
+const target = game.getCharacter(targetId);
+
+// Read current total stacks (sum across instances)
+const burnStacks = target.getStatus('burn')?.currentStacks ?? 0;
+
+// Apply (multi_stack=true appends an instance; single-stack refreshes)
+target.addStatus(game.createStatus('poison'), { stacks: 5, duration: 3, source: casterId });
+
+// Remove stacks (FIFO from oldest instance); drops the status automatically if empty
+target.removeStatusStacks('shield', 1);
+
+// Iterate per-instance for multi_stack statuses
+for (const inst of target.getStatus('burn')?.getInstances() ?? []) {
+  console.log(inst.stacks, inst.duration, inst.source);
+}
+```
+
+`Character.addStatus(status, applyArgs?)` is the single entry point — the engine handles refresh-on-reapply for single-stack statuses and per-instance append for `multi_stack: true` statuses automatically.
+
+
 ## `rpg_party`
 
 Party management helpers.

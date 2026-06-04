@@ -3,10 +3,10 @@
 import { FormationTab } from './components/FormationTab.mjs';
 import { BattleScreen } from './components/BattleScreen.mjs';
 import { HealthOverlay } from './components/HealthOverlay.mjs';
-import { TokenBricks } from './components/TokenBricks.mjs';
 import { currentBattle } from './battle-state.mjs';
 import { initBattleTracking, addFloatingText, isAlive, isActive, getAliveOnSide, getAllOnSide, getAll } from './battle-flow.mjs';
 import { autoPlaceOnGrid } from './grid-placement.mjs';
+import { getStatusDefinitions, getStatusDamageType } from './battle-effects.mjs';
 
 console.log("auto_battler plugin loaded");
 
@@ -14,13 +14,6 @@ const { game } = window.engine;
 
 // Export FormationTab for user scripts to use
 game.registerComponent('AutoBattler_FormationTab', FormationTab);
-
-// Inject token bricks into character statuses viewer
-game.addComponent({
-  id: 'auto_battler_token_bricks',
-  slot: 'character-statuses-bottom',
-  component: TokenBricks,
-});
 
 // Battle speed: 0 = paused, 1/2/3/5 = multiplier
 game.registerState('battle_speed', 1);
@@ -125,7 +118,7 @@ game.registerEmitter('battle_status_remove');
 
 // Emitter: battle_scaling_stat
 // Fired when resolving the scaling stat (power/sorcery) for an effect.
-// Modify event.value to change the effective stat. Affects damage, healing, and token stacks.
+// Modify event.value to change the effective stat. Affects damage, healing, and status stacks.
 // Args: (battle: Battle, caster: Character, damageType: string, event: { value: number })
 game.registerEmitter('battle_scaling_stat');
 
@@ -133,6 +126,56 @@ game.registerEmitter('battle_scaling_stat');
 // Fired before a character relocates on the grid. Return false to prevent the move.
 // Args: (battle: Battle, character: Character, fromPos: string, toPos: string)
 game.registerEmitter('battle_move');
+
+// ── Aspect renderers ──
+// auto_battler splits power/sorcery: physical=power, elemental=sorcery, absolute=max,
+// healing=sorcery (matches getScalingStat in battle-effects.mjs).
+
+function renderScaled(value, character, statKey, label) {
+  let txt = `<b>${value}% of ${label}</b>`;
+  if (character) {
+    const base = statKey === 'max'
+      ? Math.max(character.getStat('power'), character.getStat('sorcery'))
+      : character.getStat(statKey);
+    txt += ` <b>(${Math.round(base * value / 100)})</b>`;
+  }
+  return txt;
+}
+
+function statForDamageType(dmgType) {
+  if (dmgType === 'physical') return { key: 'power', label: 'power' };
+  if (dmgType === 'absolute') return { key: 'max', label: 'power/sorcery' };
+  return { key: 'sorcery', label: 'sorcery' };
+}
+
+game.registerAspectRenderer('damage', ({ value, aspects, character }) => {
+  const { key, label } = statForDamageType(aspects.damage_type || 'physical');
+  return renderScaled(value, character, key, label);
+});
+
+game.registerAspectRenderer('healing', ({ value, character }) =>
+  renderScaled(value, character, 'sorcery', 'sorcery')
+);
+
+function statusStacksRenderer(applyAspectId) {
+  return ({ value, aspects, character }) => {
+    const statusIds = aspects[applyAspectId];
+    if (!Array.isArray(statusIds) || statusIds.length === 0) {
+      return `<b>${value}</b>`;
+    }
+    const defs = getStatusDefinitions();
+    let scalingDef = null;
+    for (const id of statusIds) {
+      const def = defs?.get(id);
+      if (def?.meta?.power_scaling) { scalingDef = def; break; }
+    }
+    if (!scalingDef) return `<b>${value}</b>`;
+    const { key, label } = statForDamageType(getStatusDamageType(scalingDef));
+    return renderScaled(value, character, key, label);
+  };
+}
+game.registerAspectRenderer('status_stacks', statusStacksRenderer('status_apply'));
+game.registerAspectRenderer('status_stacks_self', statusStacksRenderer('status_apply_self'));
 
 // Add universal Move ability to all characters
 game.on('character_create', (character) => {
@@ -315,7 +358,6 @@ game.registerService('start_battle', {
       prevDisableSaves: game.getState('disable_saves'),
       prevGameState: game.getState('game_state'),
       abilitiesState: {},
-      tokens: {},
       defeatedPlayer: [],
       defeatedEnemy: [],
       noRetreat: !!noRetreat,

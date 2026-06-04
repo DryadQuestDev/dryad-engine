@@ -203,6 +203,10 @@ While items and skills automatically create their own statuses, you can also def
 
 ---
 
+### Status Meta
+
+Status effects can carry a **meta** data bag – a set of custom fields you define yourself (in the `Status Meta` editor tab) and read from your own scripts. A burn status might carry `damage_per_turn` and `element`; a buff might carry `power_scaling`. The engine just stores and hands these values back to your game and plugin code, so the same status system flexibly powers whatever mechanics your game needs.
+
 ### Character Templates
 
 **What they are:** Complete character definitions - the blueprints.

@@ -36,7 +36,7 @@ const emit = defineEmits<{
 
 .char-viewer-popup {
   position: relative;
-  background: rgba(30, 30, 35, 0.95);
+  background: rgba(30, 30, 35, 1);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
   width: 90%;

@@ -1045,30 +1045,32 @@ export class Character {
 */
 
 
-  public addStatus(status: Status) {
+  public addStatus(status: Status, applyArgs?: { stacks?: number; duration?: number; source?: string }) {
     // Check if status with this id already exists
     const existingStatus = this.statuses.get(status.id);
 
     if (existingStatus) {
-      // Debug: console.log(`Found existing status: ${status.id}`, {...});
-
-      // If it exists and is stackable, try to add stacks
-      if (existingStatus.isStackable() && status.isStackable()) {
-        const stacksToAdd = status.currentStacks;
-        const success = this.addStatusStacks(existingStatus.id, stacksToAdd);
-        gameLogger.info(`Added ${stacksToAdd} stacks to status "${status.id}". New count: ${existingStatus.currentStacks}`);
-        return;
-      }
-
-      // If not stackable, replace the existing status with the new one
-      gameLogger.info(`Status "${status.id}" already exists and is not stackable - replacing`);
-      this.removeStatus(existingStatus.id);
-    } else {
-      // Debug: console.log(`Adding new status: ${status.id}`, {...});
+      const oldReplenishableValues = this.captureResourceStatValues();
+      // Reapply path — refresh duration + add stacks (single-stack) or append instance (multi-stack)
+      const stacks = applyArgs?.stacks ?? status.currentStacks;
+      const duration = applyArgs?.duration ?? status.duration;
+      const source = applyArgs?.source;
+      existingStatus.applyInstance({ stacks, duration, source });
+      this.reevaluate();
+      this.adjustAllResources(oldReplenishableValues, true);
+      return;
     }
 
     // Capture all replenishable stat values before adding status (for computed stats)
     const oldReplenishableValues = this.captureResourceStatValues();
+
+    // If applyArgs are provided, seed the fresh status's first instance from them
+    if (applyArgs) {
+      const stacks = applyArgs.stacks ?? status.currentStacks;
+      const duration = applyArgs.duration ?? status.duration;
+      const source = applyArgs.source;
+      status._instances = [{ stacks, duration, source }];
+    }
 
     // Add as a new status
     this.statuses.set(status.id, status);
@@ -1077,6 +1079,7 @@ export class Character {
 
     // Adjust all replenishable resources (handles both direct and computed stats)
     this.adjustAllResources(oldReplenishableValues, true);
+    Game.getInstance().trigger('status_added', this, status);
   }
 
 
@@ -1098,6 +1101,25 @@ export class Character {
 
       // Adjust all replenishable resources (handles both direct and computed stats)
       this.adjustAllResources(oldReplenishableValues, true);
+      Game.getInstance().trigger('status_removed', this, statusToRemove);
+    }
+  }
+
+  /**
+   * Tick a single status's duration by `amount`. Drops expired instances.
+   * If the status has no instances left, removes the status from the character.
+   * Fires `status_expired` per expired instance.
+   */
+  public tickStatusDuration(id: string, amount: number = 1): void {
+    const status = this.statuses.get(id);
+    if (!status) return;
+    const expired = status.tickDuration(amount);
+    if (expired.length > 0) {
+      const game = Game.getInstance();
+      for (const inst of expired) game.trigger('status_expired', this, status, inst);
+    }
+    if (status.getInstances().length === 0) {
+      this.removeStatus(id);
     }
   }
 
@@ -1131,6 +1153,25 @@ export class Character {
     this.reevaluate();
     this.adjustAllResources(oldValues, true);
     return success;
+  }
+
+  /**
+   * Remove stacks from a status (oldest instances first) with proper resource adjustment.
+   * Removes the status entirely if it drops to 0 stacks. Returns the number actually removed.
+   */
+  public removeStatusStacks(statusId: string, amount: number = 1): number {
+    const status = this.statuses.get(statusId);
+    if (!status) return 0;
+
+    const oldValues = this.captureResourceStatValues();
+    const removed = status.removeStacks(amount);
+    if (status.getInstances().length === 0) {
+      this.removeStatus(statusId);
+    } else {
+      this.reevaluate();
+      this.adjustAllResources(oldValues, true);
+    }
+    return removed;
   }
 
 
@@ -1232,12 +1273,8 @@ export class Character {
     return this.resources[name] || 0;
   }
 
-  public getStatus(id: string): Status {
-    const status = this.statuses.get(id);
-    if (!status) {
-      throw new Error(`Status ${id} does not exist`);
-    }
-    return status;
+  public getStatus(id: string): Status | undefined {
+    return this.statuses.get(id);
   }
 
   public hasStatus(id: string): boolean {
@@ -1393,14 +1430,13 @@ export class Character {
             statValue += status.stats[name] * multiplier;
           }
 
-          // Add computed stats from status
-          if (status.computedStatsKey) {
-            const computer = game.characterSystem.getStatComputer(status.computedStatsKey);
-            if (computer) {
-              const computedValues = computer(this); // Pass current character instance
-              if (typeof computedValues[name] === 'number') {
-                statValue += computedValues[name] * multiplier;
-              }
+          // Add computed stats from status (one computer per key in computedStatsKeys)
+          for (const key of status.computedStatsKeys) {
+            const computer = game.characterSystem.getStatComputer(key);
+            if (!computer) continue;
+            const computedValues = computer(this);
+            if (typeof computedValues[name] === 'number') {
+              statValue += computedValues[name] * multiplier;
             }
           }
         }

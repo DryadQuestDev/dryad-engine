@@ -119,16 +119,16 @@ const MyComponent = vue.defineComponent({
   // Register the component
   components: { BackgroundAsset },
   setup() {
-    // Fetch asset template from game data with id "my_background"
-    const assetTemplate = game.getData("assets").get("my_background");
-    // Create reactive copy
-    const asset = vue.ref({ ...assetTemplate });
+    // getData() returns its own copy of the asset; pass it straight through
+    const asset = game.getData("assets").get("my_background");
     return { asset };
   },
   // Pass asset as prop
   template: `<BackgroundAsset :asset="asset" /><div>some other content</div>`
 });
 ```
+
+`getData()` returns a static (non-reactive) copy of the editor's source data, so the asset never changes on its own — pass it straight to the prop for a one-time render. Wrap it in `vue.ref(...)` only if you intend to swap it at runtime (e.g. `asset.value = ...`) so the component re-renders.
 
 ---
 

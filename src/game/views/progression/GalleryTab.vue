@@ -46,7 +46,7 @@ const getFilteredGalleries = (type: 'characters' | 'assets' = selectedTabType.va
 
 // Function: Get items for a specific gallery
 const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = selectedTabType.value as 'characters' | 'assets') => {
-  const items: Array<{ id: string; name: string; description: string; isDiscovered: boolean }> = [];
+  const items: Array<{ id: string; name: string; description: string; isDiscovered: boolean; order: number }> = [];
 
   if (type === 'characters') {
     for (const template of game.characterSystem.templatesMap.values()) {
@@ -56,7 +56,8 @@ const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = sele
           id: template.id,
           name: isDiscovered ? (template.gallery?.entity_name || template.id) : '???',
           description: isDiscovered ? (template.gallery?.entity_description || '') : '',
-          isDiscovered
+          isDiscovered,
+          order: template.gallery?.gallery_order ?? 0
         });
       }
     }
@@ -68,14 +69,15 @@ const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = sele
           id: asset.id,
           name: isDiscovered ? (asset.gallery?.entity_name || asset.id) : '???',
           description: isDiscovered ? (asset.gallery?.entity_description || '') : '',
-          isDiscovered
+          isDiscovered,
+          order: asset.gallery?.gallery_order ?? 0
         });
       }
     }
   }
 
-  // Sort items by name (case-insensitive)
-  items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  // Sort by gallery_order, fall back to id
+  items.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 
   return items;
 };

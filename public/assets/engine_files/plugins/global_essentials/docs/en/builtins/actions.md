@@ -9,9 +9,9 @@ All built-in actions for scenes and choices.
 | Action | Description | Example | Delayed |
 |--------|-------------|---------|---------|
 | `notification` | Display a notification popup | `"Hello!"` | |
-| `flash` | Display a flash message | `"Item received!"` | |
+| `flash` | Display a flash message. Accepts a plain string, or `{ text, class }` to wrap the text in a `<span class="…">` | `"Item received!"` or `{ text: "small note", class: "flash-small" }` | |
 | `state` | Set game states | `"game_state=battle, disable_ui=true"` | |
-| `popup` | Open a popup or close current popup | `"my-popup"` or `false` | ✓ |
+| `popup` | Manage the popup stack: `"id"` opens, `"!id"` closes that one, `false` closes all. Comma-separated tokens applied in order; popups stack on top of each other | `"my-popup"`, `"popup1, !popup2"`, or `false` | ✓ |
 | `property` | Modify game properties (`=` set, `>` add, `<` subtract) | `"gold>100, score=0"` | |
 | `discover_lore` | Mark one or more lore records as discovered | `"kingdom_of_luminaria"` or `"goblins, orcs, trolls"` | |
 
@@ -25,8 +25,6 @@ All built-in actions for scenes and choices.
 // Object format (for setting complex values)
 { property: { settings: { volume: 80, theme: "dark" } } }
 ```
-
----
 
 ## Dungeon Actions
 
@@ -82,8 +80,7 @@ Column 1 (before `%`) plays on first visit. Column 2 (after `%`) plays on every 
 
 | Action | Description | Example | Delayed |
 |--------|-------------|---------|---------|
-| `join_party` | Add character to party | `"alice, bob"` | |
-| `leave_party` | Remove character from party | `"alice"` | |
+| `party` | Add / remove characters from party. `!` prefix removes | `"alice, bob, !carol"` | |
 | `create_character` | Create a new character | `{ id: "npc1", template: "villager" }` | |
 | `update_character` | Update character properties | `{ id: "alice", party: true }` | |
 | `delete_character` | Delete a character | `{ id: "npc1" }` | |

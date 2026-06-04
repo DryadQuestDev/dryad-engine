@@ -51,7 +51,7 @@ The player's current party is used automatically. If the party exceeds `max_part
 - **Zoom In / Zoom Out** -- On the player's turn, the camera zooms in on the active character. When targeting allies or during enemy turns, the camera zooms out to show all combatants.
 - **Back Views** -- Player characters are rendered with their "back" view during battle, facing the enemies. Enemy characters face the player normally.
 - **No Grid** -- Unlike the Auto Battler, there is no positional grid. Characters are arranged visually but position does not affect gameplay.
-- **Token System** -- Status effects are independent instances with their own stacks, duration, and source tracking. Supports DoT, HoT, shields, stun, taunt, thorns, and death defiance.
+- **Status System** -- Combat effects use the engine's standard `character_statuses` with combat-specific behavior driven by a `meta` bag (`is_battle`, `power_scaling`, `dot_damage_type`, `absorb`, `stun`, etc.). When `multi_stack: true`, each apply creates an independent instance with its own duration (DoT/poison-style). Supports DoT, HoT, shields, stun, taunt, thorns, and death defiance. See [Statuses](statuses.md).
 - **Ability Panel** -- Players choose abilities from an animated panel that slides in during their turn. Abilities can target self, allies, enemies, or all.
 
 ## Stats
@@ -70,16 +70,12 @@ The plugin defines the following character stats:
 
 | Stat | Description |
 |---|---|
-| `armor` | Flat reduction to physical damage received. |
+| `physical_armor` | Flat reduction to physical hit damage. Min 1 dmg; negative amplifies. |
+| `magical_armor` | Flat reduction to magic hit damage. Min 1 dmg; negative amplifies. |
 | `dodge` | Chance to avoid incoming damage entirely (0--100%). |
-| `resist_fire` | Reduces fire damage received (%). |
-| `resist_water` | Reduces water damage received (%). |
-| `resist_air` | Reduces air damage received (%). |
-| `resist_earth` | Reduces earth damage received (%). |
-| `resist_arcane` | Reduces arcane damage received (%). |
-| `resist_poison` | Reduces poison damage received (%). |
-| `resist_light` | Reduces light damage received (%). |
-| `resist_dark` | Reduces dark damage received (%). |
+| `resist_burn` | Reduces burn DoT damage (%). Above 100% heals instead. |
+| `resist_poison` | Reduces poison DoT damage (%). Above 100% heals instead. |
+| `resist_bleed` | Reduces bleed DoT damage (%). Above 100% heals instead. |
 
 **Offense**
 

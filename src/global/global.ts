@@ -45,7 +45,6 @@ import CharacterFace from '../game/views/CharacterFace.vue';
 import CharacterDoll from '../game/views/progression/CharacterDoll.vue';
 import BackgroundAsset from '../game/views/BackgroundAsset.vue';
 import CustomComponentContainer from '../game/views/CustomComponentContainer.vue';
-import DPopover from '../game/views/DPopover.vue';
 
 // Progression components
 import CharacterSheet from '../game/views/progression/CharacterSheet.vue';
@@ -343,6 +342,10 @@ export class Global {
     this.applyEngineTheme(modsManifests);
 
     gameLogger.info("Game initialized, loading save data...");
+    if (!this.game.coreSystem.trigger("save_load_before", data)) {
+      gameLogger.warn("Save load aborted by save_load_before listener.");
+      return null;
+    }
     loadSave(this.game, data);
 
     // Clean up any slots marked for removal (from exit animations that were in progress during save)
@@ -555,6 +558,9 @@ export class Global {
 
     game.coreSystem.gameSettingsSchema = gameSettings;
     game.coreSystem.settings.value = this.optionsToObject(gameSettings);
+    const gameSettingsMap = new Map<string, any>();
+    for (const s of gameSettings) gameSettingsMap.set(s.id, s);
+    game.coreSystem.dataRegistry.set('game_settings', gameSettingsMap);
 
     // load object maps for music and sounds
     game.coreSystem.musicMap = await this.fetchMapValues(gameId, `music`, modsIds);
@@ -843,7 +849,6 @@ export class Global {
         CharacterDoll,
         BackgroundAsset,
         CustomComponentContainer,
-        DPopover,
         // Progression components
         CharacterSheet,
         CharacterStats,

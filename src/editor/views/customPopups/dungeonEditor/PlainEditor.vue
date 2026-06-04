@@ -129,22 +129,22 @@ function findSearchRanges(text: string, query: string): Array<[number, number]> 
   return ranges;
 }
 
-function findEmphasisRanges(text: string): { em: Array<[number, number]>; strong: Array<[number, number]> } {
-  const em: Array<[number, number]> = [];
-  const strong: Array<[number, number]> = [];
+function findEmphasisRanges(text: string): { double: Array<[number, number]>; single: Array<[number, number]> } {
+  const double: Array<[number, number]> = [];
+  const single: Array<[number, number]> = [];
   const doubleRe = /\*\*([^*\n]+?)\*\*/g;
   let m: RegExpExecArray | null;
   while ((m = doubleRe.exec(text)) !== null) {
-    em.push([m.index, m.index + m[0].length]);
+    double.push([m.index, m.index + m[0].length]);
   }
   const singleRe = /\*([^*\n]+?)\*/g;
   while ((m = singleRe.exec(text)) !== null) {
     const s = m.index;
     const e = m.index + m[0].length;
-    const overlaps = em.some(([ds, de]) => !(e <= ds || s >= de));
-    if (!overlaps) strong.push([s, e]);
+    const overlaps = double.some(([ds, de]) => !(e <= ds || s >= de));
+    if (!overlaps) single.push([s, e]);
   }
-  return { em, strong };
+  return { double, single };
 }
 
 const HL_COLORS = ['yellow', 'pink', 'orange', 'green', 'blue', 'purple'] as const;
@@ -316,23 +316,24 @@ function renderOverlay(text: string, hls: Highlight[]): string {
   const sh = dungeonStructuredHighlight.value.trim();
   if (sh && sh !== sq) setTok(STYLE_SEARCH, findSearchRanges(text, sh));
 
-  const { em, strong } = findEmphasisRanges(text);
+  const { double, single } = findEmphasisRanges(text);
   // Faux-bold via text-shadow — `font-weight` would change glyph widths and
   // drift the caret. Italic stays as `font-style:italic` because italic
   // glyphs have near-identical advance widths in most fonts.
   //
+  // Standard markdown: `**text**` → bold, `*text*` → italic.
   // Markers (`*` / `**`) are EXCLUDED from the styled range so the asterisks
   // render in regular weight. Bolding them via text-shadow made the ink
   // bleed onto adjacent tall glyphs (capital letters), so `*Word*` looked
   // denser than `*word*`. With markers in regular weight only the inner
   // content carries emphasis and the markers read uniformly.
-  for (const [s, e] of em) {
+  for (const [s, e] of double) {
     if (e - s < 5) continue; // need at least `**x**`
-    for (let i = s + 2; i < e - 2 && i < len; i++) emStyle[i] = 'font-style:italic';
+    for (let i = s + 2; i < e - 2 && i < len; i++) strongStyle[i] = FAUX_BOLD;
   }
-  for (const [s, e] of strong) {
+  for (const [s, e] of single) {
     if (e - s < 3) continue; // need at least `*x*`
-    for (let i = s + 1; i < e - 1 && i < len; i++) strongStyle[i] = FAUX_BOLD;
+    for (let i = s + 1; i < e - 1 && i < len; i++) emStyle[i] = 'font-style:italic';
   }
 
   let out = '';
@@ -702,10 +703,10 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div v-show="showToolbar" ref="floatingRef" class="hl-toolbar" :style="floatingStyles">
-        <button type="button" class="hl-format hl-format--bold" title="Bold (*text*)"
-          @mousedown.prevent="wrapSelection('*')">B</button>
-        <button type="button" class="hl-format hl-format--italic" title="Italic (**text**)"
-          @mousedown.prevent="wrapSelection('**')">I</button>
+        <button type="button" class="hl-format hl-format--bold" title="Bold (**text**)"
+          @mousedown.prevent="wrapSelection('**')">B</button>
+        <button type="button" class="hl-format hl-format--italic" title="Italic (*text*)"
+          @mousedown.prevent="wrapSelection('*')">I</button>
         <span class="hl-sep"></span>
         <button v-for="color in HL_COLORS" :key="color" type="button" class="hl-swatch"
           :class="`hl-swatch--${color}`" :title="color"

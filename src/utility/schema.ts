@@ -23,7 +23,7 @@ export interface Schemable {
   min?: number; // minimum value for number fields
   max?: number; // maximum value for number fields
   show?: {
-    [key: string]: any[];
+    [key: string]: any[] | '$falsy' | '$truthy';
   }
   objects?: Schema; // Optional: Holds the nested schema definition when type is 'schema'
   allowAndMode?: boolean; // Show AND/OR toggle for string[] fields (used in filter fields)

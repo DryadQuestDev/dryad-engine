@@ -1,142 +1,79 @@
-/* ── Token Bricks (Character Sheet) ── */
+/* ── Effect / damage-type colors ──
+   Used by locale damage-type spans (e.g. <span class="physical">Physical</span>) and by
+   ability-effect renderers in main.mjs to highlight (X) values in tooltips. */
 
-.token-brick {
-  position: relative;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid #888;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 50px;
-  height: 50px;
+:root {
+  --dmg-physical: rgb(193, 222, 248);
+  --dmg-magic: #b388ff;
+  --dmg-burn: #ff6b35;
+  --dmg-poison: #66bb6a;
+  --dmg-bleeding: #e04040;
+  --dmg-absolute: #ff4081;
+  /* "pure" damage — ignores armor/resists */
+  --effect-heal: #42b983;
+  --effect-value: #f0e07c;
+  /* soft lemon yellow — distinct from #f0c674 (delta-value gold in AbilityCard) */
 }
 
-.token-brick:hover {
-  background: rgba(136, 136, 136, 0.15);
-  border-color: #aaa;
+.physical {
+  color: var(--dmg-physical);
+  font-weight: 600;
 }
 
-.token-brick.polarity-positive {
-  border-color: #42b983;
+.magic {
+  color: var(--dmg-magic);
+  font-weight: 600;
 }
 
-.token-brick.polarity-positive:hover {
-  background: rgba(66, 185, 131, 0.15);
-  border-color: #52c593;
+.burn {
+  color: var(--dmg-burn);
+  font-weight: 600;
 }
 
-.token-brick.polarity-negative {
-  border-color: #e74c3c;
+.poison {
+  color: var(--dmg-poison);
+  font-weight: 600;
 }
 
-.token-brick.polarity-negative:hover {
-  background: rgba(231, 76, 60, 0.15);
-  border-color: #ef5f50;
+.bleeding {
+  color: var(--dmg-bleeding);
+  font-weight: 600;
 }
 
-.token-brick.polarity-neutral {
-  border-color: #888;
+.absolute {
+  color: var(--dmg-absolute);
+  font-weight: 600;
 }
 
-.token-brick.has-image {
-  padding: 1px;
-  background: transparent;
+.heal {
+  color: var(--effect-heal);
+  font-weight: 600;
 }
 
-.token-brick.has-image:hover {
-  background: transparent;
+.value {
+  color: var(--effect-value);
+  font-weight: 600;
 }
 
-.token-brick-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
 
-.token-brick-name {
-  font-size: 0.8rem;
-  color: #ccc;
-  padding: 0.2rem 0.4rem;
-  white-space: nowrap;
-}
+/* ── Projectiles / battle VFX ── */
 
-.token-brick-stacks {
-  position: absolute;
-  bottom: -4px;
-  right: -4px;
-  background: rgba(0, 0, 0, 0.85);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  line-height: 1.2;
-}
-
-.token-brick-duration {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  background: rgba(0, 0, 0, 0.85);
-  color: #ffd54f;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 4px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 215, 0, 0.3);
-}
-
-.token-brick-popup {
+.rpg-projectile {
   position: fixed;
-  z-index: 9999;
-  background: rgba(26, 26, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  padding: 12px 16px;
-  min-width: 180px;
-  max-width: 280px;
-  color: #eee;
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
+  z-index: 11000;
   pointer-events: none;
-}
-
-.token-brick-popup-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  padding-bottom: 6px;
-  margin-bottom: 8px;
-}
-
-.token-brick-popup-header h4 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: bold;
-  color: #e2c044;
-}
-
-.token-brick-popup-icon {
-  width: 24px;
-  height: 24px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
+  will-change: left, top, transform;
 }
 
-.token-brick-popup-body {
-  font-size: 14px;
-}
-
-.token-brick-popup-desc {
-  margin: 0 0 6px 0;
-  color: #ccc;
-}
-
-.token-brick-popup-details {
-  display: flex;
-  gap: 12px;
-  color: rgba(255, 255, 255, 0.7);
+/* Spritesheet sprite: a strip/grid frame-stepped in JS (background-size + background-position set
+   per frame). The N/(N-1)-style exact per-cell positions are computed in spawnSprite. */
+.rpg-projectile-sheet {
+  background-repeat: no-repeat;
 }
 
 /* ── Battle Screen ── */
@@ -182,6 +119,30 @@
   background: #f2e8e8c6;
 }
 
+/* Full-screen background — covers the whole battle area (so zoom-out shows it at full
+   size with no black edges). Overscanned a couple px so sub-pixel rounding never exposes
+   an edge; scaled by worldCam so it zooms with the enemies. Clipped by .rpg-battle-screen
+   (overflow:hidden). */
+.rpg-bg-camera {
+  position: absolute;
+  inset: -2px;
+  z-index: 0;
+  transform-origin: 20% 55%;
+  transition: transform 0.5s ease;
+  will-change: transform;
+}
+
+/* Enemy camera wrapper (viewport-sized): enemy slots scale together via ONE GPU transform
+   about the focal — no per-slot layout animation (no flicker). Same worldCam as the bg. */
+.rpg-world-camera {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  transform-origin: 20% 55%;
+  transition: transform 0.5s ease;
+  will-change: transform;
+}
+
 @container (min-aspect-ratio: 16/9) {
   .rpg-viewport {
     width: auto;
@@ -193,12 +154,19 @@
 /* ── Sidebar: info + controls + turn order ── */
 
 .rpg-sidebar {
+  /* Overlay on the right edge instead of taking flex space — otherwise the arena (and the
+     16:9 viewport inside it) shrinks by the sidebar width, pillarboxing the play area on a
+     16:9 monitor. */
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 8px;
   width: 80px;
-  flex-shrink: 0;
   background: rgba(0, 0, 0, 0.3);
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -316,12 +284,21 @@
   position: absolute;
   left: var(--rpg-ability-panel-left, 30%);
   top: 40%;
+  /* Bound height so a long ability list scrolls instead of overflowing the viewport. */
+  max-height: calc(60dvh - 16px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
   z-index: 10;
   padding: 8px;
+}
+
+.rpg-ability-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .rpg-ability-item {
@@ -432,6 +409,35 @@
   color: rgba(255, 255, 255, 0.35);
 }
 
+.rpg-channel-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  min-height: 44px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 167, 38, 0.35);
+  border-left: 3px solid #ffa726;
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.rpg-channel-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #ffa726;
+}
+
+.rpg-channel-card .rpg-btn-cancel {
+  margin-left: auto;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
 .rpg-ability-icon {
   width: 36px;
   height: 36px;
@@ -472,16 +478,29 @@
 
 /* ── Target selection overlay ── */
 
+@keyframes rpg-target-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 .rpg-target-overlay {
   position: absolute;
   bottom: 50%;
-  left: 50%;
+  left: 40%;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
   z-index: 10;
+  animation: rpg-target-fade-in 0.18s ease-out;
 }
 
 .rpg-target-message {
@@ -494,6 +513,11 @@
   color: rgba(255, 255, 255, 0.9);
   font-size: 14px;
   white-space: nowrap;
+  text-align: center;
+}
+
+.rpg-target-message-for {
+  font-weight: bold;
 }
 
 .rpg-btn-cancel {
@@ -524,6 +548,32 @@
 @keyframes rpg-hit-flash {
   0% {
     filter: brightness(2) saturate(0) sepia(1) hue-rotate(-30deg);
+  }
+
+  100% {
+    filter: none;
+  }
+}
+
+.rpg-tick-flicker .character-doll-wrapper {
+  animation: rpg-tick-flicker 0.55s ease-out forwards;
+}
+
+@keyframes rpg-tick-flicker {
+  0% {
+    filter: none;
+  }
+
+  25% {
+    filter: brightness(1.8) saturate(0.3) sepia(1) hue-rotate(-30deg);
+  }
+
+  55% {
+    filter: none;
+  }
+
+  75% {
+    filter: brightness(1.5) saturate(0.4) sepia(1) hue-rotate(-30deg);
   }
 
   100% {
@@ -651,14 +701,10 @@
 
 /* Floating text icons via CSS */
 .rpg-floating-text.physical::before,
-.rpg-floating-text.fire::before,
-.rpg-floating-text.water::before,
-.rpg-floating-text.air::before,
-.rpg-floating-text.earth::before,
-.rpg-floating-text.arcane::before,
+.rpg-floating-text.magic::before,
+.rpg-floating-text.burn::before,
+.rpg-floating-text.bleeding::before,
 .rpg-floating-text.poison::before,
-.rpg-floating-text.light::before,
-.rpg-floating-text.dark::before,
 .rpg-floating-text.absolute::before {
   content: '';
   width: 18px;
@@ -682,36 +728,20 @@
   color: #e8c4a0;
 }
 
-.rpg-floating-text.fire {
-  color: #ff6b35;
-}
-
-.rpg-floating-text.water {
-  color: #4fc3f7;
-}
-
-.rpg-floating-text.air {
-  color: #b0bec5;
-}
-
-.rpg-floating-text.earth {
-  color: #8d6e63;
-}
-
-.rpg-floating-text.arcane {
-  color: #ce93d8;
-}
-
 .rpg-floating-text.poison {
   color: #66bb6a;
 }
 
-.rpg-floating-text.light {
-  color: #fff59d;
+.rpg-floating-text.magic {
+  color: #b388ff;
 }
 
-.rpg-floating-text.dark {
-  color: #9575cd;
+.rpg-floating-text.burn {
+  color: #ff7043;
+}
+
+.rpg-floating-text.bleeding {
+  color: #e53935;
 }
 
 .rpg-floating-text.absolute {
@@ -734,6 +764,11 @@
 
 .rpg-floating-text.token-apply {
   color: var(--float-color, #ce93d8);
+}
+
+.rpg-floating-text.token-remove {
+  color: var(--float-color, #ce93d8);
+  font-style: italic;
 }
 
 .rpg-floating-text.status-apply {
@@ -761,6 +796,13 @@
   font-weight: 700;
   font-size: 20px;
   text-shadow: 0 0 6px rgba(224, 64, 251, 0.6), 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.rpg-floating-text.ability-channel {
+  color: #ffa726;
+  font-weight: 700;
+  font-size: 20px;
+  text-shadow: 0 0 6px rgba(255, 167, 38, 0.65), 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
 .rpg-floating-text.crit {
@@ -929,36 +971,20 @@
   color: #e8c4a0;
 }
 
-.rpg-dmg-fire {
-  color: #ff6b35;
-}
-
-.rpg-dmg-water {
-  color: #4fc3f7;
-}
-
-.rpg-dmg-air {
-  color: #b0bec5;
-}
-
-.rpg-dmg-earth {
-  color: #8d6e63;
-}
-
-.rpg-dmg-arcane {
-  color: #ce93d8;
-}
-
 .rpg-dmg-poison {
   color: #66bb6a;
 }
 
-.rpg-dmg-light {
-  color: #fff59d;
+.rpg-dmg-magic {
+  color: #b388ff;
 }
 
-.rpg-dmg-dark {
-  color: #9575cd;
+.rpg-dmg-burn {
+  color: #ff7043;
+}
+
+.rpg-dmg-bleeding {
+  color: #e53935;
 }
 
 .rpg-dmg-absolute {
@@ -967,8 +993,16 @@
 
 /* ── Ability badges ── */
 
-.rpg-ability-badges {
+/* Right-hand group: costs + cd/charges badges sit next to each other. */
+.rpg-ability-aside {
   margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.rpg-ability-badges {
   display: flex;
   gap: 4px;
   align-items: center;
@@ -1025,7 +1059,6 @@
 .rpg-ability-costs {
   display: flex;
   gap: 4px;
-  margin-left: auto;
 }
 
 .rpg-ability-cost {
@@ -1101,9 +1134,10 @@
    100% × 100% of the viewport with `container-type: size`). This makes the
    overlay scale with the viewport — when the browser resizes, body and overlay
    shrink/grow together. Reference at viewport_height = 900px: 22cqh ≈ 200px
-   width, 2cqh ≈ 18px font, etc. CharacterSlot's `overlayScale` boost stacks
-   on top via `transform: scale()` (Follow-up 13). Borders stay in px since
-   they pixel-snap better at small sizes. */
+   width, 2cqh ≈ 18px font, etc. CharacterSlot applies a fixed base scale
+   (OVERLAY_BASE_SCALE) via `transform: scale()` so the overlay is the same
+   on-screen size for every character. Borders stay in px since they pixel-snap
+   better at small sizes. */
 
 .rpg-char-overlay {
   position: relative;
@@ -1178,4 +1212,40 @@
 .rpg-token-stacks {
   font-size: 10px;
   line-height: 1;
+}
+
+/* ── Stagger Pips ── */
+
+.rpg-stagger-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3cqh;
+  padding: 0.25cqh 0;
+  justify-content: center;
+  pointer-events: none;
+  max-width: 22cqh;
+}
+
+.rpg-stagger-pip {
+  width: 1.2cqh;
+  height: 1.2cqh;
+  border: 1px solid #FB923C;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 2px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.rpg-stagger-pip--filled {
+  background: #FB923C;
+  transform: scale(1.05);
+}
+
+.rpg-stagger-pip--bonus {
+  border-color: #9CA3AF;
+  opacity: 0.85;
+}
+
+.rpg-stagger-pip--bonus.rpg-stagger-pip--filled {
+  background: #9CA3AF;
 }

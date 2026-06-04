@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, PropType } from 'vue';
+import { computed, markRaw, PropType } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { getShapePath, ShapeType } from '../../../utility/shapes';
 import { useSkillParams, isSkillVisible } from './useSkillParams';
+import SkillCard from '../popups/cards/SkillCard.vue';
+import { popover as vPopover } from '../../directives/popoverDirective';
 
 const props = defineProps({
   skill: {
@@ -24,12 +26,17 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits<{
-  mouseenter: [event: MouseEvent, skill: any];
-  mouseleave: [];
-}>();
-
 const game = Game.getInstance();
+const SkillCardComp = markRaw(SkillCard);
+const popoverBinding = computed(() => ({
+  component: SkillCardComp,
+  props: {
+    treeId: props.treeId,
+    slotId: props.skill.id,
+    characterId: props.character.id,
+  },
+  placement: 'right-start' as const,
+}));
 
 // Use composable for reactive skill params
 const { isVisible, isDisabledByParams } = useSkillParams(props.skill);
@@ -119,19 +126,10 @@ const slotClasses = computed(() => ({
   'maxed': learnedLevel.value >= (props.skill.max_upgrade_level || 1)
 }));
 
-// Handle mouse events
-function handleMouseEnter(event: MouseEvent) {
-  emit('mouseenter', event, props.skill);
-}
-
-function handleMouseLeave() {
-  emit('mouseleave');
-}
 </script>
 
 <template>
-  <g :class="slotClasses" :transform="`translate(${skill.x}, ${skill.y})`" @mouseenter="handleMouseEnter"
-    @mouseleave="handleMouseLeave">
+  <g :class="slotClasses" :transform="`translate(${skill.x}, ${skill.y})`" v-popover="popoverBinding">
     <!-- Skill Image (clipped to shape and fills the full area) -->
     <image v-if="skillImage" :href="skillImage" :x="0" :y="0" :width="skillSize" :height="skillSize"
       preserveAspectRatio="xMidYMid slice" :clip-path="`url(#clip-${skill.skill})`" />

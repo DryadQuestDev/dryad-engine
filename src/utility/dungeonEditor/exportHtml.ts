@@ -87,18 +87,18 @@ function findTokenRanges(text: string): TokenRange[] {
   for (const re = /^[ \t]*\/\/[^\n]*/gm; (m = re.exec(text)) !== null;) {
     out.push({ start: m.index, end: m.index + m[0].length, style: STYLE_COMMENT });
   }
-  // Emphasis: `**text**` → italic, `*text*` → bold (longest first so they
+  // Emphasis: `**text**` → bold, `*text*` → italic (longest first so they
   // override outer brace/record/placeholder bold on the same chars when they
   // wrap them, but lose to those when nested inside).
-  const emRanges: Array<[number, number]> = [];
+  const boldRanges: Array<[number, number]> = [];
   for (const re = /\*\*([^*\n]+?)\*\*/g; (m = re.exec(text)) !== null;) {
-    out.push({ start: m.index, end: m.index + m[0].length, style: STYLE_EM });
-    emRanges.push([m.index, m.index + m[0].length]);
+    out.push({ start: m.index, end: m.index + m[0].length, style: STYLE_STRONG });
+    boldRanges.push([m.index, m.index + m[0].length]);
   }
   for (const re = /\*([^*\n]+?)\*/g; (m = re.exec(text)) !== null;) {
     const s = m.index, e = m.index + m[0].length;
-    const overlapsEm = emRanges.some(([ds, de]) => !(e <= ds || s >= de));
-    if (!overlapsEm) out.push({ start: s, end: e, style: STYLE_STRONG });
+    const overlapsBold = boldRanges.some(([ds, de]) => !(e <= ds || s >= de));
+    if (!overlapsBold) out.push({ start: s, end: e, style: STYLE_EM });
   }
   return out;
 }

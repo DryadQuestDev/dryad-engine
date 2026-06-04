@@ -39,12 +39,12 @@ function getThreshold(level) {
 }
 
 /**
- * Get XP multiplier for a character. Defaults to 1 if unset or 0.
+ * Get XP multiplier for a character. xp_modifier is a percent stat; 0 = normal.
  * @param {Character} character
  * @returns {number}
  */
-function getXpMultiplier(character) {
-    return character.getTrait('xp_multiplier') || 1;
+function getXpModifier(character) {
+    return 1 + character.getStat('xp_modifier') / 100;
 }
 
 // ── Init: set XP resource on character creation ──
@@ -125,7 +125,7 @@ game.registerService('xp', {
     addXp(characterId, amount) {
         const char = game.getCharacter(characterId);
         if (!char) return;
-        char.addResource('xp', Math.round(amount * getXpMultiplier(char)));
+        char.addResource('xp', Math.round(amount * getXpModifier(char)));
     },
     /** @param {number} level @returns {number} */
     getThreshold,
@@ -147,7 +147,7 @@ game.registerCondition('_level', (/** @type {string} */ characterId) => {
 // ── Action ──
 
 function applyXp(/** @type {Character} */ char, /** @type {number} */ amount) {
-    char.addResource('xp', Math.round(amount * getXpMultiplier(char)));
+    char.addResource('xp', Math.round(amount * getXpModifier(char)));
 }
 
 game.registerAction('xp', (/** @type {number|string} */ value) => {

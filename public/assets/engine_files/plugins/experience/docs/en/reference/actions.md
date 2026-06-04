@@ -42,6 +42,7 @@ Optional array of currency items to award per level up. Only items with `is_curr
 | Stat | Type | Description |
 |---|---|---|
 | `xp` | resource | Experience points toward next level. Max = current level's threshold. Managed by the plugin. |
+| `xp_modifier` | stat | Percent modifier to XP gain. 0 = normal (100%), 20 = +20%, -50 = halved. Modified by statuses/items. |
 
 ## Character Traits
 
@@ -49,7 +50,6 @@ Optional array of currency items to award per level up. Only items with `is_curr
 |---|---|---|
 | `level` | number | Character's current level. Set in character template to enable XP/leveling. |
 | `level_up_status` | chooseOne (status) | Optional. Status to apply on each level up. Stacks automatically — each level adds one stack. Use for no-code stat growth per level. |
-| `xp_multiplier` | number | Optional. XP gain multiplier. Defaults to 1 if unset or 0. Applied when XP is awarded via the `xp` action or service. |
 
 ### `level_up_status`
 
@@ -76,22 +76,22 @@ Assign a status ID to a character's `level_up_status` trait. On each level up, t
 
 Different characters can reference different growth statuses for unique progression curves.
 
-### `xp_multiplier`
+### `xp_modifier`
 
-Controls how much XP a character receives. Applied automatically when XP is awarded via the `xp` action or `addXp` service. Defaults to 1 if unset or 0.
+Controls how much XP a character receives. Applied automatically when XP is awarded via the `xp` action or `addXp` service. Value is a percent: final multiplier = `1 + xp_modifier / 100`.
 
 | Value | Effect |
 |---|---|
-| unset / 0 | Treated as 1 (normal XP) |
-| `1` | Normal XP |
-| `1.5` | 50% bonus XP |
-| `0.5` | Half XP |
-| `2` | Double XP |
+| unset / `0` | Normal XP (100%) |
+| `20` | 120% XP |
+| `50` | 150% XP |
+| `100` | 200% XP |
+| `-50` | 50% XP (halved) |
 
 **Example:**
 
 ```json
-{ "traits": { "level": 1, "xp_multiplier": 1.5 } }
+{ "traits": { "level": 1 }, "stats": { "xp_modifier": 50 } }
 ```
 
-Since traits are computed from statuses, items and buffs can modify the multiplier. For example, an "XP Boost" status with `traits: { xp_multiplier: 0.5 }` would add +0.5 to the base value, giving a total of 1.5 (or 2.0 if stacked).
+Since stats stack additively from statuses and items, an "XP Boost" status with `stats: { xp_modifier: 20 }` adds +20% per stack — two stacks give +40%, three give +60%, etc.

@@ -2,47 +2,13 @@
 import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import ItemSlot from './ItemSlot.vue';
-import ItemCard from './ItemCard.vue';
-import ItemChoices from './ItemChoices.vue';
 import { ITEM_SLOT_SIZE_PERCENT } from '../../../global/global';
-import { useItemPopup } from './useItemPopup';
 
 const props = defineProps<{
   character: Character;
   disabled?: boolean; // Disable item click/drag while keeping hover tooltips
   layout?: 'doll' | 'row'; // 'doll' = positioned overlay (default), 'row' = flex row for text dungeons
 }>();
-
-// Get only equipped items from the party inventory for this specific character
-const equippedItems = computed(() => {
-  const inventory = props.character.getPartyInventory();
-  if (!inventory) return [];
-
-  // Get the UIDs of items equipped by this character
-  const equippedItemUids = new Set(
-    props.character.getItemSlots()
-      .map(slot => slot.itemUid)
-      .filter(uid => uid) // Filter out empty slots
-  );
-
-  // Return only items that are equipped by this character
-  return inventory.items.filter(item =>
-    item.isEquipped && equippedItemUids.has(item.uid)
-  );
-});
-
-// Use the shared item popup composable for equipped items
-// clearOnItemsChange = true because equipped items are character-specific
-const {
-  popupContainerRef,
-  floatingStyles,
-  displayedItem,
-  hasChoices,
-  showPopup,
-  handleItemHover,
-  handlePopupEnter,
-  handlePopupLeave,
-} = useItemPopup(() => equippedItems.value, true);
 
 // Get all item slots for this character with their equipped items
 const itemSlotsWithItems = computed(() => {
@@ -73,31 +39,13 @@ const itemSlotsWithItems = computed(() => {
       left: slotData.slot.x + 'cqh',
       top: slotData.slot.y + 'cqh'
     }">
-      <ItemSlot v-if="slotData.item" :item="slotData.item" :disabled="props.disabled === true" class="equipped-item"
-        @hover="handleItemHover" />
+      <ItemSlot v-if="slotData.item" :item="slotData.item" :character-id="character.id"
+        :disabled="props.disabled === true" popup-placement="left-start" :pinnable="true" class="equipped-item" />
       <div v-else class="empty-slot">
         <img v-if="slotData.emptySlotImage" :src="slotData.emptySlotImage" alt="Empty slot" class="empty-slot-image" />
         <span v-else class="empty-slot-name">{{ slotData.emptySlotName }}</span>
       </div>
     </div>
-
-    <!-- Equipped items popup container -->
-    <Teleport to="body">
-      <div v-if="showPopup" ref="popupContainerRef" class="popups-container" :style="{
-        ...floatingStyles,
-        willChange: 'transform'
-      }" @mouseenter="handlePopupEnter" @mouseleave="handlePopupLeave">
-        <!-- ItemChoices at the top (only if there are choices and not disabled) -->
-        <div v-if="hasChoices && props.disabled !== true" class="item-choices-wrapper">
-          <ItemChoices :item="displayedItem!" />
-        </div>
-
-        <!-- ItemCard below ItemChoices -->
-        <div class="item-card-wrapper">
-          <ItemCard :item="displayedItem!" :character-id="character.id" />
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 

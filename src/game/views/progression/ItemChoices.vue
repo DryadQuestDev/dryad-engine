@@ -79,8 +79,8 @@ function handleChoiceClick(choice: Choice) {
   border-radius: 4px;
   color: #fff;
   cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 14px;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  font-size: 1em;
   text-align: left;
   white-space: nowrap;
 }
@@ -110,7 +110,7 @@ function handleChoiceClick(choice: Choice) {
 }
 
 .choice-icon {
-  font-size: 16px;
+  font-size: 1.15em;
   flex-shrink: 0;
 }
 

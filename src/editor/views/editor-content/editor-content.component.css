@@ -8,33 +8,24 @@
   /* Prevent the container itself from scrolling */
   position: relative;
   /* Needed for absolute positioning of children */
-
 }
 
 .column {
   overflow-y: auto;
-  /* Enable vertical scrolling */
   max-height: 100%;
-  /* Limit height to the container's height */
   padding: 15px 0 0 15px;
-  /* You might need additional padding or styling here */
 }
 
 /* Define flex properties for direct children columns */
 .editor-content>.editor-left {
-  flex: 0 0 200px;
-  /* Don't grow, don't shrink, base width 200px */
-  /* Note: .column styles still apply (overflow, max-height) */
+  flex: 0 0 300px;
 }
 
 .editor-content>.editor-right {
   flex: 1 1 auto;
   /* Grow, shrink, base on auto */
   min-width: 0;
-  /* Important for flex items containing large content */
-  /* Note: .column styles still apply (overflow, max-height) */
   transition: opacity 0.15s ease-in-out;
-  /* Smooth fade transition */
 }
 
 /* Fade out during page navigation to hide scroll jumps */
@@ -103,12 +94,12 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.template-wizard-banner > .pi-bolt {
+.template-wizard-banner>.pi-bolt {
   font-size: 1.5rem;
   color: #4ae68a;
 }
 
-.template-wizard-banner > .pi-chevron-right {
+.template-wizard-banner>.pi-chevron-right {
   margin-left: auto;
   color: #6aa;
   font-size: 0.9rem;

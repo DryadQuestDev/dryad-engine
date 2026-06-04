@@ -1,14 +1,22 @@
 # Damage Formula
 
-## Damage Types
+## Mitigation model: burst vs DoT
 
-All damage in the RPG Battler scales from the `power` stat. The damage type determines which defense applies:
+Mitigation follows **how** damage arrives, not its element:
 
-| Category | Sub-types | Defense |
-|---|---|---|
-| Physical | `physical` | Reduced by `armor`: `max(raw - armor, 0)` |
-| Elemental | `fire`, `water`, `air`, `earth`, `arcane`, `poison`, `light`, `dark` | Reduced by matching resistance: `raw * (1 - resist / 100)` |
-| Absolute | `absolute` | Ignores all defenses and shields |
+- **Burst hits** (a single or multi-hit ability) use **flat armor**. Subtracting a flat amount scales sensibly against a meaningful chunk, and the per-hit subtraction means heavy single hits pierce armor while flurries get eaten.
+- **DoT ticks** (per-turn) use **percentage resist**, because per-tick numbers are tiny and flat reduction would zero them out. A resist above 100% turns the tick into **healing**.
+
+| Channel | Damage type(s) | Defense | Formula |
+|---|---|---|---|
+| Physical hit | `physical` | `physical_armor` (flat) | `max(raw - physical_armor, 1)` — min 1 dmg; negative armor amplifies |
+| Magic hit | `magic` | `magical_armor` (flat) | `max(raw - magical_armor, 1)` — min 1 dmg; negative armor amplifies |
+| Unblockable hit | `absolute` | — | passes through, ignores armor & shields |
+| Burn DoT | `burn` | `resist_burn` (%) | `raw * (1 - resist_burn / 100)` — above 100% heals |
+| Poison DoT | `poison` | `resist_poison` (%) | `raw * (1 - resist_poison / 100)` — above 100% heals |
+| Bleed DoT | `bleeding` | `resist_bleed` (%) | `raw * (1 - resist_bleed / 100)` — above 100% heals |
+
+Elemental *flavour* (fire, water, light, ...) is carried by an ability's **school** (`meta.school`), a separate tag system that does **not** affect mitigation — it's reserved for future school-synergy mechanics. All damage scales from the `power` stat.
 
 ## Calculation Steps
 
@@ -56,9 +64,11 @@ Applied before defense reduction. A positive `damage_taken_mult` increases damag
 
 ### 5. Defense Reduction
 
-- **Physical:** `finalDamage = max(rawDamage - target.armor, 0)`
-- **Elemental:** `finalDamage = rawDamage * (1 - target.resist_X / 100)` where X matches the element
-- **Absolute:** No reduction -- raw damage passes through
+- **Physical hit:** `finalDamage = max(rawDamage - target.physical_armor, 1)` — always at least 1; negative armor increases damage.
+- **Magic hit:** `finalDamage = max(rawDamage - target.magical_armor, 1)` — same rules as physical.
+- **Absolute:** No reduction -- raw damage passes through.
+
+(DoT ticks use percentage resist instead — see [DoT / HoT Damage](#dot--hot-damage) below.)
 
 ### 6. Dodge
 
@@ -70,27 +80,26 @@ Before defenses are applied to HP, a dodge roll occurs. If `random(0-100) < targ
 
 ### 7. Shield Absorption
 
-If the target has `absorb` token instances (shields) and the damage is not absolute:
+If the target has the `shield` status (multi-stack) and damage is not absolute:
 
-- Shield stacks absorb damage 1:1 (each stack absorbs 1 point of damage)
-- Stacks are consumed as damage is absorbed
-- Multiple shield instances are drained in application order
-- Remaining damage after shields hits HP
-- "Absorbed X" floating text shows absorbed amount
+- Each stack absorbs 1 point of damage (1:1).
+- Stacks are consumed from the **shortest-remaining-duration instance first** (permanent `-1` instances drain last). This means about-to-expire shields get used before they're wasted; long-lived shields stay around as protection.
+- Remaining damage after the shield hits HP.
+- "Absorbed X" floating text shows the absorbed amount.
 
 ### 8. Thorns Reflection
 
-After damage passes through shields and hits HP, if the target has `thorns` token stacks:
+After damage hits HP, if the target has the `thorns` status (multi-stack):
 
 ```
-thornsDamage = round(damageDealt * thornsValue * totalStacks / 100)
+thornsDamage = thorns.currentStacks   // 1 flat damage per stack
 ```
 
-The reflected damage is dealt to the attacker as unmitigated damage.
+The reflected damage is dealt to the attacker as unmitigated damage. Stacks are **not** consumed on trigger — thorns reflects the full stack count on every incoming hit. Each `status_apply_target` of thorns creates an independent instance with its own duration; when an instance expires its stacks fall off and the per-hit reflection drops accordingly.
 
 ### 9. Death Defiance
 
-If the target would be reduced to 0 HP and has a `death_defiance` token, one stack is consumed and the character survives at 1 HP. "DEFIED DEATH" floating text appears.
+If the target would be reduced to 0 HP and has the `death_defiance` status, one stack is consumed and the character survives at 1 HP. "DEFIED DEATH" floating text appears.
 
 ## Healing Formula
 
@@ -116,10 +125,10 @@ Applied to the caster after all targets have been damaged by the effect. Uses th
 
 ## DoT / HoT Damage
 
-Token-based damage and healing over time use a simplified formula:
+Status-based damage and healing over time (statuses flagged `meta.dot_damage_type` or `meta.hot`) use a simplified formula:
 
 ```
-dotDamage = round(effectValue * totalStacks)
+dotDamage = round(totalStacks)
 ```
 
-DoT damage respects defenses (armor for physical, resistances for elemental). HoT healing respects `heal_received_mult` but does not scale from any stat -- it is purely stack-based.
+DoT damage is mitigated by the matching **percentage** resist for its `dot_damage_type` (`resist_burn` / `resist_poison` / `resist_bleed`); `absolute` DoT ignores resists. If the resist exceeds 100%, the tick becomes **healing** instead of damage (e.g. a creature with `resist_burn` 150 is healed for 50% of each burn tick). HoT healing respects `heal_received_mult` but does not scale from any stat -- it is purely stack-based. `totalStacks` is the sum across all instances of the status.

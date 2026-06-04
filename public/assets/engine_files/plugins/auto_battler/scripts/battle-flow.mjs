@@ -1,6 +1,6 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { resolveAbility, getCharacterPosition, applyToken, removeTokenStacks, getTokenStacks, getTokenDefinitions, processTokenEffects, getEffectiveRange } from './battle-effects.mjs';
+import { resolveAbility, getCharacterPosition, applyStatusInstance, removeStatusStacks, getStatusStacks, getStatusDefinitions, processStatusEffects, getEffectiveRange } from './battle-effects.mjs';
 import { decideAction } from './battle-ai.mjs';
 
 export { currentBattle } from './battle-state.mjs';
@@ -47,13 +47,13 @@ function parseFloatingTexts(effects) {
       addFloatingText(e.targetId, `+${e.amount}`, 'heal', FLOAT_ICONS.heal);
     else if (e.type === 'steal' && e.targetId)
       addFloatingText(e.targetId, `+${e.amount}`, 'steal', FLOAT_ICONS.heal);
-    else if (e.type === 'token_apply' && e.targetId) {
-      const def = getTokenDefinitions().get(e.tokenId);
-      addFloatingText(e.targetId, `+${e.stacks}`, 'token-apply', def?.icon || null, def?.color);
+    else if (e.type === 'status_apply' && e.targetId) {
+      const def = getStatusDefinitions().get(e.statusId);
+      addFloatingText(e.targetId, `+${e.stacks}`, 'status-apply', def?.image || null, def?.color);
     }
-    else if (e.type === 'token_dot' && e.targetId)
+    else if (e.type === 'status_dot' && e.targetId)
       addFloatingText(e.targetId, `-${e.amount}`, e.damageType || 'physical', FLOAT_ICONS.damage);
-    else if (e.type === 'token_hot' && e.targetId)
+    else if (e.type === 'status_hot' && e.targetId)
       addFloatingText(e.targetId, `+${e.amount}`, 'heal', FLOAT_ICONS.heal);
     else if (e.type === 'cleanse' && e.targetId)
       addFloatingText(e.targetId, 'CLEANSED', 'cleanse', null);
@@ -269,15 +269,8 @@ function getActorSpeed(actor) {
   const char = game.getCharacter(actor.characterId);
   if (!char) return actor.speed;
 
-  // Stun: any token with stun effect and instances present → speed 0
-  const charTokens = currentBattle.value.tokens[actor.characterId];
-  if (charTokens) {
-    const defs = getTokenDefinitions();
-    for (const tokenId in charTokens) {
-      const def = defs.get(tokenId);
-      if (def?.effects.some(e => e.type === 'stun') && charTokens[tokenId].length > 0) return 0;
-    }
-  }
+  // Stun (id-based): if `stun` status has stacks → speed 0
+  if ((char.getStatus('stun')?.currentStacks ?? 0) > 0) return 0;
 
   let speed = char.getStat('speed');
   const speedMult = char.getStat('speed_mult') || 0;
@@ -308,8 +301,6 @@ export function initBattleTracking() {
     ...Object.values(battle.playerGrid),
     ...Object.values(battle.enemyGrid),
   ];
-
-  battle.tokens = {};
 
   for (const charId of allCharIds) {
     const character = game.getCharacter(charId);
@@ -349,15 +340,16 @@ export function initBattleTracking() {
     }
   }
 
-  // Initialize tokens from source stats at battle start
-  const defs = getTokenDefinitions();
+  // Initialize statuses from meta.source stats at battle start
+  const defs = getStatusDefinitions();
   for (const charId of allCharIds) {
     const character = game.getCharacter(charId);
     if (!character) continue;
-    for (const [tokenId, def] of defs) {
-      if (!def.source) continue;
-      const stacks = Math.floor(character.getStat(def.source));
-      if (stacks > 0) applyToken(charId, tokenId, stacks, undefined, charId);
+    for (const [statusId, def] of defs) {
+      const src = def.meta?.source;
+      if (!src) continue;
+      const stacks = Math.floor(character.getStat(src) || 0);
+      if (stacks > 0) applyStatusInstance(charId, statusId, stacks, undefined, charId);
     }
   }
 
@@ -375,7 +367,7 @@ export function initBattleTracking() {
 }
 
 /**
- * Tick token instance durations and status durations ('battle'-tagged) continuously.
+ * Tick meta.is_battle status instance durations continuously.
  * Called each advanceTimeline step — same rate as the turn clock.
  * @param {number} drainAmount - how much to drain (TURN_SPEED * minTime / ATB_THRESHOLD)
  */
@@ -385,35 +377,17 @@ function drainBattleDurations(drainAmount) {
   for (const actor of battle.initiative) {
     if (!isActive(actor.characterId)) continue;
 
-    // Tick token instance durations, remove expired
-    const charTokens = battle.tokens[actor.characterId];
-    if (charTokens) {
-      for (const tokenId in charTokens) {
-        const instances = charTokens[tokenId];
-        for (let i = instances.length - 1; i >= 0; i--) {
-          if (instances[i].duration != null) {
-            instances[i].duration -= drainAmount;
-            if (instances[i].duration <= 0) instances.splice(i, 1);
-          }
-        }
-        if (instances.length === 0) delete charTokens[tokenId];
-      }
-    }
-
-    // Drain statuses with 'battle' tag and positive duration
     const char = game.getCharacter(actor.characterId);
     if (!char) continue;
-    for (const status of char.getStatuses()) {
-      if (status.tags.includes('battle') && status.duration > 0) {
-        status.duration -= drainAmount;
-        if (status.duration <= 0) char.removeStatus(status.id);
-      }
-    }
+
+    // Drain every status.meta.is_battle via engine helper (per-instance tick + drop expired)
+    const battleIds = char.getStatuses().filter(s => s.meta?.is_battle).map(s => s.id);
+    for (const id of battleIds) char.tickStatusDuration(id, drainAmount);
   }
 }
 
 /**
- * Process token effects (DoT/HoT) on clock turn for all alive characters.
+ * Process status DoT/HoT effects on clock turn for all alive characters.
  * Handles floating texts, logging, death, and battle end.
  * @returns {Promise<boolean>} true if battle ended or phase changed
  */
@@ -422,9 +396,9 @@ async function processClockTurnEffects() {
   const speed = game.getState('battle_speed') || 1;
   for (const a of battle.initiative) {
     if (!isActive(a.characterId)) continue;
-    const tokenResults = processTokenEffects(a.characterId);
-    if (tokenResults.length > 0) {
-      for (const e of tokenResults) {
+    const dotResults = processStatusEffects(a.characterId);
+    if (dotResults.length > 0) {
+      for (const e of dotResults) {
         parseFloatingTexts([e]);
         battle.log.push({ turn: battle.turn, actorId: CLOCK_TURN_ACTOR, effect: e });
         await battleDelay(120);
@@ -837,21 +811,13 @@ export function handleDeath(characterId, killerId = null, deferRemoval = false) 
   // Already recorded — skip (AoE can trigger multiple times)
   if (arr.includes(characterId)) return false;
 
-  // Death defiance tokens — survive at 1 HP, consume 1 stack
-  const defs = getTokenDefinitions();
-  const charTokens = battle.tokens?.[characterId];
-  if (charTokens) {
-    for (const tokenId in charTokens) {
-      const def = defs.get(tokenId);
-      if (!def) continue;
-      const hasDD = def.effects.some(e => e.type === 'death_defiance');
-      if (hasDD && charTokens[tokenId].length > 0) {
-        removeTokenStacks(characterId, tokenId, 1);
-        character.addResource('health', 1);
-        battle.log.push({ turn: battle.turn, actorId: characterId, effect: /** @type {EffectResult} */ ({ type: 'death_defiance', targetId: characterId, tokenId }) });
-        return false;
-      }
-    }
+  // Death defiance (id-based) — survive at 1 HP, consume 1 stack
+  const dd = character.getStatus('death_defiance');
+  if (dd && dd.currentStacks > 0) {
+    removeStatusStacks(characterId, 'death_defiance', 1);
+    character.addResource('health', 1);
+    battle.log.push({ turn: battle.turn, actorId: characterId, effect: /** @type {EffectResult} */ ({ type: 'death_defiance', targetId: characterId, statusId: 'death_defiance' }) });
+    return false;
   }
 
   const killer = killerId ? game.getCharacter(killerId) : null;
@@ -969,9 +935,9 @@ export function canUseAbility(characterId, abilityId, metaOverride) {
   if (meta.caster_min_health && healthRatio >= meta.caster_min_health) return false;
   if (meta.caster_max_health && healthRatio <= meta.caster_max_health) return false;
 
-  // Preparation token requirement
+  // Preparation status requirement
   if (meta.preparation) {
-    if (getTokenStacks(characterId, 'preparation') <= 0) return false;
+    if (getStatusStacks(characterId, 'preparation') <= 0) return false;
   }
 
   return true;

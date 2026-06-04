@@ -2,9 +2,7 @@
 import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
-import type { EntityStatObject } from '../../../schemas/entityStatSchema';
 import StatEntity from './StatEntity.vue';
-import { useHoverPopup } from './useHoverPopup';
 
 interface StatGroup {
   id: string;
@@ -83,48 +81,14 @@ const statGroups = computed((): StatGroup[] => {
   return groups;
 });
 
-// Stat popup
-const {
-  hovered: hoveredStat,
-  popupRef: statPopupRef,
-  floatingStyles: statFloatingStyles,
-  show: showStat,
-  scheduleHide: hideStat,
-  onPopupEnter: onStatPopupEnter,
-  onPopupLeave: onStatPopupLeave,
-} = useHoverPopup<{ statId: string; stat: EntityStatObject }>({ placement: 'left-start' });
-
-const onStatHover = (event: MouseEvent, statId: string, stat: EntityStatObject) => {
-  if (!stat.ingame_description) return;
-  showStat({ statId, stat }, event.currentTarget as HTMLElement);
-};
-
-const onStatLeave = () => {
-  hideStat();
-};
-
 </script>
 
 <template>
   <div v-if="statGroups.length" class="character-stats">
     <div v-for="group in statGroups" :key="group.id" class="stats-section">
       <h3 v-if="group.id && !noHeaders">{{ game.getLine('group.' + group.id) }}</h3>
-      <StatEntity v-for="statId in group.stats" :key="statId" :character="character" :statId="statId"
-        @statHover="onStatHover" @statLeave="onStatLeave" />
+      <StatEntity v-for="statId in group.stats" :key="statId" :character="character" :statId="statId" />
     </div>
-
-    <!-- Stat/Resource Popup -->
-    <Teleport to="body">
-      <div v-if="hoveredStat" ref="statPopupRef" class="stat-popup dark-scrollbar" :style="statFloatingStyles"
-        @mouseenter="onStatPopupEnter" @mouseleave="onStatPopupLeave">
-        <div class="popup-header">
-          <h4>{{ hoveredStat.stat.name || hoveredStat.statId }}</h4>
-        </div>
-        <div class="popup-body">
-          <div v-script="hoveredStat.stat.ingame_description || ''" class="popup-description"></div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -155,42 +119,4 @@ const onStatLeave = () => {
   padding-bottom: 0.5em;
 }
 
-/* Stat/Resource Popup */
-.stat-popup {
-  position: fixed;
-  z-index: 9999;
-  background: rgba(26, 26, 26, 0.98);
-  border: 2px solid #444;
-  border-radius: 8px;
-  padding: 12px;
-  min-width: 200px;
-  max-width: 300px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  color: #fff;
-  pointer-events: auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.stat-popup .popup-header {
-  border-bottom: 1px solid #555;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-}
-
-.stat-popup .popup-header h4 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: bold;
-  color: #42b983;
-}
-
-.stat-popup .popup-body {
-  font-size: 14px;
-}
-
-.stat-popup .popup-description {
-  color: #ccc;
-  margin: 0;
-}
 </style>

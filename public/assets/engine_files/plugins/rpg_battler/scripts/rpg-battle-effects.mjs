@@ -1,19 +1,39 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle, parseFloatingText } from './rpg-battle-state.mjs';
+import { currentRpgBattle, parseFloatingText, addFloatingText } from './rpg-battle-state.mjs';
+import { summonCombatant } from './rpg-battle-flow.mjs';
 
 const { game } = window.engine;
 
-const ELEMENTAL_TYPES = ['fire', 'water', 'air', 'earth', 'arcane', 'poison', 'light', 'dark'];
+// Burst (ability-hit) channels use flat armor; DoT channels use % resist.
+const FLAT_ARMOR = { physical: 'physical_armor', magic: 'magical_armor' };
+const DOT_RESIST = { burn: 'resist_burn', poison: 'resist_poison', bleeding: 'resist_bleed' };
 
 // ── Scaling ──
 
-/** @type {number|null} Power override set by resolveAbility from the action event. */
+/** @type {number|null} Per-action cache of effective power; set at the top of resolveAbility. */
 let _actionPower = null;
 
 /**
+ * Compute the effective scaling stat for an ability: `power * (1 + power_amplifier/100)`,
+ * unless the ability opts out via `meta.unamplified`. `power_amplifier` is a percentage
+ * (100 = +100% = doubles power). Used by both runtime (resolveAbility) and tooltip
+ * (powerScaledRenderer). Games drive `power_amplifier` through normal stat channels — typically
+ * a stat computer or a buff status.
+ * @param {Character} character
+ * @param {{ meta?: any } | undefined} ability
+ * @returns {number}
+ */
+export function getEffectivePower(character, ability) {
+  const base = character.getStat('power');
+  if (ability?.meta?.unamplified) return base;
+  const amp = character.getStat('power_amplifier') || 0;
+  return base * (1 + amp / 100);
+}
+
+/**
  * All damage/healing in RPG battler scales from power.
- * If an action-level power override is active (from battle_action_start event), uses that.
+ * Inside an action resolution, reads the cached _actionPower; otherwise falls back to raw power.
  * @param {Character} caster
  * @returns {number}
  */
@@ -21,125 +41,162 @@ function getScalingStat(caster) {
   return _actionPower ?? caster.getStat('power');
 }
 
-// ── Token helpers ──
+// ── Status helpers ──
 
-/** @returns {Map<string, RpgTokenDefinition>} */
-export function getTokenDefinitions() {
-  return game.getData('plugins_data/rpg_battler/token_definitions', true);
+/** @returns {Map<string, any>} */
+export function getStatusDefinitions() {
+  return game.getData('character_statuses', true);
+}
+
+/** Get total stacks of a status on a character. */
+export function getStatusStacks(characterId, statusId) {
+  const char = game.getCharacter(characterId);
+  return char?.getStatus(statusId)?.currentStacks ?? 0;
 }
 
 /**
- * Apply stacks as a new independent instance (DD-style: each apply creates a separate instance).
- * @param {string} characterId
- * @param {string} tokenId
- * @param {number} stacks
- * @param {number} [duration]
- * @param {string} [source]
- * @returns {{ applied: number, tokenName: string } | null}
+ * Apply a status instance via the engine's addStatus API.
+ * For multi_stack statuses: appends a new instance.
+ * For single-stack: refreshes existing or creates fresh.
+ * @returns {{ applied: number, name: string } | null}
  */
-export function applyToken(characterId, tokenId, stacks, duration, source) {
-  const battle = currentRpgBattle.value;
-  const def = getTokenDefinitions().get(tokenId);
-  if (!def || stacks <= 0) return null;
-  if (!battle.charState[characterId].tokens) battle.charState[characterId].tokens = {};
-  if (!battle.charState[characterId].tokens[tokenId]) battle.charState[characterId].tokens[tokenId] = [];
-  const instances = battle.charState[characterId].tokens[tokenId];
-  const max = def.max_stacks || Infinity;
-  const total = instances.reduce((s, i) => s + i.stacks, 0);
-  const allowed = Math.min(stacks, max - total);
-  if (allowed <= 0) return null;
+export function applyStatusInstance(characterId, statusId, stacks, duration, source) {
+  if (stacks <= 0) return null;
+  const char = game.getCharacter(characterId);
+  if (!char) return null;
+  const def = getStatusDefinitions().get(statusId);
+  if (!def) return null;
+  const status = game.createStatus(statusId);
+  if (!status) return null;
+  // Report the count that actually LANDED (capped by max_stacks) for multi-stack statuses, via a
+  // before/after delta. Single-stack is a 1-marker — keep the requested count (its flash shows
+  // duration, and a refresh should still read its requested stack rather than a 0 delta).
+  const before = def.multi_stack ? (char.getStatus(statusId)?.currentStacks ?? 0) : 0;
+  char.addStatus(status, { stacks, duration, source });
+  const applied = def.multi_stack ? (char.getStatus(statusId)?.currentStacks ?? 0) - before : stacks;
+  return { applied, name: def.name };
+}
 
-  // Permanent tokens (no duration, 0, or negative) merge into a single instance
-  const isPermanent = !duration || duration <= 0;
-  if (isPermanent) {
-    const existing = instances.find(i => !i.duration || i.duration <= 0);
-    if (existing) {
-      existing.stacks += allowed;
-      return { applied: allowed, tokenName: def.name };
+/**
+ * Remove stacks from a status. Removes the status entirely if it drops to 0.
+ * @returns {number} stacks actually removed
+ */
+export function removeStatusStacks(characterId, statusId, stacks) {
+  return game.getCharacter(characterId)?.removeStatusStacks(statusId, stacks) ?? 0;
+}
+
+/**
+ * Compute the effective stagger threshold for a character (base × pct multiplier).
+ * Returns 0 if the character is missing or has no base threshold (= not staggerable).
+ * @param {string} charId
+ * @returns {number}
+ */
+export function computeEffectiveThreshold(charId) {
+  const char = game.getCharacter(charId);
+  if (!char) return 0;
+  const base = char.getStat('stagger_threshold') || 0;
+  if (base <= 0) return 0;
+  const pct = char.getStat('stagger_threshold_pct') || 0;
+  return Math.ceil(base * (1 + pct / 100));
+}
+
+/**
+ * Remove every `is_channel` status cast by `charId` (live instance `source`), wherever it is held.
+ * Called when `charId`'s channels should end — when the caster is stunned or defeated.
+ * @param {string} charId
+ */
+export function endChannelsBy(charId) {
+  const battle = currentRpgBattle.value;
+  if (!battle) return;
+  for (const id of [...battle.playerParty, ...battle.enemyParty]) {
+    const c = game.getCharacter(id);
+    if (!c) continue;
+    for (const st of c.getStatuses()) {
+      if (st.meta?.is_channel && st.getInstances().some(i => i.source === charId)) c.removeStatus(st.id);
     }
   }
-
-  /** @type {RpgTokenInstance} */
-  const inst = { stacks: allowed, source: source || characterId };
-  if (!isPermanent) inst.duration = duration;
-  instances.push(inst);
-  return { applied: allowed, tokenName: def.name };
 }
 
 /**
- * Remove stacks FIFO from oldest instances.
- * @param {string} characterId
- * @param {string} tokenId
- * @param {number} stacks
+ * Check stagger threshold for a character; if exceeded, strip all stagger,
+ * apply stun, and refresh the braced status. Called inline after any
+ * stagger application, and from tickActiveCharacter after status
+ * durations tick.
+ * @param {string} charId
  */
-export function removeTokenStacks(characterId, tokenId, stacks) {
+export function checkStaggerThreshold(charId) {
   const battle = currentRpgBattle.value;
-  const instances = battle.charState[characterId].tokens?.[tokenId];
-  if (!instances?.length) return;
-  let remaining = stacks;
-  while (remaining > 0 && instances.length > 0) {
-    const inst = instances[0];
-    if (inst.stacks <= remaining) {
-      remaining -= inst.stacks;
-      instances.shift();
-    } else {
-      inst.stacks -= remaining;
-      remaining = 0;
-    }
-  }
-  if (instances.length === 0) delete battle.charState[characterId].tokens[tokenId];
-}
+  if (!battle) return;
+  const char = game.getCharacter(charId);
+  if (!char || char.getResource('health') <= 0) return;
 
-/** Get total stacks of a token on a character. */
-export function getTokenStacks(characterId, tokenId) {
-  const instances = currentRpgBattle.value.charState[characterId]?.tokens[tokenId];
-  if (!instances?.length) return 0;
-  return instances.reduce((sum, i) => sum + i.stacks, 0);
+  const stacks = getStatusStacks(charId, 'stagger');
+  if (stacks <= 0) return;
+
+  const threshold = computeEffectiveThreshold(charId);
+  if (threshold <= 0 || stacks < threshold) return;
+
+  // Strip all stagger
+  char.removeStatus('stagger');
+  // Apply stun + braced
+  applyStatusInstance(charId, 'stun', 1);
+  endChannelsBy(charId);
+  const braced = game.createStatus('braced');
+  if (braced) char.addStatus(braced);
+
+  const stunDef = getStatusDefinitions().get('stun');
+  addFloatingText({
+    characterId: charId,
+    text: game.getLine('float_stunned'),
+    cssClass: 'status-apply',
+    icon: stunDef?.image || null,
+    color: stunDef?.color,
+  });
+  battle.log.push({ turn: battle.turn, actorId: charId, targetId: charId, text: game.getLine('log_stun_applied') });
 }
 
 /**
- * Process DoT and HoT token effects for a character.
+ * Process DoT and HoT effects for a character. Reads status meta.dot_damage_type / meta.hot.
  * @param {string} characterId
  * @returns {RpgEffectResult[]}
  */
-export function processTokenEffects(characterId) {
-  const battle = currentRpgBattle.value;
-  const charTokens = battle.charState[characterId].tokens;
-  if (!charTokens) return [];
-  const defs = getTokenDefinitions();
+export function processStatusEffects(characterId) {
   const character = game.getCharacter(characterId);
   if (!character) return [];
+  const defs = getStatusDefinitions();
 
   /** @type {RpgEffectResult[]} */
   const results = [];
 
-  for (const tokenId in charTokens) {
-    const instances = charTokens[tokenId];
-    const def = defs.get(tokenId);
-    if (!def) continue;
-    const totalStacks = Math.round(instances.reduce((s, i) => s + i.stacks, 0));
+  for (const status of character.getStatuses()) {
+    const meta = status.meta || {};
+    const totalStacks = Math.round(status.currentStacks);
     if (totalStacks <= 0) continue;
+    const isDot = !!meta.dot_damage_type;
+    const isRegen = status.id === 'regen';
+    if (!isDot && !isRegen) continue;
+    const statusName = status.name || defs.get(status.id)?.name || status.id;
 
-    for (const eff of def.effects) {
-      if (eff.type === 'dot') {
-        const rawDmg = Math.round(eff.value * totalStacks);
-        const dmgType = eff.damage_type || 'absolute';
-        const dmg = applyDefenses(rawDmg, dmgType, character);
-        if (dmg > 0) {
-          character.addResource('health', -dmg);
-          results.push({ type: 'token_dot', targetId: characterId, amount: dmg, rawAmount: rawDmg, damageType: dmgType, tokenId, defeated: isLethallyDefeated(characterId) });
-        }
-      } else if (eff.type === 'hot') {
-        let heal = Math.round(eff.value * totalStacks);
-        const rawHeal = heal;
-        const healReceivedMult = character.getStat('heal_received_mult') || 0;
-        if (healReceivedMult) {
-          heal = Math.max(0, Math.round(heal * (1 + healReceivedMult / 100)));
-        }
-        if (heal > 0) {
-          character.addResource('health', heal);
-          results.push({ type: 'token_hot', targetId: characterId, amount: heal, rawAmount: rawHeal, tokenId });
-        }
+    if (isDot) {
+      const rawDmg = totalStacks;
+      const dmgType = meta.dot_damage_type;
+      const dmg = applyDefenses(rawDmg, dmgType, character);
+      if (dmg > 0) {
+        character.addResource('health', -dmg);
+        results.push({ type: 'status_dot', targetId: characterId, amount: dmg, rawAmount: rawDmg, damageType: dmgType, statusId: status.id, statusName, defeated: isLethallyDefeated(characterId) });
+      } else if (dmg < 0) {
+        // Resist above 100% turned the tick into healing.
+        character.addResource('health', -dmg);
+        results.push({ type: 'status_dot_heal', targetId: characterId, amount: -dmg, rawAmount: rawDmg, damageType: dmgType, statusId: status.id, statusName });
+      }
+    } else if (isRegen) {
+      let heal = totalStacks;
+      const rawHeal = heal;
+      const healReceivedMult = character.getStat('heal_received_mult') || 0;
+      if (healReceivedMult) heal = Math.max(0, Math.round(heal * (1 + healReceivedMult / 100)));
+      if (heal > 0) {
+        character.addResource('health', heal);
+        results.push({ type: 'status_hot', targetId: characterId, amount: heal, rawAmount: rawHeal, statusId: status.id, statusName });
       }
     }
   }
@@ -186,14 +243,13 @@ export function getAliveAllies(characterId) {
   return pool.filter(id => isCharAlive(id));
 }
 
-/**
- * @param {string} characterId
- * @returns {boolean}
- */
 /** @param {string} characterId */
 export function isLethallyDefeated(characterId) {
   const char = game.getCharacter(characterId);
-  return char ? char.getResource('health') <= 0 && getTokenStacks(characterId, 'death_defiance') <= 0 : false;
+  if (!char) return false;
+  if (char.getResource('health') > 0) return false;
+  // death_defiance status saves from lethal
+  return getStatusStacks(characterId, 'death_defiance') <= 0;
 }
 
 export function isCharAlive(characterId) {
@@ -245,7 +301,6 @@ export function expandSplashTargets(casterId, primaryTargets, maxNeighbors, spla
  * @returns {{ raw: number, isCrit: boolean }}
  */
 export function calculateRawDamage(caster, aspects, target) {
-  const battle = currentRpgBattle.value;
   const baseStat = getScalingStat(caster);
   let rawDamage = baseStat * (aspects.damage / 100);
 
@@ -270,6 +325,12 @@ export function calculateRawDamage(caster, aspects, target) {
     isCrit = true;
   }
 
+  // Bonus damage during the stagger window: while stunned, and through the braced recovery after.
+  if (getStatusStacks(target.id, 'stun') > 0 || getStatusStacks(target.id, 'braced') > 0) {
+    const bonus = caster.getStat('bonus_stun_damage') || 0;
+    if (bonus > 0) rawDamage *= (1 + bonus / 100);
+  }
+
   return { raw: rawDamage, isCrit };
 }
 
@@ -285,16 +346,58 @@ export function applyDefenses(raw, dmgType, target) {
   raw *= Math.max(1 + dmgTakenMult / 100, 0.1);
 
   if (dmgType === 'absolute') return Math.max(0, Math.round(raw));
-  if (dmgType === 'physical') return Math.max(0, Math.round(raw - (target.getStat('armor') || 0)));
-  if (ELEMENTAL_TYPES.includes(dmgType)) {
-    const resist = target.getStat(`resist_${dmgType}`) || 0;
-    return Math.max(0, Math.round(raw * (1 - resist / 100)));
+
+  // Burst hits: flat armor, floored at 1 dmg, negative armor amplifies.
+  const armorStat = FLAT_ARMOR[dmgType];
+  if (armorStat) {
+    return Math.max(1, Math.round(raw - (target.getStat(armorStat) || 0)));
   }
+
+  // DoT ticks: percentage resist. No clamp — resist above 100 yields a
+  // negative number, i.e. the tick heals the target instead of damaging.
+  const resistStat = DOT_RESIST[dmgType];
+  if (resistStat) {
+    const resist = target.getStat(resistStat) || 0;
+    return Math.round(raw * (1 - resist / 100));
+  }
+
   return Math.max(0, Math.round(raw));
 }
 
 /**
+ * Drain `amount` shield stacks from a target, prioritizing instances with the
+ * shortest remaining duration first (permanent -1 instances last). This way
+ * about-to-expire stacks get used before they're wasted. Drops emptied instances
+ * and removes the status if no instances remain.
+ * @param {Character} target
+ * @param {number} amount
+ */
+function consumeShieldStacks(target, amount) {
+  const status = target.getStatus('shield');
+  if (!status || amount <= 0) return;
+  const instances = status.getInstances();
+  // Sort indices by duration ascending; treat -1 (permanent) as last.
+  const order = instances
+    .map((inst, idx) => ({ idx, dur: inst.duration < 0 ? Infinity : inst.duration }))
+    .sort((a, b) => a.dur - b.dur)
+    .map(o => o.idx);
+  let remaining = amount;
+  for (const idx of order) {
+    if (remaining <= 0) break;
+    const inst = instances[idx];
+    const take = Math.min(inst.stacks, remaining);
+    inst.stacks -= take;
+    remaining -= take;
+  }
+  // Drop emptied instances; remove status if empty
+  /** @type {any} */ (status)._instances = instances.filter(i => i.stacks > 0);
+  if (status.currentStacks <= 0) target.removeStatus('shield');
+}
+
+/**
  * Apply damage with shield absorption and thorns reflection.
+ * Absorbs via `shield` status (1 damage per stack, drained shortest-duration first).
+ * Reflects via `thorns` status (1 flat per stack per hit, not consumed).
  * @param {Character} target
  * @param {number} amount
  * @param {string} [damageType]
@@ -302,49 +405,34 @@ export function applyDefenses(raw, dmgType, target) {
  * @returns {{ dealt: number, shieldAbsorbed: number, thornsReflected: number }}
  */
 export function applyDamage(target, amount, damageType, casterId) {
-  const battle = currentRpgBattle.value;
   let remaining = amount;
   let shieldAbsorbed = 0;
   let thornsReflected = 0;
 
-  const defs = getTokenDefinitions();
-  const charTokens = battle.charState[target.id]?.tokens;
-  if (charTokens && damageType !== 'absolute') {
-    for (const tokenId in charTokens) {
-      const def = defs.get(tokenId);
-      const absorbEff = def?.effects.find(e => e.type === 'absorb');
-      if (!absorbEff) continue;
-      const perStack = absorbEff.value || 1;
-      const totalStacks = charTokens[tokenId].reduce((s, i) => s + i.stacks, 0);
-      const maxAbsorb = totalStacks * perStack;
-      const absorbed = Math.min(maxAbsorb, remaining);
-      const stacksUsed = Math.ceil(absorbed / perStack);
-      if (stacksUsed > 0) {
+  // Absorb (shield-only) — each stack absorbs 1 damage, consumed from shortest-duration
+  // instance first so soon-to-expire stacks get used before they're wasted.
+  if (damageType !== 'absolute') {
+    const shield = target.getStatus('shield');
+    if (shield && shield.currentStacks > 0) {
+      const absorbed = Math.min(shield.currentStacks, remaining);
+      if (absorbed > 0) {
         shieldAbsorbed += absorbed;
         remaining -= absorbed;
-        removeTokenStacks(target.id, tokenId, stacksUsed);
+        consumeShieldStacks(target, absorbed);
       }
-      if (remaining <= 0) break;
     }
   }
 
   if (remaining > 0) target.addResource('health', -remaining);
 
-  // Thorns: reflect damage back to attacker
-  if (casterId && charTokens && remaining > 0) {
-    const caster = game.getCharacter(casterId);
-    if (caster) {
-      for (const tokenId in charTokens) {
-        const def = defs.get(tokenId);
-        const thornsEff = def?.effects.find(e => e.type === 'thorns');
-        if (!thornsEff) continue;
-        const totalStacks = charTokens[tokenId].reduce((s, i) => s + i.stacks, 0);
-        const reflectPct = thornsEff.value * totalStacks / 100;
-        const reflected = Math.round(remaining * reflectPct);
-        if (reflected > 0) {
-          caster.addResource('health', -reflected);
-          thornsReflected += reflected;
-        }
+  // Thorns (thorns-only): 1 flat damage per stack per hit. Not consumed.
+  if (casterId && remaining > 0) {
+    const thorns = target.getStatus('thorns');
+    if (thorns && thorns.currentStacks > 0) {
+      const caster = game.getCharacter(casterId);
+      if (caster) {
+        thornsReflected = thorns.currentStacks;
+        caster.addResource('health', -thornsReflected);
       }
     }
   }
@@ -361,7 +449,7 @@ export function applyDamage(target, amount, damageType, casterId) {
  */
 export function applyHealing(caster, target, healPercent) {
   const healAmp = caster.getStat('heal_amplification') || 0;
-  let healing = Math.round(getScalingStat(caster) * (healPercent / 100) * ((100 + healAmp) / 100));
+  let healing = Math.round(getScalingStat(caster) * (healPercent / 100) * (1 + healAmp / 100));
   const raw = healing;
   const healReceivedMult = target.getStat('heal_received_mult') || 0;
   if (healReceivedMult) {
@@ -369,6 +457,49 @@ export function applyHealing(caster, target, healPercent) {
   }
   target.addResource('health', healing);
   return { healed: healing, raw };
+}
+
+// ── Shared effect application (used by resolveAbility AND the rpg_battle service) ──
+
+/**
+ * Apply a damage instance (shield/HP/thorns) and return the result objects. Does NOT emit
+ * floating text / log — callers do that via logEffect so they control ordering.
+ * @returns {{ results: RpgEffectResult[], dealt: number }}
+ */
+export function applyDamageInstance(casterId, targetId, finalDamage, rawDamage, damageType, isCrit) {
+  const target = game.getCharacter(targetId);
+  if (!target) return { results: [], dealt: 0 };
+  const r = applyDamage(target, finalDamage, damageType, casterId);
+  /** @type {RpgEffectResult[]} */
+  const results = [{
+    type: 'damage', targetId, amount: r.dealt, rawAmount: Math.round(rawDamage),
+    damageType, shieldAbsorbed: r.shieldAbsorbed, isCrit: !!isCrit, defeated: isLethallyDefeated(targetId),
+  }];
+  if (r.thornsReflected > 0) {
+    results.push({ type: 'thorns', targetId: casterId, amount: r.thornsReflected, defeated: isLethallyDefeated(casterId) });
+  }
+  return { results, dealt: r.dealt };
+}
+
+/**
+ * Apply ONE status with the FINAL stack count (caller does any power-scaling). Handles the
+ * stagger guard + threshold check. Returns the result object, or null if nothing applied.
+ * @returns {RpgEffectResult|null}
+ */
+export function applyStatusEffect(casterId, targetId, statusId, stacks, duration) {
+  if (!(stacks > 0)) return null;
+  if (statusId === 'stagger' && getStatusStacks(targetId, 'stun') > 0) return null;
+  const r = applyStatusInstance(targetId, statusId, stacks, duration, casterId);
+  if (!r || r.applied <= 0) return null;
+  // NB: the stagger→stun threshold check runs in the CALLER, after the stagger result is logged,
+  // so the "is stunned" log follows "gains Stagger" (cause before consequence).
+  return { type: 'status_apply', targetId, statusId, statusName: r.name, stacks: r.applied, duration: duration ?? 0 };
+}
+
+/** Emit a single effect result: floating text + battle log. */
+export function logEffect(battle, casterId, effect) {
+  parseFloatingText(effect);
+  battle.log.push({ turn: battle.turn, actorId: casterId, effect });
 }
 
 // ── Target resolution ──
@@ -393,38 +524,72 @@ export function resolveTargets(casterId, targetType, selectedTargetId) {
   }
 }
 
+// ── Channels ──
+
+/**
+ * Begin a channel: mint a token from the casting ability (its icon + name) carrying a frozen
+ * snapshot of the resolved ability + effective power in `meta.channel_snapshot`, tagged
+ * `is_channel` so a stun sweeps it. Replaces any channel the caster already has (one per caster).
+ * The token re-fires inline from `tickActiveCharacter` on the caster's turns.
+ * @param {string} casterId @param {string} abilityId @param {any} ability @param {number} power
+ */
+function startChannel(casterId, abilityId, ability, power) {
+  const caster = game.getCharacter(casterId);
+  if (!caster) return;
+  for (const st of [...caster.getStatuses()]) {
+    if (st.meta?.channel_snapshot) caster.removeStatus(st.id);
+  }
+  const meta = ability.meta || {};
+  const token = game.createStatus({
+    id: `channel_${abilityId}`,
+    name: meta.name || 'Channel',
+    description: meta.description || '',
+    image: meta.icon || '',
+    polarity: 'positive',
+    max_stacks: 1,
+    meta: {
+      is_battle: true,
+      is_channel: true,
+      channel_snapshot: { abilityId, power, ability: JSON.parse(JSON.stringify(ability)) },
+    },
+  });
+  caster.addStatus(token, { source: casterId });
+}
+
 // ── Ability resolution ──
 
 /**
  * Resolve a full ability: deduct costs, apply all effects, set cooldown.
+ * On a bounce (`isBounce`), the effects re-resolve on the target but cost and
+ * cooldown/charges are skipped (the primary cast already paid them).
  * @param {string} casterId
  * @param {string} abilityId
  * @param {string} [targetId]
- * @param {number} [power] - Power override from battle_action_start event
+ * @param {{ isBounce?: boolean, actionPower?: number, ability?: any }} [opts] `actionPower`/`ability` freeze
+ *   a re-fired cast (channels): replay the snapshotted effects at the snapshotted power.
  * @returns {RpgEffectResult[]}
  */
-export function resolveAbility(casterId, abilityId, targetId, power) {
-  _actionPower = power ?? null;
+export function resolveAbility(casterId, abilityId, targetId, { isBounce = false, actionPower, ability: abilityOverride } = {}) {
   const battle = currentRpgBattle.value;
   const caster = game.getCharacter(casterId);
-  const ability = caster.getAbility(abilityId);
+  const ability = abilityOverride ?? caster.getAbility(abilityId);
   if (!ability) { _actionPower = null; return []; }
-
   const meta = ability.meta;
+  _actionPower = actionPower ?? (meta?.flat ? 100 : getEffectivePower(caster, ability));
 
-  // Deduct costs
-  if (meta.costs) {
+  // Deduct costs (skipped on bounces — primary cast already paid)
+  if (!isBounce && meta.costs) {
     for (const statId in meta.costs) {
       caster.addResource(statId, -meta.costs[statId]);
     }
   }
 
-  // Consume preparation token
-  if (meta.preparation) {
-    removeTokenStacks(casterId, 'preparation', 1);
+  // Consume the self status requirement on cast (skipped on bounces)
+  if (!isBounce && meta.require_status_self && meta.require_status_self_consume) {
+    removeStatusStacks(casterId, meta.require_status_self, 1);
   }
 
-  game.trigger('battle_action_cast', battle, caster, abilityId);
+  game.trigger('battle_action_cast', caster, abilityId);
 
   const targetType = meta.target || 'enemy';
   let targets = resolveTargets(casterId, targetType, targetId);
@@ -432,28 +597,50 @@ export function resolveAbility(casterId, abilityId, targetId, power) {
   /** @type {RpgEffectResult[]} */
   const allResults = [];
 
+  const statusDefs = getStatusDefinitions();
+
+  // Lifesteal accrues across the whole ability's damage, applied once after all effects resolve.
+  let abilityDamage = 0;
+  let lifestealPct = 0;
+
   for (const effectId in ability.effects) {
     const aspects = ability.effects[effectId];
 
     // Roll chance
     if (aspects.chance !== undefined && Math.random() > aspects.chance) continue;
 
-    // Expand targets for splash
-    const effectTargets = aspects.splash
-      ? expandSplashTargets(casterId, targets, aspects.splash, aspects.splash_only)
-      : targets;
+    // Summon: spawn a combatant from a character template onto the caster's side (once per effect,
+    // not re-summoned on bounces). Independent of the ability's target; composes with other aspects.
+    if (aspects.summon && !isBounce) {
+      const newChar = game.createCharacter(game.createUid(), aspects.summon);
+      if (newChar) {
+        const id = summonCombatant(newChar, getSide(casterId));
+        if (id) allResults.push({ type: 'summon', targetId: id });
+      }
+    }
 
-    let totalDamageDealt = 0;
+    // Per-target work (damage / heal / status / cleanse / cooldown / charges). When the effect only
+    // does caster-side things (summon and/or self-status), the target list is empty so the loop
+    // below is a no-op and no empty battle_action_apply events fire.
+    const hasTargetPayload = !!(aspects.damage || aspects.healing
+      || aspects.status_apply_target?.length || aspects.status_remove_target?.length
+      || aspects.cleanse || aspects.cooldown_change || aspects.charges_change || aspects.require_status_target_consume);
+
+    const effectTargets = !hasTargetPayload ? []
+      : aspects.splash
+        ? expandSplashTargets(casterId, targets, aspects.splash, aspects.splash_only)
+        : targets;
+
+    if (aspects.lifesteal) lifestealPct = Math.max(lifestealPct, aspects.lifesteal);
 
     for (const tId of effectTargets) {
       const target = game.getCharacter(tId);
       if (!target || target.getResource('health') <= 0) continue;
 
-      // Combo gate (pre-condition, not part of the apply event)
-      if (aspects.combo) {
-        const stacks = getTokenStacks(tId, 'combo');
-        if (stacks <= 0) continue;
-        removeTokenStacks(tId, 'combo', 1);
+      // Target status requirement (pre-condition, not part of the apply event)
+      if (aspects.require_status_target) {
+        if (getStatusStacks(tId, aspects.require_status_target) <= 0) continue;
+        if (aspects.require_status_target_consume) removeStatusStacks(tId, aspects.require_status_target, 1);
       }
 
       // ── Compute all math ──
@@ -477,15 +664,12 @@ export function resolveAbility(casterId, abilityId, targetId, power) {
       let healing = 0;
       if (aspects.healing) {
         const healAmp = caster.getStat('heal_amplification') || 0;
-        healing = Math.round(getScalingStat(caster) * (aspects.healing / 100) * ((100 + healAmp) / 100));
+        healing = Math.round(getScalingStat(caster) * (aspects.healing / 100) * (1 + healAmp / 100));
       }
 
-      let tokenStacks = 0;
-      if (aspects.token_apply) {
-        tokenStacks = aspects.token_stacks || 1;
-        const tokenDef = getTokenDefinitions().get(aspects.token_apply);
-        if (tokenDef?.power_scaling) tokenStacks = Math.round(getScalingStat(caster) * tokenStacks / 100);
-      }
+      const statusApplyList = aspects.status_apply_target ? [...aspects.status_apply_target] : [];
+      const statusRemoveList = aspects.status_remove_target ? [...aspects.status_remove_target] : [];
+      const baseStatusStacks = aspects.status_stacks_target ?? 1;
 
       // ── Build apply event ──
 
@@ -499,18 +683,17 @@ export function resolveAbility(casterId, abilityId, targetId, power) {
         isCrit,
         isDodged,
         healing,
-        tokenId: aspects.token_apply || null,
-        tokenStacks,
-        tokenDuration: aspects.token_duration,
-        statusApply: aspects.status_apply ? [...aspects.status_apply] : [],
-        statusDuration: aspects.status_duration,
-        statusRemove: aspects.status_remove ? [...aspects.status_remove] : [],
+        statusApply: statusApplyList,
+        statusStacks: baseStatusStacks,
+        statusDuration: aspects.status_duration_target,
+        statusRemove: statusRemoveList,
+        statusRemoveStacks: aspects.status_remove_stacks_target,
         cleanse: !!aspects.cleanse,
         cooldownChange: aspects.cooldown_change || 0,
         chargesChange: aspects.charges_change || 0,
       };
 
-      if (!game.trigger('battle_action_apply', battle, caster, applyEvent)) continue;
+      if (!game.trigger('battle_action_apply', caster, applyEvent)) continue;
 
       // ── Apply state mutations from event ──
       const resultStartIdx = allResults.length;
@@ -519,24 +702,15 @@ export function resolveAbility(casterId, abilityId, targetId, power) {
         /** @type {RpgEffectResult} */
         const dodgeResult = { type: 'dodge', targetId: tId };
         allResults.push(dodgeResult);
-        parseFloatingText(dodgeResult);
-        battle.log.push({ turn: battle.turn, actorId: casterId, effect: dodgeResult });
+        logEffect(battle, casterId, dodgeResult);
         continue;
       }
 
       // Damage
       if (applyEvent.damage > 0) {
-        const result = applyDamage(target, applyEvent.damage, applyEvent.damageType, casterId);
-        totalDamageDealt += result.dealt;
-        allResults.push({
-          type: 'damage', targetId: tId, amount: result.dealt,
-          rawAmount: Math.round(applyEvent.rawDamage), damageType: applyEvent.damageType,
-          shieldAbsorbed: result.shieldAbsorbed, isCrit: applyEvent.isCrit,
-          defeated: isLethallyDefeated(tId),
-        });
-        if (result.thornsReflected > 0) {
-          allResults.push({ type: 'thorns', targetId: casterId, amount: result.thornsReflected, defeated: isLethallyDefeated(casterId) });
-        }
+        const { results, dealt } = applyDamageInstance(casterId, tId, applyEvent.damage, applyEvent.rawDamage, applyEvent.damageType, applyEvent.isCrit);
+        abilityDamage += dealt;
+        allResults.push(...results);
       }
 
       // Healing
@@ -548,45 +722,47 @@ export function resolveAbility(casterId, abilityId, targetId, power) {
         allResults.push({ type: 'heal', targetId: tId, amount: healed, rawAmount: applyEvent.healing });
       }
 
-      // Token apply to target
-      if (applyEvent.tokenId && applyEvent.tokenStacks > 0) {
-        const result = applyToken(tId, applyEvent.tokenId, applyEvent.tokenStacks, applyEvent.tokenDuration, casterId);
-        if (result) allResults.push({ type: 'token_apply', targetId: tId, tokenId: applyEvent.tokenId, stacks: result.applied, duration: applyEvent.tokenDuration });
+      // Status apply (each id in the list)
+      for (const statusId of applyEvent.statusApply) {
+        const def = statusDefs.get(statusId);
+        if (!def) continue;
+        // Per-ability power-scaling decided here; applyStatusEffect takes the final stack count.
+        let stacks = applyEvent.statusStacks;
+        if (def.meta?.power_scaling) stacks = Math.round(getScalingStat(caster) * stacks / 100);
+        const result = applyStatusEffect(casterId, tId, statusId, stacks, applyEvent.statusDuration);
+        if (result) allResults.push(result);
       }
 
-      // Cleanse
+      // Cleanse — reads status.meta directly (so item-granted statuses participate too)
       if (applyEvent.cleanse) {
         const casterSide = getSide(casterId);
         const tSide = getSide(tId);
         const removePolarity = (casterSide === tSide) ? 'negative' : 'positive';
-        const defs = getTokenDefinitions();
-        const charTokens = battle.charState[tId]?.tokens;
-        if (charTokens) {
-          for (const tkId in charTokens) {
-            if (defs.get(tkId)?.polarity === removePolarity) {
-              delete charTokens[tkId];
-            }
-          }
+        for (const status of [...target.getStatuses()]) {
+          if (!status.meta?.is_battle) continue;
+          const polarity = status.polarity || statusDefs.get(status.id)?.polarity;
+          if (polarity === removePolarity) target.removeStatus(status.id);
         }
         allResults.push({ type: 'cleanse', targetId: tId });
       }
 
-      // Status apply
-      for (const statusId of applyEvent.statusApply) {
-        const status = game.createStatus(statusId);
-        if (status) {
-          if (applyEvent.statusDuration !== undefined) status.duration = applyEvent.statusDuration;
-          target.addStatus(status);
-          allResults.push({ type: 'status_apply', targetId: tId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
-        }
-      }
-
       // Status remove
       for (const statusId of applyEvent.statusRemove) {
-        const statusDefs = game.getData('character_statuses', true);
-        const sDef = statusDefs?.get(statusId);
-        target.removeStatus(statusId);
-        allResults.push({ type: 'status_remove', targetId: tId, statusId, statusName: sDef?.name || statusId });
+        const have = getStatusStacks(tId, statusId);
+        if (have <= 0) continue;
+        const toRemove = applyEvent.statusRemoveStacks !== undefined
+          ? Math.min(have, applyEvent.statusRemoveStacks)
+          : have;
+        if (toRemove <= 0) continue;
+        const def = statusDefs.get(statusId);
+        removeStatusStacks(tId, statusId, toRemove);
+        allResults.push({
+          type: 'status_remove',
+          targetId: tId,
+          statusId,
+          statusName: def?.name || statusId,
+          stacks: toRemove,
+        });
       }
 
       // Cooldown change on target
@@ -609,73 +785,99 @@ export function resolveAbility(casterId, abilityId, targetId, power) {
 
       // Log all results from this target's mutations, then fire post-apply
       for (let i = resultStartIdx; i < allResults.length; i++) {
-        parseFloatingText(allResults[i]);
-        battle.log.push({ turn: battle.turn, actorId: casterId, effect: allResults[i] });
+        logEffect(battle, casterId, allResults[i]);
       }
-      game.trigger('battle_action_applied', battle, caster, applyEvent);
+      game.trigger('battle_action_applied', caster, applyEvent);
+      if (applyEvent.statusApply.includes('stagger')) checkStaggerThreshold(tId);
     }
 
-    // Lifesteal (derived from total damage, not part of per-target event)
-    if (aspects.lifesteal && totalDamageDealt > 0) {
-      const healed = Math.round(totalDamageDealt * (aspects.lifesteal / 100));
+    // Self-heal — heals the caster regardless of the ability's target.
+    if (aspects.healing_self) {
+      const healAmp = caster.getStat('heal_amplification') || 0;
+      const recvMult = caster.getStat('heal_received_mult') || 0;
+      const healed = Math.round(getScalingStat(caster) * (aspects.healing_self / 100) * (1 + healAmp / 100) * (1 + recvMult / 100));
       if (healed > 0) {
         caster.addResource('health', healed);
-        allResults.push({ type: 'steal', targetId: caster.id, amount: healed });
+        /** @type {RpgEffectResult} */
+        const r = { type: 'heal', targetId: casterId, amount: healed, rawAmount: healed };
+        allResults.push(r);
+        logEffect(battle, casterId, r);
       }
     }
 
-    // Self-effects — also fire battle_action_apply with targetId = casterId
-    if (aspects.token_apply_self || aspects.status_apply_self) {
-      let selfTokenStacks = 0;
-      if (aspects.token_apply_self) {
-        selfTokenStacks = aspects.token_stacks_self || 1;
-        const tokenDef = getTokenDefinitions().get(aspects.token_apply_self);
-        if (tokenDef?.power_scaling) selfTokenStacks = Math.round(getScalingStat(caster) * selfTokenStacks / 100);
+    // Side-scoped status apply/remove (self / allies / enemies). Each holder gets its own
+    // status-only apply event — mirrors the per-target loop but without damage/cleanse.
+    const applyScope = (holderIds, applyList, stacks, duration, removeList, removeStacks) => {
+      const apply = applyList ? [...applyList] : [];
+      const remove = removeList ? [...removeList] : [];
+      if (!apply.length && !remove.length) return;
+      for (const holderId of holderIds) {
+        if (!isCharAlive(holderId)) continue;
+        /** @type {RpgActionApplyEvent} */
+        const event = {
+          effectId,
+          targetId: holderId,
+          damage: 0, rawDamage: 0, damageType: 'physical', isCrit: false, isDodged: false,
+          healing: 0,
+          statusApply: [...apply],
+          statusStacks: stacks ?? 1,
+          statusDuration: duration,
+          statusRemove: [...remove],
+          statusRemoveStacks: removeStacks,
+          cleanse: false,
+          cooldownChange: 0,
+          chargesChange: 0,
+        };
+        if (!game.trigger('battle_action_apply', caster, event)) continue;
+        const startIdx = allResults.length;
+        for (const statusId of event.statusApply) {
+          const def = statusDefs.get(statusId);
+          if (!def) continue;
+          let s = event.statusStacks;
+          if (def.meta?.power_scaling) s = Math.round(getScalingStat(caster) * s / 100);
+          const result = applyStatusEffect(casterId, holderId, statusId, s, event.statusDuration);
+          if (result) allResults.push(result);
+        }
+        for (const statusId of event.statusRemove) {
+          const have = getStatusStacks(holderId, statusId);
+          if (have <= 0) continue;
+          const toRemove = event.statusRemoveStacks !== undefined ? Math.min(have, event.statusRemoveStacks) : have;
+          if (toRemove <= 0) continue;
+          const def = statusDefs.get(statusId);
+          removeStatusStacks(holderId, statusId, toRemove);
+          allResults.push({ type: 'status_remove', targetId: holderId, statusId, statusName: def?.name || statusId, stacks: toRemove });
+        }
+        for (let i = startIdx; i < allResults.length; i++) logEffect(battle, casterId, allResults[i]);
+        game.trigger('battle_action_applied', caster, event);
+        if (event.statusApply.includes('stagger')) checkStaggerThreshold(holderId);
       }
+    };
 
-      /** @type {RpgActionApplyEvent} */
-      const selfEvent = {
-        effectId,
-        targetId: casterId,
-        damage: 0, rawDamage: 0, damageType: 'physical', isCrit: false, isDodged: false,
-        healing: 0,
-        tokenId: aspects.token_apply_self || null,
-        tokenStacks: selfTokenStacks,
-        tokenDuration: aspects.token_duration_self,
-        statusApply: aspects.status_apply_self ? [...aspects.status_apply_self] : [],
-        statusDuration: aspects.status_duration_self,
-        statusRemove: [],
-        cleanse: false,
-        cooldownChange: 0,
-        chargesChange: 0,
-      };
+    if (!isBounce) {
+      applyScope([casterId], aspects.status_apply_self, aspects.status_stacks_self, aspects.status_duration_self, aspects.status_remove_self, aspects.status_remove_stacks_self);
+      applyScope(getAliveAllies(casterId), aspects.status_apply_allies, aspects.status_stacks_allies, aspects.status_duration_allies, aspects.status_remove_allies, aspects.status_remove_stacks_allies);
+      applyScope(getAliveEnemies(casterId), aspects.status_apply_enemies, aspects.status_stacks_enemies, aspects.status_duration_enemies, aspects.status_remove_enemies, aspects.status_remove_stacks_enemies);
+    }
+  }
 
-      if (game.trigger('battle_action_apply', battle, caster, selfEvent)) {
-        const selfStartIdx = allResults.length;
-        if (selfEvent.tokenId && selfEvent.tokenStacks > 0) {
-          const result = applyToken(casterId, selfEvent.tokenId, selfEvent.tokenStacks, selfEvent.tokenDuration, casterId);
-          if (result) allResults.push({ type: 'token_apply', targetId: casterId, tokenId: selfEvent.tokenId, stacks: result.applied, duration: selfEvent.tokenDuration });
-        }
-        for (const statusId of selfEvent.statusApply) {
-          const status = game.createStatus(statusId);
-          if (status) {
-            if (selfEvent.statusDuration !== undefined) status.duration = selfEvent.statusDuration;
-            caster.addStatus(status);
-            allResults.push({ type: 'status_apply', targetId: casterId, statusId, statusName: status.name, duration: status.duration > 0 ? status.duration : 0 });
-          }
-        }
-        for (let i = selfStartIdx; i < allResults.length; i++) {
-          parseFloatingText(allResults[i]);
-          battle.log.push({ turn: battle.turn, actorId: casterId, effect: allResults[i] });
-        }
-        game.trigger('battle_action_applied', battle, caster, selfEvent);
-      }
+  // Lifesteal: heal the caster from the ability's TOTAL damage this resolution.
+  // Amplified like any heal the caster receives (heal_amplification + heal_received_mult).
+  if (lifestealPct > 0 && abilityDamage > 0) {
+    const healAmp = caster.getStat('heal_amplification') || 0;
+    const recvMult = caster.getStat('heal_received_mult') || 0;
+    const healed = Math.round(abilityDamage * (lifestealPct / 100) * (1 + healAmp / 100) * (1 + recvMult / 100));
+    if (healed > 0) {
+      caster.addResource('health', healed);
+      /** @type {RpgEffectResult} */
+      const r = { type: 'steal', targetId: caster.id, amount: healed };
+      allResults.push(r);
+      logEffect(battle, casterId, r);
     }
   }
 
   // Set cooldown and consume charges
   const abilityState = battle.charState[casterId]?.abilities[abilityId];
-  if (abilityState) {
+  if (!isBounce && abilityState) {
     if (abilityState.charges > 0) abilityState.charges--;
     const cd = meta.cooldown || 0;
     if (cd > 0) abilityState.cooldown = cd;
@@ -692,6 +894,8 @@ export function resolveAbility(casterId, abilityId, targetId, power) {
       }
     }
   }
+
+  if (meta.channel && !isBounce) startChannel(casterId, abilityId, ability, _actionPower);
 
   _actionPower = null;
   return allResults;

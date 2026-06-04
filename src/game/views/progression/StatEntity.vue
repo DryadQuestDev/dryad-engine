@@ -1,18 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, markRaw } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import type { EntityStatObject } from '../../../schemas/entityStatSchema';
 import ProgressBar from './ProgressBar.vue';
+import StatCard from '../popups/cards/StatCard.vue';
+import { popover as vPopover } from '../../directives/popoverDirective';
 
 const props = defineProps<{
   character: Character;
   statId: string;
-}>();
-
-const emit = defineEmits<{
-  (e: 'statHover', event: MouseEvent, statId: string, stat: EntityStatObject): void;
-  (e: 'statLeave'): void;
 }>();
 
 const game = Game.getInstance();
@@ -41,30 +38,28 @@ const binaryColor = computed(() => {
   return reductionIsGood ? '#ff453a' : '#42b983';
 });
 
-const onMouseEnter = (event: MouseEvent) => {
-  if (stat.value) {
-    emit('statHover', event, props.statId, stat.value);
-  }
-};
+const StatCardComp = markRaw(StatCard);
 
-const onMouseLeave = () => {
-  emit('statLeave');
-};
+// Only attach popover when the stat has an ingame description.
+const popoverBinding = computed(() => {
+  if (!hasDescription.value) return null;
+  return { component: StatCardComp, props: { statId: props.statId, characterId: props.character.id }, placement: 'left-start' as const };
+});
 </script>
 
 <template>
   <div v-if="stat && isBinary && displayValue" class="stat-entity binary-stat"
-    :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+    :class="{ 'has-description': hasDescription }" v-popover="popoverBinding">
     <span class="binary-check" :style="{ color: binaryColor }">&#10003;</span>
     <span class="stat-name">{{ stat.name || statId }}</span>
   </div>
   <div v-else-if="stat && isResource && (character.hasStat(statId) || maxValue !== 0)" class="stat-entity resource-row"
-    :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+    :class="{ 'has-description': hasDescription }" v-popover="popoverBinding">
     <ProgressBar :current="currentValue" :max="maxValue" :barColor="stat.color ? `#${stat.color}` : undefined"
       :label="stat.name || statId" width="100%" />
   </div>
   <div v-else-if="stat && (character.hasStat(statId) || maxValue !== 0)" class="stat-entity numeric-row"
-    :class="{ 'has-description': hasDescription }" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
+    :class="{ 'has-description': hasDescription }" v-popover="popoverBinding">
     <span class="stat-name">{{ stat.name || statId }}</span>
     <span class="stat-value">{{ displayValue }}</span>
   </div>
