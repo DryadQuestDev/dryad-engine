@@ -3,7 +3,7 @@ import { Global } from '../global/global';
 import copy from 'fast-copy';
 import { computed, ComputedRef } from 'vue';
 
-import { DungeonSystem, DungeonLine } from './systems/dungeonSystem';
+import { DungeonSystem, DungeonLine, SceneAsset } from './systems/dungeonSystem';
 import { DungeonData } from './core/dungeon/dungeonData';
 import { ActionObject, AspectRenderer, LogicSystem, PoolSettings, PoolDrawResult, CollectionSettings } from './systems/logicSystem';
 import { NarrativeSystem } from './systems/narrativeSystem';
@@ -134,6 +134,15 @@ export class Game {
    */
   public getLoadedSaveVersions(): Record<string, { name: string; version: string }> | null {
     return this.coreSystem.loadedSaveVersions ? { ...this.coreSystem.loadedSaveVersions } : null;
+  }
+
+  /**
+   * Returns true if the loaded save was made on a previous `(game + mods)` version.
+   * False for new games, or when the loaded save's versions match the current ones.
+   * Useful for retroactive migration hooks in `game_initiated` listeners.
+   */
+  public isOldSave(): boolean {
+    return this.coreSystem.isOldSave();
   }
 
   /**
@@ -321,6 +330,18 @@ export class Game {
 
   public removeAssets(data: string[] | string): void {
     this.dungeonSystem.removeAssets(data);
+  }
+
+  public getAssets(): SceneAsset[] {
+    return this.dungeonSystem.getAssets();
+  }
+
+  public setAssets(assets: SceneAsset[]): void {
+    this.dungeonSystem.setAssets(assets);
+  }
+
+  public clearAssets(): void {
+    this.dungeonSystem.clearAssets();
   }
 
   public addFlash(flash: string): void {
@@ -640,6 +661,14 @@ export class Game {
   /** Returns true if the record is discovered (or has auto_discovery=true). */
   public isRecordDiscovered(id: string): boolean {
     return this.narrativeSystem.isRecordDiscovered(id);
+  }
+
+  /**
+   * Returns child records of `parentId` that the player has discovered, in discovery order.
+   * Used to render layered encyclopedia / popover entries that grow as the story unfolds.
+   */
+  public getDiscoveredChildren(parentId: string) {
+    return this.narrativeSystem.getDiscoveredChildren(parentId);
   }
 
   /** Returns all encyclopedia trees, sorted by `order`. */

@@ -246,6 +246,18 @@ export class DungeonSystem {
     }
   }
 
+  public getAssets(): SceneAsset[] {
+    return [...this.assets.value];
+  }
+
+  public setAssets(assets: SceneAsset[]): void {
+    this.assets.value = [...assets];
+  }
+
+  public clearAssets(): void {
+    this.assets.value = [];
+  }
+
   get global() {
     return Global.getInstance();
   }

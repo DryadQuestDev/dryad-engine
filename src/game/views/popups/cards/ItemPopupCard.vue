@@ -31,6 +31,14 @@ const hasChoices = computed(() => choices.value.length > 0 && !props.disabled);
 </template>
 
 <style scoped>
+/* Override the global .popup-inner padding here — the nested ItemCard
+   already supplies its own 12px padding, so .popup-inner's spacing would
+   stack and read as a double margin. The .item-choices-wrapper that may
+   sit above the card carries its own visual spacing via the parent's gap. */
+.item-popup-card.popup-inner {
+    padding: 0;
+}
+
 .item-popup-card {
     display: flex;
     flex-direction: column;

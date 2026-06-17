@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { SpineStats } from '../../../game/utils/spineRenderer';
-import { findAutoplayedAnimations } from '../../../game/utils/spineAnimationGroups';
 
 const props = defineProps<{
   stats: SpineStats | null;
-  /** Character attributes — used to mark autoplayed chips. Omit for assets. */
-  characterAttributes?: Record<string, unknown>;
   /** Asset's currently selected animation — that chip gets a "default" tag. */
   defaultAnimation?: string | null;
   /** Asset's currently selected skins — those chips get a "default" tag. */
@@ -15,23 +12,7 @@ const props = defineProps<{
   hideCounts?: boolean;
 }>();
 
-const autoplayed = computed<Map<string, string | null>>(() => {
-  const map = new Map<string, string | null>();
-  if (!props.stats || !props.characterAttributes) return map;
-  for (const entry of findAutoplayedAnimations(props.stats.animations, props.characterAttributes)) {
-    map.set(entry.name, entry.groupName);
-  }
-  return map;
-});
-
 const defaultSkinSet = computed(() => new Set(props.defaultSkins ?? []));
-
-function autoplayTooltip(groupName: string | null): string {
-  if (groupName === null) {
-    return 'Base animation — plays automatically on track 0. Rename it to "group_X" with a matching attribute on the character to make it switchable at runtime.';
-  }
-  return `Group "${groupName}" has no attribute on this character — playing first suffix by default. Add a "${groupName}" attribute to control which one plays.`;
-}
 </script>
 
 <template>
@@ -45,12 +26,11 @@ function autoplayTooltip(groupName: string | null): string {
           v-for="name in stats.animations"
           :key="`a-${name}`"
           class="chip"
-          :class="{ autoplayed: autoplayed.has(name), 'is-default': defaultAnimation === name }"
-          v-tooltip.top="autoplayed.has(name) ? autoplayTooltip(autoplayed.get(name) ?? null) : (defaultAnimation === name ? 'Currently selected — change in the picker above.' : undefined)"
+          :class="{ 'is-default': defaultAnimation === name }"
+          v-tooltip.top="defaultAnimation === name ? 'Currently selected — change in the picker above.' : undefined"
         >
           <span class="chip-name">{{ name }}</span>
-          <span v-if="autoplayed.has(name)" class="chip-tag">autoplayed</span>
-          <span v-else-if="defaultAnimation === name" class="chip-tag">default</span>
+          <span v-if="defaultAnimation === name" class="chip-tag">default</span>
         </span>
       </div>
     </section>
@@ -153,7 +133,6 @@ function autoplayTooltip(groupName: string | null): string {
   color: #333;
 }
 
-.chip.autoplayed,
 .chip.is-default {
   background-color: #fff8e6;
   border-color: #f0d27a;

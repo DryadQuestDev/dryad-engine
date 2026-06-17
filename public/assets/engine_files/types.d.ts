@@ -426,6 +426,19 @@ interface Game {
   getLoadedSaveVersions(): Record<string, { name: string; version: string }> | null;
 
   /**
+   * Returns true if the loaded save was made on a previous `(game + mods)` version.
+   * False for new games, or when the loaded save's versions match the current ones.
+   * Useful for retroactive migration hooks in `game_initiated` listeners.
+   * @example
+   * game.on('game_initiated', () => {
+   *   if (game.isOldSave()) {
+   *     // run one-off retroactive setup
+   *   }
+   * });
+   */
+  isOldSave(): boolean;
+
+  /**
    * Rebuild every character's state from the current definitions (template + statuses + traits + attributes).
    * No-op if the loaded save's `(gameVersion, mods)` signature matches the current one, or on a new game.
    *
@@ -813,6 +826,29 @@ interface Game {
    * game.removeAssets(['tree1', 'tree2']);
    */
   removeAssets(data: string[] | string): void;
+
+  /**
+   * Get a copy of the assets currently in the scene.
+   * Useful for snapshotting before clearing/replacing them (e.g. entering a battle).
+   * @example
+   * const prev = game.getAssets();
+   * game.clearAssets();
+   * // ...later...
+   * game.setAssets(prev); // restore
+   */
+  getAssets(): Asset[];
+
+  /**
+   * Replace all scene assets with the given list (the existing assets are discarded).
+   * Pass full Asset objects (e.g. from a previous getAssets() snapshot) to restore them as-is.
+   * @param assets - The assets to make the current scene assets.
+   */
+  setAssets(assets: Asset[]): void;
+
+  /**
+   * Remove all assets from the current scene immediately (no exit animations).
+   */
+  clearAssets(): void;
 
   /**
    * Add a flash text effect to the current scene.
@@ -1553,13 +1589,20 @@ interface Game {
   registerNarrativeState(id: string, evaluator: Function): void;
 
   /** Returns a record by id, or undefined if not found. Records are authored under Narrative > Records in the editor. */
-  getRecord(id: string): { id: string; title: string; summary?: string; content?: string; image?: string; auto_discovery?: boolean; tags?: string[] } | undefined;
+  getRecord(id: string): { id: string; title: string; summary?: string; content?: string; image?: string; auto_discovery?: boolean; parent_record?: string; tags?: string[] } | undefined;
 
   /** Marks a record as discovered (persists in save). No-op if already discovered or id is unknown. */
   discoverRecord(id: string): void;
 
   /** Returns true if the record is discovered (or has auto_discovery=true). */
   isRecordDiscovered(id: string): boolean;
+
+  /**
+   * Returns discovered child records of `parentId` (records whose `parent_record` field equals `parentId`),
+   * in discovery order. Used to render layered encyclopedia / popover entries that grow as the story
+   * unfolds — e.g. an NPC's record gains addendum sections as the player lives more scenes with them.
+   */
+  getDiscoveredChildren(parentId: string): { id: string; title: string; summary?: string; content?: string; image?: string; parent_record?: string; tags?: string[] }[];
 
   /** Returns all encyclopedia trees, sorted by `order` ascending. */
   getEncyclopediaTrees(): { id: string; tab: string; order?: number; groups?: { name: string; records?: { record: string }[] }[] }[];

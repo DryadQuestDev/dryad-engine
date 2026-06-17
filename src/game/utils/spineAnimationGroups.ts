@@ -1,91 +1,79 @@
 /**
- * Utility for grouping Spine animation names by convention.
+ * Spine playback helpers for editor previews.
  *
- * Animations named `group_suffix` (split on last `_`) are grouped together.
- * Each group gets a deterministic track number (alphabetical, starting at 1).
- * Animations without `_` are base animations for track 0.
+ * Runtime playback lives in Character.buildSpineTrackMapForView; this file
+ * mirrors it for editor-side preview popups (where we have raw template data
+ * + skin layers JSON instead of a full Character instance).
  */
 
-export interface AnimationGroupData {
-  baseAnimations: string[];
-  groups: Record<string, { track: number; suffixes: string[] }>;
-}
+/**
+ * Editor-side mirror of Character.buildSpineTrackMapForView — builds the
+ * {track → animation name} map by walking the character template's skin
+ * layers (filtered to `type === 'spine'` AND matching view), sorted by
+ * z_index ascending. Track index = sort position (NOT z_index value), so
+ * two layers with z_index = 0 land on tracks 0 and 1 distinctly.
+ */
+export function buildEditorSpineTrackMapFromLayers(
+  characterSkinLayerIds: string[] | undefined | null,
+  skinLayersData: any[],
+  attributes: Record<string, any>,
+  view?: string | null,
+): Map<number, string> {
+  const norm = (v: any) => (!v || v === '_default') ? '_default' : v;
+  const target = norm(view);
+  const ids = new Set(characterSkinLayerIds || []);
 
-export function buildAnimationGroups(animationNames: string[]): AnimationGroupData {
-  const baseAnimations: string[] = [];
-  const groupMap = new Map<string, string[]>();
+  const layers = skinLayersData
+    .filter((layer) => layer && ids.has(layer.id) && layer.type === 'spine' && norm(layer.view) === target)
+    .slice()
+    .sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
 
-  for (const name of animationNames) {
-    const lastUnderscore = name.lastIndexOf('_');
-    if (lastUnderscore === -1) {
-      baseAnimations.push(name);
-    } else {
-      const group = name.substring(0, lastUnderscore);
-      const suffix = name.substring(lastUnderscore + 1);
-      let suffixes = groupMap.get(group);
-      if (!suffixes) {
-        suffixes = [];
-        groupMap.set(group, suffixes);
+  const map = new Map<number, string>();
+  layers.forEach((layer, trackIndex) => {
+    let key = layer.id;
+    if (Array.isArray(layer.attributes)) {
+      for (const attr of layer.attributes) {
+        key += '_' + (attributes?.[attr] ?? '');
       }
-      suffixes.push(suffix);
     }
-  }
-
-  // Assign track numbers alphabetically starting at 1; suffixes within each
-  // group sorted alphabetically so "first suffix" is deterministic.
-  const sortedGroupNames = [...groupMap.keys()].sort();
-  const groups: Record<string, { track: number; suffixes: string[] }> = {};
-  for (let i = 0; i < sortedGroupNames.length; i++) {
-    const name = sortedGroupNames[i];
-    groups[name] = { track: i + 1, suffixes: groupMap.get(name)!.sort() };
-  }
-
-  baseAnimations.sort();
-  return { baseAnimations, groups };
+    const animName = layer.spine_animations?.[key];
+    if (animName) map.set(trackIndex, animName);
+  });
+  return map;
 }
 
 /**
- * Build the {track → animation name} map for a character's spine playback.
- *
- * - Base animations (no `_`) autoplay the first alphabetically on track 0.
- * - For each group:
- *   - Attribute unset: autoplay the first suffix alphabetically.
- *   - Attribute set and matches an animation: play that one.
- *   - Attribute set but doesn't match: leave the track empty (dev opted out).
- *
- * Mirrored at runtime by Character.getSpineTrackAnimations so editor previews
- * match gameplay.
+ * Editor-side mirror of Character.getSpineSkinsForView — collects spine skin
+ * names from `type: 'spine'` skin layers matching the view. Each layer
+ * contributes one name (from `spine_skins[key]`) to the result list. The
+ * runtime combines them via `Skin.addSkin()` so they all apply at once.
  */
-export function buildEditorTrackMap(
-  animationNames: string[],
-  attributes: Record<string, unknown>,
-): Map<number, string> {
-  const result = new Map<number, string>();
-  const groups = buildAnimationGroups(animationNames);
-  const available = new Set(animationNames);
+export function buildEditorSpineSkinsFromLayers(
+  characterSkinLayerIds: string[] | undefined | null,
+  skinLayersData: any[],
+  attributes: Record<string, any>,
+  view?: string | null,
+): string[] {
+  const norm = (v: any) => (!v || v === '_default') ? '_default' : v;
+  const target = norm(view);
+  const ids = new Set(characterSkinLayerIds || []);
+  const skins: string[] = [];
 
-  if (groups.baseAnimations.length > 0) {
-    result.set(0, groups.baseAnimations[0]);
-  }
+  for (const layer of skinLayersData) {
+    if (!layer || !ids.has(layer.id)) continue;
+    if (layer.type !== 'spine') continue;
+    if (norm(layer.view) !== target) continue;
 
-  for (const groupName in groups.groups) {
-    const group = groups.groups[groupName];
-    const attrValue = attributes[groupName];
-
-    if (typeof attrValue === 'string' && attrValue) {
-      const animName = `${groupName}_${attrValue}`;
-      if (available.has(animName)) {
-        result.set(group.track, animName);
+    let key = layer.id;
+    if (Array.isArray(layer.attributes)) {
+      for (const attr of layer.attributes) {
+        key += '_' + (attributes?.[attr] ?? '');
       }
-      continue;
     }
-
-    if (group.suffixes.length > 0) {
-      result.set(group.track, `${groupName}_${group.suffixes[0]}`);
-    }
+    const skinName = layer.spine_skins?.[key];
+    if (skinName) skins.push(skinName);
   }
-
-  return result;
+  return skins;
 }
 
 /**
@@ -110,43 +98,4 @@ export function applyTrackMap(
       spine.state.setAnimation(track, animName, loop);
     }
   }
-}
-
-export interface AutoplayedAnimation {
-  /** Animation name that will play automatically (no attribute drives it). */
-  name: string;
-  /** The group whose unset attribute caused autoplay, or null for a base animation playing on track 0. */
-  groupName: string | null;
-}
-
-/**
- * Returns animations that will play without any attribute driving them:
- * - The track 0 base animation (no `_` in name) if any.
- * - The first suffix of every group whose attribute is unset.
- *
- * A group whose attribute is set but points to a non-existent animation is
- * NOT autoplayed — the dev explicitly chose nothing for that track. Used by
- * the editor to tag chips with an `autoplayed` indicator.
- */
-export function findAutoplayedAnimations(
-  animationNames: string[],
-  attributes: Record<string, unknown>,
-): AutoplayedAnimation[] {
-  const groups = buildAnimationGroups(animationNames);
-  const result: AutoplayedAnimation[] = [];
-
-  if (groups.baseAnimations.length > 0) {
-    result.push({ name: groups.baseAnimations[0], groupName: null });
-  }
-
-  for (const groupName in groups.groups) {
-    const attrValue = attributes[groupName];
-    if (typeof attrValue === 'string' && attrValue) continue;
-
-    const group = groups.groups[groupName];
-    if (group.suffixes.length === 0) continue;
-    result.push({ name: `${groupName}_${group.suffixes[0]}`, groupName });
-  }
-
-  return result;
 }

@@ -16,6 +16,12 @@ const summarySource = computed(() => {
     return r.summary || r.content || '';
 });
 
+const discoveredChildren = computed(() => game.getDiscoveredChildren(props.recordId));
+
+function childBody(child: { summary?: string; content?: string }): string {
+    return child.summary || child.content || '';
+}
+
 function onOpenInEncyclopedia() {
     game.openEncyclopediaForRecord(props.recordId);
     closeAll();
@@ -32,6 +38,11 @@ function onOpenInEncyclopedia() {
             <span class="popup-title">{{ record.title }}</span>
         </div>
         <div v-script="summarySource" class="popup-body"></div>
+        <template v-for="child in discoveredChildren" :key="child.id">
+            <hr class="record-child-sep">
+            <div class="record-child-title">{{ child.title }}</div>
+            <div v-script="childBody(child)" class="popup-body"></div>
+        </template>
     </div>
     <div v-else class="popup-inner popup-error">
         Unknown record: {{ recordId }}
@@ -41,5 +52,19 @@ function onOpenInEncyclopedia() {
 <style scoped>
 .popup-header {
     justify-content: flex-start;
+}
+
+.record-child-sep {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin: 10px 0 6px;
+}
+
+.record-child-title {
+    font-weight: 600;
+    color: var(--theme-primary, #5dadec);
+    font-size: 0.95em;
+    margin-bottom: 4px;
+    letter-spacing: 0.2px;
 }
 </style>

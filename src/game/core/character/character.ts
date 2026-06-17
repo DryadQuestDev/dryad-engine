@@ -13,7 +13,6 @@ import { gameLogger } from "../../utils/logger";
 import { Inventory } from "./inventory";
 import { PARTY_INVENTORY_ID } from "../../systems/itemSystem";
 import { mergeTrait } from "../../../functions/mergeTrait";
-import { buildAnimationGroups, buildEditorTrackMap, type AnimationGroupData } from "../../utils/spineAnimationGroups";
 import ShortUniqueId from "short-unique-id";
 
 export type learnedSkill = {
@@ -84,13 +83,6 @@ export class Character {
   // Spine configs keyed by view ('' = default, 'back' = back view, etc.). _default normalizes to ''.
   public spineViews: Map<string, SpineViewConfig> = new Map();
 
-  // Available spine animation names per view, populated by CharacterDollSpine on load
-  @Skip()
-  public spineAnimationsAvailable: Map<string, Set<string>> = new Map();
-
-  // Animation groups per view, populated by setAvailableSpineAnimations()
-  @Skip()
-  public spineAnimationGroups: Map<string, AnimationGroupData> = new Map();
 
   // Skills Logic
   public skillTrees: Set<string> = new Set();
@@ -304,19 +296,27 @@ export class Character {
     return this.statuses.values().next().value!;
   }
 
-  // Helper method to build image URLs from an array of skin layer objects
+  // Build the attribute-suffixed lookup key for a layer (matches the editor's
+  // build_images key construction). No attributes → key = layer.id alone.
+  private buildLayerLookupKey(layer: CharacterSkinLayerObject): string {
+    let key = layer.id;
+    if (layer.attributes && Array.isArray(layer.attributes)) {
+      for (const attribute of layer.attributes) {
+        key += "_" + this.attributes[attribute];
+      }
+    }
+    return key;
+  }
+
+  // Helper method to build image URLs from an array of skin layer objects.
+  // Skips spine-type layers — those are consumed by buildSpineTrackMapForView.
   private buildImageUrlsFromLayers(layers: CharacterSkinLayerObject[]): ImageLayerMeta[] {
     const result: ImageLayerMeta[] = [];
 
     for (const layer of layers) {
-      let imageKey = layer.id;
+      if ((layer as any).type === 'spine') continue;
 
-      // Build key with attributes
-      if (layer.attributes && Array.isArray(layer.attributes)) {
-        for (const attribute of layer.attributes) {
-          imageKey += "_" + this.attributes[attribute];
-        }
-      }
+      const imageKey = this.buildLayerLookupKey(layer);
 
       // Get layer data from skin layers map
       const layerData = Game.getInstance().characterSystem.skinLayersMap.get(layer.id);
@@ -633,36 +633,79 @@ export class Character {
     return this.buildImageUrlsFromLayers(skinLayerObjects);
   }
 
-  // Convention-based: each attribute value becomes a Spine skin name
-  public getSpineSkins(): string[] {
+  /**
+   * Collects Spine skin name strings from active skin layers of `type: 'spine'`
+   * matching the given view. Each layer's `spine_skins[key]` is looked up using
+   * the same combo-key construction as static images / spine_animations. Result
+   * is the input to `spineRenderer.applySkins()`, which combines them via
+   * `Skin.addSkin()`.
+   */
+  public getSpineSkinsForView(view: string = ''): string[] {
+    const game = Game.getInstance();
+    const requestedView = this.normalizeView(view);
     const skins: string[] = [];
-    for (const key in this.attributes) {
-      const value = this.attributes[key];
-      if (value) skins.push(value);
+
+    for (const layerId of this.skinLayers) {
+      const layerObj = game.characterSystem.skinLayersMap.get(layerId);
+      if (!layerObj) continue;
+      if ((layerObj as any).type !== 'spine') continue;
+      const layerView = this.normalizeView((layerObj as any).view as string | undefined);
+      if (layerView !== requestedView) continue;
+
+      const key = this.buildLayerLookupKey(layerObj);
+      const skinName = (layerObj as any).spine_skins?.[key];
+      if (skinName) skins.push(skinName);
     }
     return skins;
   }
 
-  public hasSpineAnimation(animation: string, view: string = ''): boolean {
-    const anims = this.spineAnimationsAvailable.get(view);
-    return anims ? anims.has(animation) : false;
-  }
-
-  public setAvailableSpineAnimations(view: string, names: string[]): void {
-    this.spineAnimationsAvailable.set(view, new Set(names));
-    this.spineAnimationGroups.set(view, buildAnimationGroups(names));
+  /** Backwards-compatible no-view-arg variant — delegates to default view. */
+  public getSpineSkins(): string[] {
+    return this.getSpineSkinsForView('');
   }
 
   /**
-   * Get the current track-to-animation mapping based on character attributes.
-   * Track 0 = first base animation (no underscore). Tracks 1+ = group's
-   * alphabetical track, animation picked by attribute value or autoplay
-   * (first suffix) when the attribute is unset.
+   * Build the track-to-animation map for a view from skin layers of type 'spine'.
+   * - Filters skin layers to type='spine' AND matching view (`_default` / empty equivalent).
+   * - Sorts by z_index ascending (undefined → 0); track index = sort position.
+   * - For each layer, looks up `layer.spine_animations[key]` where `key` is built
+   *   the same way as static `images` (`layer.id + '_' + attr_values…`, or just
+   *   `layer.id` when no attributes).
+   * - Layers whose resolved animation value is missing or empty string get no
+   *   track entry (the renderer skips them; other tracks aren't shifted).
+   */
+  public buildSpineTrackMapForView(view: string = ''): Map<number, string> {
+    const game = Game.getInstance();
+    const requestedView = this.normalizeView(view);
+    const layers: CharacterSkinLayerObject[] = [];
+
+    for (const layerId of this.skinLayers) {
+      const layerObj = game.characterSystem.skinLayersMap.get(layerId);
+      if (!layerObj) continue;
+      if ((layerObj as any).type !== 'spine') continue;
+      const layerView = this.normalizeView((layerObj as any).view as string | undefined);
+      if (layerView !== requestedView) continue;
+      layers.push(layerObj);
+    }
+
+    layers.sort((a, b) => (a.z_index || 0) - (b.z_index || 0));
+
+    const map = new Map<number, string>();
+    layers.forEach((layer, trackIndex) => {
+      const key = this.buildLayerLookupKey(layer);
+      const animations = (layer as any).spine_animations as Record<string, string> | undefined;
+      const animName = animations?.[key];
+      if (animName) map.set(trackIndex, animName);
+    });
+    return map;
+  }
+
+  /**
+   * Get the current track-to-animation mapping for the given view. Driven
+   * entirely by skin layers of type 'spine' (see buildSpineTrackMapForView).
    */
   public getSpineTrackAnimations(view: string = ''): Map<number, string> {
-    const available = this.spineAnimationsAvailable.get(view);
-    if (!available || available.size === 0) return new Map();
-    return buildEditorTrackMap([...available], this.attributes);
+    return this.buildSpineTrackMapForView(view);
   }
 
   // ignore types

@@ -14,37 +14,37 @@ const { game } = window.engine;
 console.log('rpg_battler plugin loaded');
 
 // ── Emitters ──
-// Emitter: battle_start — Fired before battle begins. Args: (battle). Return false to prevent.
+// Emitter: battle_start — Fired before battle begins. Args: (). Return false to prevent.
 game.registerEmitter('battle_start');
-// Emitter: battle_end — Fired when battle ends. Args: (battle, result).
+// Emitter: battle_end — Fired when battle ends. Args: (result).
 game.registerEmitter('battle_end');
-// Emitter: battle_turn_start — Fired at the start of a new round. Args: (battle, turnNumber).
+// Emitter: battle_turn_start — Fired at the start of a new round. Args: (turnNumber).
 game.registerEmitter('battle_turn_start');
-// Emitter: battle_action_start — Fired before ability execution. Args: (battle, caster, event).
+// Emitter: battle_action_start — Fired before ability execution. Args: (caster, event).
 // event = { abilityId, targetId }. Mutate to redirect ability or change target. Return false to cancel.
 // For power adjustments, listen to `rpg_compute_power` instead — that hook fires for both runtime and tooltip.
 game.registerEmitter('battle_action_start');
 // Emitter: battle_action_cast — Fired after ability is confirmed and costs deducted, before effects resolve.
-// Args: (battle, caster, abilityId). Use for on-cast side effects (rage generation, etc.).
+// Args: (caster, abilityId). Use for on-cast side effects (rage generation, etc.).
 game.registerEmitter('battle_action_cast');
 // Emitter: battle_action_apply — Fired per-effect per-target after all math, before state mutation.
-// Args: (battle, caster, event). event = { effectId, targetId, damage, rawDamage, damageType, isCrit, isDodged, healing, statusApply, statusStacks, statusDuration, statusRemove, statusRemoveStacks, cleanse, cooldownChange, chargesChange }.
+// Args: (caster, event). event = { effectId, targetId, damage, rawDamage, damageType, isCrit, isDodged, healing, statusApply, statusStacks, statusDuration, statusRemove, statusRemoveStacks, cleanse, cooldownChange, chargesChange }.
 // Mutate any field. Return false to skip this effect on this target.
 game.registerEmitter('battle_action_apply');
 // Emitter: battle_action_applied — Fired per-effect per-target AFTER state mutations. Same args as battle_action_apply.
 // Use for reactive effects (rage-on-hit, counters, on-kill triggers). Not cancellable.
 game.registerEmitter('battle_action_applied');
-// Emitter: battle_action_end — Fired after ability effects resolve. Args: (battle, caster, abilityId, results).
+// Emitter: battle_action_end — Fired after ability effects resolve. Args: (caster, abilityId, results).
 game.registerEmitter('battle_action_end');
 // Emitter: battle_action_complete — Fired after an action AND its animations finish (cast + hit
 // + bounces), unlike battle_action_end which fires when effects resolve, before animation.
 // Args: (caster, abilityId, results). Use for UI that must not interrupt the animation.
 game.registerEmitter('battle_action_complete');
-// Emitter: battle_character_defeated — Fired when character reaches 0 HP. Args: (battle, characterId, side).
+// Emitter: battle_character_defeated — Fired when character reaches 0 HP. Args: (characterId, side).
 game.registerEmitter('battle_character_defeated');
 // Emitter: character_turn_post_tick — Fired at the start of an individual character's turn,
 // AFTER cooldowns/tokens/statuses have ticked and DoTs processed, BEFORE the stun check.
-// Args: (battle, characterId). Not cancellable. Use for reactive effects depending on post-tick state.
+// Args: (characterId). Not cancellable. Use for reactive effects depending on post-tick state.
 game.registerEmitter('character_turn_post_tick');
 
 // ── Aspect renderers ──
@@ -215,10 +215,11 @@ game.addComponent({
 /**
  * Spawn enemies from a battle definition's enemy list.
  * @param {RpgBattleEntry[]} entries
- * @returns {string[]} character IDs
+ * @returns {{ ids: string[], spawned: string[] }} all enemy IDs, and the subset the battle created (non-live)
  */
 function spawnEnemies(entries) {
   const ids = [];
+  const spawned = [];
   for (const entry of entries) {
     for (let i = 0; i < (entry.amount || 1); i++) {
       if (entry.is_live_instance) {
@@ -229,10 +230,11 @@ function spawnEnemies(entries) {
         const char = game.createCharacter(uid, entry.character_id);
         game.addCharacter(char);
         ids.push(char.id);
+        spawned.push(char.id);
       }
     }
   }
-  return ids;
+  return { ids, spawned };
 }
 
 
@@ -311,7 +313,7 @@ game.registerService('rpg_battle', {
       params.playerParty = params.playerParty.slice(0, max);
     }
 
-    const enemyParty = spawnEnemies(enemyEntries);
+    const { ids: enemyParty, spawned: spawnedEnemies } = spawnEnemies(enemyEntries);
     const turnOrder = [...params.playerParty, ...enemyParty];
     const playerSet = new Set(params.playerParty);
 
@@ -325,6 +327,7 @@ game.registerService('rpg_battle', {
       enemyParty,
       turnOrder,
       summoned: [],
+      spawnedEnemies,
       actorTurn: -1,
       activeCharId: null,
       activeSide: 'player',
@@ -338,6 +341,7 @@ game.registerService('rpg_battle', {
       prevBlockInventory: game.getState('block_party_inventory'),
       prevGameState: game.getState('game_state'),
       prevHideEvents: game.getState('hide_events'),
+      prevAssets: game.getAssets(),
     };
 
     // Initialize charState for all combatants
@@ -382,6 +386,7 @@ game.registerService('rpg_battle', {
     game.setState('block_party_inventory', true);
     game.setState('hide_events', true);
     game.setState('game_state', 'rpg_battle');
+    game.clearAssets();
     game.setMusic('battle');
 
     return { ok: true, battle };
@@ -523,7 +528,7 @@ export function endRpgBattle(result) {
   }
 
   // Remove spawned enemies + mid-battle summons
-  for (const charId of [...battle.enemyParty, ...battle.summoned]) {
+  for (const charId of [...battle.spawnedEnemies, ...battle.summoned]) {
     const char = game.getCharacter(charId);
     if (char) game.deleteCharacter(charId);
   }
@@ -533,6 +538,7 @@ export function endRpgBattle(result) {
   game.setState('block_party_inventory', battle.prevBlockInventory);
   game.setState('game_state', battle.prevGameState);
   game.setState('hide_events', battle.prevHideEvents);
+  game.setAssets(battle.prevAssets);
   game.nextScene();
   game.setMusic(false);
 

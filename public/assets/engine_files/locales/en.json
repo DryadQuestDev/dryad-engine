@@ -221,6 +221,7 @@
   "ability_tag.granted": "Granted",
   "ability_tag.modified": "Modified",
   "ability_tag.inactive": "Inactive",
+  "item_tag.quest": "Quest",
   "stat_breakdown.base": "Base",
   "stat_breakdown.items": "Equipped Items",
   "stat_breakdown.skills": "Learned Skills",

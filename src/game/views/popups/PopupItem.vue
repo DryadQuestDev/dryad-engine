@@ -175,14 +175,24 @@ const widthStyle = computed(() => {
 
 /* Reset chrome on shared card components when rendered inside a popup.
    The popup shell already provides background + border + shadow; let cards
-   keep their own chrome only when used standalone (encyclopedia, exchange). */
+   keep their own chrome only when used standalone (encyclopedia, exchange).
+   Padding is left to the card's own scoped style — ItemCard ships with
+   12px which covers both the lore-link path and the ItemPopupCard path
+   (whose .popup-inner wrapper drops its own padding to avoid stacking). */
 .popup .item-card,
 .popup .item-choices {
     background: transparent;
     border: none;
     box-shadow: none;
-    padding: 0;
     width: auto;
     max-width: none;
+}
+
+/* The .popup-close-overlay button sits absolute at top:4px right:6px and is
+   ~28px wide. The cost block in .item-card's header is right-anchored with
+   margin-left: auto and lands directly under the X. Push it inward when
+   rendered inside a popup so the two don't visually collide. */
+.popup .item-card .item-cost {
+    margin-right: 28px;
 }
 </style>

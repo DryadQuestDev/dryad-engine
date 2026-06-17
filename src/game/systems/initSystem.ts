@@ -831,7 +831,7 @@ export class InitSystem {
             }
         });
 
-        this.game.registerAction("discover_lore", {
+        this.game.registerAction("lore", {
             action: (data: string) => {
                 for (const id of data.split(',').map(s => s.trim()).filter(Boolean)) {
                     this.game.narrativeSystem.discoverRecord(id);

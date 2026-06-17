@@ -58,10 +58,16 @@ function selectCharacter(index: number) {
 
         <!-- Body: Doll + Stats -->
         <div class="viewer-body">
-            <!-- Character Doll (left) -->
-            <div class="viewer-doll-wrapper">
-                <CharacterSlot :character="selectedCharacter" :slot="{ scale: 1 }" :showItemSlots="true"
-                    :disableItemInteraction="true" />
+            <!-- Character Doll (left)
+                 Two wrappers: the outer .viewer-doll-stage takes the flex slot and gives the
+                 doll horizontal room; the inner .viewer-doll-wrapper keeps the 50cqh column
+                 untouched so item slot positions (calibrated in ItemSlotPickerPopup against
+                 the same 50cqh frame) land on the same body parts as in CharacterTab. -->
+            <div class="viewer-doll-stage">
+                <div class="viewer-doll-wrapper">
+                    <CharacterSlot :character="selectedCharacter" :slot="{ scale: 1 }" :showItemSlots="true"
+                        :disableItemInteraction="true" />
+                </div>
             </div>
 
             <!-- Stats/Statuses (right) - reuses CharacterSheet without inventory -->
@@ -125,9 +131,26 @@ function selectCharacter(index: number) {
     container-type: size;
 }
 
-/* Match CharacterTab.vue layout for doll wrapper */
+/* Outer stage — takes the flex slot in .viewer-body. Wider than the inner column
+   so the body's natural ±25cqh overflow renders without being clipped by the
+   modal root. The inner .viewer-doll-wrapper remains the 50cqh authoring frame
+   for item slots so positions tuned in ItemSlotPickerPopup stay valid. */
+.viewer-doll-stage {
+    flex-shrink: 0;
+    width: 100cqh;
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Match CharacterTab.vue layout for doll wrapper. Item slots are calibrated
+   against this 50cqh column — DO NOT change width here or items will drift
+   relative to the body. The outer .viewer-doll-stage above provides the
+   visual room instead. */
 .viewer-doll-wrapper {
-    /* width: 50cqh; */
+    width: 50cqh;
     flex-shrink: 0;
     height: 100%;
     position: relative;

@@ -9,6 +9,7 @@ import {
 } from '../views/popups/popupStore';
 import RecordCard from '../views/popups/cards/RecordCard.vue';
 import StatusCard from '../views/popups/cards/StatusCard.vue';
+import ItemCard from '../views/progression/ItemCard.vue';
 
 /**
  * Directive `v-script` — render DryadScript text on any element with full lore-link interactivity.
@@ -19,7 +20,7 @@ import StatusCard from '../views/popups/cards/StatusCard.vue';
  * - One-time event listeners (mount/unmount); `updated` only re-renders innerHTML.
  *
  * The resolver always runs with `noExecuteActions: true` — rendering must never fire side
- * effects like `{discover_lore: ...}`. Sites that rely on action firing (scene encounters,
+ * effects like `{lore: ...}`. Sites that rely on action firing (scene encounters,
  * quest log entries) must call `game.resolveString(...)` explicitly upstream and pass the
  * result with `{ resolver: false }`.
  *
@@ -75,6 +76,12 @@ registerLoreKindCard('status', {
         const character = ctx?.character as { id: string } | undefined;
         return { statusId: id, characterId: character?.id };
     },
+    closable: true,
+});
+
+registerLoreKindCard('item', {
+    component: markRaw(ItemCard),
+    mapProps: (id) => ({ item: Game.getInstance().createItem(id) }),
     closable: true,
 });
 

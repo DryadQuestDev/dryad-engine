@@ -36,7 +36,7 @@ const spineConfig = computed(() => {
 
 const spineAtlas = computed(() => spineConfig.value?.atlas ?? undefined);
 const spineSkeleton = computed(() => spineConfig.value?.skeleton ?? undefined);
-const spineSkins = computed(() => props.character.getSpineSkins());
+const spineSkins = computed(() => props.character.getSpineSkinsForView(props.view || ''));
 
 // Multi-track animation mapping driven by character attributes
 const spineTrackAnimations = computed(() => {
@@ -114,16 +114,13 @@ const initSpine = async () => {
       Game.getInstance().coreSystem.persistImage(spineAtlas.value);
     }
 
-    // Register available animation names and build groups
-    const animNames = spine.skeleton.data.animations.map((a: any) => a.name);
-    props.character.setAvailableSpineAnimations(props.view || '', animNames);
-
-    // Apply all track animations from attribute-driven groups
+    // Apply track animations driven by skin layers (type='spine').
     const trackMap = props.character.getSpineTrackAnimations(props.view || '');
     applyTrackAnimations(spine, trackMap);
 
     // Discover current animation + skins (skip gallery preview characters)
     if (props.character.templateId && spineSkeleton.value && !props.character.id.startsWith('_gallery_preview')) {
+      const animNames = spine.skeleton.data.animations.map((a: any) => a.name);
       Game.getInstance().coreSystem.updateDiscoveredSpineData(props.character.templateId, spineSkeleton.value, animNames, spineSkins.value);
     }
 
@@ -164,16 +161,9 @@ watch([spineAtlas, spineSkeleton], () => {
   });
 });
 
-// Character object changed (e.g. gallery recreates preview) — transfer animation data
-watch(() => props.character, (newChar) => {
-  if (spine && newChar) {
-    const view = props.view || '';
-    if (!newChar.spineAnimationGroups.has(view)) {
-      const animNames = spine.skeleton.data.animations.map((a: any) => a.name);
-      newChar.setAvailableSpineAnimations(view, animNames);
-    }
-  }
-});
+// Character object changed (e.g. gallery recreates preview) — the
+// spineTrackAnimations computed reacts to the new character automatically;
+// no manual transfer needed since the track map is driven by skin layers.
 
 // Skin changes
 watch(spineSkins, (newSkins) => {

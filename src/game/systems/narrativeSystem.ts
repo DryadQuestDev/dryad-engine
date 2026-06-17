@@ -328,6 +328,30 @@ export class NarrativeSystem {
         return this.discoveredRecords.has(id);
     }
 
+    /**
+     * Children of `parentId` that the player has discovered, in discovery order
+     * (Set preserves insertion order). Auto-discovery children — rare — append
+     * at the end in record-definition order. Used by RecordCard and the
+     * Encyclopedia tab to render the parent entry with its layered addendums.
+     */
+    public getDiscoveredChildren(parentId: string): RecordObject[] {
+        const result: RecordObject[] = [];
+        const seen = new Set<string>();
+        for (const id of this.discoveredRecords) {
+            const r = this.recordsMap.get(id);
+            if (r?.parent_record === parentId) {
+                result.push(r);
+                seen.add(id);
+            }
+        }
+        for (const r of this.recordsMap.values()) {
+            if (r.parent_record === parentId && r.auto_discovery && !seen.has(r.id)) {
+                result.push(r);
+            }
+        }
+        return result;
+    }
+
     /** Walk encyclopedia trees once and index each record id → first owning tree. Call after `encyclopediaTreesMap` is populated. */
     public buildEncyclopediaIndex(): void {
         this.encyclopediaRecordIndex.clear();

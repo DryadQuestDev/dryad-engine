@@ -13,7 +13,7 @@ All built-in actions for scenes and choices.
 | `state` | Set game states | `"game_state=battle, disable_ui=true"` | |
 | `popup` | Manage the popup stack: `"id"` opens, `"!id"` closes that one, `false` closes all. Comma-separated tokens applied in order; popups stack on top of each other | `"my-popup"`, `"popup1, !popup2"`, or `false` | ✓ |
 | `property` | Modify game properties (`=` set, `>` add, `<` subtract) | `"gold>100, score=0"` | |
-| `discover_lore` | Mark one or more lore records as discovered | `"kingdom_of_luminaria"` or `"goblins, orcs, trolls"` | |
+| `lore` | Mark one or more lore records as discovered | `"kingdom_of_luminaria"` or `"goblins, orcs, trolls"` | |
 
 ### property Examples
 

@@ -5,7 +5,7 @@ import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { spineRenderer, type SpineStats } from '../../../game/utils/spineRenderer';
-import { buildEditorTrackMap, applyTrackMap } from '../../../game/utils/spineAnimationGroups';
+import { applyTrackMap, buildEditorSpineTrackMapFromLayers, buildEditorSpineSkinsFromLayers } from '../../../game/utils/spineAnimationGroups';
 import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO, SPINE_REFERENCE_HEIGHT, SPINE_REFERENCE_WIDTH } from '../../../game/utils/characterReference';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import Slider from 'primevue/slider';
@@ -115,6 +115,27 @@ const rectStyle = computed(() => ({
 const imageLayers = computed(() => {
   return loadCharacterImages(localItem.value, skinLayersData.value as any, selectedView.value);
 });
+
+// Layer-driven spine track map. Single source of truth for which animations
+// play — recomputes whenever skin_layers / skinLayersData / attributes / view
+// change. On reopen the spine atlas can resolve faster than `skinLayersData`
+// loads, so the watcher below is what catches that case (init may apply an
+// empty map first; this re-applies once data lands).
+const spineTrackMap = computed(() => buildEditorSpineTrackMapFromLayers(
+  localItem.value?.skin_layers,
+  skinLayersData.value,
+  localItem.value?.attributes || {},
+  selectedView.value,
+));
+
+// Layer-driven spine skins — same reopen-race protection via the watcher
+// below; layers from spine-type entries with spine_skins contribute names.
+const spineSkins = computed(() => buildEditorSpineSkinsFromLayers(
+  localItem.value?.skin_layers,
+  skinLayersData.value,
+  localItem.value?.attributes || {},
+  selectedView.value,
+));
 
 // Initialize local values from item.traits
 onMounted(() => {
@@ -495,17 +516,12 @@ async function initSpinePlayer() {
     spineInstance = spine;
     spineStats.value = spineRenderer.getStats(spine);
 
-    // Apply skins from attributes (convention-based: attribute values = Spine skin names)
-    const skeletonData = spine.skeleton.data;
-    const skins = Object.values(attributes).filter(
-      (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-    );
-    if (skins.length > 0) {
-      spineRenderer.applySkins(spine, skins);
+    // Apply skins (layer-driven; mirrors Character.getSpineSkinsForView).
+    if (spineSkins.value.length > 0) {
+      spineRenderer.applySkins(spine, spineSkins.value);
     }
 
-    const animNames = spine.skeleton.data.animations.map((a: any) => a.name);
-    applyTrackMap(spine, buildEditorTrackMap(animNames, attributes));
+    applyTrackMap(spine, spineTrackMap.value);
 
     // Set image dimensions for face rect positioning
     // actualImage uses the game's reference size (500×700) since CharacterFace.vue
@@ -558,12 +574,20 @@ watch(spineContainerRef, (newRef) => {
   }
 });
 
-// Re-apply track map when attributes change without full reinit.
-watch(() => localItem.value.attributes, (attributes) => {
-  if (!spineInstance) return;
-  const animNames = spineInstance.skeleton.data.animations.map((a: any) => a.name);
-  applyTrackMap(spineInstance, buildEditorTrackMap(animNames, attributes || {}));
-}, { deep: true });
+// Re-apply track map whenever its inputs change — covers attribute changes
+// AND the reopen race where init runs before skinLayersData has finished
+// loading from disk (init applies an empty map; this catches up once data
+// lands).
+watch(spineTrackMap, (map) => {
+  if (spineInstance) applyTrackMap(spineInstance, map);
+});
+
+// Re-apply skins on the same race-safe pattern.
+watch(spineSkins, (skins) => {
+  if (spineInstance && skins.length > 0) {
+    spineRenderer.applySkins(spineInstance, skins);
+  }
+});
 
 // Live-update the spine renderer's scale when the user edits the spine entry. dx/dy are
 // applied as a CSS transform on the orange wrapper (see template), not here, so the orange
@@ -621,8 +645,7 @@ onMounted(() => {
     <div class="picker-content">
       <!-- Controls -->
       <div class="controls">
-        <SpineStatsPanel v-if="isSpineCharacter" :stats="spineStats"
-          :character-attributes="localItem.attributes || {}" />
+        <SpineStatsPanel v-if="isSpineCharacter" :stats="spineStats" />
 
         <div v-if="characterViews.length > 0" class="control-group">
           <label>View</label>
@@ -952,6 +975,8 @@ onMounted(() => {
   height: 100%;
   border-left: 2px dashed rgba(0, 0, 0, 0.15);
   pointer-events: none;
+  /* z-index high enough to sit above the doll's spine canvas (which establishes
+     its own stacking context via WebGL / CSS transform), matches ItemSlotPickerPopup. */
   z-index: 1;
 }
 

@@ -293,15 +293,20 @@ onMounted(() => {
         <div class="sheet-boundary right"></div>
 
         <!-- Character render + slot markers. The doll-frame is 50cqh wide centered, matching
-             the in-game character column. EditorCharacterPreview handles both spine and static
-             with one pipeline; slot markers sit as siblings so the body's internal scale doesn't
-             affect them, with their cqh resolving against .preview-container (container-type:size). -->
+             the in-game character column. .character-doll is the explicit 1:1 square sized to
+             100cqh (matching FacePickerPopup), so the body sits in a known-size box even when
+             the preview-container's aspect ratio varies. Slot markers sit as siblings of the
+             doll so the body's internal scale doesn't affect them; their cqh resolves against
+             .preview-container (container-type:size). -->
         <div class="character-doll-wrapper">
-          <EditorCharacterPreview :character="localItem" :coreCharacter="coreItem">
-            <template #empty>
-              <p class="empty-text">⚠️ Select Character Image Layers in the <strong>skin_layers</strong> field, or configure <strong>spine</strong> files.</p>
-            </template>
-          </EditorCharacterPreview>
+          <div class="character-doll">
+            <EditorCharacterPreview :character="localItem" :coreCharacter="coreItem">
+              <template #empty>
+                <p class="empty-text">⚠️ Select Character Image Layers in the <strong>skin_layers</strong> field, or
+                  configure <strong>spine</strong> files.</p>
+              </template>
+            </EditorCharacterPreview>
+          </div>
 
           <div v-for="(slot, index) in allSlots" :key="index"
             :class="['slot-selector-rect', { selected: slot.localIndex === selectedSlotIndex && !slot.isCore, 'core-slot': slot.isCore }]"
@@ -525,7 +530,7 @@ onMounted(() => {
   height: 100%;
   border-left: 2px dashed rgba(0, 0, 0, 0.15);
   pointer-events: none;
-  z-index: 1;
+  z-index: 0;
 }
 
 .sheet-boundary.left {
@@ -552,6 +557,18 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Inline-block 1:1 square explicitly sized to 100cqh (preview-container height).
+   Matches FacePickerPopup so the spine canvas inside has a known geometric
+   reference, independent of preview-container's aspect ratio. The orange border
+   marks the doll bounds for the dev's positioning sanity. */
+.character-doll {
+  position: relative;
+  display: inline-block;
+  height: 100cqh;
+  aspect-ratio: 1 / 1;
+  border: 1px solid rgb(255, 183, 0);
 }
 
 .slot-selector-rect {
@@ -607,5 +624,4 @@ onMounted(() => {
   border-color: #9E9E9E;
   background-color: rgba(158, 158, 158, 0.05);
 }
-
 </style>

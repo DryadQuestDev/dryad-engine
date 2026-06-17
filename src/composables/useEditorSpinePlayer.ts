@@ -1,13 +1,19 @@
 import { ref, watch, onBeforeUnmount, type Ref } from 'vue';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import { spineRenderer, type SpineStats } from '../game/utils/spineRenderer';
-import { buildEditorTrackMap, applyTrackMap } from '../game/utils/spineAnimationGroups';
+import { applyTrackMap } from '../game/utils/spineAnimationGroups';
 
 interface Options {
   containerRef: Ref<HTMLElement | null>;
   atlasUrl: Ref<string | null | undefined>;
   skeletonUrl: Ref<string | null | undefined>;
-  attributes: Ref<Record<string, unknown>>;
+  /** Resolved {track → animation name} map. Caller computes this from the
+   *  character's spine-type skin layers (see buildEditorSpineTrackMapFromLayers). */
+  trackMap: Ref<Map<number, string>>;
+  /** Resolved spine skin name list. Caller computes from spine-type skin
+   *  layers via buildEditorSpineSkinsFromLayers. Combined via Skin.addSkin
+   *  at runtime by spineRenderer.applySkins. */
+  skins: Ref<string[]>;
   /** Optional art_scale ref. Multiplies into spine baseScale so oversized skeletons can be shrunk. */
   artScale?: Ref<number | null | undefined>;
   /** Optional art_dx ref (% of slot height). */
@@ -53,16 +59,10 @@ export function useEditorSpinePlayer(opts: Options) {
       spineInstance = spine;
       stats.value = spineRenderer.getStats(spine);
 
-      const attrs = opts.attributes.value || {};
-      const skeletonData = spine.skeleton.data;
+      const skins = opts.skins.value;
+      if (skins && skins.length > 0) spineRenderer.applySkins(spine, skins);
 
-      const skins = Object.values(attrs).filter(
-        (v): v is string => typeof v === 'string' && !!skeletonData.skins.find((s: any) => s.name === v)
-      );
-      if (skins.length > 0) spineRenderer.applySkins(spine, skins);
-
-      const animNames = skeletonData.animations.map((a: any) => a.name);
-      applyTrackMap(spine, buildEditorTrackMap(animNames, attrs));
+      applyTrackMap(spine, opts.trackMap.value);
     } catch (err) {
       console.error(`[${opts.slotIdPrefix}] Failed to initialize Spine:`, err);
     }
@@ -77,12 +77,22 @@ export function useEditorSpinePlayer(opts: Options) {
     stats.value = null;
   }
 
+  // Re-apply skins whenever the resolved list changes (caller's computed
+  // recomputes on attribute / layer changes).
   watch(
-    () => opts.attributes.value,
-    (attrs) => {
-      if (!spineInstance) return;
-      const animNames = spineInstance.skeleton.data.animations.map((a: any) => a.name);
-      applyTrackMap(spineInstance, buildEditorTrackMap(animNames, attrs || {}));
+    () => opts.skins.value,
+    (skins) => {
+      if (!spineInstance || !skins) return;
+      if (skins.length > 0) spineRenderer.applySkins(spineInstance, skins);
+    },
+    { deep: true },
+  );
+
+  // Re-apply track map whenever it changes (caller updates it from layers + attributes).
+  watch(
+    () => opts.trackMap.value,
+    (map) => {
+      if (spineInstance && map) applyTrackMap(spineInstance, map);
     },
     { deep: true },
   );

@@ -642,8 +642,9 @@ export class CharacterSystem {
 
   /**
    * Process addItemSlot action
-   * Format: "alice.hat[20, 40], eleanor.gloves[30, 60]"
-   * Coordinates are required (percentage of the character width and height)
+   * Format: "alice.hat[20, 40], eleanor.gloves" — coordinates are optional and
+   * default to `0, 0` when omitted (useful for text-based games with no doll).
+   * When present, coordinates are percentage of the character width and height.
    */
   // ignore types
   public processAddItemSlotAction(data: string): void {
@@ -672,10 +673,10 @@ export class CharacterSystem {
     }
 
     for (const spec of specs) {
-      // Match pattern: charId.slotId[x, y]
-      const match = spec.match(/^([^.]+)\.([^\[]+)\[([^\]]+)\]$/);
+      // Match pattern: charId.slotId[x, y] — brackets optional
+      const match = spec.match(/^([^.]+)\.([^\[]+?)(?:\[([^\]]+)\])?$/);
       if (!match) {
-        gameLogger.error(`Invalid addItemSlot format: "${spec}". Use "charId.slotId[x, y]"`);
+        gameLogger.error(`Invalid addItemSlot format: "${spec}". Use "charId.slotId" or "charId.slotId[x, y]"`);
         continue;
       }
 
@@ -687,18 +688,20 @@ export class CharacterSystem {
         continue;
       }
 
-      // Parse coordinates
-      const coords = coordsStr.split(',').map(s => s.trim());
-      if (coords.length !== 2) {
-        gameLogger.error(`Invalid coordinates format: "${coordsStr}". Use "[x, y]"`);
-        continue;
-      }
-
-      const x = Number(coords[0]);
-      const y = Number(coords[1]);
-      if (isNaN(x) || isNaN(y)) {
-        gameLogger.error(`Invalid coordinate values: "${coordsStr}". Both x and y must be numbers.`);
-        continue;
+      let x = 0;
+      let y = 0;
+      if (coordsStr !== undefined) {
+        const coords = coordsStr.split(',').map(s => s.trim());
+        if (coords.length !== 2) {
+          gameLogger.error(`Invalid coordinates format: "${coordsStr}". Use "[x, y]"`);
+          continue;
+        }
+        x = Number(coords[0]);
+        y = Number(coords[1]);
+        if (isNaN(x) || isNaN(y)) {
+          gameLogger.error(`Invalid coordinate values: "${coordsStr}". Both x and y must be numbers.`);
+          continue;
+        }
       }
 
       try {

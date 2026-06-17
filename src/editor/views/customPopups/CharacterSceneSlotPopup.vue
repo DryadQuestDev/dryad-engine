@@ -9,6 +9,7 @@ import { loadCharacterImages } from '../../../shared/utils/characterImageLoader'
 import type { CharacterSceneSlotObject } from '../../../schemas/characterSceneSlotSchema';
 import { CharacterSceneSlotSchema } from '../../../schemas/characterSceneSlotSchema';
 import { useEditorSpinePlayer } from '../../../composables/useEditorSpinePlayer';
+import { buildEditorSpineTrackMapFromLayers, buildEditorSpineSkinsFromLayers } from '../../../game/utils/spineAnimationGroups';
 import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../../game/utils/characterReference';
 import Button from 'primevue/button';
 import Select from 'primevue/select';
@@ -145,11 +146,28 @@ const spineArtDy = computed(() => {
 const spineGameScale = computed(() => getSpineCharacterScale('_default', editor.getMergedManifest()));
 const spineSlotScale = computed(() => localItem.value.scale ?? 1);
 
+// Layer-driven spine track map (mirrors Character.buildSpineTrackMapForView).
+const spineTrackMap = computed(() => buildEditorSpineTrackMapFromLayers(
+  selectedCharacter.value?.skin_layers,
+  skinLayersData.value,
+  spineAttributes.value,
+  null, // scene slot popup always previews the default view
+));
+
+// Layer-driven spine skins (mirrors Character.getSpineSkinsForView).
+const spineSkins = computed(() => buildEditorSpineSkinsFromLayers(
+  selectedCharacter.value?.skin_layers,
+  skinLayersData.value,
+  spineAttributes.value,
+  null,
+));
+
 const { init: initSpinePlayer } = useEditorSpinePlayer({
   containerRef: spineContainerRef,
   atlasUrl: spineAtlas,
   skeletonUrl: spineSkeleton,
-  attributes: spineAttributes,
+  trackMap: spineTrackMap,
+  skins: spineSkins,
   artScale: spineArtScale,
   artDx: spineArtDx,
   artDy: spineArtDy,

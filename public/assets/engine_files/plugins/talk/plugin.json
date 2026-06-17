@@ -1,0 +1,27 @@
+{
+  "id": "talk",
+  "name": "Talk",
+  "description": "Adds a Talk button to the character sheet that opens a character's dialogue scene.",
+  "author": "Nekon",
+  "version": "1.0.0",
+  "order": 0,
+  "scripts": [
+    "main.mjs"
+  ],
+  "data": {
+    "character_traits": [
+      {
+        "uid": "talk_trait_dialogue",
+        "id": "dialogue",
+        "type": "string",
+        "description": "Scene id for this character's Talk dialogue, as dungeon.room.scene (e.g. riko_doc.main.talk). Leave empty to hide the Talk button."
+      }
+    ],
+    "locale": [
+      {
+        "id": "talk_button_label",
+        "val": "Talk"
+      }
+    ]
+  }
+}

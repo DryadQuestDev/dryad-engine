@@ -605,9 +605,36 @@ export class LogicSystem {
     }
 
     private resolveLoreLinks(text: string): string {
-        const regex = /\[\[(!?)([a-zA-Z0-9_]+)(?:(?:>|&gt;)([^\]]+?))?\]\]/g;
+        const regex = /\[\[(!?)(?:([a-z]+):)?([a-zA-Z0-9_]+)(?:(?:>|&gt;)([^\]]+?))?\]\]/g;
         const narrative = this.game.narrativeSystem;
-        return text.replace(regex, (_match, bang: string, id: string, customLabel?: string) => {
+        return text.replace(regex, (_match, bang: string, kind: string | undefined, id: string, customLabel?: string) => {
+            if (kind === 'item') {
+                const def = this.game.getData('item_templates', true)?.get(id);
+                if (!def) {
+                    gameLogger.error(`Unknown item "${id}" in [[item:${id}]]`);
+                    return customLabel || id;
+                }
+                const name = customLabel || def.traits?.name || def.name || id;
+                const rarity = def.attributes?.rarity;
+                const rarityClass = rarity ? ` rarity rarity_${rarity}` : '';
+                return `<span class='lore-link${rarityClass}' data-lore-id='${id}' data-lore-kind='item' tabindex='0'>${name}</span>`;
+            }
+
+            if (kind === 'status') {
+                const def = this.game.getData('character_statuses', true)?.get(id);
+                if (!def) {
+                    gameLogger.error(`Unknown status "${id}" in [[status:${id}]]`);
+                    return customLabel || id;
+                }
+                const name = customLabel || def.name || id;
+                return `<span class='lore-link' data-lore-id='${id}' data-lore-kind='status' tabindex='0'>${name}</span>`;
+            }
+
+            if (kind && kind !== 'record') {
+                gameLogger.warn(`Unknown lore kind "${kind}" in [[${kind}:${id}]] — falling back to label`);
+                return customLabel || id;
+            }
+
             const record = narrative.getRecord(id);
             if (!record) {
                 gameLogger.error(`Unknown record "${id}" in [[${bang}${id}]]`);

@@ -46,6 +46,7 @@ type RpgBattle = {
   turnOrder: string[];
   /** Ids of mid-battle summoned combatants — deleted from the game on battle end. */
   summoned: string[];
+  spawnedEnemies: string[];
   actorTurn: number;
   activeCharId: string | null;
   activeSide: 'player' | 'enemy';
@@ -59,6 +60,7 @@ type RpgBattle = {
   prevBlockInventory: boolean;
   prevGameState: string;
   prevHideEvents: boolean;
+  prevAssets: Asset[];
 };
 
 // ── Ability State ──

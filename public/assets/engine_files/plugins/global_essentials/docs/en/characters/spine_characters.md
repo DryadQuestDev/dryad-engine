@@ -1,6 +1,6 @@
 # Spine Character Dolls
 
-Characters can use Spine skeletal animations instead of static layered images. This provides smooth idle animations, dynamic poses, and attribute-driven skin swapping – all baked into the Spine file.
+Characters can use Spine skeletal animations instead of (or alongside) static layered images. Both animation playback and skin selection are driven by **skin layers of `type: spine`** — the same authoring pipeline you already use for static image layers, with animation names and skin names instead of image paths.
 
 ---
 
@@ -10,73 +10,40 @@ In the engine editor, open a character template and fill in the **Spine** sectio
 
 - **Atlas** – the `.atlas` file
 - **Skeleton** – the `.json` or `.skel` skeleton file
-- **Default Animation** – animation name to play on creation (e.g., `idle`)
 
-When a character has spine configured, `CharacterDoll` component automatically renders the Spine animation instead of static image layers.
+You can declare more than one entry — one per view (default, `back`, etc.). Each entry has its own `art_dx`, `art_dy`, `art_scale` so each rig can be framed independently.
 
----
-
-## Skin Mapping (Convention-Based)
-
-Character **attributes** drive which Spine skins are active. Each attribute's current value is used directly as a Spine skin name. Multiple attributes combine into a multi-skin.
-
-| Attribute | Value | Spine skin activated |
-|-----------|-------|---------------------|
-| `outfit` | `leather` | `leather` |
-| `hair` | `red_ponytail` | `red_ponytail` |
-
-The artist names Spine skins to match the attribute values defined in the engine editor. Attribute values that don't match any Spine skin are silently ignored.
+When a character has a spine configured for the current view, the engine renders the spine animation instead of static image layers (unless a static layer for the same view is also active — see "Static Action Overlays" below).
 
 ---
 
-## Changing Animations
+## Spine Skin Layers
 
-### From Content (No Code)
+Spine animations and skins are picked the same way static images are picked for layered characters — via **skin layers** that watch one or more **character attributes** and resolve to a value per attribute combination. The only difference is what the value is: a static layer maps each combo to an image file, while a spine layer maps each combo to an animation name (in `spine_animations`) or a skin name (in `spine_skins`). 
+For more information on character attributes and skins read ->characters.characters_overview
 
-Use the `char` action with the `animation` type:
+A spine-type skin layer can drive an **animation**, a **skin**, or both — they're two facets of the same layer. The editor generates the per-attribute fields for you; just fill in the dropdowns and string fields.
 
-```
-{char: "mc.animation=idle"}
-```
+Note: if your character animation is not playing, make sure you've filled in both attributes and skin_layers properties for that character template in the editor.
 
-Animations are driven by character attributes. Name spine animations using `attributeKey_value` convention (e.g. `belly_0`, `face_ahegao`). When the attribute changes, the matching animation plays automatically on its own track.
+## Static Action Overlays
 
-### From Scripts
+A spine-rendered view can be temporarily replaced by a static image. If you define a static layer that matches the same view (e.g. an `attack` layer keyed by a `battle_state` attribute), the engine hides the spine while the static frame is showing — typically used for hand-drawn action frames during attacks, hits, and casts. When the action ends and the attribute returns to idle, the spine resumes.
+
+Worked example: Ane's `back` view has both a back spine and a `ane_back` static layer with images for `attack`, `cast`, `hit`. While `battle_state=idle`, the back spine plays. When she's hit, `battle_state=hit` activates the `ane_back_hit.webp` frame and the spine is hidden until the action ends.
+
+## API
+
+Spine animations and skins follow character attributes. Set an attribute, the engine resolves the new animation / skin name from the matching layer and crossfades to it.
 
 ```javascript
 const mc = game.getCharacter('mc');
 
-// Change belly animation (plays belly_2 on its dedicated track)
-mc.setAttribute('belly', '2');
+// belly layer resolves to 'belly_2'
+mc.setAttribute('outfit', 'cute_dress');
 
-// Change face expression (plays face_ahegao on its dedicated track)
-mc.setAttribute('face', 'ahegao');
-
-// Check if animation exists
-if (mc.hasSpineAnimation('belly_2')) {
-  mc.setAttribute('belly', '2');
-}
+// face layer resolves to 'face_ahegao'
+mc.setAttribute('expression', 'angry');
 ```
 
----
-
-## API Reference
-
-| Method / Property | Description |
-|-------------------|-------------|
-| `character.isSpineCharacter()` | Returns `true` if spine atlas and skeleton are configured |
-| `character.isSpineForView(view)` | Returns `true` if spine exists for the given view (e.g. `"back"`) |
-| `character.getSpineTrackAnimations(view?)` | Get current track-to-animation map based on attributes |
-| `character.hasSpineAnimation(name, view?)` | Check if animation exists in the skeleton. Returns `false` if not loaded yet |
-| `character.getSpineSkins()` | Returns array of Spine skin names from current attributes |
-| `character.setAvailableSpineAnimations(view, names)` | Register animation names and build groups (called by engine on load) |
-
----
-
-## Editor Support
-
-All three character editor popups support spine preview:
-
-- **Art Manager** (face picker) – position the face crop rectangle on the animated spine
-- **Item Slot Picker** – drag item slot positions onto the spine character
-- **Scene Slot Editor** – preview spine characters with scene transforms and animations
+There's no manual "play this animation" or "apply this skin" API — everything flows through skin layers + attributes.

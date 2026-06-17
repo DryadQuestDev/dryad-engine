@@ -126,6 +126,15 @@ const contentSource = computed(() => {
     return r.content || r.summary || '';
 });
 
+const discoveredChildren = computed(() => {
+    if (!selectedRecordId.value) return [];
+    return game.getDiscoveredChildren(selectedRecordId.value);
+});
+
+function childBody(child: { summary?: string; content?: string }): string {
+    return child.content || child.summary || '';
+}
+
 // Validate the persisted selection against the current data. Tree falls back if missing;
 // record id is cleared if the record was deleted or is no longer discovered.
 // If no record ends up selected (fresh game, stale save, etc.), auto-pick the first
@@ -290,6 +299,12 @@ function onLinkNavigate(recordId: string) {
                     <h2 class="record-title">{{ selectedRecord.title }}</h2>
                     <div v-script="{ html: contentSource, navMode: true, onNavigate: onLinkNavigate }"
                         class="record-body"></div>
+                    <template v-for="child in discoveredChildren" :key="child.id">
+                        <hr class="record-child-sep">
+                        <h3 class="record-child-title">{{ child.title }}</h3>
+                        <div v-script="{ html: childBody(child), navMode: true, onNavigate: onLinkNavigate }"
+                            class="record-body"></div>
+                    </template>
                 </div>
                 <div v-else class="no-selection">
                     Select a record to view details.
@@ -562,6 +577,19 @@ function onLinkNavigate(recordId: string) {
 .record-body {
     color: #d1d5db;
     line-height: 1.7;
+}
+
+.record-child-sep {
+    border: none;
+    border-top: 1px solid #3a3a3a;
+    margin: 22px 0 14px;
+}
+
+.record-child-title {
+    font-size: 1.25em;
+    color: var(--theme-primary, #5dadec);
+    margin: 0 0 10px 0;
+    letter-spacing: 0.2px;
 }
 
 .no-selection,

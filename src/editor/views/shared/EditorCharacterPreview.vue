@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { Editor } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { useEditorSpinePlayer } from '../../../composables/useEditorSpinePlayer';
+import { buildEditorSpineTrackMapFromLayers, buildEditorSpineSkinsFromLayers } from '../../../game/utils/spineAnimationGroups';
 import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO, OVERLAY_BASE_SCALE } from '../../../game/utils/characterReference';
 
 const props = defineProps<{
@@ -65,6 +66,25 @@ const spineConfig = computed(() => {
 const atlasUrl = computed(() => spineConfig.value.atlas);
 const skeletonUrl = computed(() => spineConfig.value.skeleton);
 const attributes = computed(() => props.character?.attributes || {});
+
+// Spine track playback now driven by skin layers of type='spine'. Mirrors
+// Character.buildSpineTrackMapForView at runtime — the editor preview shows
+// exactly what the game will play.
+const spineTrackMap = computed(() => buildEditorSpineTrackMapFromLayers(
+  props.character?.skin_layers,
+  skinLayersData.value,
+  attributes.value,
+  props.view,
+));
+
+// Spine skins (combined via Skin.addSkin at runtime) — mirrors
+// Character.getSpineSkinsForView. Layer-driven, status-gateable.
+const spineSkins = computed(() => buildEditorSpineSkinsFromLayers(
+  props.character?.skin_layers,
+  skinLayersData.value,
+  attributes.value,
+  props.view,
+));
 const artScale = computed(() => spineConfig.value.art_scale);
 const artDx = computed(() => spineConfig.value.art_dx);
 const artDy = computed(() => spineConfig.value.art_dy);
@@ -104,7 +124,8 @@ const { init: initSpinePlayer } = useEditorSpinePlayer({
   containerRef: spineContainerRef,
   atlasUrl,
   skeletonUrl,
-  attributes,
+  trackMap: spineTrackMap,
+  skins: spineSkins,
   artScale,
   artDx,
   artDy,

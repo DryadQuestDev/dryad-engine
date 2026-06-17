@@ -418,6 +418,20 @@ span.lore-link:focus-visible,
   text-decoration-color: var(--glass-tint, #ffd166);
 }
 
+/* Item lore-links carry a `rarity` marker class alongside .lore-link
+   (emitted by resolveLoreLinks). The matching `rarity_<X>` class sets
+   --rarity-color; this rule consumes it. Doubles `.lore-link.lore-link`
+   to keep specificity above the `color: inherit` rule above. */
+.lore-link.lore-link.rarity {
+  color: var(--rarity-color);
+  text-decoration-color: var(--rarity-color);
+}
+
+.lore-link.lore-link.rarity:hover,
+.lore-link.lore-link.rarity:focus-visible {
+  filter: brightness(1.2);
+}
+
 .flash-content .special {
   color: #17ff32;
 }
@@ -665,6 +679,10 @@ span.lore-link:focus-visible,
 
 .rarity_legendary {
   --rarity-color: #ff8c42;
+}
+
+.rarity_quest {
+  --rarity-color: #ffd700;
 }
 
 /* Apply rarity color to text (item names) */

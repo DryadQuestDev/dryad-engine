@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
+import Dialog from 'primevue/dialog';
+import InputNumber from 'primevue/inputnumber';
 import RichContentEditor from './PlainEditor.vue';
 import type { SceneBlock, SceneColumn, SceneRow } from '../../../../utility/dungeonEditor/ast';
 import { newSceneColumn, newSceneRow } from '../../../../utility/dungeonEditor/ast';
@@ -10,12 +13,29 @@ import { inputMatchesSearch } from './searchState';
 const props = defineProps<{ block: SceneBlock }>();
 const emit = defineEmits<{ 'update:block': [block: SceneBlock] }>();
 
+const choiceDialogVisible = ref(false);
+const choiceCount = ref(3);
+
 function emitRows(rows: SceneRow[]) {
   emit('update:block', { ...props.block, rows });
 }
 
 function addRow() {
   emitRows([...props.block.rows, tagWithUid(newSceneRow())]);
+}
+
+function openChoiceRowDialog() {
+  choiceCount.value = 3;
+  choiceDialogVisible.value = true;
+}
+
+function confirmChoiceRow() {
+  const n = Math.max(1, Math.floor(choiceCount.value || 1));
+  const columns = Array.from({ length: n }, (_, i) =>
+    tagWithUid({ ...newSceneColumn('~'), name: `choice${i + 1}` }),
+  );
+  emitRows([...props.block.rows, tagWithUid({ columns } as SceneRow)]);
+  choiceDialogVisible.value = false;
 }
 
 function removeRow(rowIdx: number) {
@@ -138,8 +158,25 @@ function updateColumn<K extends keyof SceneColumn>(
       <button type="button" class="add-btn add-btn--row" @click="addRow">
         <span class="add-btn__plus">+</span>
         <span class="add-btn__label">Row</span>
+        <span class="add-btn__sigil">%</span>
+      </button>
+      <button type="button" class="add-btn add-btn--row add-btn--row-tilde" @click="openChoiceRowDialog">
+        <span class="add-btn__plus">+</span>
+        <span class="add-btn__label">Row</span>
+        <span class="add-btn__sigil">~</span>
       </button>
     </div>
+
+    <Dialog v-model:visible="choiceDialogVisible" modal header="Add choice row" :style="{ width: '20rem' }">
+      <div class="choice-dialog-body">
+        <label for="choice-count">How many choices?</label>
+        <InputNumber input-id="choice-count" v-model="choiceCount" :min="1" :max="20" showButtons />
+      </div>
+      <template #footer>
+        <Button label="Cancel" text severity="secondary" @click="choiceDialogVisible = false" />
+        <Button label="Create" @click="confirmChoiceRow" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -361,5 +398,31 @@ input.params-input {
 .add-btn--row:hover {
   background: rgba(129, 199, 132, 0.18);
   border-color: #2e7d32;
+}
+
+.add-btn--row-tilde {
+  border-color: rgba(77, 182, 172, 0.6);
+  color: #00897b;
+}
+
+.add-btn--row-tilde:hover {
+  background: rgba(77, 182, 172, 0.18);
+  border-color: #00897b;
+}
+
+.add-btn--row-tilde .add-btn__sigil {
+  color: #4db6ac;
+}
+
+.choice-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.25rem 0;
+}
+
+.choice-dialog-body label {
+  font-size: 0.9rem;
+  color: #cfcfcf;
 }
 </style>

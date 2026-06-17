@@ -47,16 +47,37 @@ Records that exist but aren't referenced by any tree work fine inline as tooltip
 
 ## Inline Link Syntax
 
-Drop a record reference into any text that goes through the text transformation pipeline (scene narrative, item descriptions, ability descriptions, quest logs, etc.):
+Drop a reference into any text that goes through the text transformation pipeline (scene narrative, item descriptions, ability descriptions, quest logs, etc.):
+
+### Records
 
 | Syntax | Behavior |
 |--------|----------|
-| `[[id]]` | Standard link. If the record is discovered, renders as a clickable hoverable link. If not discovered, renders as plain text (the record's title). Stealth-gates lore reveals. |
+| `[[id]]` | Standard record link. If the record is discovered, renders as a clickable hoverable link. If not discovered, renders as plain text (the record's title). Stealth-gates lore reveals. |
+| `[[record:id]]` | Explicit form of `[[id]]`. Useful when reading alongside `[[item:...]]` / `[[status:...]]` for consistency. |
 | `[[!id]]` | **Discover-on-encounter**. The first time this token is rendered, marks the record as discovered. Useful in scene narrative that introduces a concept ("you learn about [[!the_kingdom]]"). After that, all subsequent `[[the_kingdom]]` references show as links. |
 | `[[id>label]]` | Custom display label. Renders the link with `label` instead of the record's title. Lets you say "the kingdom" inline instead of always "Kingdom of Luminaria". |
 | `[[!id>label]]` | Combined: discover-on-encounter with a custom label. |
 
 `[[!id]]` discovery only fires for branches that survive `if{}` conditional evaluation – `[[!id]]` inside a discarded branch will not unlock the record.
+
+### Items and Statuses
+
+The same `[[...]]` syntax also drives popovers for **items** and **character statuses**, using a kind prefix:
+
+| Syntax | Behavior |
+|--------|----------|
+| `[[item:id]]` | Renders a link to an item template. Hovering opens the ItemCard popover (name, description, rarity color, stat block, price). The link text is tinted with the item's rarity color (common = grey, epic = purple, etc.). |
+| `[[status:id]]` | Renders a link to a character status. Hovering opens the StatusCard popover (name, description, stats granted, abilities granted). |
+| `[[item:id>label]]` | Custom label form, same as records. |
+| `[[status:id>label]]` | Custom label form, same as records. |
+
+Items and statuses are **always shown as clickable** – there's no discovery gate (the `!` prefix is silently ignored for these kinds). Unknown ids log an error and render as the label / raw id.
+
+**Example:**
+
+```
+Riko lays three pieces on the counter: [[item:sword]], [[item:book]], and [[item:shield]]. Interested?
 
 ---
 
@@ -66,7 +87,7 @@ A record is "discovered" if any of these is true:
 
 1. Its `auto_discovery` field is `true`.
 2. A `[[!id]]` link in some rendered text marked it discovered.
-3. A `{discover_lore: id}` action ran (see below).
+3. A `{lore: id}` action ran (see below).
 
 Discovered records render their inline links and appear with full content in the Encyclopedia. Undiscovered records:
 
@@ -75,13 +96,13 @@ Discovered records render their inline links and appear with full content in the
 
 Discovery state is persisted in saves (Set of discovered ids).
 
-### `discover_lore` action
+### `lore` action
 
 Fires inside any event/scene action JSON. Accepts a single id or a comma-separated list:
 
 ```
-{discover_lore: "kingdom_of_luminaria"}
-{discover_lore: "kingdom_of_luminaria, riko_diary, freeze_status"}
+{lore: "kingdom_of_luminaria"}
+{lore: "kingdom_of_luminaria, riko_diary, freeze_status"}
 ```
 
 Use this when you want discovery without relying on `[[!id]]` rendering – for example, on entering a room, completing a quest, or looting an item.
@@ -166,9 +187,11 @@ const trees = game.getEncyclopediaTrees();
 |--------------|---------|
 | Define a lore/tutorial entry | Narrative > Records – set id, title, summary, content |
 | Group entries into Encyclopedia tabs | Narrative > Encyclopedia Trees – set tab, order, groups |
-| Show a hover tooltip in scene text | Write `[[id]]` |
-| Show a tooltip with custom label | Write `[[id>the kingdom]]` |
-| Discover a record on first scene read | Write `[[!id]]` |
-| Discover a record from an action | Use `{discover_lore: "id"}` |
+| Show a record tooltip in scene text | Write `[[id]]` |
+| Show an item card on hover | Write `[[item:id]]` (rarity-colored automatically) |
+| Show a status card on hover | Write `[[status:id]]` |
+| Show a tooltip with custom label | Write `[[id>the kingdom]]` (works with `item:` / `status:` too) |
+| Discover a record on first scene read | Write `[[!id]]` (records only) |
+| Discover a record from an action | Use `{lore: "id"}` |
 | Check discovery in a script | `game.isRecordDiscovered(id)` |
 | Auto-unlock from game start | Set `auto_discovery: true` on the record |

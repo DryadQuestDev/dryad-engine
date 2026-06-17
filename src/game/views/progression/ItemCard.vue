@@ -23,6 +23,9 @@ const rarityClass = computed(() => {
   return rarity ? `rarity_${rarity}` : '';
 });
 
+const isQuest = computed(() => props.item.attributes['rarity'] === 'quest');
+const questLabel = computed(() => Global.getInstance().getString('item_tag.quest'));
+
 // Get weight for single item (not multiplied by quantity)
 const itemWeight = computed(() => {
   const weight = props.item.getTrait('weight');
@@ -89,6 +92,7 @@ const consumeDurationText = computed(() => {
     <div class="card-header">
       <div class="header-top">
         <h3 class="item-name" :class="rarityClass">{{ item.getTrait('name') || 'Item Name' }}</h3>
+        <span v-if="isQuest" class="quest-tag">{{ questLabel }}</span>
         <!-- Item cost display (only if item has price) -->
         <div v-if="item.isTradable()" class="item-cost">
           <div v-for="(amount, currencyId) in item.price" :key="currencyId" class="cost-item">
@@ -149,8 +153,7 @@ const consumeDurationText = computed(() => {
 .header-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .item-name {
@@ -160,10 +163,24 @@ const consumeDurationText = computed(() => {
   color: #42b983;
 }
 
+.quest-tag {
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  border-radius: 8px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 .item-cost {
   display: flex;
   gap: 6px;
   align-items: center;
+  margin-left: auto;
 }
 
 .cost-item {

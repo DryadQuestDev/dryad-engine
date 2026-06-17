@@ -76,10 +76,12 @@ const isActiveItem = computed(() => props.forceActive || editor.activeItemUids.v
 // NOW DEFINE THE WATCHER AND OTHER LOGIC THAT USES PROPS
 const dynamicImageSchemaObjects = ref<Record<string, Schemable> | null>(null);
 const dynamicMaskSchemaObjects = ref<Record<string, Schemable> | null>(null);
+const dynamicSpineAnimationSchemaObjects = ref<Record<string, Schemable> | null>(null);
+const dynamicSpineSkinSchemaObjects = ref<Record<string, Schemable> | null>(null);
 
-// Watcher for itemData to update dynamicImageSchemaObjects and dynamicMaskSchemaObjects
-// Only register deep watcher for fields that use build_images logic
-if (props.fieldKey === 'images' || props.fieldKey === 'masks') {
+// Watcher for itemData to update the dynamic schema refs.
+// Only register deep watcher for fields that use build_images logic.
+if (props.fieldKey === 'images' || props.fieldKey === 'masks' || props.fieldKey === 'spine_animations' || props.fieldKey === 'spine_skins') {
   watch(() => props.itemData, (newItemData, oldItemData) => {
     if (
       typeof props.rootSchema === 'object' && props.rootSchema && props.rootSchema.attributes &&
@@ -107,13 +109,19 @@ if (props.fieldKey === 'images' || props.fieldKey === 'masks') {
 
       const newDynamicImageObjects: Record<string, Schemable> = {};
       const newDynamicMaskObjects: Record<string, Schemable> = {};
+      const newDynamicSpineAnimationObjects: Record<string, Schemable> = {};
+      const newDynamicSpineSkinObjects: Record<string, Schemable> = {};
       let attributesObjects = editor.skinAttributes.value;
-      //console.warn("attributesObjects:", attributesObjects);
+
+      // Build the per-combo key list. With attributes selected, each combo is
+      // `${layer.id}_${attr_value_1}_${attr_value_2}…`. With no attributes,
+      // there's exactly one combo keyed by the layer id alone — matches the
+      // runtime lookup in character.ts buildImageUrlsFromLayers where
+      // `imageKey = layer.id` when `layer.attributes` is empty/missing.
+      const combinedIds: string[] = [];
       if (selectedAttributes.length > 0 && attributesObjects && attributesObjects.length > 0) {
         let valuesCollection: any[] = [];
-
         selectedAttributes.forEach(attrId => {
-          // console.warn("attrId:", attrId);
           let values = attributesObjects.find((attr: { id: string }) => attr.id === attrId)?.values;
           if (values && Array.isArray(values)) {
             valuesCollection.push(values);
@@ -121,8 +129,6 @@ if (props.fieldKey === 'images' || props.fieldKey === 'masks') {
             console.warn(`[FormFieldRenderer] Attribute '${attrId}' not found in attributesObjects or has no values array`);
           }
         });
-        //console.error("valuesCollection:", valuesCollection);
-
         const ids = valuesCollection.reduce(
           (acc: any, curr: any) =>
             acc.flatMap((prefix: any) =>
@@ -130,41 +136,44 @@ if (props.fieldKey === 'images' || props.fieldKey === 'masks') {
             ),
           ['']                // start with an empty prefix
         );
-
         for (let id of ids) {
-          let idFinal = props.itemData.id + "_" + id;
-          // Build image schema
-          newDynamicImageObjects[idFinal] = {
-            type: 'file',
-            fileType: 'image',
-          };
-          // Build mask schema (polygon strings)
-          newDynamicMaskObjects[idFinal] = {
-            type: 'string',
-          };
+          combinedIds.push(props.itemData.id + "_" + id);
         }
-
-
+      } else {
+        // No attributes: single entry keyed by the layer id itself.
+        combinedIds.push(props.itemData.id);
       }
+
+      for (const idFinal of combinedIds) {
+        newDynamicImageObjects[idFinal] = { type: 'file', fileType: 'image' };
+        newDynamicMaskObjects[idFinal] = { type: 'string' };
+        newDynamicSpineAnimationObjects[idFinal] = { type: 'string' };
+        newDynamicSpineSkinObjects[idFinal] = { type: 'string' };
+      }
+
       if (JSON.stringify(dynamicImageSchemaObjects.value) !== JSON.stringify(newDynamicImageObjects)) {
         dynamicImageSchemaObjects.value = newDynamicImageObjects;
       }
       if (JSON.stringify(dynamicMaskSchemaObjects.value) !== JSON.stringify(newDynamicMaskObjects)) {
         dynamicMaskSchemaObjects.value = newDynamicMaskObjects;
       }
+      if (JSON.stringify(dynamicSpineAnimationSchemaObjects.value) !== JSON.stringify(newDynamicSpineAnimationObjects)) {
+        dynamicSpineAnimationSchemaObjects.value = newDynamicSpineAnimationObjects;
+      }
+      if (JSON.stringify(dynamicSpineSkinSchemaObjects.value) !== JSON.stringify(newDynamicSpineSkinObjects)) {
+        dynamicSpineSkinSchemaObjects.value = newDynamicSpineSkinObjects;
+      }
     } else if (props.fieldKey === 'images') {
-      // This condition means fieldKey is 'images' but other conditions for building dynamic schema failed
-      if (dynamicImageSchemaObjects.value !== null) {
-        dynamicImageSchemaObjects.value = null;
-      }
+      if (dynamicImageSchemaObjects.value !== null) dynamicImageSchemaObjects.value = null;
     } else if (props.fieldKey === 'masks') {
-      // This condition means fieldKey is 'masks' but other conditions for building dynamic schema failed
-      if (dynamicMaskSchemaObjects.value !== null) {
-        dynamicMaskSchemaObjects.value = null;
-      }
+      if (dynamicMaskSchemaObjects.value !== null) dynamicMaskSchemaObjects.value = null;
+    } else if (props.fieldKey === 'spine_animations') {
+      if (dynamicSpineAnimationSchemaObjects.value !== null) dynamicSpineAnimationSchemaObjects.value = null;
+    } else if (props.fieldKey === 'spine_skins') {
+      if (dynamicSpineSkinSchemaObjects.value !== null) dynamicSpineSkinSchemaObjects.value = null;
     }
   }, { deep: true, immediate: true });
-} // end guard: fieldKey === 'images' || 'masks'
+} // end guard: fieldKey === 'images' || 'masks' || 'spine_animations' || 'spine_skins'
 
 const emit = defineEmits(['update:modelValue', 'validate']);
 
@@ -440,6 +449,34 @@ const effectiveFieldSchema = computed<Schemable | null>(() => {
     return {
       ...base,
       objects: dynamicMaskSchemaObjects.value
+    };
+  }
+
+  // Handle build_images logic for spine_animations field
+  if (
+    props.fieldKey === 'spine_animations' &&
+    props.rootSchema &&
+    props.rootSchema.attributes &&
+    (props.rootSchema.attributes as Schemable).logic === 'build_images' &&
+    dynamicSpineAnimationSchemaObjects.value
+  ) {
+    return {
+      ...base,
+      objects: dynamicSpineAnimationSchemaObjects.value
+    };
+  }
+
+  // Handle build_images logic for spine_skins field
+  if (
+    props.fieldKey === 'spine_skins' &&
+    props.rootSchema &&
+    props.rootSchema.attributes &&
+    (props.rootSchema.attributes as Schemable).logic === 'build_images' &&
+    dynamicSpineSkinSchemaObjects.value
+  ) {
+    return {
+      ...base,
+      objects: dynamicSpineSkinSchemaObjects.value
     };
   }
 

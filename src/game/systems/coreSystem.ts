@@ -149,6 +149,23 @@ export class CoreSystem {
   }
 
   /**
+   * Returns true when a save was loaded and its `(game + mods)` version signature
+   * differs from the current one. Returns false for new games or when the loaded
+   * save's versions match the current versions exactly. Same signature comparison
+   * `runDefaultSaveMigration` uses internally.
+   *
+   * A missing or empty `loadedSaveVersions` counts as its own (empty) signature —
+   * any current `_core` version mismatches it, so this returns true.
+   */
+  public isOldSave(): boolean {
+    const game = Game.getInstance();
+    if (game.isNewGame) return false;
+    const stringify = (m: Record<string, { version: string }>) =>
+      Object.keys(m).sort().map(k => `${k}=${m[k].version}`).join(',');
+    return stringify(this.loadedSaveVersions ?? {}) !== stringify(this.getVersions());
+  }
+
+  /**
    * Rebuild every character's state from current definitions (template + statuses + traits + attributes).
    * No-op for new games or when the loaded versions match the current ones.
    *
@@ -156,16 +173,12 @@ export class CoreSystem {
    */
   public runDefaultSaveMigration(options: { ignoreStats?: string[]; ignoreTraits?: string[]; ignoreAttributes?: string[]; ignoreItemTraits?: string[]; ignoreItemAttributes?: string[]; } = {}): void {
     const game = Game.getInstance();
-    if (game.isNewGame) return;                                      // fresh save: nothing to migrate
+    if (!this.isOldSave()) return;
 
     const stringify = (m: Record<string, { version: string }>) =>
       Object.keys(m).sort().map(k => `${k}=${m[k].version}`).join(',');
-
-    // A missing or empty versions map on the save counts as its own (empty) signature —
-    // any current `_core` version mismatches it, so migration runs.
     const oldSig = stringify(this.loadedSaveVersions ?? {});
     const newSig = stringify(this.getVersions());
-    if (oldSig === newSig) return;                                   // nothing changed
 
     console.log(`[save-migration] ${oldSig || '(none)'} → ${newSig}`);
     const migrationStart = performance.now();
