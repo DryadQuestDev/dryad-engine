@@ -11,6 +11,7 @@ import InputNumber from 'primevue/inputnumber';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
 import type { Inventory } from '../../core/character/inventory';
+import { PARTY_INVENTORY_ID } from '../../systems/itemSystem';
 
 const game = Game.getInstance();
 const global = Global.getInstance();
@@ -84,8 +85,12 @@ onMounted(() => {
   // Collect all inventories
   inventories.value = Array.from(game.itemSystem.inventories.value.values());
 
-  // Sort by id
-  inventories.value.sort((a, b) => a.id.localeCompare(b.id));
+  // Sort by id, party inventory always first
+  inventories.value.sort((a, b) => {
+    if (a.id === PARTY_INVENTORY_ID) return -1;
+    if (b.id === PARTY_INVENTORY_ID) return 1;
+    return a.id.localeCompare(b.id);
+  });
 
   // Initialize form state for each inventory
   inventories.value.forEach(inv => {

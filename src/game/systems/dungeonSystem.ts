@@ -916,6 +916,24 @@ export class DungeonSystem {
     return this.sceneSlots.value.find(slot => slot.char === charId);
   }
 
+  private static readonly ANIM_GROUPS = {
+    enter: ['enter', 'enter_duration', 'enter_delay', 'enter_ease'],
+    exit: ['exit', 'exit_duration', 'exit_ease'],
+    idle: ['idle', 'idle_duration', 'idle_intensity'],
+  } as const;
+
+  private resolveInheritedAnimations(incoming: Record<string, any>, previous?: Partial<SceneSlot>): void {
+    for (const anchor of ['enter', 'exit', 'idle'] as const) {
+      const val = incoming[anchor];
+      if (val !== 'inherit' && val !== undefined) continue;
+      for (const prop of DungeonSystem.ANIM_GROUPS[anchor]) {
+        const prev = previous?.[prop as keyof SceneSlot];
+        if (prev !== undefined) incoming[prop] = prev;
+        else delete incoming[prop];
+      }
+    }
+  }
+
   /**
    * Add a new actor to the scene with enter animation
    */
@@ -930,6 +948,7 @@ export class DungeonSystem {
 
     // Check if character already exists in scene
     const existingSlot = this.findSlotByChar(slot.char);
+    this.resolveInheritedAnimations(slot as any, existingSlot);
     if (existingSlot) {
       // If character is being removed, cancel the removal
       this.cancelScheduledRemoval(existingSlot);
@@ -996,6 +1015,7 @@ export class DungeonSystem {
     this.cancelScheduledRemoval(existingSlot);
 
     // Update properties directly on the existing reactive object
+    this.resolveInheritedAnimations(updates, existingSlot);
     Object.assign(existingSlot, updates);
     gameLogger.info(`[actor] Updated properties for "${charId}":`, updates);
     return true;
@@ -1023,6 +1043,7 @@ export class DungeonSystem {
 
     // Prepare new slot data (template + inline properties)
     const newSlotData = { ...targetTemplate, ...inlineProps };
+    this.resolveInheritedAnimations(newSlotData, existingSlot);
 
     // Strip enter animations to avoid playing them during slot change
     // But preserve exit animations so the character has correct exit for new slot
@@ -1871,13 +1892,13 @@ export class DungeonSystem {
     if (lines.has(nextParagraphId)) {
       return nextParagraphId;
     }
-
-    // 2. Try to find the next block (same row, block + 1, paragraph 1)
-    let nextBlockId = this.compileSceneId(scene_name, scene_row, scene_block + 1, 1);
-    if (lines.has(nextBlockId)) {
-      return nextBlockId;
-    }
-
+    /*
+        // 2. Try to find the next block (same row, block + 1, paragraph 1)
+        let nextBlockId = this.compileSceneId(scene_name, scene_row, scene_block + 1, 1);
+        if (lines.has(nextBlockId)) {
+          return nextBlockId;
+        }
+    */
     // 3. Try to find the next row (row + 1, block 1, paragraph 1)
     let nextRowId = this.compileSceneId(scene_name, scene_row + 1, 1, 1);
     if (lines.has(nextRowId)) {

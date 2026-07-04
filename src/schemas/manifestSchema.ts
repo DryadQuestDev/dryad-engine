@@ -32,6 +32,18 @@ export const ManifestSchema = {
     tooltip: 'Per-view spine size multiplier. One numeric field per character_view (including injected _default). 1.0 = native scale; 0.5 = half size. Per-spine art_scale stacks on top of this view-level baseline.'
   },
   landing_css: { type: 'file[]', fileType: 'css', tooltip: 'CSS stylesheets applied only on the landing page (loaded on game/mod select, unloaded on switch). Separate from `css` so game-time styles do not leak while browsing.' },
+  landing_widgets: {
+    type: 'schema[]',
+    tooltip: 'HTML widgets overlaid on the landing page inside a centered 16:9 stage (contain-fit). Stacks across active manifests like landing_bg_asset. The engine only positions them — style the content via landing_css.',
+    objects: {
+      uid: { type: 'uid' },
+      widget_id: { type: 'string', tooltip: 'Widget id. Applied as the element\'s HTML id so landing_css can target it with #<widget_id>.' },
+      html: { type: 'htmlarea', tooltip: 'Raw HTML content. Rendered as-is with no engine styling.' },
+      x: { type: 'number', min: 0, max: 100, step: 1, tooltip: 'Left edge of the widget, in % of the 16:9 stage width. Empty = 0.' },
+      y: { type: 'number', min: 0, max: 100, step: 1, tooltip: 'Top edge of the widget, in % of the 16:9 stage height. Empty = 0.' },
+      disabled: { type: 'boolean', defaultValue: false, tooltip: 'Hide this widget. Widgets with the same widget_id merge across active manifests in load order, so a mod can disable (or restyle) a base-game widget by declaring an entry with the same widget_id.' },
+    }
+  },
   disable_engine_link: { type: 'boolean', defaultValue: false, tooltip: 'Hide the link on the Dryad Engine logo (logo still shown). For SFW releases that do not want to link to the 18+ engine site. Any active manifest setting this to true wins.' },
   scripts: { type: 'file[]', fileType: 'js', tooltip: 'JavaScript files to load and execute for this game/mod. \n Note: It is strongly recommended to use .mjs extension for better IDE support.' },
   css: { type: 'file[]', fileType: 'css', tooltip: 'CSS stylesheets to load for this game/mod.' },

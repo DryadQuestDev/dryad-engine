@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, provide } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, provide } from 'vue';
 import { useSortable } from '@vueuse/integrations/useSortable';
 import { useStorage, watchDebounced } from '@vueuse/core';
 import {
@@ -307,8 +307,25 @@ function onBlocksListScroll() {
   else delete settings.value.scrollPosition[key];
 }
 
+const searchInputRef = ref<HTMLInputElement | null>(null);
+
+// Ctrl+F / Cmd+F focuses the popup's search bar instead of the browser find.
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
+    if (showRaw.value) return;
+    e.preventDefault();
+    searchInputRef.value?.focus();
+    searchInputRef.value?.select();
+  }
+}
+
 onMounted(() => {
   restoreSelection();
+  window.addEventListener('keydown', onGlobalKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown);
 });
 
 const serialized = computed(() => serializeAst(doc.value));
@@ -811,6 +828,34 @@ const matchingBlockIndices = computed<Set<number> | null>(() => {
   return searchSet ?? filterSet;
 });
 
+// Occurrence-level match state for the counter and the prev/next arrows.
+// Source of truth is the rendered `.at-search` spans in DOM order — PlainEditor
+// re-applies them ~200ms after query/content changes, so counts are read
+// lazily (at jump time) or behind debounces, never synchronously.
+const matchCount = ref(0);
+const activeMatchPos = ref(0);
+
+function collectMatchEls(): HTMLElement[] {
+  const root = blocksListRef.value;
+  if (!root) return [];
+  // A hit crossing a style boundary renders as IMMEDIATELY adjacent spans —
+  // count them as one. Separate hits always have at least one non-hit char
+  // between them (a text node or a non-search span), so previousSibling —
+  // not previousElementSibling, which would skip the text node — is the test.
+  return Array.from(root.querySelectorAll<HTMLElement>('.at-search'))
+    .filter((el) => {
+      const prev = el.previousSibling;
+      return !(prev instanceof HTMLElement && prev.classList.contains('at-search'));
+    });
+}
+
+let activeMatchEl: HTMLElement | null = null;
+function markActiveMatch(el: HTMLElement) {
+  activeMatchEl?.classList.remove('at-search-active');
+  el.classList.add('at-search-active');
+  activeMatchEl = el;
+}
+
 function clearStructuredFilter() {
   dungeonStructuredFilter.value = null;
 }
@@ -1002,21 +1047,33 @@ watchDebounced(
   { debounce: 2000, maxWait: 10000 },
 );
 
-// Scroll to the first search match after Quill editors have applied the
-// `.at-search` highlight spans. Debounced slightly longer than the
-// RichContentEditor's highlight re-apply (200ms) so the DOM is settled.
+// Recount and jump to the first occurrence once PlainEditor overlays have
+// re-rendered their `.at-search` spans (reactive on the query; the debounce
+// is to avoid thrashing scroll position on every keystroke).
 watchDebounced(
-  searchQuery,
-  (q) => {
-    if (!q || !q.trim()) return;
-    nextTick(() => {
-      const root = blocksListRef.value;
-      if (!root) return;
-      const first = root.querySelector('.at-search') as HTMLElement | null;
-      if (first) first.scrollIntoView({ behavior: 'instant', block: 'center' });
-    });
+  [searchQuery, dungeonStructuredFilter],
+  () => {
+    activeMatchPos.value = 0;
+    if (!searchQuery.value.trim() && !dungeonStructuredFilter.value) {
+      matchCount.value = 0;
+      return;
+    }
+    nextTick(() => jumpToMatch(0));
   },
   { debounce: 260 },
+);
+
+// Live edits add/remove highlight spans; keep the counter honest without
+// scrolling — the user is typing inside a block.
+watchDebounced(
+  () => doc.value.blocks,
+  () => {
+    if (!searchQuery.value.trim() && !dungeonStructuredFilter.value) return;
+    const els = collectMatchEls();
+    matchCount.value = els.length;
+    if (activeMatchPos.value >= els.length) activeMatchPos.value = Math.max(0, els.length - 1);
+  },
+  { debounce: 400, deep: true },
 );
 
 function hasLintIssues(): boolean {
@@ -1106,6 +1163,29 @@ watch(selectedIndex, (idx) => {
 function jumpToBlock(index: number) {
   selectedIndex.value = index;
   scrollToBlock(index);
+}
+
+// Jump to the pos-th highlighted occurrence. The DOM is queried fresh on
+// every jump, so span re-renders between clicks can't leave stale references.
+function jumpToMatch(pos: number) {
+  const els = collectMatchEls();
+  matchCount.value = els.length;
+  if (!els.length) return;
+  const p = ((pos % els.length) + els.length) % els.length;
+  activeMatchPos.value = p;
+  const el = els[p];
+  el.scrollIntoView({ behavior: 'instant', block: 'center' });
+  markActiveMatch(el);
+  const anchor = el.closest('[data-block-index]') as HTMLElement | null;
+  if (anchor) selectedIndex.value = Number(anchor.dataset.blockIndex);
+}
+
+function nextMatch() {
+  jumpToMatch(activeMatchPos.value + 1);
+}
+
+function prevMatch() {
+  jumpToMatch(activeMatchPos.value - 1);
 }
 
 // Scroll to a specific scene row (and optionally column) inside the
@@ -1245,7 +1325,17 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
     <div v-if="!showRaw" class="search-row">
       <i class="pi pi-search search-icon" />
-      <input v-model="searchQuery" class="search-input" type="text" placeholder="Search…" />
+      <input ref="searchInputRef" v-model="searchQuery" class="search-input" type="text" placeholder="Search…" />
+      <span v-if="matchingBlockIndices" class="search-count">{{ matchCount ? activeMatchPos + 1 : 0 }}/{{
+        matchCount }}</span>
+      <button v-if="matchingBlockIndices" type="button" class="search-nav" :disabled="!matchCount"
+        @click="prevMatch" title="Previous match">
+        <i class="pi pi-chevron-left" />
+      </button>
+      <button v-if="matchingBlockIndices" type="button" class="search-nav" :disabled="!matchCount"
+        @click="nextMatch" title="Next match">
+        <i class="pi pi-chevron-right" />
+      </button>
       <button v-show="searchQuery" type="button" class="search-clear" @click="searchQuery = ''" title="Clear">
         <i class="pi pi-times" />
       </button>
@@ -1341,14 +1431,11 @@ function questKindOf(id: string | undefined): QuestKind | null {
         <div v-if="doc.blocks.length === 0" class="empty-state">
           <p>Empty dungeon. Start by adding a Room, Encounter, Scene, or Template above.</p>
         </div>
-        <div v-else-if="matchingBlockIndices && matchingBlockIndices.size === 0" class="empty-state">
-          <p>No blocks match "{{ searchQuery }}".</p>
-        </div>
         <template v-for="item in groupedItems" :key="item.kind === 'quest'
           ? `quest:${(doc.blocks[item.group.startIndex] as any).__uid ?? item.group.startIndex}`
           : (doc.blocks[item.idx] as any).__uid ?? item.idx">
           <template v-if="item.kind === 'block'">
-            <div v-if="isBlockVisible(item.idx)" v-bind="{ 'data-block-index': item.idx }" class="block-anchor" :class="{
+            <div v-bind="{ 'data-block-index': item.idx }" class="block-anchor" :class="{
               'block-anchor--selected': selectedIndex === item.idx,
               'block-anchor--indented': indented[item.idx],
             }" @click="(e: MouseEvent) => onBlockClick(item.idx, e)">
@@ -1359,8 +1446,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
             </div>
           </template>
           <template v-else>
-            <div v-if="isItemVisible(item)" v-bind="{ 'data-block-index': item.group.startIndex }" class="block-anchor"
-              :class="{
+            <div v-bind="{ 'data-block-index': item.group.startIndex }" class="block-anchor" :class="{
                 'block-anchor--selected': selectedIndex !== null && selectedIndex >= item.group.startIndex && selectedIndex < item.group.endIndex,
                 'block-anchor--indented': indented[item.group.startIndex],
               }" @click="(e: MouseEvent) => onBlockClick(item.group.startIndex, e)">
@@ -1827,6 +1913,35 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .search-clear:hover {
   background: rgba(0, 0, 0, 0.06);
   color: #000;
+}
+
+.search-nav {
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+}
+
+.search-nav:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+  color: #000;
+}
+
+.search-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.blocks-list :deep(.at-search-active) {
+  outline: 2px solid #e8823d;
+  outline-offset: 1px;
+  border-radius: 2px;
 }
 
 .search-count {

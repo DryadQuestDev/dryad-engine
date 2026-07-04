@@ -10,6 +10,7 @@ export const AssetSchema = {
     file_video: { type: 'file', fileType: 'video', tooltip: 'Path to a video file.', show: { type: ['video'] } },
     file_spine_atlas: { type: 'file', fileType: 'atlas', tooltip: 'Path to Spine atlas file (.atlas).', show: { type: ['spine'] } },
     file_spine_skeleton: { type: 'file', fileType: 'spine_skeleton', tooltip: 'Path to Spine skeleton file (.json or .skel binary).', show: { type: ['spine'] } },
+    hide_actors: { type: 'boolean', tooltip: 'Whether to hide the actors from the scene while this asset is visible.' },
     gallery: {
         type: 'schema', objects: {
             gallery_id: { type: 'chooseOne', fromFile: 'galleries', fromFileTypeAnd: { type: 'assets' }, tooltip: 'Gallery ID to display the asset in.' },

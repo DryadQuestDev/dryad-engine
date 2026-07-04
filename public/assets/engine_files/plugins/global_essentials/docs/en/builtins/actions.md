@@ -87,6 +87,11 @@ Column 1 (before `%`) plays on first visit. Column 2 (after `%`) plays on every 
 | `status` | Apply / remove status effects per target. `&` separates items; `!` prefix removes | `"alice->buff1 & buff2, bob->!debuff"` | |
 | `char` | Modify character property (`=` set, `>` add, `<` subtract) | `"alice.resource.health>10"` | |
 | | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle` | `"mc.attribute.belly=2"` | |
+| `attr` | Shortcut for `char` with `attribute` type | `"ane.face = hurt"` | |
+| `trait` | Shortcut for `char` with `trait` type | `"alice.name = Alice"` | |
+| `stat` | Shortcut for `char` with `stat` type (`=` `>` `<`) | `"alice.strength > 5"` | |
+| `resource` | Shortcut for `char` with `resource` type (`=` `>` `<`) | `"alice.health > 10"` | |
+| `skin_style` | Shortcut for `char` with `skinStyle` type (`=` set, `>` add, `<` remove) | `"alice.hat = class1"` | |
 | `skin_layer` | Add / remove skin layers per target. `&` separates layers; `!` prefix removes | `"alice->armor & helmet, bob->!cloak"` | |
 | `item_slot` | Add / remove equipment slots per target. `&` separates slots; `!` prefix removes | `"alice->ring & necklace, bob->!belt"` | |
 | `skill` | Learn a skill for character | `"alice.fire_magic.fireball"` | |
@@ -111,10 +116,39 @@ Each action takes a string of the form `targetId->item & item & ..., targetId->!
 
 | Action | Description | Example | Delayed |
 |--------|-------------|---------|---------|
-| `equip_item` | Equip item to character | `true` | |
-| `unequip_item` | Unequip item from character | `true` | |
+| `equip` | Equip/unequip items by character + item id | `"ordelia -> armor1, ane -> !sword1"` | |
+| `equip_item` | Equip the **active item** (uid) — internal/advanced | `true` | |
+| `unequip_item` | Unequip the **active item** (uid) — internal/advanced | `true` | |
 | `add_item` | Add item to inventory | `"sword, potion#5"` | |
 | `loot` | Open loot exchange | `"chest_inventory"` | ✓ |
 | `trade` | Open trade exchange | `"merchant_inventory"` | ✓ |
 | `learn_recipe` | Learn a crafting recipe | `"iron_sword, steel_sword"` | |
+
+### equip
+
+Equip and unequip items using real **character ids** and **item template ids** (no uids). Comma
+separates specs; two spec shapes:
+
+- **Targeted** (`char -> payload & payload`): `&` separates payloads; a payload is `itemId` to equip or
+  `!itemId` to unequip. `char.slot_type` targets a specific slot type (an equip fills its first empty
+  slot, else the first; an `!itemId` is restricted to that type).
+- **Clear** (`!char` / `!char.slot_type`, no arrow): `!char.slot_type` unequips every occupied slot of
+  that type; `!char` clears all of the character's equipment.
+
+`slot_type` is the slot's id from **Item Slots** (e.g. `outfit_ordelia`), not a per-character instance
+name. On equip, if no matching instance exists in the character's inventory one is created from the
+template. Invalid ids/slots log a console warning and skip that spec — the scene continues.
+
+```javascript
+{ equip: "ordelia -> armor1 & ring1" }        // equip both (auto slot)
+{ equip: "ordelia.trinket_ordelia -> ring1" } // equip into a slot type
+{ equip: "ordelia -> !armor1" }               // unequip by item id
+{ equip: "!ordelia.outfit_ordelia" }          // clear a slot type
+{ equip: "!ordelia" }                         // clear all equipment
+```
+
+> **`equip` vs `equip_item`/`unequip_item`:** prefer `equip` for scripting — it uses stable ids.
+> `equip_item`/`unequip_item` act on the *active item* (its uid) and are mostly internal UI plumbing;
+> `{ equip_item: true }` / `{ unequip_item: true }` stay useful inside active-item flows (e.g. the
+> tutorial's equip/unequip cancel handling).
 

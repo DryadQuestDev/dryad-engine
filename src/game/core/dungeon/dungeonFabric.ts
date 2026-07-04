@@ -256,6 +256,11 @@ export class DungeonFabric {
                             // Debug: console.warn(params);
                             let computed = game.logicSystem.buildComputed(params);
                             encounter.isVisible = computed;
+
+                            if (params.rooms) {
+                                let extraRooms = params.rooms.split(",").map((x: string) => x.trim()).filter(Boolean);
+                                encounter.additionalRoomIds.push(...extraRooms);
+                            }
                         }
                     }
                 } break;

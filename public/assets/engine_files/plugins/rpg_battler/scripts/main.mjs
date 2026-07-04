@@ -16,8 +16,17 @@ console.log('rpg_battler plugin loaded');
 // ── Emitters ──
 // Emitter: battle_start — Fired before battle begins. Args: (). Return false to prevent.
 game.registerEmitter('battle_start');
-// Emitter: battle_end — Fired when battle ends. Args: (result).
+// Emitter: battle_end — Fired when battle ends, BEFORE pre-battle states are restored and the
+// roster is cleaned up — battle data (enemies, statuses) is still readable here, but state
+// writes get overwritten by the restore; set post-battle state in battle_closed instead.
+// Args: (result: 'victory' | 'defeat'). Not cancellable.
 game.registerEmitter('battle_end');
+// Emitter: battle_closed
+// Fired after the battle is fully torn down: pre-battle states restored, battle statuses
+// removed, spawned enemies deleted, battle cleared. Fires before the triggering scene
+// resumes (victory only). Safe place to set post-battle game state.
+// Args: (result: 'victory' | 'defeat'). Not cancellable.
+game.registerEmitter('battle_closed');
 // Emitter: battle_turn_start — Fired at the start of a new round. Args: (turnNumber).
 game.registerEmitter('battle_turn_start');
 // Emitter: battle_action_start — Fired before ability execution. Args: (caster, event).
@@ -277,7 +286,7 @@ game.registerService('rpg_battle', {
   /**
    * @param {StartRpgBattleParams} params
    */
-  start(params) {
+  async start(params) {
     let enemyEntries = params.enemies;
     let background = params.background || null;
 
@@ -381,6 +390,33 @@ game.registerService('rpg_battle', {
     }
 
     applyDifficultyToEnemies(battle);
+
+    // Preload every combatant's battle assets behind a loading screen — all
+    // battle_state poses, masks, spines, plus any characters their abilities
+    // can summon — so first hits/attacks never fetch images mid-animation.
+    game.setScreenLoading(true);
+    try {
+      const battleStates = [...(game.getData('character_attributes', true).get('battle_state')?.values || [])];
+      const preloadTargets = new Set(allCombatants);
+      for (const id of allCombatants) {
+        const abilities = game.getCharacter(id)?.getAbilities() || {};
+        for (const abId in abilities) {
+          // FinalAbilities effects: object keyed by effect id, values = aspects
+          const effects = abilities[abId].effects || {};
+          for (const effectId in effects) {
+            if (effects[effectId]?.summon) preloadTargets.add(effects[effectId].summon); // character template id
+          }
+        }
+      }
+      await Promise.allSettled([...preloadTargets].map((target) =>
+        game.preloadCharacterAssets(target, {
+          simulateAttributes: { battle_state: battleStates },
+          spine: true,
+        })
+      ));
+    } finally {
+      game.setScreenLoading(false);
+    }
 
     game.setState('disable_saves', true);
     game.setState('block_party_inventory', true);
@@ -539,11 +575,16 @@ export function endRpgBattle(result) {
   game.setState('game_state', battle.prevGameState);
   game.setState('hide_events', battle.prevHideEvents);
   game.setAssets(battle.prevAssets);
-  game.nextScene();
   game.setMusic(false);
 
-
-
   currentRpgBattle.value = null;
+
+  game.trigger('battle_closed', result);
+
+  // Resume the scene that triggered the battle only on victory — on defeat it must not
+  // continue as if won; the game's battle_closed listener owns what happens next.
+  if (result === 'victory') {
+    game.nextScene();
+  }
 }
 

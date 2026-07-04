@@ -7,6 +7,7 @@ export class DungeonEncounter {
 
     public id: string = "";
     public room!: DungeonRoom;
+    public additionalRoomIds: string[] = [];
 
     public x: number = 0;
     public y: number = 0;
@@ -44,9 +45,9 @@ export class DungeonEncounter {
     }
 
     public isHere(currentActiveRoom: DungeonRoom | undefined): boolean {
-        // Stub: Implement actual logic to check if encounter is in the current room
-        if (!this.room || !currentActiveRoom) return false;
-        return this.room.id === currentActiveRoom.id;
+        if (!currentActiveRoom) return false;
+        if (this.room && this.room.id === currentActiveRoom.id) return true;
+        return this.additionalRoomIds.includes(currentActiveRoom.id);
     }
 
     /**

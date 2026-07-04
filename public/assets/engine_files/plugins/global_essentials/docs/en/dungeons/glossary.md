@@ -209,6 +209,42 @@ This lets you keep your narrative **branchy and reactive** directly in the text,
 
 ---
 
+### Rooms: Sharing Encounters and Events Across Rooms
+
+Normally a `@encounter` or `#event` belongs to the single room its ID starts with (`^room_id`). The **`rooms`** param makes it **also** available in other rooms, without copying its content.
+
+- For an `@encounter`, it becomes **clickable** in the listed rooms too.
+- For a `#event`, it can **trigger** in the listed rooms too.
+
+The value is a comma‑separated list of room IDs. It is **additive** – the encounter or event still works in its own room, plus every room you list.
+
+Example – a wagon parked between two rooms, clickable from both:
+
+```text
+@wagon{rooms: "11"}
+A wagon stands abandoned near the bridge.
+```
+
+Here `@wagon` lives in its own room (say `^10`) but is also clickable while the player is in room `11`.
+
+You can combine `rooms` with `if` to gate the shared availability:
+
+```text
+@squeeze{rooms: "f1_8", if: "push = 1"}
+A narrow gap you can squeeze through.
+```
+
+The same works for events:
+
+```text
+#warning{rooms: "3, 4, 6", if: true}
+A distant horn echoes through the corridors.
+```
+
+This event, defined in its own room, can also fire when the player enters rooms `3`, `4`, or `6`.
+
+---
+
 ### Conditions: Branching and Checks
 
 **Conditions** works the same way as flags but provide custom logic to decide whether a block of content should run or a choice should be available.

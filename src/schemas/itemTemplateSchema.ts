@@ -5,7 +5,11 @@ import { AppliedStatusSchema } from './characterStatusSchema';
 export const ItemTemplateSchema = {
     uid: { type: 'uid', required: true, tooltip: 'Unique identifier for the item template.' },
     id: { type: 'string', required: true, tooltip: 'Item template ID used to reference this item in code.' },
+    category: { type: 'chooseOne', fromFile: 'item_categories', tooltip: 'Inventory filter category (player UI only — unrelated to equip slots).' },
     choices: { type: 'chooseMany', fromFile: 'custom_choices', fromFileTypeOr: { group: ['any', 'item'] }, tooltip: 'Custom choices to show when interacting with the item in the party inventory.' },
+    slots: { type: 'chooseMany', fromFile: 'item_slots', tooltip: 'Equipment slots where this item can be equipped.' },
+    price: { type: 'schema', fromFile: 'item_templates', fromFileType: 'number', fromFileTypeAnd: { is_currency: true }, tooltip: 'Price of the item in various currencies. Only items marked as currency appear as options.' },
+    is_currency: { type: 'boolean', tooltip: 'If true, the item can be used as currency for the \'price\' field. You might need to reload the tab to update the price options.' },
     traits: { type: 'schema', fromFile: 'item_traits', fromFileType: 'custom', tooltip: 'Custom item traits defined in item_traits file.' },
     attributes: { type: 'schema', fromFile: 'item_attributes', fromFileType: 'chooseOne', tooltip: 'Item attributes with selectable values from item_attributes file.' },
     properties: { type: 'schema', fromFile: 'item_properties', fromFileType: 'number', tooltip: 'Numeric properties (e.g., weight) from item_properties file.' },
@@ -21,9 +25,6 @@ export const ItemTemplateSchema = {
             ...AppliedStatusSchema
         }
     },
-    slots: { type: 'chooseMany', fromFile: 'item_slots', tooltip: 'Equipment slots where this item can be equipped.' },
-    price: { type: 'schema', fromFile: 'item_templates', fromFileType: 'number', fromFileTypeAnd: { is_currency: true }, tooltip: 'Price of the item in various currencies. Only items marked as currency appear as options.' },
-    is_currency: { type: 'boolean', tooltip: 'If true, the item can be used as currency for the \'price\' field. You might need to reload the tab to update the price options.' },
     actions: {
         type: 'schema', tooltip: 'Action scripts triggered by item events.', objects: {
             item_create: { type: 'textarea', tooltip: 'Script executed when the item is created in the inventory.' },

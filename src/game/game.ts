@@ -11,6 +11,7 @@ import { CharacterSystem, StatComputerFunction, type StatGroupResolverFunction }
 import { ItemSystem } from './systems/itemSystem';
 import { CoreSystem, type EmitterMap, type CustomComponent, type SaveOptions } from './systems/coreSystem';
 import { gameLogger } from './utils/logger';
+import { preloadCharacterAssets, type PreloadCharacterAssetsOptions } from './utils/assetPreloader';
 import { Character } from './core/character/character';
 import { Inventory } from './core/character/inventory';
 import { Item } from './core/character/item';
@@ -93,6 +94,14 @@ export class Game {
 
   public isSaveDisabled(): boolean {
     return this.coreSystem.isSaveDisabled();
+  }
+
+  /**
+   * Open the engine menu, optionally on a specific tab.
+   * @param menuState - 'main' | 'saves' | 'engine_settings' | 'game_settings' (default 'main')
+   */
+  public openMenu(menuState?: string): void {
+    Global.getInstance().openMenu(menuState);
   }
 
   /** Returns the current game's manifest (id, name, author, version, etc.). Read-only. */
@@ -398,6 +407,24 @@ export class Game {
 
   public isCharacterInParty(character: Character | string): boolean {
     return this.characterSystem.isCharacterInParty(character);
+  }
+
+  /**
+   * Warms the browser cache with every image a character may render (skin-layer
+   * frames, masks, face) so attribute swaps never fetch mid-animation. Accepts a
+   * live Character, a live character id, or a character TEMPLATE id (for
+   * not-yet-spawned characters like ability summons). Never rejects.
+   */
+  public preloadCharacterAssets(target: Character | string, options?: PreloadCharacterAssetsOptions): Promise<void> {
+    return preloadCharacterAssets(target, options);
+  }
+
+  /**
+   * Shows/hides a full-screen "Loading" overlay (same visual as the initial game
+   * load) WITHOUT unmounting the game — use around asset preloading.
+   */
+  public setScreenLoading(value: boolean): void {
+    this.coreSystem.screenLoading.value = value;
   }
 
   public addToParty(character: Character | string): void {

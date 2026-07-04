@@ -2,8 +2,9 @@
 import { ref, shallowRef, computed, nextTick, onBeforeUnmount, watch } from 'vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { useStorage } from '@vueuse/core';
-import { dungeonSearchQuery, dungeonStructuredHighlight } from './searchState';
+import { dungeonSearchQuery, dungeonStructuredFilter } from './searchState';
 import { useLazyMount } from './useLazyMount';
+import type { IndexCategory } from '../../../../utility/dungeonEditor/index';
 
 const editorSettings = useStorage<{ autoCurlyQuotes?: boolean; autoEnDash?: boolean }>('dungeonEditor_settings', {});
 
@@ -125,6 +126,40 @@ function findSearchRanges(text: string, query: string): Array<[number, number]> 
   while ((m = re.exec(text)) !== null) {
     if (m[0].length === 0) break;
     ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+
+// Structured-filter highlight: match `name` only in its indexed role (see
+// utility/dungeonEditor/index.ts), never as a plain substring — the word
+// "actor" in prose must not match the `actor` action.
+function findStructuredRanges(text: string, kind: IndexCategory, name: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  if (!name) return ranges;
+  const esc = escapeRegex(name);
+  if (kind === 'anchor') {
+    const re = new RegExp(`(^|\\n)&${esc}(?!\\w)`, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const lead = m[1] ? 1 : 0;
+      ranges.push([m.index + lead, m.index + m[0].length]);
+    }
+    return ranges;
+  }
+  const keyRe = new RegExp(`(^|[{,\\s"'])${esc}(?=\\s*["']?\\s*:)`, 'g');
+  const wordRe = new RegExp(`(^|[^\\w.])${esc}(?![\\w.])`, 'g');
+  for (const [s, e] of findBalancedBraces(text)) {
+    // A range starting off `{` was pulled back over a condition keyword —
+    // condition braces hold flag checks, never actions.
+    if (kind === 'action' && text[s] !== '{') continue;
+    const re = kind === 'action' ? keyRe : wordRe;
+    const seg = text.slice(s, e);
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(seg)) !== null) {
+      const start = s + m.index + m[1].length;
+      ranges.push([start, start + name.length]);
+    }
   }
   return ranges;
 }
@@ -313,8 +348,8 @@ function renderOverlay(text: string, hls: Highlight[]): string {
 
   const sq = dungeonSearchQuery.value.trim();
   if (sq) setTok(STYLE_SEARCH, findSearchRanges(text, sq));
-  const sh = dungeonStructuredHighlight.value.trim();
-  if (sh && sh !== sq) setTok(STYLE_SEARCH, findSearchRanges(text, sh));
+  const sf = dungeonStructuredFilter.value;
+  if (sf?.name) setTok(STYLE_SEARCH, findStructuredRanges(text, sf.kind, sf.name));
 
   const { double, single } = findEmphasisRanges(text);
   // Faux-bold via text-shadow — `font-weight` would change glyph widths and
@@ -357,7 +392,10 @@ function renderOverlay(text: string, hls: Highlight[]): string {
     if (eS) parts.push(eS);
     if (sS && !t) parts.push(sS);  // token bold wins; emph bold otherwise
     if (h) parts.push(`background-color:${h}`);
-    out += parts.length ? `<span style="${parts.join(';')}">${chunk}</span>` : chunk;
+    // Search chunks carry a real class so the popup's match counter and
+    // prev/next navigation can find them via querySelectorAll('.at-search').
+    const cls = t === STYLE_SEARCH ? ' class="at-search"' : '';
+    out += parts.length ? `<span${cls} style="${parts.join(';')}">${chunk}</span>` : chunk;
     i = j;
   }
   // Trailing space so a final '\n' shows as a visible empty line in <pre>

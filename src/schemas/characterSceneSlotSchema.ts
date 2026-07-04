@@ -21,9 +21,9 @@ export const CharacterSceneSlotSchema = {
     enter: {
         type: 'chooseOne',
         tooltip: 'Enter transition effect type.',
-        defaultValue: 'none',
+        defaultValue: 'inherit',
         options: [
-            'none', 'blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut',
+            'inherit', 'none', 'blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut',
             'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp',
             'flip', 'flipVertical', 'grow', 'moveInBottom', 'moveInLeft', 'moveInRight', 'moveInTop',
             'pop', 'rotate', 'rotateIn', 'rotateOut', 'shrink', 'slideDown', 'slideInBottom',
@@ -45,9 +45,9 @@ export const CharacterSceneSlotSchema = {
     exit: {
         type: 'chooseOne',
         tooltip: 'Exit transition effect type.',
-        defaultValue: 'none',
+        defaultValue: 'inherit',
         options: [
-            'none', 'blurOut', 'bounce', 'dissolve', 'elastic', 'fade', 'fadeSlideDown',
+            'inherit', 'none', 'blurOut', 'bounce', 'dissolve', 'elastic', 'fade', 'fadeSlideDown',
             'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow',
             'rotate', 'rotateOut', 'shrink', 'slideDown', 'slideLeft', 'slideOutBottom',
             'slideOutLeft', 'slideOutRight', 'slideOutTop', 'slideRight', 'slideUp', 'zoomIn', 'zoomOut'
@@ -66,9 +66,9 @@ export const CharacterSceneSlotSchema = {
     idle: {
         type: 'chooseOne',
         tooltip: 'Continuous idle animation type.',
-        defaultValue: 'none',
+        defaultValue: 'inherit',
         options: [
-            'none', 'blink', 'bounce', 'breathe', 'float', 'ghost', 'glitch', 'glow', 'hop', 'jitter', 'lean',
+            'inherit', 'none', 'blink', 'bounce', 'breathe', 'float', 'ghost', 'glitch', 'glow', 'hop', 'jitter', 'lean',
             'nod', 'pan', 'pulse', 'rock', 'rotate', 'shake', 'shimmy', 'sway', 'wave', 'wiggle'
         ]
     },

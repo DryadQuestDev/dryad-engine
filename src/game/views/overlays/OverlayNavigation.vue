@@ -403,9 +403,9 @@ const isTextDungeon = computed(() => {
               <!-- events scenes-->
               <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" ref="dialogueDisplayRef"
                 :display-content="displayContent" :full-content="fullDialogueHtml" :flash-html="flashHtml"
-                :show-flash="showFlashContent" :selectable="isTextSelectable"
-                :character-name="characterName" :show-inline-name="talkingCharacterHasNoArt"
-                :content-style="dialogueContentStyle" :name-style="characterNameStyle" />
+                :show-flash="showFlashContent" :selectable="isTextSelectable" :character-name="characterName"
+                :show-inline-name="talkingCharacterHasNoArt" :content-style="dialogueContentStyle"
+                :name-style="characterNameStyle" />
               <!-- encounters-->
               <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
                 <TextEncounter />
@@ -440,9 +440,8 @@ const isTextDungeon = computed(() => {
           <!-- events scenes-->
           <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" ref="dialogueDisplayRef"
             :display-content="displayContent" :full-content="fullDialogueHtml" :flash-html="flashHtml"
-            :show-flash="showFlashContent" :selectable="isTextSelectable"
-            :character-name="characterName" :show-inline-name="false" :content-style="dialogueContentStyle"
-            :name-style="characterNameStyle" />
+            :show-flash="showFlashContent" :selectable="isTextSelectable" :character-name="characterName"
+            :show-inline-name="false" :content-style="dialogueContentStyle" :name-style="characterNameStyle" />
           <!-- encounters-->
           <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
             <!-- Map/Screen dungeon: original layout -->
@@ -531,7 +530,7 @@ const isTextDungeon = computed(() => {
 }
 
 .event-container {
-  border: 1px solid #eee;
+  border: 2px solid #535353;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.8);
   margin-bottom: 1rem;
@@ -657,7 +656,7 @@ const isTextDungeon = computed(() => {
   padding: 4px 8px;
   font-size: 0.9em;
   background: rgba(0, 0, 0, 0.8);
-  border: 1px solid #eee;
+  border: 2px solid #535353;
   border-radius: 4px 4px 0 0;
   border-bottom: none;
   width: fit-content;

@@ -232,6 +232,16 @@ Get a stat's computed value directly as a number. Works reactively in Vue templa
 const maxHealth = character.getStat("health");
 ```
 
+### hasStat(statId)
+
+Check if the character has a stat defined in any of their statuses (core/template stats, starting statuses, buffs, equipment).
+
+```js
+if (character.hasStat("rage")) {
+  // show the rage panel
+}
+```
+
 ### setStat(name, value)
 
 Set the base value of a stat on the character's core status.

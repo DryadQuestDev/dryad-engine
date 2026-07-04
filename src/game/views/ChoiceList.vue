@@ -80,7 +80,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 <style scoped>
 .choice-list {
   /* Add your component-specific styles here */
-  border: 1px solid #007bff;
+  /*border: 1px solid #007bff;*/
   padding: 1rem;
   margin: 1rem 0;
   border-radius: 4px;

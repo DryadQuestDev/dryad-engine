@@ -149,6 +149,13 @@ export class Global {
     this.isMenuOpen.value = !this.isMenuOpen.value;
   }
 
+  /** Initial tab MenuContainer opens on; consumed (reset to 'main') by its setup. */
+  public menuInitialState = ref('main');
+  public openMenu(menuState: string = 'main') {
+    this.menuInitialState.value = menuState;
+    this.isMenuOpen.value = true;
+  }
+
   public setViewer(type: string) {
     this.openViewer.value = this.openViewer.value === type ? '' : type;
   }
@@ -262,6 +269,7 @@ export class Global {
   public notifications: Ref<NotificationItem[]> = ref([]);
 
   public addNotification(message: string) {
+    message = this.game.resolveString(message).output;
     const newNotification: NotificationItem = {
       id: Date.now() + this.notificationCounter++, // Simple unique ID
       message: message,
@@ -539,6 +547,7 @@ export class Global {
     game.itemSystem.itemAttributesMap = await this.fetchMapValues(gameId, `item_attributes`, modsIds);
     game.itemSystem.itemPropertiesMap = await this.fetchMapValues(gameId, `item_properties`, modsIds);
     game.itemSystem.itemSlotsMap = await this.fetchMapValues(gameId, `item_slots`, modsIds);
+    game.itemSystem.itemCategoriesMap = await this.fetchMapValues(gameId, `item_categories`, modsIds);
     game.itemSystem.itemRecipesMap = await this.fetchMapValues(gameId, `item_recipes`, modsIds);
 
     // load object maps for asset system

@@ -1567,16 +1567,10 @@ export class Character {
   }
 
   public getAvailableSlotsForItem(item: Item): ItemSlot[] {
-    const availableSlots: ItemSlot[] = [];
-    const itemSlotIds = item.slots; // Item's compatible slot IDs
-
-    // For each slot ID the item can be equipped in
-    itemSlotIds.forEach(itemSlotId => {
-      // Find all character slots that match this slot ID
-      const characterSlots = this.getItemSlotsBySlotId(itemSlotId);
-      availableSlots.push(...characterSlots);
+    return this.itemSlots.filter(slot => {
+      const tokens = [slot.slotId, ...(slot.getSlotObject()?.accepts ?? [])];
+      return tokens.some(t => item.slots.includes(t));
     });
-    return availableSlots;
   }
 
   // get first empty slot to fit. If no empty slots then get the first slot that can fit.
@@ -1643,6 +1637,11 @@ export class Character {
 
     if (!slot) {
       throw new Error(`No slot found to equip item "${resolvedItem.id}" on character "${this.id}"`);
+    }
+
+    if (slotId && !this.getAvailableSlotsForItem(resolvedItem).includes(slot)) {
+      gameLogger.warn(`Item "${resolvedItem.id}" is not compatible with slot "${slot.slotId}" on character "${this.id}"`);
+      return;
     }
 
     inventory.equipSlot(slot, resolvedItem, this);

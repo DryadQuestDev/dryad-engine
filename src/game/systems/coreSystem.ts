@@ -82,17 +82,20 @@ export class CoreSystem {
    * Keeps an image in browser memory cache by maintaining a reference.
    * Call this on image @load to prevent browser from evicting the cached image.
    * Cache is capped at 600 entries; oldest is evicted when full.
+   * Returns the cached element so callers can await its load/decode.
    */
-  public persistImage(src: string): void {
-    if (src && !this.imageCache.has(src)) {
-      if (this.imageCache.size >= 600) {
-        const firstKey = this.imageCache.keys().next().value!;
-        this.imageCache.delete(firstKey);
-      }
-      const img = new Image();
-      img.src = src;
-      this.imageCache.set(src, img);
+  public persistImage(src: string): HTMLImageElement | undefined {
+    if (!src) return undefined;
+    const existing = this.imageCache.get(src);
+    if (existing) return existing;
+    if (this.imageCache.size >= 600) {
+      const firstKey = this.imageCache.keys().next().value!;
+      this.imageCache.delete(firstKey);
     }
+    const img = new Image();
+    img.src = src;
+    this.imageCache.set(src, img);
+    return img;
   }
 
   // ============================================
@@ -128,6 +131,14 @@ export class CoreSystem {
 
   @Skip()
   public stateLoading = ref(true);
+
+  /**
+   * Full-screen "Loading" overlay (same visual as the initial game load) that
+   * covers the game WITHOUT unmounting it — used by scripts/plugins to hide
+   * asset preloading (see game.setScreenLoading).
+   */
+  @Skip()
+  public screenLoading = ref(false);
 
   /**
    * Versions map stamped on the save that was just loaded — keyed by data-source id.

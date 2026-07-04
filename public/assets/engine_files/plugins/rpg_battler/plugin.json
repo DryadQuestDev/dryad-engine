@@ -12,7 +12,7 @@
     {
       "id": "rpg-overlay-tuner",
       "name": "Overlay Tuner",
-      "tab": "character_templates",
+      "tabs": ["character_templates", "character_statuses", "item_templates", "skill_slots"],
       "script": "scripts/editor/OverlayTuner.mjs",
       "css": "scripts/editor/OverlayTuner.css"
     }
@@ -315,12 +315,12 @@
       {
         "id": "battle_overlay_x_offset",
         "type": "number",
-        "tooltip": "Horizontal offset (%) for the battle overlay (health bar, tokens). Positive = right."
+        "tooltip": "Horizontal fine-adjust (%) for the battle overlay (health bar, tokens), measured from the slot center. Art Manager tuning already centers the body, so this usually stays 0. Positive = right."
       },
       {
         "id": "battle_overlay_y_offset",
         "type": "number",
-        "tooltip": "Vertical offset (%) for the battle overlay (health bar, tokens). Positive = down."
+        "tooltip": "Vertical fine-adjust (%) for the battle overlay (health bar, tokens), measured from the slot top. Tune per character height (short/tall). Positive = down."
       }
     ],
     "item_traits": [
@@ -1273,7 +1273,7 @@
         "id": "braced",
         "name": "Braced",
         "description": "<p>Recovering from a stun: stagger threshold doubled, but exposed to bonus stun damage.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/braced.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/braced.webp",
         "duration": 3,
         "tags": [
           "buff"
@@ -1289,7 +1289,7 @@
         "id": "burn",
         "name": "Burn",
         "description": "<p>Searing damage each turn. Burns hot but burns out fast in 3 turns.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/burn.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/burn.webp",
         "duration": 3,
         "max_stacks": 0,
         "polarity": "negative",
@@ -1304,7 +1304,7 @@
         "id": "poison",
         "name": "Poison",
         "description": "<p>A slow trickle of poison damage each turn. Does not expire on its own – only an <strong>Antidote</strong> or a cleansing spell removes it.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/poison.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/poison.webp",
         "max_stacks": 0,
         "polarity": "negative",
         "multi_stack": false,
@@ -1318,7 +1318,7 @@
         "id": "bleed",
         "name": "Bleed",
         "description": "<p>Bleeds each turn. Lasts 5 turns by default.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/bleed.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/bleed.webp",
         "duration": 5,
         "max_stacks": 0,
         "polarity": "negative",
@@ -1333,7 +1333,7 @@
         "id": "regen",
         "name": "Regen",
         "description": "<p>Restores health each turn.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/regen.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/regen.webp",
         "max_stacks": 0,
         "polarity": "positive",
         "multi_stack": true,
@@ -1346,7 +1346,7 @@
         "id": "shield",
         "name": "Shield",
         "description": "<p>Absorbs incoming damage. Each stack absorbs 1 damage.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/shield.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/shield.webp",
         "max_stacks": 0,
         "polarity": "positive",
         "multi_stack": true,
@@ -1370,7 +1370,7 @@
         "id": "stagger",
         "name": "Stagger",
         "description": "<p>Accumulating pressure toward a stun. When stacks reach the target's stagger threshold, the target is stunned and all stagger is consumed.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/stagger.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/stagger.webp",
         "max_stacks": 0,
         "polarity": "negative",
         "meta": {
@@ -1381,7 +1381,7 @@
         "id": "taunt",
         "name": "Taunt",
         "description": "<p>Forces enemies to target this character.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/damage.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/taunt.webp",
         "max_stacks": 1,
         "polarity": "positive",
         "meta": {
@@ -1392,7 +1392,7 @@
         "id": "thorns",
         "name": "Thorns",
         "description": "<p>Reflects <b>1</b> damage per stack back to the attacker on every incoming hit. Stacks are not consumed; each apply tracks its own duration independently.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/speed.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/thorns.webp",
         "max_stacks": 0,
         "polarity": "positive",
         "multi_stack": true,
@@ -1404,7 +1404,7 @@
         "id": "death_defiance",
         "name": "Death Defiance",
         "description": "<p>Survives a lethal blow with 1 HP. Consumed on trigger.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/death_defiance.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/death_defiance.webp",
         "max_stacks": 1,
         "polarity": "positive",
         "meta": {
@@ -1415,7 +1415,7 @@
         "id": "preparation",
         "name": "Preparation",
         "description": "<p>Required to use certain powerful abilities.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/preparation.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/preparation.webp",
         "max_stacks": 0,
         "polarity": "positive",
         "meta": {
@@ -1426,7 +1426,7 @@
         "id": "combo",
         "name": "Combo",
         "description": "<p>Required for combo attacks. Consumed on use.</p>",
-        "image": "assets/engine_assets/plugins/rpg_battler/combo.svg",
+        "image": "assets/engine_assets/plugins/rpg_battler/combo.webp",
         "max_stacks": 0,
         "polarity": "positive",
         "meta": {

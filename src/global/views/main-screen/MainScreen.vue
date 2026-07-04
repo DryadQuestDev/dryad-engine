@@ -13,6 +13,7 @@ import { MusicPlayer } from '../../../services/musicPlayer';
 import BackgroundAsset from '../../../game/views/BackgroundAsset.vue';
 import GamesDropdown from './GamesDropdown.vue';
 import ModsStrip from './ModsStrip.vue';
+import LandingWidgets from './LandingWidgets.vue';
 import ManifestPanel from './ManifestPanel.vue';
 import ScreenshotsOverlay from './ScreenshotsOverlay.vue';
 import SavesDrawer from './SavesDrawer.vue';
@@ -381,6 +382,8 @@ onUnmounted(() => {
       />
     </div>
 
+    <LandingWidgets :manifests="manifests" />
+
     <header class="main-screen-header">
       <div class="main-screen-header-left">
         <button v-if="!isWebMode" class="main-screen-hbtn main-screen-hbtn--accent" @click="openInstallModal" :disabled="!gamesLoaded">
@@ -480,8 +483,10 @@ onUnmounted(() => {
           v-if="selectedMod"
           :manifest="selectedMod"
           :active="activeMods.some(m => m.id === selectedMod?.id)"
+          closable
           @screenshots="screenshotsManifest = selectedMod"
           @toggle="selectedMod && onToggleMod(selectedMod)"
+          @close="selectedMod = null"
         />
       </div>
     </main>

@@ -13,6 +13,7 @@ import App from './App.vue'
 import PrimeVue from 'primevue/config';
 import Aura from '@primeuix/themes/aura';
 import Tooltip from 'primevue/tooltip';
+import { ZIndex } from '@primeuix/utils/zindex';
 import ConfirmationService from 'primevue/confirmationservice';
 import { initDialogService } from './services/dialogService';
 import { initGlobalErrorHandlers } from './services/errorHandler';
@@ -42,13 +43,32 @@ app.use(PrimeVue, {
   }
 });
 app.use(ConfirmationService);
-app.directive('tooltip', Tooltip);
+// PrimeVue's Tooltip.remove() calls document.body.removeChild() on a node that
+// may already be detached when tooltip targets unmount en masse (its teardown
+// is deferred via setTimeout), throwing NotFoundError. Override remove() to
+// detach from the node's actual parent instead.
+const SafeTooltip = (Tooltip as any).extend('tooltip', {
+  methods: {
+    remove(el: any) {
+      if (el) {
+        const tooltipElement = document.getElementById(el.$_ptooltipId);
+        if (tooltipElement && tooltipElement.parentElement) {
+          ZIndex.clear(tooltipElement);
+          tooltipElement.remove();
+        }
+        el.$_ptooltipId = null;
+      }
+    },
+  },
+});
+
+app.directive('tooltip', SafeTooltip);
 app.directive('persist', persistImage);
 app.directive('fit', fitText);
 app.directive('script', script);
 app.directive('popover', popover);
 app.directive('dragscroll', dragscroll);
-app.config.globalProperties.vTooltip = Tooltip;
+app.config.globalProperties.vTooltip = SafeTooltip;
 
 // Configure Vue error handler
 app.config.errorHandler = (err, _instance, info) => {

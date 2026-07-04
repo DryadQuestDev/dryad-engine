@@ -7,11 +7,12 @@ export const EncyclopediaTreeSchema = {
     order: { type: 'number', defaultValue: 0, tooltip: 'Lower values appear first.' },
     groups: {
         type: 'schema[]', tooltip: 'Groups of records inside this tab. Order is preserved.', objects: {
-            uid: { type: 'uid', required: true },
+            uid: { type: 'uid' },
+            id: { type: 'string' },
             name: { type: 'string', required: true, tooltip: 'Group display name.' },
             records: {
                 type: 'schema[]', tooltip: 'Records in this group. Order is preserved.', objects: {
-                    uid: { type: 'uid', required: true },
+                    uid: { type: 'uid' },
                     record: { type: 'chooseOne', fromFile: 'records', required: true, tooltip: 'Reference to a record.' },
                 }
             }

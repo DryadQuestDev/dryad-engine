@@ -52,8 +52,8 @@ The action is `delayed`, meaning it executes after the current DryadScript seque
 
 | Trait | Type | Description |
 |---|---|---|
-| `battle_overlay_x_offset` | number | Horizontal offset (%) for the battle overlay (health bar, status bricks). Positive = right |
-| `battle_overlay_y_offset` | number | Vertical offset (%) for the battle overlay (health bar, status bricks). Positive = up |
+| `battle_overlay_x_offset` | number | Horizontal fine-adjust (%) for the battle overlay from the slot center. Usually 0 – Art Manager tuning centers the body. Positive = right |
+| `battle_overlay_y_offset` | number | Vertical fine-adjust (%) for the battle overlay from the slot top. Tune per character height. Positive = down |
 
 ## Character Views
 

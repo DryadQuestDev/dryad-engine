@@ -717,6 +717,8 @@ export class Editor {
 
   schema: Ref<Schema | null> = ref(null);
   filePath: string = '';
+  private isLoadingActiveObject = false;
+  private activeObjectDungeon: string | null = null;
   fileName: string = '';
   fileNameOriginal: string = '';
   isArray: Ref<boolean> = ref(false);
@@ -728,6 +730,8 @@ export class Editor {
   dungeonConfig: Ref<DungeonConfigObject | null> = ref(null);
   ignoreDefaultValues: boolean = false;
   public async loadActiveObject(): Promise<void> {
+    this.isLoadingActiveObject = true;
+    try {
     if (this.switchTimeout) {
       clearTimeout(this.switchTimeout);
     }
@@ -777,6 +781,11 @@ export class Editor {
       this.activeObject.value = null;
       return;
     }
+
+    // Unmount the previous form in one wave before reloading skin attributes,
+    // so build_images watchers never recompute stale items against new-mod data
+    this.activeObject.value = null;
+    await nextTick();
 
     // load attributes
     if (settings?.loadSkinAttributes) {
@@ -871,6 +880,7 @@ export class Editor {
     }
 
     this.activeObject.value = file;
+    this.activeObjectDungeon = this.mainTab === 'dungeons' ? this.selectedDungeon : null;
 
 
     // set Default values
@@ -920,6 +930,9 @@ export class Editor {
     //      console.warn(`Failed to load: ${this.filePath}`, error);
     //       this.activeObject.value = null;
     //   }
+    } finally {
+      this.isLoadingActiveObject = false;
+    }
   }
 
   private applyDefaultValuesRecursive(dataNode: any, currentSchema: Schema | Schemable): void {
@@ -1118,6 +1131,20 @@ export class Editor {
       return;
     }
 
+    if (this.isLoadingActiveObject) {
+      return;
+    }
+
+    if (this.mainTab === 'dungeons' && this.activeObjectDungeon !== this.selectedDungeon) {
+      if (!silent) {
+        this.global.addNotificationId('dungeon_stale_save_blocked', {
+          loaded: this.activeObjectDungeon ?? '',
+          selected: this.selectedDungeon ?? '',
+        });
+      }
+      return;
+    }
+
     if (this.isArray.value) {
       this.activeObject.value = this.activeObject.value.sort((a: any, b: any) => {
         const orderA = a.order ?? 0;
@@ -1170,6 +1197,16 @@ export class Editor {
       case 'dungeon':
         await this.createDungeon();
         return;
+    }
+
+    if (this.mainTab === 'dungeons' && this.secondaryTab === 'config' && !this.create) {
+      if (this.activeObject.value?.id !== this.selectedDungeon) {
+        this.global.addNotificationId('dungeon_id_folder_mismatch', {
+          id: this.activeObject.value?.id ?? '',
+          folder: this.selectedDungeon ?? '',
+        });
+        return;
+      }
     }
 
     try {
@@ -1638,6 +1675,11 @@ export class Editor {
       const gameId = this.selectedGame;
 
       const configPath = `games_files/${gameId}/${modId}/dungeons/${dungeonId}/config.json`;
+
+      if (await this.global.pathExists(configPath)) {
+        this.global.addNotificationId('dungeon_already_exists', { id: dungeonId });
+        return;
+      }
 
 
       // Create directory first (optional, depends if writeJson creates dirs)

@@ -90,7 +90,10 @@
 
 .tuner-overlay-rect {
     /* Position/scale come from the slot's #overlay wrapper (EditorCharacterPreview);
-       this is just the draggable guide. pointer-events:auto so only the rect drags. */
+       this is just the draggable guide. pointer-events:auto so only the rect drags.
+       translate mirrors the in-game lift on .rpg-char-overlay (css/rpg-battle.css)
+       so the preview is WYSIWYG — keep the two in sync. */
+    translate: 0 -2cqh;
     width: 100px;
     height: 50px;
     border: 2px dashed rgba(0, 200, 255, 0.7);
@@ -117,4 +120,10 @@
     text-transform: uppercase;
     letter-spacing: 1px;
     pointer-events: none;
+}
+.tuner-hint {
+    margin-left: auto;
+    color: #777;
+    font-size: 0.8rem;
+    font-style: italic;
 }

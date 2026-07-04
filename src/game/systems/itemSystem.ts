@@ -9,6 +9,7 @@ import { ItemInventoryObject } from "../../schemas/itemInventorySchema";
 import { EntityTraitObject } from "../../schemas/entityTraitSchema";
 import { EntityAttributeObject } from "../../schemas/entityAttributeSchema";
 import { ItemSlotObject } from "../../schemas/itemSlotSchema";
+import { ItemCategoryObject } from "../../schemas/itemCategorySchema";
 import { PropertyObject } from "../../schemas/propertySchema";
 import { EntityStatObject } from "../../schemas/entityStatSchema";
 import { Property } from "../property";
@@ -45,6 +46,8 @@ export class ItemSystem {
     public itemPropertiesMap: Map<string, EntityStatObject> = new Map();
     @Skip()
     public itemSlotsMap: Map<string, ItemSlotObject> = new Map();
+    @Skip()
+    public itemCategoriesMap: Map<string, ItemCategoryObject> = new Map();
     @Skip()
     public itemRecipesMap: Map<string, ItemRecipeObject> = new Map();
 
@@ -252,6 +255,7 @@ export class ItemSystem {
         item.statusObject = obj.status || {};
         item.slots = obj.slots || [];
         item.tags = obj.tags || [];
+        item.category = obj.category || "";
         item.actions = obj.actions || {};
         item.choices = obj.choices || [];
         item.price = obj.price || {};

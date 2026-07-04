@@ -91,6 +91,9 @@ class SpineRendererService {
   private initialized = false;
   private initPromise: Promise<void> | null = null;
   private loadingPromises = new Map<string, Promise<void>>();
+
+  // Per-slot registration generation — stale async register() calls bail when superseded
+  private registerVersions = new Map<string, number>();
   private maxCanvasW = 0;
   private maxCanvasH = 0;
 
@@ -152,17 +155,32 @@ class SpineRendererService {
     return promise;
   }
 
+  /** Warm the atlas/skeleton into the Assets cache ahead of a register() (cached + in-flight deduped). */
+  public async preloadAssets(atlasUrl: string, skeletonUrl: string): Promise<void> {
+    await this.loadAssets(atlasUrl, skeletonUrl);
+  }
+
   async register(id: string, element: HTMLElement, options: RegisterOptions): Promise<Spine | null> {
+    // Generation guard: overlapping register calls for the same slot id (e.g. an
+    // outfit swap re-inits while the previous atlas is still downloading) must not
+    // BOTH complete — the stale one would append a second frozen canvas and fight
+    // over the slot entry. Only the newest registration survives its awaits.
+    const version = (this.registerVersions.get(id) ?? 0) + 1;
+    this.registerVersions.set(id, version);
+
     if (!this.initialized) await this.init();
     if (!this.app) return null;
+    if (this.registerVersions.get(id) !== version) return null;
 
-    // Unregister existing slot with same ID
+    // Unregister existing slot with same ID (bumps the version — recapture ours)
     if (this.slots.has(id)) {
       this.unregister(id);
+      this.registerVersions.set(id, version);
     }
 
     try {
       await this.loadAssets(options.atlasUrl, options.skeletonUrl);
+      if (this.registerVersions.get(id) !== version) return null;
 
       const key = this.makeAssetKey(options.atlasUrl, options.skeletonUrl);
       const skelAlias = `skel_${key}`;
@@ -271,6 +289,10 @@ class SpineRendererService {
   }
 
   unregister(id: string): void {
+    // Cancel any in-flight register for this id, even when nothing is in the
+    // slots map yet (component unmounted while its assets were downloading).
+    this.registerVersions.set(id, (this.registerVersions.get(id) ?? 0) + 1);
+
     const slot = this.slots.get(id);
     if (!slot) return;
 

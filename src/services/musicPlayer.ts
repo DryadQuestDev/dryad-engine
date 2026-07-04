@@ -96,6 +96,7 @@ export class MusicPlayer {
   }
 
   private startPlaylist(files: string[]): void {
+    this.disposePlayer();
     this.playlist = shuffle([...files]);
     this.trackIndex = 0;
     this.player = new Audio();
@@ -114,7 +115,10 @@ export class MusicPlayer {
     player.currentTime = 0;
     gameLogger.info(`Playing music: ${this.playlist[this.trackIndex]}`);
     player.play().catch((error: any) => {
-      if (error?.name === 'NotAllowedError' || error?.name === 'DOMException') {
+      if (error?.name === 'AbortError') {
+        return;
+      }
+      if (error?.name === 'NotAllowedError') {
         gameLogger.warn('Music play prevented - waiting for user interaction');
         this.waitForInteraction();
       } else {
@@ -140,6 +144,10 @@ export class MusicPlayer {
   }
 
   private disposePlayer(): void {
+    if (this.fadeInterval !== null) {
+      clearInterval(this.fadeInterval);
+      this.fadeInterval = null;
+    }
     if (this.player) {
       this.player.pause();
       this.player.currentTime = 0;

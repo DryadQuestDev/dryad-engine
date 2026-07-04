@@ -536,6 +536,11 @@ span.lore-link:focus-visible,
   }
 }
 
+/* Built-in inventory "All" filter tab icon. Override this class to re-skin it. */
+.inventory-filter-icon-all {
+  background-image: url('/assets/engine_assets/icons/all_items.svg');
+}
+
 /* Space reserved on the left for the fixed .ui-container tray (cog / book /
    users icons). Panels rendered next to it (ProgressionContainer,
    OverlayNavigation's .overlay.text) read this var so they don't overlap.

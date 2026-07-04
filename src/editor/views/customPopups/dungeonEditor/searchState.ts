@@ -18,16 +18,6 @@ export const dungeonSearchQuery = ref('');
 export const dungeonStructuredFilter = ref<{ kind: IndexCategory; name: string } | null>(null);
 
 /**
- * The substring RichContentEditor instances should highlight in addition to
- * `dungeonSearchQuery`. Mirrors the structured filter's name when set.
- * Sharing the same `at-search` highlight class keeps the rich editor wiring
- * trivial.
- */
-export const dungeonStructuredHighlight = computed(() =>
-  dungeonStructuredFilter.value?.name ?? '',
-);
-
-/**
  * True when `value` contains the trimmed `dungeonSearchQuery` (case-insensitive).
  * Used to tint header / choice / column `<input>` elements whose value matches
  * — `<input>` text can't be sub-string-styled, but the whole field can.

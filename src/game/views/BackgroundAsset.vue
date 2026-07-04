@@ -982,7 +982,13 @@ const applyIdleAnimation = (element: HTMLElement) => {
 // Set initial volume and watch for changes
 onMounted(() => {
   if (videoRef.value) {
-    videoRef.value.volume = videoVolume.value;
+    const v = videoRef.value;
+    v.volume = videoVolume.value;
+    v.play().catch(() => {
+      // Autoplay with sound blocked (web, no user gesture yet) — play muted instead
+      v.muted = true;
+      v.play().catch(() => { });
+    });
   }
 
   // Get the element to animate (prefer assetElementRef for images, videoRef for videos)

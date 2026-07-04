@@ -18,10 +18,11 @@ const props = defineProps<{
   view?: string; // Character view overrides (e.g. 'back')
   interactive?: boolean; // Enable pointer-events for click handling
   overlaySlot?: string; // Optional slot name for overlay injection (same pattern as CharacterFace)
-  /** Dev-tuned fine-adjust offsets in cqh of slot height — added to bodyArtOffset
-   * so the overlay sits where the dev placed it via OverlayTuner (or similar).
-   * Plugins read their own per-character traits and pass them in; CharacterSlot
-   * stays plugin-agnostic. */
+  /** Dev-tuned fine-adjust offsets in cqh of slot height, measured from the slot
+   * anchor — art_dx/dy already center the body's pixels on the slot, so these
+   * only nudge the overlay from there (OverlayTuner or similar). Plugins read
+   * their own per-character traits and pass them in; CharacterSlot stays
+   * plugin-agnostic. */
   overlayOffsetX?: number;
   overlayOffsetY?: number;
   instantLayers?: boolean; // Disable fade transition on layer changes (for combat animations)
@@ -107,43 +108,18 @@ const finalScale = computed(() => cssSlotScale.value * artScale.value);
 // Visible character scale, regardless of how it's applied. Pass to overlay context.
 const visibleScale = computed(() => scale.value * animatedArtOffset.value.scale);
 
-// Hit-mask transform — same body-tracking pattern as the overlay (FU 17/29):
-// translate by bodyArtOffset.dx/dy × slot.scale (cqh in slot-parent space, NOT
-// magnified by the inner scale), then scale to body's drawn size. Both spine
-// and static produce the same effective body rect, so a single transform fits
-// both.
-const hitMaskArtDx = computed(() => `${bodyArtOffset.value.dx * scale.value}cqh`);
-const hitMaskArtDy = computed(() => `${bodyArtOffset.value.dy * scale.value}cqh`);
-
-// Body art offset for the OVERLAY (per-view): for spine characters use the spine
-// entry's art_dx/dy (which the spine renderer applies to the canvas CSS); for
-// static characters fall back to character traits (which CharacterDollStatic
-// applies to its layers). The overlay wrapper translates by the same amount so
-// it sits above the body's actual visible center, regardless of view (front vs
-// back) or scale. cqh resolves against the slot's container-type:size.
-const bodyArtOffset = computed(() => {
-  const view = props.view;
-  const isSpine = view ? props.character.isSpineForView(view) : props.character.isSpineCharacter();
-  if (isSpine) {
-    const o = props.character.getSpineArtOffset(view);
-    return { dx: mirror.value ? -o.dx : o.dx, dy: o.dy };
-  }
-  return {
-    dx: (mirror.value ? -1 : 1) * (props.character.getTrait('art_dx') || 0),
-    dy: props.character.getTrait('art_dy') || 0,
-  };
-});
-// bodyArtOffset auto-tracks the body's per-view art_dx/dy. The optional
-// overlayOffsetX/Y props add a dev-tuned fine-adjust on top (cqh of slot
-// height, mirror-aware on X — same convention as bodyArtOffset). Multiply
-// by scale.value so the overlay shift matches the body's visible shift at
-// any slot.scale (cqh otherwise resolves to slot's full CSS height, which
-// over-shifts at small slot.scale — see Follow-up 17).
-const overlayArtDx = computed(() => {
-  const tuned = (mirror.value ? -1 : 1) * (props.overlayOffsetX ?? 0);
-  return `${(bodyArtOffset.value.dx + tuned) * scale.value}cqh`;
-});
-const overlayArtDy = computed(() => `${(bodyArtOffset.value.dy + (props.overlayOffsetY ?? 0)) * scale.value}cqh`);
+// Overlay and hit mask anchor to slot geometry only. The per-view art_dx/dy
+// (spine entry or traits) exist to CENTER the body's pixels on the slot — they
+// are tuned against the Art Manager's center reference line — so after the
+// renderer applies them the body's visible center IS the slot center and
+// nothing here may track them (tracking would double-count the correction and
+// drift off the body by exactly art_dx/dy). The optional overlayOffsetX/Y
+// props are a dev-tuned fine-adjust from that anchor (cqh of slot height,
+// mirror-aware on X). Multiply by scale.value so the shift stays "% of body's
+// visible height" at any slot.scale (cqh otherwise resolves against the slot's
+// full CSS height, which over-shifts at small slot.scale — see Follow-up 17).
+const overlayArtDx = computed(() => `${(mirror.value ? -1 : 1) * (props.overlayOffsetX ?? 0) * scale.value}cqh`);
+const overlayArtDy = computed(() => `${(props.overlayOffsetY ?? 0) * scale.value}cqh`);
 // Single source of truth for overlay (HP bar / name) size: a fixed base scale, so every
 // character's overlay is the SAME on-screen size regardless of slot.scale. The overlay-wrapper
 // is a sibling of the body's scale-wrapper (and its sizes are cqh = viewport-relative), so
@@ -154,6 +130,8 @@ const effectiveOverlayScale = OVERLAY_BASE_SCALE;
 // boosted overlay scale — otherwise a boost > 1 would lift the anchor above
 // the head. The overlay's `transform-origin: 50% 0` makes its boosted size
 // grow downward (over the body), so the anchor stays pinned to body top.
+// Aesthetic clearance above the head is the overlay content's own concern
+// (e.g. rpg_battler lifts .rpg-char-overlay via CSS translate).
 const overlayTop = computed(() => `${50 - 50 * scale.value}cqh`);
 
 // cqh resolves against the slot's container-type:size — i.e. always 1% of slot's
@@ -433,15 +411,11 @@ const onLeave = (_el: Element, done: () => void) => {
   height: 100%;
   aspect-ratio: 1 / 1;
   width: auto;
-  /* Same body-tracking transform as the body itself (FU 17): translate places
-     the polygon over the body's visible center (cqh in slot-parent space, NOT
-     magnified by inner scale), scale shrinks the polygon to the body's drawn
-     size. Spine's per-canvas transform and static's wrapper transform both
-     resolve to the same effective rect, so this single transform fits both
-     paths. */
-  transform: translate(-50%, -50%)
-             translate(v-bind("hitMaskArtDx"), v-bind("hitMaskArtDy"))
-             scale(v-bind("scale"));
+  /* Centered on the slot, scaled to the body's drawn size. art_dx/dy center the
+     body's pixels on the slot (Art Manager reference-line tuning), so the slot
+     center is the body's visible center for both spine and static paths — no
+     art-offset tracking here. */
+  transform: translate(-50%, -50%) scale(v-bind("scale"));
   transform-origin: 50% 50%;
   /* SVG passes pointer events through except on the polygon (which opts in
      via pointer-events="all"), so clicks outside the polygon shape pass
@@ -471,12 +445,11 @@ const onLeave = (_el: Element, done: () => void) => {
   top: v-bind("overlayTop");
   /* Transforms apply right-to-left: scale runs first (in element-local space),
      then translate (in parent space, NOT magnified by scale), then -50% center.
-     This order keeps art_dx tracking accurate at any slot.scale — the overlay
-     shifts by exactly bodyArtOffset cqh regardless of how the body is sized.
-     translateX(-50%): horizontal centering on the wrapper.
-     translate(art_dx cqh, art_dy cqh): art tracking — matches the body's per-view
-     offset (spine entry's art_dx for spine views, traits for static). cqh resolves
-     against the slot (container-type:size), same as the canvas's own translate.
+     translateX(-50%): horizontal centering on the wrapper — the slot center IS
+     the body's visible center, since art_dx/dy center the pixels on the slot.
+     translate(overlayArtDx, overlayArtDy): the dev-tuned fine-adjust from that
+     anchor (overlayOffsetX/Y props). cqh resolves against the slot
+     (container-type:size), same as the canvas's own translate.
      scale(effectiveOverlayScale): fixed base scale so the overlay is a
      constant on-screen size for every character, around transform-origin (50% 0 = top-center).
      --overlay-zoom: an extra multiplier a parent can set (default 1) to enlarge the overlay so it

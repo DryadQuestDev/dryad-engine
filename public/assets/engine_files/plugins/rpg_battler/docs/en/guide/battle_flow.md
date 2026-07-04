@@ -95,11 +95,13 @@ The battle ends immediately when all characters on one side are defeated:
 When the battle ends:
 
 1. The result overlay appears (Victory or Defeat)
-2. The player clicks Continue
-3. The `battle_end` emitter fires
+2. The player clicks Continue -- the battle ends with the shown result
+3. The `battle_end` emitter fires (battle data still readable)
 4. All `meta.is_battle` statuses are removed from all participants
 5. Spawned enemies are deleted
 6. Saves are re-enabled and the previous game state is restored
+7. The `battle_closed` emitter fires (teardown complete -- safe to set post-battle state)
+8. On victory only, the scene that triggered the battle resumes; on defeat it stays halted -- handle what happens next in a `battle_closed` listener
 
 ## Battle Speed
 

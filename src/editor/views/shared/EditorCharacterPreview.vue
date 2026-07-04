@@ -18,7 +18,7 @@ const props = defineProps<{
   /** Dev-tuned fine-adjust for the `overlay` slot, in cqh of slot height (mirror-aware on X). */
   overlayOffsetX?: number;
   overlayOffsetY?: number;
-  /** Mirror the body horizontally (flips art_dx tracking for the overlay). */
+  /** Mirror the body horizontally (flips the overlay's X fine-adjust). */
   mirror?: boolean;
 }>();
 
@@ -92,28 +92,17 @@ const gameScale = computed(() => getSpineCharacterScale(props.view, editor.getMe
 
 const isSpine = computed(() => !!(atlasUrl.value && skeletonUrl.value));
 
-// Per-view body art offset for the `overlay` slot — mirrors CharacterSlot.bodyArtOffset.
-// Spine: the spine entry's art_dx/dy (already resolved per view in spineConfig).
-// Static: the character's traits.art_dx/dy with coreCharacter fallback. Mirror-aware on dx.
-function trait(key: string, fallback: number): number {
-  const v = props.character?.traits?.[key] ?? props.coreCharacter?.traits?.[key];
-  return typeof v === 'number' ? v : fallback;
-}
-const bodyArtOffset = computed(() => {
-  const m = props.mirror ? -1 : 1;
-  if (isSpine.value) return { dx: m * spineConfig.value.art_dx, dy: spineConfig.value.art_dy };
-  return { dx: m * trait('art_dx', 0), dy: trait('art_dy', 0) };
-});
-
-// Slot-relative overlay wrapper, identical to CharacterSlot's model:
-// overlayTop = slot-top of the centered body box; translate tracks the body's
-// art_dx/dy plus the dev-tuned offset; scale = the shared overlay base size.
+// Slot-relative overlay wrapper, identical to CharacterSlot's model: anchored
+// to slot geometry only — art_dx/dy center the body's pixels on the slot (Art
+// Manager reference-line tuning), so the anchor already sits on the body's
+// visible center. overlayOffsetX/Y are the dev-tuned fine-adjust from there
+// (mirror-aware on X); scale = the shared overlay base size.
 const slotScale = computed(() => props.slotScale ?? 1);
 const overlayWrapperStyle = computed(() => {
   const s = slotScale.value;
   const m = props.mirror ? -1 : 1;
-  const dx = (bodyArtOffset.value.dx + m * (props.overlayOffsetX ?? 0)) * s;
-  const dy = (bodyArtOffset.value.dy + (props.overlayOffsetY ?? 0)) * s;
+  const dx = m * (props.overlayOffsetX ?? 0) * s;
+  const dy = (props.overlayOffsetY ?? 0) * s;
   return {
     top: `${50 - 50 * s}cqh`,
     transform: `translateX(-50%) translate(${dx}cqh, ${dy}cqh) scale(${OVERLAY_BASE_SCALE})`,

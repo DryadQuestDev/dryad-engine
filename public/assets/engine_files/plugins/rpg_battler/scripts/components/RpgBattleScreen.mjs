@@ -157,8 +157,8 @@ export const RpgBattleScreen = defineComponent({
 
     // ── Slot generation ──
     // Overlay rendering is delegated to CharacterSlot via overlaySlot="rpg-battle-char-overlay".
-    // CharacterSlot positions the overlay above the body's head, scales it with slot.scale,
-    // and translates by the per-view body art_dx — no manual positioning math here.
+    // CharacterSlot anchors the overlay to the slot (art_dx/dy center the body's pixels on it)
+    // above the body-box top — no manual positioning math here.
 
     // World camera: background + enemies live in one wrapper that scales together via a single
     // GPU transform (see .rpg-world-camera). worldCam = the zoom factor (1 out, WORLD_ZOOM_IN in).
@@ -173,7 +173,9 @@ export const RpgBattleScreen = defineComponent({
       if (enemies.length === 0) return [];
 
       const startX = 0, dx = 15, dy = 25, cols = 3;
-      const floorY = 0; // front/bottom row sits on the floor line; deeper rows stack upward
+      // Front/bottom row sits on the floor line; deeper rows stack upward. Positive =
+      // lower on screen — keeps the back row's overlay clear of the viewport top edge.
+      const floorY = 2;
       const baseScale = 0.35; // up from 0.2
       // Fake perspective: each row farther back is smaller (size only — a slot filter would
       // also dim the HP-bar overlay).
@@ -502,6 +504,12 @@ export const RpgBattleScreen = defineComponent({
       endRpgBattle('victory');
     }
 
+    // Result-overlay Continue: ends with the battle's actual result so defeat
+    // reaches battle_end/battle_closed listeners (winBattle is the dev force-win only).
+    function closeBattle() {
+      endRpgBattle(battle.value?.result || 'victory');
+    }
+
     function toggleZoom() {
       if (forceZoomOut.value) {
         forceZoomOut.value = false;
@@ -576,7 +584,7 @@ export const RpgBattleScreen = defineComponent({
       abilityPanelRef, viewerCharacters, viewerInitialIndex,
       isEnemyTargetable, onEnemyTargetClick,
       onSelectAbility, selectTarget, cancelTarget, onSlotClick, closeViewer,
-      winBattle, onEndTurn, toggleZoom, cycleBattleState, game,
+      winBattle, closeBattle, onEndTurn, toggleZoom, cycleBattleState, game,
     };
   },
   template: /*html*/`
@@ -597,8 +605,9 @@ export const RpgBattleScreen = defineComponent({
                  Players + UI live OUTSIDE it. -->
             <div class="rpg-world-camera" :style="{ transform: 'scale(' + worldCam + ') translateZ(0)' }">
             <!-- Enemies. Overlay (name + HP + tokens) is rendered by CharacterSlot
-                 via overlaySlot="rpg-battle-char-overlay" — it auto-tracks the
-                 body's per-view art_dx and shrinks with slot.scale. -->
+                 via overlaySlot="rpg-battle-char-overlay" — anchored to the slot
+                 (art_dx/dy center the body's pixels on it); battle_overlay_x/y_offset
+                 fine-adjust from there. -->
             <div v-for="es in enemySlots" :key="'e_' + es.charId" :data-rpg-char-id="es.charId">
               <CharacterSlot
                 :character="game.getCharacter(es.charId)" :slot="es.slot"
@@ -617,8 +626,8 @@ export const RpgBattleScreen = defineComponent({
             </div>
             <!-- /.rpg-world-camera -->
 
-            <!-- Players. view="back" → CharacterSlot resolves bodyArtOffset from
-                 the back spine entry, so the overlay tracks the back spine's center. -->
+            <!-- Players. view="back" → the back spine entry's art_dx/dy center its
+                 pixels on the slot; the overlay stays slot-anchored. -->
             <div v-for="ps in playerSlots" :key="'p_' + ps.charId" :data-rpg-char-id="ps.charId"
               v-show="!zoomedIn || ps.charId === battle.activeCharId"
               :style="{ '--overlay-zoom': ps.charId === battle.activeCharId ? worldCam : 1 }">
@@ -688,7 +697,7 @@ export const RpgBattleScreen = defineComponent({
       <div v-if="isBattleOver" class="rpg-battle-result-overlay">
         <div class="rpg-battle-result" :class="battle.result">
           <div class="rpg-battle-result-text">{{ battle.result === 'victory' ? game.getLine('ui_victory') : game.getLine('ui_defeat') }}</div>
-          <button class="rpg-btn" @click="winBattle">Continue</button>
+          <button class="rpg-btn" @click="closeBattle">Continue</button>
         </div>
       </div>
     </div>

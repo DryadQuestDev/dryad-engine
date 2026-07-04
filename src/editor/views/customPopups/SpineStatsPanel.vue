@@ -10,9 +10,49 @@ const props = defineProps<{
   defaultSkins?: string[];
   /** Hide the bones/slots/constraints row (use when shown elsewhere). */
   hideCounts?: boolean;
+  /** Animations currently driven by the character's skin layers + attributes (green). */
+  activeAnimations?: string[];
+  /** Animations force-played via chip click (yellow, wins over green). */
+  forcedAnimations?: string[];
+  /** Skins currently driven by the character's skin layers + attributes (green). */
+  activeSkins?: string[];
+  /** Skins force-applied via chip click (yellow, wins over green). */
+  forcedSkins?: string[];
+  /** Makes chips clickable, emitting toggle-animation / toggle-skin. */
+  interactive?: boolean;
+}>();
+
+const emit = defineEmits<{
+  'toggle-animation': [name: string];
+  'toggle-skin': [name: string];
 }>();
 
 const defaultSkinSet = computed(() => new Set(props.defaultSkins ?? []));
+const activeAnimationSet = computed(() => new Set(props.activeAnimations ?? []));
+const forcedAnimationSet = computed(() => new Set(props.forcedAnimations ?? []));
+const activeSkinSet = computed(() => new Set(props.activeSkins ?? []));
+const forcedSkinSet = computed(() => new Set(props.forcedSkins ?? []));
+
+function chipClass(name: string, forced: Set<string>, active: Set<string>, isDefault: boolean) {
+  return {
+    'is-forced': forced.has(name),
+    'is-active': !forced.has(name) && active.has(name),
+    'is-default': isDefault,
+    clickable: props.interactive,
+  };
+}
+
+function chipTooltip(name: string, forced: Set<string>, active: Set<string>, isDefault: boolean): string | undefined {
+  if (forced.has(name)) return 'Forced – click to release.';
+  if (active.has(name)) {
+    return props.interactive
+      ? 'Active via skin layers/attributes – click to force it on.'
+      : 'Active via skin layers/attributes.';
+  }
+  if (isDefault) return 'Currently selected — change in the picker above.';
+  if (props.interactive) return 'Click to force it on.';
+  return undefined;
+}
 </script>
 
 <template>
@@ -26,8 +66,9 @@ const defaultSkinSet = computed(() => new Set(props.defaultSkins ?? []));
           v-for="name in stats.animations"
           :key="`a-${name}`"
           class="chip"
-          :class="{ 'is-default': defaultAnimation === name }"
-          v-tooltip.top="defaultAnimation === name ? 'Currently selected — change in the picker above.' : undefined"
+          :class="chipClass(name, forcedAnimationSet, activeAnimationSet, defaultAnimation === name)"
+          v-tooltip.top="chipTooltip(name, forcedAnimationSet, activeAnimationSet, defaultAnimation === name)"
+          @click="interactive && emit('toggle-animation', name)"
         >
           <span class="chip-name">{{ name }}</span>
           <span v-if="defaultAnimation === name" class="chip-tag">default</span>
@@ -44,8 +85,9 @@ const defaultSkinSet = computed(() => new Set(props.defaultSkins ?? []));
           v-for="name in stats.skins"
           :key="`s-${name}`"
           class="chip"
-          :class="{ 'is-default': defaultSkinSet.has(name) }"
-          v-tooltip.top="defaultSkinSet.has(name) ? 'Currently selected — change in the picker above.' : undefined"
+          :class="chipClass(name, forcedSkinSet, activeSkinSet, defaultSkinSet.has(name))"
+          v-tooltip.top="chipTooltip(name, forcedSkinSet, activeSkinSet, defaultSkinSet.has(name))"
+          @click="interactive && emit('toggle-skin', name)"
         >
           <span class="chip-name">{{ name }}</span>
           <span v-if="defaultSkinSet.has(name)" class="chip-tag">default</span>
@@ -131,12 +173,39 @@ const defaultSkinSet = computed(() => new Set(props.defaultSkins ?? []));
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
   color: #333;
+  user-select: none;
 }
 
 .chip.is-default {
   background-color: #fff8e6;
   border-color: #f0d27a;
   cursor: help;
+}
+
+/* Layer-driven (attributes/skin layers) — green */
+.chip.is-active {
+  background-color: #e8f5e9;
+  border-color: #81c784;
+  color: #1b5e20;
+}
+
+/* Force-toggled by the dev — yellow, wins over green and default styling */
+.chip.is-forced {
+  background-color: #fff3c4;
+  border-color: #e0b000;
+  color: #5a4500;
+}
+
+.chip.clickable {
+  cursor: pointer;
+}
+
+.chip.clickable:hover {
+  border-color: #999;
+}
+
+.chip.is-forced.clickable:hover {
+  border-color: #a88400;
 }
 
 .chip-tag {

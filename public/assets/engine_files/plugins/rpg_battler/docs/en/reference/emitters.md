@@ -5,7 +5,8 @@
 | Emitter | Args | Cancellable | Description |
 |---|---|---|---|
 | `battle_start` | `()` | Yes | Before battle begins. Return false to prevent the battle from starting |
-| `battle_end` | `(result)` | No | When battle ends. `result`: `"victory"` or `"defeat"` |
+| `battle_end` | `(result)` | No | When battle ends, before pre-battle states are restored and the roster is cleaned up. `result`: `"victory"` or `"defeat"`. Battle data (rosters, statuses) is still readable here; state writes get overwritten by the restore — use `battle_closed` for those |
+| `battle_closed` | `(result)` | No | After the battle is fully torn down: pre-battle states restored, battle statuses removed, spawned enemies deleted, battle cleared. Fires before the triggering scene resumes (victory only — on defeat the scene stays halted). Safe place to set post-battle game state |
 | `battle_turn_start` | `(turnNumber)` | No | At the start of a new round |
 
 ## Actions
@@ -73,7 +74,7 @@ game.on('battle_action_applied', (caster, event) => {
 
 | Emitter | Args | Cancellable | Description |
 |---|---|---|---|
-| `battle_character_defeated` | `(battle, characterId, side)` | No | When a character reaches 0 HP (after death defiance check). `side`: `"player"` or `"enemy"` |
+| `battle_character_defeated` | `(characterId, side)` | No | When a character reaches 0 HP (after death defiance check). `side`: `"player"` or `"enemy"` |
 
 ## Example
 
@@ -89,7 +90,7 @@ game.registerStatComputer('reservoir_potency', (character) => {
 });
 
 // Double damage to targets below 25% HP
-game.on('battle_action_apply', (battle, caster, event) => {
+game.on('battle_action_apply', (caster, event) => {
     const target = game.getCharacter(event.targetId);
     if (target.getResourceRatio('health') < 0.25) {
         event.damage *= 2;
@@ -97,19 +98,19 @@ game.on('battle_action_apply', (battle, caster, event) => {
 });
 
 // Override a dodge (target can't dodge this turn)
-game.on('battle_action_apply', (battle, caster, event) => {
+game.on('battle_action_apply', (caster, event) => {
     if (someCondition) event.isDodged = false;
 });
 
 // Log when any character is defeated
-game.on('battle_character_defeated', (battle, characterId, side) => {
+game.on('battle_character_defeated', (characterId, side) => {
     const char = game.getCharacter(characterId);
     const name = char?.getTrait('name') || characterId;
     console.log(`${name} was defeated on the ${side} side`);
 });
 
 // React when a specific status has just expired on a character's turn start
-game.on('character_turn_post_tick', (battle, characterId) => {
+game.on('character_turn_post_tick', (characterId) => {
     const char = game.getCharacter(characterId);
     if (!char.hasStatus('braced')) {
         // Braced just expired (or was never active) — react accordingly

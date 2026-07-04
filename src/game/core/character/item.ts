@@ -100,6 +100,8 @@ export class Item {
 
     public slots: string[] = [];
 
+    public category: string = "";
+
     // TODO:should these be fetched from the template?
     public tags: string[] = [];
     public getTags(): string[] {

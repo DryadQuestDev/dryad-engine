@@ -205,7 +205,7 @@ export class PluginManager {
             if (!pluginPath) continue;
 
             for (const popup of popups) {
-                if (!popup.id || !popup.script || !popup.tab) continue;
+                if (!popup.id || !popup.script || !popup.tabs) continue;
                 try {
                     // Load optional CSS
                     if (popup.css) {
@@ -222,9 +222,12 @@ export class PluginManager {
                         name: popup.name || popup.id,
                         component,
                     });
-                    const existing = this.pluginPopupsByTab.get(popup.tab) || [];
-                    existing.push(popup.id);
-                    this.pluginPopupsByTab.set(popup.tab, existing);
+                    const tabs = Array.isArray(popup.tabs) ? popup.tabs : [popup.tabs];
+                    for (const tabId of tabs) {
+                        const existing = this.pluginPopupsByTab.get(tabId) || [];
+                        existing.push(popup.id);
+                        this.pluginPopupsByTab.set(tabId, existing);
+                    }
                 } catch (e) {
                     console.error(`[PluginManager] Failed to load editor popup '${popup.id}' from ${popup.script}:`, e);
                 }

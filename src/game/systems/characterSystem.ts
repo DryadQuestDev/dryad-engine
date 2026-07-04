@@ -468,22 +468,37 @@ export class CharacterSystem {
    *
    * @param data String format: "alice.trait.name=New Name, eleanor.resource.health<25.5, alice.skinStyle.hat>class1, alice.skinStyle.hat=[class1, class2]"
    *             Object format: { "alice.trait.name": "New Name", "eleanor.resource.health": -25.5 }
-   * @param mode Operation mode: 'set', 'add', or 'subtract'
+   * @param forcedType When set (e.g. by the `attr`/`stat`/`trait`/`resource`/`skin_style` shortcut
+   *                   actions), paths are "charId.key" and this value is used as the type.
    */
   // ignore types
-  public processCharAction(data: string | Record<string, any>): void {
+  public processCharAction(data: string | Record<string, any>, forcedType?: string): void {
     const parsed = this.game.logicSystem.parseOpsSpec(data);
     const operations: Array<{ charId: string; type: string; key: string; operator: string; value: any }> = [];
 
     for (const entry of parsed) {
       const parts = entry.id.split('.');
-      if (parts.length !== 2 && parts.length !== 3) {
-        gameLogger.error(`Invalid char path: "${entry.id}". Use "charId.type.key" or "charId.type"`);
-        continue;
+      let charId: string;
+      let type: string;
+      let key: string;
+
+      if (forcedType) {
+        if (parts.length !== 2) {
+          gameLogger.error(`Invalid ${forcedType} path: "${entry.id}". Use "charId.key"`);
+          continue;
+        }
+        charId = parts[0];
+        type = forcedType;
+        key = parts[1];
+      } else {
+        if (parts.length !== 2 && parts.length !== 3) {
+          gameLogger.error(`Invalid char path: "${entry.id}". Use "charId.type.key" or "charId.type"`);
+          continue;
+        }
+        charId = parts[0];
+        type = parts[1];
+        key = parts.length === 3 ? parts[2] : '';
       }
-      const charId = parts[0];
-      const type = parts[1];
-      const key = parts.length === 3 ? parts[2] : '';
 
       let value: any = entry.value;
       if (type === 'stat' || type === 'resource') {

@@ -108,8 +108,8 @@ Segment content supports the full text resolution pipeline:
 | `\|@slotId\|` | Nested slot (recursive) | `\|@approach\| \|@main\|` |
 | `\|@slotId(args)\|` | Nested slot with arguments | `\|@action(1)\|` — passes `1` to the segment |
 | `\|$templateId\|` | Template reference | `\|$greeting\|` |
-| `*text*` | Bold | `*important*` |
-| `**text**` | Italic | `**whispered**` |
+| `*text*` | Italic | `*whispered*` |
+| `**text**` | Bold | `**important**` |
 
 Slots can nest other slots, enabling hierarchical narrative composition:
 

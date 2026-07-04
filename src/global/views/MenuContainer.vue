@@ -12,7 +12,10 @@ import CustomComponentContainer from '../../game/views/CustomComponentContainer.
 const game = Game.getInstance();
 const global = Global.getInstance();
 
-const menuState = ref('main');
+// Consume the requested initial tab (game.openMenu('saves') etc.); the component is
+// v-if-mounted fresh on every open, so setup reruns and the reset keeps later opens on 'main'.
+const menuState = ref(global.menuInitialState.value);
+global.menuInitialState.value = 'main';
 
 const isGameRunning = global.engineState.value === 'game';
 

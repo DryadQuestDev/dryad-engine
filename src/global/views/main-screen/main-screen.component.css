@@ -166,6 +166,11 @@
   height: 100%;
   min-height: 0;
   align-items: stretch;
+  pointer-events: none;
+}
+
+.main-screen-cards>* {
+  pointer-events: auto;
 }
 
 .main-screen-empty {

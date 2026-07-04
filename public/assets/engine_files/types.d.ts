@@ -380,6 +380,14 @@ interface Game {
   isSaveDisabled(): boolean;
 
   /**
+   * Open the engine menu, optionally on a specific tab.
+   * @param menuState - Tab to open: 'main' | 'saves' | 'engine_settings' | 'game_settings' (default 'main')
+   * @example
+   * game.openMenu('saves'); // open the menu directly on the save/load list
+   */
+  openMenu(menuState?: string): void;
+
+  /**
    * Returns the current game's manifest — includes id, name, author, version, description, etc.
    * Read-only; to edit the manifest, use the engine editor.
    * @example
@@ -989,6 +997,35 @@ interface Game {
    * }
    */
   isCharacterInParty(character: Character | string): boolean;
+
+  /**
+   * Warms the browser cache with every image a character may render (skin-layer
+   * frames, masks, face_static) so attribute swaps never fetch mid-animation.
+   * Accepts a live Character, a live character id, or a character TEMPLATE id
+   * (for not-yet-spawned characters like ability summons).
+   * `simulateAttributes` adds extra attribute values to the character's current
+   * ones when enumerating skin-layer image keys; `spine: true` also warms spine
+   * atlas/skeleton assets. The returned promise never rejects.
+   * @example
+   * await game.preloadCharacterAssets('ane', {
+   *   simulateAttributes: { battle_state: ['idle', 'attack', 'hit'] },
+   *   spine: true,
+   * });
+   */
+  preloadCharacterAssets(target: Character | string, options?: {
+    simulateAttributes?: Record<string, string[]>;
+    spine?: boolean;
+  }): Promise<void>;
+
+  /**
+   * Shows/hides a full-screen "Loading" overlay (same visual as the initial game
+   * load) WITHOUT unmounting the game — wrap asset preloading with it.
+   * @example
+   * game.setScreenLoading(true);
+   * try { await game.preloadCharacterAssets('boss'); }
+   * finally { game.setScreenLoading(false); }
+   */
+  setScreenLoading(value: boolean): void;
 
   /**
    * Add a character to the party.
@@ -2272,6 +2309,15 @@ interface Character {
    * const maxHealth = character.getStat('health');
    */
   getStat(name: string): number;
+
+  /**
+   * Check if the character has a stat defined in any of their statuses
+   * (core/template stats, starting statuses, buffs, equipment, etc.).
+   * @param statId - The stat name
+   * @example
+   * if (character.hasStat('rage')) { ... }
+   */
+  hasStat(statId: string): boolean;
 
   /**
    * Set the base value of a stat on the character's core status.

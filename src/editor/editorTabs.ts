@@ -18,6 +18,7 @@ import { SoundSchema } from "../schemas/soundSchema";
 import { PluginSchema } from "../schemas/pluginShema";
 import { ItemTemplateSchema } from "../schemas/itemTemplateSchema";
 import { ItemSlotSchema } from "../schemas/itemSlotSchema";
+import { ItemCategorySchema } from "../schemas/itemCategorySchema";
 import { ItemInventorySchema } from "../schemas/itemInventorySchema";
 import { AssetSchema } from "../schemas/assetSchema";
 import { DevSettingsSchema } from "../schemas/devSettings";
@@ -282,6 +283,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'character_status',
         isArray: true,
         requiresMod: true,
+        customPopups: ['face-picker'],
       },
       {
         id: 'character_slot_templates',
@@ -299,6 +301,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'skill_slot',
         isArray: true,
         requiresMod: true,
+        customPopups: ['face-picker'],
       },
       {
         id: 'skill_trees',
@@ -365,6 +368,14 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
       },
       {
+        id: 'item_categories',
+        schema: ItemCategorySchema,
+        file: 'item_categories',
+        title: 'item_category',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
         id: 'item_traits',
         schema: EntityTraitSchema,
         file: 'item_traits',
@@ -395,6 +406,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'item_template',
         isArray: true,
         requiresMod: true,
+        customPopups: ['face-picker'],
       },
       {
         id: 'inventories',

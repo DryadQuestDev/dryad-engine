@@ -64,7 +64,35 @@ Go to **Items > Item Traits** and define fields like:
 | chest | Chest |
 | accessory_1 | Accessory |
 
-Items define which slots they can go into. Characters define which slots they have (and where they appear in the equipment UI).
+Items define which slots they can go into (the item's `slots`). Characters define which slots they have (and where they appear in the equipment UI).
+
+**`accepts` — sharing one item across many slots.** A slot always admits items targeting its own id. The optional `accepts` field lists *extra* slot tokens it also admits, so a single item can fit many slots without listing each one. Define a shared "tag" slot (with no character instances) and have the real slots accept it:
+
+| Slot ID | `accepts` | Admits items whose `slots` include… |
+|---------|-----------|--------------------------------------|
+| `trinket_general` | – | (tag-only slot — nothing equips it directly) |
+| `trinket_ane` | `trinket_general` | `trinket_ane` **or** `trinket_general` |
+| `trinket_ordelia` | `trinket_general` | `trinket_ordelia` **or** `trinket_general` |
+
+A **general** trinket sets `slots: ["trinket_general"]` and fits every character's trinket slot; a **character-specific** trinket sets `slots: ["trinket_ane"]` and fits only Ane's. Adding a new character never touches existing items — its slot simply lists `trinket_general` in `accepts`. Leave `accepts` empty for an ordinary slot (it matches its own id only).
+
+---
+
+### Item Categories
+
+**What they are:** Player-facing inventory filter groups — the tabs (and their icons) in the inventory UI.
+**Unrelated to Item Slots:** categories never affect where an item equips; they only sort the inventory view.
+
+Go to **Items > Item Categories** and define groups:
+
+| Field | Description |
+|-------|-------------|
+| name | Tab label (e.g. "Consumables") |
+| icon | Tab icon image (falls back to the name as a text chip if omitted) |
+| order | Tab order (lower shows first) |
+
+Each item template picks one **category** (its `category` field). The inventory shows a built-in **All**
+tab plus one tab per category, with a name search box; items with no category appear only under **All**.
 
 ---
 
@@ -78,6 +106,7 @@ Items define which slots they can go into. Characters define which slots they ha
 | attributes | Categories (rarity, type) |
 | slots | Which equipment slots this item fits |
 | tags | For filtering and game logic |
+| category | Inventory filter category (player UI only) |
 | price | Trading value in various currencies |
 | max_stack | How many can stack (1 = no stacking) |
 | is_currency | Whether this item is money |
@@ -191,6 +220,25 @@ Consuming the same item type multiple times produces the same status ID, so the 
 |------|-------|
 | Give player a sword | `game.createItem('iron_sword')` → `inventory.addItem(sword)` |
 | Check and deduct gold | `inventory.canAffordPrice({ gold: 100 })` → `inventory.deductCurrency({ gold: 100 })` |
+
+---
+
+## Item Actions (scripting)
+
+Scene actions for items (used in dungeon content). See ->builtins.actions for full syntax.
+
+| Action | What it does |
+|--------|--------------|
+| `equip` | Equip/unequip by real character + item-template ids (**recommended**). `char -> item & item`, `char -> !item` to unequip, `!char.slot_type` to clear a slot, `!char` to clear all. |
+| `equip_item` / `unequip_item` | **Internal/advanced** — act on the *active item* (uid). Keep for active-item flows (`{ equip_item: true }`, e.g. an equip/unequip cancel handler). Prefer `equip` otherwise. |
+| `add_item` | Add items to an inventory by id (`"sword, potion#5"`). |
+| `consume_item` | Consume the active/target item. |
+| `item_slot` | Add/remove equipment *slots* on a character (`"alice->extra_ring, bob->!ring_3"`). |
+| `loot` / `trade` | Open a loot / trade exchange. |
+| `learn_recipe` | Learn crafting recipe(s). |
+
+> Prefer `equip` over `equip_item`/`unequip_item` for normal scripting: it takes stable character and
+> item ids, while `equip_item`/`unequip_item` operate on the active item's uid.
 
 ---
 

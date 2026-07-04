@@ -56,6 +56,7 @@ All built-in game states you can read and write using `game.getState()` and `gam
 | State | Default | Description |
 |-------|---------|-------------|
 | `supress_game_events` | `false` | Suppress game event triggers |
+| `hide_events` | `false` | Hide the active scene's event UI and background assets (used by full-screen takeovers like battles or a game-over screen) |
 | `disable_saves` | `false` | Disable save functionality |
 | `replay_mode` | `false` | Whether game is in replay mode |
 | `replay_mode_unlock_choices` | `false` | Unlock all choices in replay mode |

@@ -48,6 +48,11 @@ const shouldShowDebugPanel = computed(() => {
       <div class="initial-loader__ring"></div>
       <div class="initial-loader__label">Loading</div>
     </div>
+    <!-- Overlay variant: covers the game without unmounting it (asset preloading) -->
+    <div class="initial-loader" v-if="game.coreSystem.screenLoading.value">
+      <div class="initial-loader__ring"></div>
+      <div class="initial-loader__label">Loading</div>
+    </div>
     <div class="game-body dark-scrollbar" v-else>
 
 
@@ -60,7 +65,7 @@ const shouldShowDebugPanel = computed(() => {
           </div>
         </div>
 
-        <div class="backgrounds-wrapper" id="backgrounds-wrapper">
+        <div class="backgrounds-wrapper" id="backgrounds-wrapper" v-if="!game.coreSystem.getState('hide_events')">
           <BackgroundAsset v-for="asset in game.dungeonSystem.assets.value" :key="asset.id" :asset="asset" />
         </div>
 

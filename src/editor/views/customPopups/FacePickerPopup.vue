@@ -23,6 +23,29 @@ const localItem = ref(JSON.parse(JSON.stringify(props.item)));
 // Core item reference (from parent)
 const coreItem = ref(props.coreItem);
 
+// Subtabs where the character-appearance override is nested under `.status`
+// (applied-status shape) rather than at the entity top level.
+const NESTED_ART_ROOT_SUBTABS = ['item_templates', 'skill_slots'];
+const artRootNested = NESTED_ART_ROOT_SUBTABS.includes(props.subtabId);
+const isCharacterTemplate = props.subtabId === 'character_templates';
+
+// Writable root — creates `.status` on first use so writes land in the right place.
+function ensureArtRoot(base: any): any {
+  if (!base) return base;
+  if (!artRootNested) return base;
+  if (!base.status) base.status = {};
+  return base.status;
+}
+
+// Reactive views: everything that reads/writes the override fields (traits,
+// spine, skin_layers, attributes) goes through these instead of localItem/coreItem
+// directly, so items/skill-slots edit `.status.*` while characters/statuses edit top level.
+const artLocal = computed(() => ensureArtRoot(localItem.value));
+const artCore = computed(() => coreItem.value ? (artRootNested ? coreItem.value.status : coreItem.value) : undefined);
+
+// Guarantee the writable root exists before first render so early reads are safe.
+ensureArtRoot(localItem.value);
+
 // Flag to prevent re-initialization loops
 const isInitialized = ref(false);
 
@@ -113,7 +136,7 @@ const rectStyle = computed(() => ({
 // Get character image layers from skin_layers (filtered by selected view).
 // The loader normalizes _default ↔ '' equivalence internally.
 const imageLayers = computed(() => {
-  return loadCharacterImages(localItem.value, skinLayersData.value as any, selectedView.value);
+  return loadCharacterImages(artLocal.value, skinLayersData.value as any, selectedView.value);
 });
 
 // Layer-driven spine track map. Single source of truth for which animations
@@ -122,20 +145,51 @@ const imageLayers = computed(() => {
 // loads, so the watcher below is what catches that case (init may apply an
 // empty map first; this re-applies once data lands).
 const spineTrackMap = computed(() => buildEditorSpineTrackMapFromLayers(
-  localItem.value?.skin_layers,
+  artLocal.value?.skin_layers,
   skinLayersData.value,
-  localItem.value?.attributes || {},
+  artLocal.value?.attributes || {},
   selectedView.value,
 ));
 
 // Layer-driven spine skins — same reopen-race protection via the watcher
 // below; layers from spine-type entries with spine_skins contribute names.
 const spineSkins = computed(() => buildEditorSpineSkinsFromLayers(
-  localItem.value?.skin_layers,
+  artLocal.value?.skin_layers,
   skinLayersData.value,
-  localItem.value?.attributes || {},
+  artLocal.value?.attributes || {},
   selectedView.value,
 ));
+
+// Dev-forced preview overrides, toggled by clicking chips in SpineStatsPanel.
+// Popup-session only. Forced animations are folded into the applied track map
+// on high track indices, so applyTrackMap's clearing loop fades them out on
+// release — no manual track bookkeeping.
+const forcedAnimations = ref<Set<string>>(new Set());
+const forcedSkins = ref<Set<string>>(new Set());
+const FORCED_TRACK_BASE = 100;
+
+const activeAnimationNames = computed(() => [...spineTrackMap.value.values()]);
+
+const effectiveTrackMap = computed(() => {
+  const map = new Map(spineTrackMap.value);
+  let i = 0;
+  for (const name of forcedAnimations.value) {
+    map.set(FORCED_TRACK_BASE + i++, name);
+  }
+  return map;
+});
+
+const effectiveSkins = computed(() => [...new Set([...spineSkins.value, ...forcedSkins.value])]);
+
+function toggleForcedAnimation(name: string) {
+  if (forcedAnimations.value.has(name)) forcedAnimations.value.delete(name);
+  else forcedAnimations.value.add(name);
+}
+
+function toggleForcedSkin(name: string) {
+  if (forcedSkins.value.has(name)) forcedSkins.value.delete(name);
+  else forcedSkins.value.add(name);
+}
 
 // Initialize local values from item.traits
 onMounted(() => {
@@ -148,36 +202,39 @@ function initializeLocalValues() {
   // Skip if already initialized to prevent infinite loops
   if (isInitialized.value) return;
 
+  const local = ensureArtRoot(localItem.value);
+  const core = artCore.value;
+
   // Merge skin_layers: combine core and mod layers
-  if (coreItem.value?.skin_layers) {
-    const coreLayers = coreItem.value.skin_layers || [];
-    const modLayers = localItem.value.skin_layers || [];
+  if (core?.skin_layers) {
+    const coreLayers = core.skin_layers || [];
+    const modLayers = local.skin_layers || [];
 
     // Use Set to merge unique layers, preserving mod order first, then adding missing core layers
     const mergedLayers = [...new Set([...modLayers, ...coreLayers])];
-    localItem.value.skin_layers = mergedLayers;
-  } else if (!localItem.value.skin_layers) {
-    localItem.value.skin_layers = [];
+    local.skin_layers = mergedLayers;
+  } else if (!local.skin_layers) {
+    local.skin_layers = [];
   }
 
   // Merge attributes: core attributes as defaults, mod attributes override
-  if (coreItem.value?.attributes || localItem.value.attributes) {
-    localItem.value.attributes = {
-      ...(coreItem.value?.attributes || {}),
-      ...(localItem.value.attributes || {})
+  if (core?.attributes || local.attributes) {
+    local.attributes = {
+      ...(core?.attributes || {}),
+      ...(local.attributes || {})
     };
-  } else if (!localItem.value.attributes) {
-    localItem.value.attributes = {};
+  } else if (!local.attributes) {
+    local.attributes = {};
   }
 
   // Ensure traits object exists
-  if (!localItem.value.traits) {
-    localItem.value.traits = {};
+  if (!local.traits) {
+    local.traits = {};
   }
 
-  localX.value = localItem.value.traits?.face_shift_x ?? coreItem.value?.traits?.face_shift_x ?? 50;
-  localY.value = localItem.value.traits?.face_shift_y ?? coreItem.value?.traits?.face_shift_y ?? 50;
-  localScale.value = localItem.value.traits?.face_shift_scale ?? coreItem.value?.traits?.face_shift_scale ?? 1;
+  localX.value = local.traits?.face_shift_x ?? core?.traits?.face_shift_x ?? 50;
+  localY.value = local.traits?.face_shift_y ?? core?.traits?.face_shift_y ?? 50;
+  localScale.value = local.traits?.face_shift_scale ?? core?.traits?.face_shift_scale ?? 1;
 
   loadArtOffsetForView();
 
@@ -194,8 +251,8 @@ function initializeLocalValues() {
 const storedPreviewMode = useStorage<'spine' | 'static'>('facepicker_previewMode', 'spine');
 
 const hasSpineForActiveView = computed(() =>
-  !!findSpineEntry(localItem.value.spine, selectedView.value)
-  || !!findSpineEntry(coreItem.value?.spine, selectedView.value)
+  !!findSpineEntry(artLocal.value.spine, selectedView.value)
+  || !!findSpineEntry(artCore.value?.spine, selectedView.value)
 );
 const hasStaticForActiveView = computed(() => imageLayers.value.length > 0);
 
@@ -218,8 +275,8 @@ const spineDisplayOffset = computed(() => {
   if (effectivePreviewMode.value === 'spine') {
     return { dx: localArtDx.value, dy: localArtDy.value, scale: localArtScale.value };
   }
-  const entry = findSpineEntry(localItem.value.spine, selectedView.value)
-    || findSpineEntry(coreItem.value?.spine, selectedView.value);
+  const entry = findSpineEntry(artLocal.value.spine, selectedView.value)
+    || findSpineEntry(artCore.value?.spine, selectedView.value);
   return {
     dx: typeof entry?.art_dx === 'number' ? entry.art_dx : 0,
     dy: typeof entry?.art_dy === 'number' ? entry.art_dy : 0,
@@ -232,9 +289,9 @@ const staticDisplayOffset = computed(() => {
     return { dx: localArtDx.value, dy: localArtDy.value, scale: localArtScale.value };
   }
   return {
-    dx: localItem.value.traits?.art_dx ?? coreItem.value?.traits?.art_dx ?? 0,
-    dy: localItem.value.traits?.art_dy ?? coreItem.value?.traits?.art_dy ?? 0,
-    scale: localItem.value.traits?.art_scale ?? coreItem.value?.traits?.art_scale ?? 1,
+    dx: artLocal.value.traits?.art_dx ?? artCore.value?.traits?.art_dx ?? 0,
+    dy: artLocal.value.traits?.art_dy ?? artCore.value?.traits?.art_dy ?? 0,
+    scale: artLocal.value.traits?.art_scale ?? artCore.value?.traits?.art_scale ?? 1,
   };
 });
 
@@ -243,15 +300,15 @@ const staticDisplayOffset = computed(() => {
 //   'static' → character traits (the static fallback for any unset layer)
 function loadArtOffsetForView() {
   if (effectivePreviewMode.value === 'spine') {
-    const entry = findSpineEntry(localItem.value.spine, selectedView.value)
-      || findSpineEntry(coreItem.value?.spine, selectedView.value);
+    const entry = findSpineEntry(artLocal.value.spine, selectedView.value)
+      || findSpineEntry(artCore.value?.spine, selectedView.value);
     localArtDx.value = typeof entry?.art_dx === 'number' ? entry.art_dx : 0;
     localArtDy.value = typeof entry?.art_dy === 'number' ? entry.art_dy : 0;
     localArtScale.value = typeof entry?.art_scale === 'number' ? entry.art_scale : 1;
   } else {
-    localArtDx.value = localItem.value.traits?.art_dx ?? coreItem.value?.traits?.art_dx ?? 0;
-    localArtDy.value = localItem.value.traits?.art_dy ?? coreItem.value?.traits?.art_dy ?? 0;
-    localArtScale.value = localItem.value.traits?.art_scale ?? coreItem.value?.traits?.art_scale ?? 1;
+    localArtDx.value = artLocal.value.traits?.art_dx ?? artCore.value?.traits?.art_dx ?? 0;
+    localArtDy.value = artLocal.value.traits?.art_dy ?? artCore.value?.traits?.art_dy ?? 0;
+    localArtScale.value = artLocal.value.traits?.art_scale ?? artCore.value?.traits?.art_scale ?? 1;
   }
 }
 
@@ -291,32 +348,34 @@ watch([localX, localY, localScale, localArtDx, localArtDy, localArtScale], () =>
 });
 
 function updateItemTraits() {
+  const local = ensureArtRoot(localItem.value);
+
   // Ensure traits object exists
-  if (!localItem.value.traits) {
-    localItem.value.traits = {};
+  if (!local.traits) {
+    local.traits = {};
   }
 
   // Face crop fields are character-trait-level — they target the character sheet only.
-  localItem.value.traits.face_shift_x = localX.value;
-  localItem.value.traits.face_shift_y = localY.value;
-  localItem.value.traits.face_shift_scale = localScale.value;
+  local.traits.face_shift_x = localX.value;
+  local.traits.face_shift_y = localY.value;
+  local.traits.face_shift_scale = localScale.value;
 
   // Art offset target follows the effective preview mode: spine entry for the
   // active view, or character traits when tuning the static fallback.
   if (effectivePreviewMode.value === 'spine') {
-    if (!Array.isArray(localItem.value.spine)) localItem.value.spine = [];
-    let entry = (localItem.value.spine as any[]).find((s: any) => viewMatches(s.view, selectedView.value));
+    if (!Array.isArray(local.spine)) local.spine = [];
+    let entry = (local.spine as any[]).find((s: any) => viewMatches(s.view, selectedView.value));
     if (!entry) {
       entry = { view: selectedView.value === DEFAULT_VIEW ? '_default' : selectedView.value };
-      (localItem.value.spine as any[]).push(entry);
+      (local.spine as any[]).push(entry);
     }
     entry.art_dx = localArtDx.value;
     entry.art_dy = localArtDy.value;
     entry.art_scale = localArtScale.value;
   } else {
-    localItem.value.traits.art_dx = localArtDx.value;
-    localItem.value.traits.art_dy = localArtDy.value;
-    localItem.value.traits.art_scale = localArtScale.value;
+    local.traits.art_dx = localArtDx.value;
+    local.traits.art_dy = localArtDy.value;
+    local.traits.art_scale = localArtScale.value;
   }
 
   suppressNextPropSync = true;
@@ -482,8 +541,8 @@ function findSpineForView(spineArray: any, view: string): { atlas?: string, skel
 }
 
 function initializeSpineRefs(view: string = selectedView.value) {
-  const localSpine = findSpineForView(localItem.value.spine, view);
-  const coreSpine = findSpineForView(coreItem.value?.spine, view);
+  const localSpine = findSpineForView(artLocal.value.spine, view);
+  const coreSpine = findSpineForView(artCore.value?.spine, view);
   spineAtlasRef.value = localSpine?.atlas || coreSpine?.atlas || null;
   spineSkeletonRef.value = localSpine?.skeleton || coreSpine?.skeleton || null;
 }
@@ -500,7 +559,7 @@ async function initSpinePlayer() {
 
   try {
     spineSlotId = `face_picker_${Date.now()}`;
-    const attributes = localItem.value.attributes || {};
+    const attributes = artLocal.value.attributes || {};
 
     // Don't pass artDx/artDy here — in the popup the offset is applied as a CSS
     // transform on the orange `.character-doll` wrapper instead, so the orange
@@ -516,12 +575,12 @@ async function initSpinePlayer() {
     spineInstance = spine;
     spineStats.value = spineRenderer.getStats(spine);
 
-    // Apply skins (layer-driven; mirrors Character.getSpineSkinsForView).
-    if (spineSkins.value.length > 0) {
-      spineRenderer.applySkins(spine, spineSkins.value);
+    // Apply skins (layer-driven + forced; mirrors Character.getSpineSkinsForView).
+    if (effectiveSkins.value.length > 0) {
+      spineRenderer.applySkins(spine, effectiveSkins.value);
     }
 
-    applyTrackMap(spine, spineTrackMap.value);
+    applyTrackMap(spine, effectiveTrackMap.value);
 
     // Set image dimensions for face rect positioning
     // actualImage uses the game's reference size (500×700) since CharacterFace.vue
@@ -551,6 +610,8 @@ function disposeSpinePlayer() {
 // Then either init (if the new view has a spine) or dispose (if it doesn't),
 // so a switch from a no-spine view back to a view-with-spine actually re-renders.
 watch(selectedView, async (newView) => {
+  forcedAnimations.value.clear();
+  forcedSkins.value.clear();
   initializeSpineRefs(newView);
   if (!spineAtlasRef.value || !spineSkeletonRef.value) {
     disposeSpinePlayer();
@@ -574,18 +635,23 @@ watch(spineContainerRef, (newRef) => {
   }
 });
 
-// Re-apply track map whenever its inputs change — covers attribute changes
-// AND the reopen race where init runs before skinLayersData has finished
-// loading from disk (init applies an empty map; this catches up once data
-// lands).
-watch(spineTrackMap, (map) => {
+// Re-apply track map whenever its inputs change — covers attribute changes,
+// forced-chip toggles, AND the reopen race where init runs before
+// skinLayersData has finished loading from disk (init applies an empty map;
+// this catches up once data lands).
+watch(effectiveTrackMap, (map) => {
   if (spineInstance) applyTrackMap(spineInstance, map);
 });
 
-// Re-apply skins on the same race-safe pattern.
-watch(spineSkins, (skins) => {
-  if (spineInstance && skins.length > 0) {
+// Re-apply skins on the same race-safe pattern. applySkins() no-ops on an
+// empty list, so releasing the last forced skin clears the skeleton explicitly.
+watch(effectiveSkins, (skins) => {
+  if (!spineInstance) return;
+  if (skins.length > 0) {
     spineRenderer.applySkins(spineInstance, skins);
+  } else {
+    spineInstance.skeleton.setSkin(null);
+    spineInstance.skeleton.setSlotsToSetupPose();
   }
 });
 
@@ -612,6 +678,7 @@ watch(localSpineGameScale, (value) => {
 // Called by CustomPopupWrapper on Save / Save and Close (not on Cancel).
 // Persists the per-view spine scale to the active manifest if the user changed it.
 async function commitExternal() {
+  if (!isCharacterTemplate) return;
   if (localSpineGameScale.value === initialSpineGameScale.value) return;
   const manifest = editor.getMergedManifest() as any;
   const map: Record<string, number> = { ...(manifest?.spine_character_scale || {}) };
@@ -645,7 +712,10 @@ onMounted(() => {
     <div class="picker-content">
       <!-- Controls -->
       <div class="controls">
-        <SpineStatsPanel v-if="isSpineCharacter" :stats="spineStats" />
+        <SpineStatsPanel v-if="isSpineCharacter" :stats="spineStats" interactive
+          :active-animations="activeAnimationNames" :forced-animations="[...forcedAnimations]"
+          :active-skins="spineSkins" :forced-skins="[...forcedSkins]"
+          @toggle-animation="toggleForcedAnimation" @toggle-skin="toggleForcedSkin" />
 
         <div v-if="characterViews.length > 0" class="control-group">
           <label>View</label>
@@ -653,7 +723,7 @@ onMounted(() => {
             class="control-select" />
         </div>
 
-        <div v-if="isSpineCharacter" class="control-group">
+        <div v-if="isSpineCharacter && isCharacterTemplate" class="control-group">
           <div class="control-label-row">
             <label>Spine Scale (game-wide): {{ localSpineGameScale.toFixed(2) }}</label>
             <span v-if="localSpineGameScale !== initialSpineGameScale" class="core-value-indicator">
@@ -674,9 +744,9 @@ onMounted(() => {
           <div class="control-group">
             <div class="control-label-row">
               <label>X Position: {{ localX.toFixed(1) }}%</label>
-              <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_x === undefined"
+              <span v-if="artCore && artCore.traits && artLocal.traits?.face_shift_x === undefined"
                 class="core-value-indicator">
-                (core: {{ (coreItem.traits.face_shift_x ?? 50).toFixed(1) }}%)
+                (core: {{ (artCore.traits.face_shift_x ?? 50).toFixed(1) }}%)
               </span>
             </div>
             <Slider :modelValue="localX" @update:modelValue="(v) => localX = Array.isArray(v) ? v[0] : v" :min="0"
@@ -686,9 +756,9 @@ onMounted(() => {
           <div class="control-group">
             <div class="control-label-row">
               <label>Y Position: {{ localY.toFixed(1) }}%</label>
-              <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_y === undefined"
+              <span v-if="artCore && artCore.traits && artLocal.traits?.face_shift_y === undefined"
                 class="core-value-indicator">
-                (core: {{ (coreItem.traits.face_shift_y ?? 50).toFixed(1) }}%)
+                (core: {{ (artCore.traits.face_shift_y ?? 50).toFixed(1) }}%)
               </span>
             </div>
             <Slider :modelValue="localY" @update:modelValue="(v) => localY = Array.isArray(v) ? v[0] : v" :min="0"
@@ -698,9 +768,9 @@ onMounted(() => {
           <div class="control-group">
             <div class="control-label-row">
               <label>Scale: {{ localScale.toFixed(2) }}</label>
-              <span v-if="coreItem && coreItem.traits && localItem.traits?.face_shift_scale === undefined"
+              <span v-if="artCore && artCore.traits && artLocal.traits?.face_shift_scale === undefined"
                 class="core-value-indicator">
-                (core: {{ (coreItem.traits.face_shift_scale ?? 1).toFixed(2) }})
+                (core: {{ (artCore.traits.face_shift_scale ?? 1).toFixed(2) }})
               </span>
             </div>
             <Slider :modelValue="localScale" @update:modelValue="handleScaleChange" :min="0.1" :max="3" :step="0.01"
@@ -857,6 +927,13 @@ onMounted(() => {
   border: 1px solid #ddd;
   border-radius: 4px;
   overflow-y: auto;
+}
+
+/* Children must not shrink — the column scrolls instead (overflow-y: auto).
+   Without this, overflowing content compresses items; .spine-static-toggle
+   (overflow: hidden) collapses to its padding and clips its labels flat. */
+.controls > * {
+  flex-shrink: 0;
 }
 
 .control-group {

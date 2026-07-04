@@ -6,11 +6,13 @@ import { manifestPanelCollapsed as collapsed } from './manifestPanelState';
 const props = withDefaults(defineProps<{
   manifest: ManifestObject | null;
   active?: boolean;
+  closable?: boolean;
 }>(), {
   active: undefined,
+  closable: false,
 });
 
-defineEmits<{ (e: 'screenshots'): void; (e: 'toggle'): void }>();
+defineEmits<{ (e: 'screenshots'): void; (e: 'toggle'): void; (e: 'close'): void }>();
 
 const hasScreenshots = computed(() => (props.manifest?.cover_assets || []).length > 0);
 const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.author));
@@ -19,9 +21,13 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
 <template>
   <div v-if="manifest" class="manifest-panel" :class="{ 'manifest-panel--collapsed': collapsed }">
     <button v-if="typeof active !== 'boolean'" class="manifest-panel-collapse-btn"
-      :class="{ 'manifest-panel-collapse-btn--alone': !hasScreenshots }"
-      @click="collapsed = !collapsed" :aria-label="collapsed ? 'Expand description' : 'Collapse description'">
+      :class="{ 'manifest-panel-collapse-btn--alone': !hasScreenshots }" @click="collapsed = !collapsed"
+      :aria-label="collapsed ? 'Expand description' : 'Collapse description'">
       <i :class="collapsed ? 'pi pi-chevron-down' : 'pi pi-chevron-up'"></i>
+    </button>
+    <button v-if="closable" class="manifest-panel-close-btn"
+      :class="{ 'manifest-panel-close-btn--alone': !hasScreenshots }" @click="$emit('close')" aria-label="Close">
+      <i class="pi pi-times"></i>
     </button>
     <button v-if="hasScreenshots" class="manifest-panel-screenshots-btn" @click="$emit('screenshots')"
       aria-label="Screenshots">
@@ -142,7 +148,6 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
   gap: 8px;
   font-size: 12px;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: rgba(216, 221, 228, 0.55);
 }
 
@@ -208,6 +213,39 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
   font-size: 14px;
 }
 
+.manifest-panel-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 60px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: rgba(216, 221, 228, 0.75);
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  border-radius: 50%;
+  cursor: pointer;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  transition: background 0.15s ease, color 0.15s ease;
+  z-index: 1;
+}
+
+.manifest-panel-close-btn--alone {
+  right: 16px;
+}
+
+.manifest-panel-close-btn:hover {
+  background: var(--glass-bg-strong);
+  color: var(--glass-tint);
+}
+
+.manifest-panel-close-btn i {
+  font-size: 14px;
+}
+
 .manifest-panel-screenshots-btn {
   position: absolute;
   top: 16px;
@@ -239,22 +277,27 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
 
 @media (pointer: coarse),
 (max-width: 600px) {
+
   .manifest-panel-screenshots-btn,
-  .manifest-panel-collapse-btn {
+  .manifest-panel-collapse-btn,
+  .manifest-panel-close-btn {
     width: 48px;
     height: 48px;
   }
 
-  .manifest-panel-collapse-btn {
+  .manifest-panel-collapse-btn,
+  .manifest-panel-close-btn {
     right: 76px;
   }
 
-  .manifest-panel-collapse-btn--alone {
+  .manifest-panel-collapse-btn--alone,
+  .manifest-panel-close-btn--alone {
     right: 16px;
   }
 
   .manifest-panel-screenshots-btn i,
-  .manifest-panel-collapse-btn i {
+  .manifest-panel-collapse-btn i,
+  .manifest-panel-close-btn i {
     font-size: 20px;
   }
 }
@@ -263,7 +306,8 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
 
   .manifest-panel,
   .manifest-panel-screenshots-btn,
-  .manifest-panel-collapse-btn {
+  .manifest-panel-collapse-btn,
+  .manifest-panel-close-btn {
     background: rgba(20, 24, 29, 0.92);
   }
 }

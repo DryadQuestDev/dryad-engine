@@ -1514,6 +1514,26 @@ export class InitSystem {
             }
         });
 
+        // Shortcuts for the char action with the type segment implied.
+        // Usage: attr: "ane.face = hurt" ≡ char: "ane.attribute.face = hurt"
+        const charShortcuts: Record<string, string> = {
+            attr: 'attribute',
+            trait: 'trait',
+            stat: 'stat',
+            resource: 'resource',
+            skin_style: 'skinStyle',
+        };
+        for (const actionId in charShortcuts) {
+            const type = charShortcuts[actionId];
+            this.game.registerAction(actionId, {
+                action: (data: string | Record<string, any>) => {
+                    this.game.characterSystem.processCharAction(data, type);
+                    const charInfo = typeof data === 'string' ? data : JSON.stringify(data);
+                    gameLogger.info(`[${actionId}] Modified character: ${charInfo}`);
+                }
+            });
+        }
+
         this.game.registerAction("skin_layer", {
             action: (data: string) => {
                 const groups = this.game.logicSystem.parseTargetedSpec(data);
@@ -1642,6 +1662,127 @@ export class InitSystem {
             const itemUid = data.itemUid || this.game.getState('active_item');
             character.unequipItem(itemUid);
             gameLogger.info(`[unequip_item] Unequipped item "${itemUid}" from character "${character.id}"`);
+        });
+
+        this.game.registerAction("equip", (data: string) => {
+            if (typeof data !== 'string') return;
+
+            for (const spec of data.split(',').map(s => s.trim()).filter(Boolean)) {
+                try {
+                    const arrowIdx = spec.indexOf('->');
+
+                    if (arrowIdx === -1) {
+                        if (!spec.startsWith('!')) {
+                            gameLogger.warn(`[equip] invalid spec (missing '->'): "${spec}"`);
+                            continue;
+                        }
+                        const target = spec.slice(1).trim();
+                        const dotIdx = target.indexOf('.');
+                        const charId = (dotIdx === -1 ? target : target.slice(0, dotIdx)).trim();
+                        const slotType = dotIdx === -1 ? "" : target.slice(dotIdx + 1).trim();
+
+                        const character = this.game.getCharacter(charId);
+                        if (!character) {
+                            gameLogger.warn(`[equip] character not found: "${charId}"`);
+                            continue;
+                        }
+
+                        const slots = slotType ? character.getItemSlotsBySlotId(slotType) : character.itemSlots;
+                        let cleared = 0;
+                        for (const slot of [...slots]) {
+                            if (slot.itemUid) {
+                                character.unequipItem(slot.itemUid);
+                                cleared++;
+                            }
+                        }
+                        if (cleared === 0) {
+                            gameLogger.warn(`[equip] nothing to clear for "${spec}"`);
+                        } else {
+                            gameLogger.info(`[equip] cleared ${cleared} slot(s) for "${spec}"`);
+                        }
+                        continue;
+                    }
+
+                    const target = spec.slice(0, arrowIdx).trim();
+                    const dotIdx = target.indexOf('.');
+                    const charId = (dotIdx === -1 ? target : target.slice(0, dotIdx)).trim();
+                    const slotType = dotIdx === -1 ? "" : target.slice(dotIdx + 1).trim();
+
+                    if (!charId) {
+                        gameLogger.warn(`[equip] missing character in spec: "${spec}"`);
+                        continue;
+                    }
+
+                    const character = this.game.getCharacter(charId);
+                    if (!character) {
+                        gameLogger.warn(`[equip] character not found: "${charId}"`);
+                        continue;
+                    }
+
+                    const inventory = character.getPartyInventory();
+                    if (!inventory) {
+                        gameLogger.warn(`[equip] no inventory for character "${charId}"`);
+                        continue;
+                    }
+
+                    const payloads = spec.slice(arrowIdx + 2).split('&').map(s => s.trim()).filter(Boolean);
+                    for (const payload of payloads) {
+                        try {
+                            const remove = payload.startsWith('!');
+                            const itemId = (remove ? payload.slice(1) : payload).trim();
+                            if (!itemId) continue;
+
+                            if (remove) {
+                                const candidateSlots = slotType ? character.getItemSlotsBySlotId(slotType) : character.itemSlots;
+                                let removed = 0;
+                                for (const slot of [...candidateSlots]) {
+                                    if (!slot.itemUid) continue;
+                                    const equipped = inventory.getItemByUid(slot.itemUid);
+                                    if (equipped && equipped.id === itemId) {
+                                        character.unequipItem(slot.itemUid);
+                                        removed++;
+                                    }
+                                }
+                                if (removed === 0) {
+                                    gameLogger.warn(`[equip] "${itemId}" is not equipped on "${charId}"${slotType ? ` in slot "${slotType}"` : ''}`);
+                                } else {
+                                    gameLogger.info(`[equip] unequipped "${itemId}" from "${charId}"`);
+                                }
+                                continue;
+                            }
+
+                            let item: Item | null = inventory.items.find(i => i.id === itemId && !i.isEquipped) ?? null;
+                            if (!item) {
+                                try {
+                                    item = this.game.createItem(itemId);
+                                } catch {
+                                    gameLogger.warn(`[equip] item id not found / not resolvable: "${itemId}"`);
+                                    continue;
+                                }
+                            }
+
+                            if (slotType) {
+                                if (character.getItemSlotsBySlotId(slotType).length === 0) {
+                                    gameLogger.warn(`[equip] slot type not found: "${charId}.${slotType}"`);
+                                    continue;
+                                }
+                                character.equipItem(item, slotType);
+                            } else {
+                                if (!character.getRelevantSlotForItem(item)) {
+                                    gameLogger.warn(`[equip] no compatible slot for item "${itemId}" on "${charId}"`);
+                                    continue;
+                                }
+                                character.equipItem(item);
+                            }
+                            gameLogger.info(`[equip] equipped "${itemId}" -> "${charId}"${slotType ? '.' + slotType : ''}`);
+                        } catch (e) {
+                            gameLogger.warn(`[equip] failed payload "${payload}" in spec "${spec}": ${e}`);
+                        }
+                    }
+                } catch (e) {
+                    gameLogger.warn(`[equip] failed spec "${spec}": ${e}`);
+                }
+            }
         });
 
         this.game.registerAction("consume_item", (data: {

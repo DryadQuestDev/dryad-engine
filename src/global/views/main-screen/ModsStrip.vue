@@ -58,21 +58,27 @@ function selectMod(mod: ManifestObject) {
 
 <template>
   <div v-if="hasMods" class="mods-strip">
-    <span class="mods-strip-label">Available Mods</span>
-    <div v-for="mod in mods" :key="mod.id || mod.uid" class="mods-strip-chip" :class="{
-      active: isModActive(mod),
-      selected: isModSelected(mod),
-      disabled: !isModCompatible(mod)
-    }">
-      <button type="button" class="mods-strip-check" :class="{ on: isModActive(mod) }" :disabled="!isModCompatible(mod)"
-        :title="isModActive(mod) ? 'Deactivate' : 'Activate'" :aria-pressed="isModActive(mod)" @click="toggleMod(mod)">
-        <i v-if="isModActive(mod)" class="pi pi-check"></i>
-      </button>
-      <button type="button" class="mods-strip-name" :title="!isModCompatible(mod) ? getModWarning(mod) : mod.name"
-        @click="selectMod(mod)">
-        {{ mod.name }}
-        <span v-if="!isModCompatible(mod)" class="mods-strip-warn">!</span>
-      </button>
+    <div class="mods-strip-header">
+      <i class="pi pi-box"></i>
+      <span class="mods-strip-label">Available Mods</span>
+      <span class="mods-strip-count">{{ mods.length }}</span>
+    </div>
+    <div class="mods-strip-chips">
+      <div v-for="mod in mods" :key="mod.id || mod.uid" class="mods-strip-chip" :class="{
+        active: isModActive(mod),
+        selected: isModSelected(mod),
+        disabled: !isModCompatible(mod)
+      }">
+        <button type="button" class="mods-strip-check" :class="{ on: isModActive(mod) }" :disabled="!isModCompatible(mod)"
+          :title="isModActive(mod) ? 'Deactivate' : 'Activate'" :aria-pressed="isModActive(mod)" @click="toggleMod(mod)">
+          <i v-if="isModActive(mod)" class="pi pi-check"></i>
+        </button>
+        <button type="button" class="mods-strip-name" :title="!isModCompatible(mod) ? getModWarning(mod) : mod.name"
+          @click="selectMod(mod)">
+          {{ mod.name }}
+          <span v-if="!isModCompatible(mod)" class="mods-strip-warn">!</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -80,17 +86,51 @@ function selectMod(mod: ManifestObject) {
 <style scoped>
 .mods-strip {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid color-mix(in srgb, var(--glass-tint) 30%, transparent);
+  border-radius: 12px;
+}
+
+.mods-strip-header {
+  display: flex;
   align-items: center;
   gap: 8px;
 }
 
+.mods-strip-header i {
+  font-size: 13px;
+  color: var(--glass-tint);
+}
+
 .mods-strip-label {
-  font-size: 11px;
+  font-size: 12.5px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(216, 221, 228, 0.5);
-  margin-right: 4px;
+  color: rgba(216, 221, 228, 0.85);
+}
+
+.mods-strip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--glass-tint);
+  background: color-mix(in srgb, var(--glass-tint) 15%, transparent);
+  border-radius: 999px;
+}
+
+.mods-strip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .mods-strip-chip {
@@ -102,11 +142,21 @@ function selectMod(mod: ManifestObject) {
   overflow: hidden;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mods-strip-chip.active {
+  border-color: var(--glass-tint);
+  background: color-mix(in srgb, var(--glass-tint) 10%, rgba(20, 24, 29, 0.55));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--glass-tint) 35%, transparent);
+}
+
+.mods-strip-chip.active .mods-strip-name {
+  color: #fff;
 }
 
 .mods-strip-chip.selected {
-  border-color: var(--glass-tint);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .mods-strip-chip.disabled {
@@ -117,7 +167,7 @@ function selectMod(mod: ManifestObject) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
+  width: 32px;
   padding: 0;
   font-family: inherit;
   color: rgba(216, 221, 228, 0.6);
@@ -126,7 +176,7 @@ function selectMod(mod: ManifestObject) {
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 
@@ -144,10 +194,10 @@ function selectMod(mod: ManifestObject) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 9px 14px;
   max-width: 220px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 13.5px;
   color: rgba(216, 221, 228, 0.85);
   background: transparent;
   border: none;
@@ -189,18 +239,24 @@ function selectMod(mod: ManifestObject) {
 
 @media (pointer: coarse), (max-width: 600px) {
   .mods-strip {
+    gap: 12px;
+  }
+  .mods-strip-chips {
     gap: 10px;
   }
+  .mods-strip-header i {
+    font-size: 15px;
+  }
   .mods-strip-label {
-    font-size: 13px;
+    font-size: 14px;
   }
   .mods-strip-check {
-    width: 40px;
-    font-size: 14px;
+    width: 44px;
+    font-size: 15px;
   }
   .mods-strip-name {
     padding: 12px 16px;
-    font-size: 14px;
+    font-size: 15px;
     max-width: none;
   }
   .mods-strip-warn {

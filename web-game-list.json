@@ -2,11 +2,18 @@
   {
     "id": "tutorial",
     "source": "production/dryad-engine-linux/assets",
-    "mods": ["_core", "lewd"]
+    "mods": ["_core", "lewd"],
+    "premium_mods": ["premium"]
   },
-    {
+  {
     "id": "sin_cradle_isekai",
     "source": "production/dryad-engine-linux/assets",
     "mods": ["_core"]
+  },
+  {
+    "id": "dryad_ane",
+    "source": "production/dryad-engine-linux/assets",
+    "mods": ["_core"],
+    "premium_mods": ["premium"]
   }
 ]

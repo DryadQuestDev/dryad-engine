@@ -26,6 +26,10 @@ const rarityClass = computed(() => {
 const isQuest = computed(() => props.item.attributes['rarity'] === 'quest');
 const questLabel = computed(() => Global.getInstance().getString('item_tag.quest'));
 
+const itemCategory = computed(() => game.itemSystem.itemCategoriesMap.get(props.item.category));
+const categoryIcon = computed(() => itemCategory.value?.icon || '');
+const categoryName = computed(() => itemCategory.value?.singular || itemCategory.value?.name || '');
+
 // Get weight for single item (not multiplied by quantity)
 const itemWeight = computed(() => {
   const weight = props.item.getTrait('weight');
@@ -103,6 +107,10 @@ const consumeDurationText = computed(() => {
           </div>
         </div>
       </div>
+      <div v-if="categoryName" class="item-category-line">
+        <img v-if="categoryIcon" :src="categoryIcon" :alt="categoryName" class="item-category-icon" />
+        <span class="item-category-name">{{ categoryName }}</span>
+      </div>
     </div>
 
     <div class="card-body">
@@ -174,6 +182,25 @@ const consumeDurationText = computed(() => {
   border-radius: 8px;
   padding: 1px 8px;
   white-space: nowrap;
+}
+
+.item-category-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.item-category-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.item-category-name {
+  font-size: 0.8em;
+  color: #999;
 }
 
 .item-cost {

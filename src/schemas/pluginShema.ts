@@ -123,7 +123,7 @@ export const PluginSchema = {
             uid: { type: 'uid', required: true },
             id: { type: 'string', tooltip: 'Unique popup identifier' },
             name: { type: 'string', tooltip: 'Button label in the editor' },
-            tab: { type: 'string', tooltip: 'Target subtab ID (e.g., "character_templates")' },
+            tabs: { type: 'string[]', tooltip: 'Target subtab IDs (e.g., ["character_templates", "item_templates"])' },
             script: { type: 'string', tooltip: 'Component .mjs file relative to plugin folder (e.g., "scripts/editor/MyPopup.mjs")' },
             css: { type: 'string', tooltip: 'Optional CSS file relative to plugin folder (e.g., "scripts/editor/MyPopup.css")' },
         }

@@ -60,6 +60,34 @@ Share the `.zip` file with your audience. Players install it by:
 
 ---
 
+## Landing Page Promotion Widgets
+
+Use the `landing_widgets` field in **General → Manifest** to overlay custom HTML on the landing page – promo banners, release announcements, links to your Patreon, or a teaser for a premium mod.
+
+Each widget has:
+
+| Field | Description |
+|-------|-------------|
+| `widget_id` | Applied as the element's HTML id so your `landing_css` can target it with `#<widget_id>` |
+| `html` | Raw HTML content, rendered as-is with no engine styling |
+| `x` | Left edge in % of the stage width (0-100) |
+| `y` | Top edge in % of the stage height (0-100) |
+
+Widgets are positioned inside a centered 16:9 stage that letterboxes to fit the window, so a widget placed at `x: 70, y: 10` stays anchored to the same spot of your landing art at any window size. Inside your `landing_css`, `cqw`/`cqh` units resolve against this stage, which makes widget sizing scale with it too:
+
+```css
+#promo {
+    width: 20cqw;
+    padding: 1cqh 1cqw;
+    background: rgba(20, 24, 29, 0.8);
+    border-radius: 12px;
+}
+```
+
+Widgets stack across active manifests in load order, just like `landing_bg_asset`. Keep in mind that inactive mods contribute nothing to the landing page – a banner promoting a mod belongs in the **base game's** manifest, since the whole point is showing it before the mod is activated.
+
+---
+
 ## Engine Version Compatibility
 
 If your game uses features from a specific engine version, set the `engine_version_min` field in **General → Manifest**.
