@@ -48,11 +48,6 @@ const shouldShowDebugPanel = computed(() => {
       <div class="initial-loader__ring"></div>
       <div class="initial-loader__label">Loading</div>
     </div>
-    <!-- Overlay variant: covers the game without unmounting it (asset preloading) -->
-    <div class="initial-loader" v-if="game.coreSystem.screenLoading.value">
-      <div class="initial-loader__ring"></div>
-      <div class="initial-loader__label">Loading</div>
-    </div>
     <div class="game-body dark-scrollbar" v-else>
 
 
@@ -104,6 +99,11 @@ const shouldShowDebugPanel = computed(() => {
 
 
 
+    </div>
+    <!-- Overlay variant: covers the game without unmounting it (asset preloading) -->
+    <div class="initial-loader" v-if="game.coreSystem.screenLoading.value">
+      <div class="initial-loader__ring"></div>
+      <div class="initial-loader__label">Loading</div>
     </div>
   </div>
 </template>
