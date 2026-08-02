@@ -105,6 +105,46 @@ game.execute({ heal_party: true });
 game.execute({ flag: "gold>100" });
 ```
 
+Instead of a bare function you can register an object to control *when* the action runs:
+
+```javascript
+game.registerAction("my_action", {
+  action: (value) => { /* ... */ },
+  eventDelayed: true,   // wait for the player's click instead of firing as the paragraph renders
+  onGameLoad: true,     // re-run when a save is restored
+  choiceModifier: (choice, value) => { /* rewrite the choice's label or availability */ },
+});
+```
+
+### Gates: aborting a paragraph
+
+A **gate** runs before its paragraph renders and before *any* of that paragraph's actions fire. Return a scene id and the paragraph is abandoned — its prose is never shown, its sibling actions never run, and the reader goes to that scene instead. Return `false` and the paragraph plays out normally.
+
+This is how you build a check that branches the reader away on failure:
+
+```javascript
+game.registerAction("check", {
+  gate: (spec, ctx) => {
+    const mc = game.getCharacter("mc");
+    if (mc.getStat("strength") >= 6) return false;    // passed — carry on
+    return game.resolveSceneId("shift:1").sceneId;    // failed — jump to the next block
+  },
+});
+```
+
+```text
+%
+You set your shoulder to the boulder and heave it aside.{check: "strength#6", flag: "boulder_moved = 1"}
+%
+You heave until your vision swims. It does not budge.
+```
+
+On a pass the first block renders and `boulder_moved` is set. On a fail the reader lands on the second block having never seen the first, and `boulder_moved` stays unset — a gate aborts the *whole* paragraph, not just the prose.
+
+`shift:1` means "same row, next block, first paragraph", so in the visual editor the failure branch is simply **the next `%` column in the same row**.
+
+> Gates only run on scene paragraphs. A gated action placed on a choice is dispatched through `action` like any other and aborts nothing.
+
 **Reference:** ->builtins.actions
 
 ---

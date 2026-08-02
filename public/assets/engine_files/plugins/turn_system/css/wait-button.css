@@ -1,0 +1,40 @@
+/* ============================================
+   WAIT BUTTON  (slot: navigation-toolbar)
+   The engine's toolbar components style .toolbar-item in scoped CSS, so a plugin
+   button has to bring its own copy of the same rules.
+   ============================================ */
+
+.toolbar-item.icon_wait,
+.toolbar-item.turn-counter {
+  width: 30px;
+  height: 30px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  position: relative;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.toolbar-item.icon_wait {
+  cursor: pointer;
+  background-image: url('assets/engine_assets/ui/adventure-bar/icon_wait.png');
+}
+
+.toolbar-item.icon_wait:hover {
+  transform: scale(1.1);
+}
+
+.toolbar-item.turn-counter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  pointer-events: none;
+}
+
+.turn-counter-text {
+  color: #a15335;
+  font-size: 20px;
+  font-weight: bold;
+}

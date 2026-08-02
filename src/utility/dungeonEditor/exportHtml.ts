@@ -28,8 +28,11 @@ const STYLE_BR = 'font-weight:bold;color:#00838f;background:rgba(0,188,212,0.12)
 const STYLE_RECORD = 'font-weight:bold;color:#1976d2';
 const STYLE_PLACEHOLDER = 'font-weight:bold;color:#2e7d32';
 const STYLE_COMMENT = 'color:#888;font-style:italic';
+const STYLE_CHOICE = 'font-weight:bold;color:#c62828';
 const STYLE_STRONG = 'font-weight:bold';
 const STYLE_EM = 'font-style:italic';
+const STYLE_INITIAL = 'font-weight:bold;color:#a100ff';
+const STYLE_ALTERED = 'font-weight:bold;color:#c95500';
 
 const COND_KEYWORDS = ['ifOr', 'else', 'if', 'fi'] as const;
 
@@ -87,6 +90,20 @@ function findTokenRanges(text: string): TokenRange[] {
   for (const re = /^[ \t]*\/\/[^\n]*/gm; (m = re.exec(text)) !== null;) {
     out.push({ start: m.index, end: m.index + m[0].length, style: STYLE_COMMENT });
   }
+  // `>Label` inline choices — sigil + label; the trailing `{…}` is already a brace token.
+  for (const re = /^>[^\n{]*/gm; (m = re.exec(text)) !== null;) {
+    out.push({ start: m.index, end: m.index + m[0].length, style: STYLE_CHOICE });
+  }
+  // `++text++` (altered state) / `+text+` (initial state) — same guarded
+  // regexes as the runtime resolveTextStyles, so "+43 health", "a+b+c" and
+  // "C++" stay plain. The guards make the two mutually exclusive.
+  for (const re = /\+\+([^+\n]+?)\+\+/g; (m = re.exec(text)) !== null;) {
+    out.push({ start: m.index, end: m.index + m[0].length, style: STYLE_ALTERED });
+  }
+  for (const re = /(?<![\w+])\+([^\s+\d][^+\n]*?)\+(?![\w+])/g; (m = re.exec(text)) !== null;) {
+    out.push({ start: m.index, end: m.index + m[0].length, style: STYLE_INITIAL });
+  }
+
   // Emphasis: `**text**` → bold, `*text*` → italic (longest first so they
   // override outer brace/record/placeholder bold on the same chars when they
   // wrap them, but lose to those when nested inside).

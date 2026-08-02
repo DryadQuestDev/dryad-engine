@@ -21,13 +21,15 @@ export class Item {
     public price: Record<string, number> = {};
     public is_currency: boolean = false;
 
-    public is_consumable: boolean = false;
-    public consume_duration: number = -1;
-    public consume_max_stacks: number = -1;
+    // Recipe id this item teaches. When set, getItemChoices adds a "Learn" choice (grayed once known).
+    public learn_recipe: string = "";
+
+    // Statuses applied on consume: [{ status: <template id>, stacks: number }]. Any entry (or a
+    // consume_percentage/absolute resource, or a consume action script) makes the item consumable.
+    // `status` is optional in the schema, so guard against empty entries when reading.
+    public apply_statuses_on_consume: { status?: string; stacks?: number }[] = [];
     public consume_percentage: Record<string, number> = {};
     public consume_absolute: Record<string, number> = {};
-    public consume_polarity: string = "";
-    public consume_status_id: string = "";
 
     public tradePrice: {
         player: Record<string, number>; // the player party's items price
@@ -39,6 +41,18 @@ export class Item {
 
     public isTradable(): boolean {
         return this.price && Object.keys(this.price).length > 0;
+    }
+
+    /**
+     * Whether this item can be consumed — derived, not a stored flag. True if it applies any status,
+     * restores/reduces any resource, or defines a consume action script.
+     */
+    public isConsumable(): boolean {
+        const hasResource = (r: Record<string, number>) => Object.values(r || {}).some(v => !!v);
+        return (this.apply_statuses_on_consume?.length > 0)
+            || hasResource(this.consume_percentage)
+            || hasResource(this.consume_absolute)
+            || !!(this.actions?.item_consume_before || this.actions?.item_consume_after);
     }
 
     /**

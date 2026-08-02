@@ -109,6 +109,31 @@ const overlayWrapperStyle = computed(() => {
   };
 });
 
+// Static (non-spine) art placement comes from the per-view static_art entries,
+// mirroring CharacterSlot's runtime resolution. Unlike spineConfig there is no
+// fallback to the default view — a view without an entry renders neutral.
+function findStaticArtForView(arr: any, view?: string | null) {
+  if (!Array.isArray(arr)) return null;
+  return arr.find((s: any) => viewMatches(s.view, view)) || null;
+}
+const staticArt = computed(() => {
+  const local = findStaticArtForView(props.character?.static_art, props.view);
+  const core = findStaticArtForView(props.coreCharacter?.static_art, props.view);
+  const pick = (k: string, d: number) =>
+    typeof local?.[k] === 'number' ? local[k] : typeof core?.[k] === 'number' ? core[k] : d;
+  return { dx: pick('art_dx', 0), dy: pick('art_dy', 0), scale: pick('art_scale', 1) };
+});
+
+// translate BEFORE scale so the offset runs in screen coords regardless of the
+// scale factor — same ordering rationale as CharacterSlot's scaleWrapperTransform.
+// dx/dy scale with slotScale to stay "% of body's visible height" (artDxFactor).
+const staticWrapperStyle = computed(() => {
+  const { dx, dy, scale } = staticArt.value;
+  const s = slotScale.value;
+  const t = (dx || dy) ? `translate(${dx * s}cqh, ${dy * s}cqh) ` : '';
+  return { transform: `${t}scale(${s * scale})` };
+});
+
 const { init: initSpinePlayer } = useEditorSpinePlayer({
   containerRef: spineContainerRef,
   atlasUrl,
@@ -142,7 +167,9 @@ watch(spineContainerRef, (newRef) => {
       <div ref="spineContainerRef" class="editor-char-spine" />
     </template>
     <template v-else-if="imageLayers.length > 0">
-      <img v-for="(src, i) in imageLayers" :key="i" :src="src" class="editor-char-img" />
+      <div class="editor-char-static" :style="staticWrapperStyle">
+        <img v-for="(src, i) in imageLayers" :key="i" :src="src" class="editor-char-img" />
+      </div>
     </template>
     <div v-else class="editor-char-empty">
       <slot name="empty">No art layers</slot>
@@ -177,6 +204,12 @@ watch(spineContainerRef, (newRef) => {
 .editor-char-spine {
   width: 100%;
   height: 100%;
+}
+
+/* default transform-origin 50% 50% — scales about slot center, like gameplay */
+.editor-char-static {
+  position: absolute;
+  inset: 0;
 }
 
 .editor-char-img {

@@ -16,6 +16,13 @@
   cursor: grabbing;
 }
 
+/* The dungeon's art is still decoding. The map keeps its layout (so the post-load centering
+   measures correctly) but shows nothing – the toolbar carries a spinner meanwhile. */
+.game-map-container.assets-loading {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .map {
   position: relative;
 }
@@ -165,6 +172,21 @@
   transform: translate(-24%, -24%);
   /* Center the compass on the room coordinates */
 
+}
+
+.compass-fade-enter-active,
+.compass-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+/* the departing compass still hovers over the map — don't let it eat clicks */
+.compass-fade-leave-active {
+  pointer-events: none;
+}
+
+.compass-fade-enter-from,
+.compass-fade-leave-to {
+  opacity: 0;
 }
 
 .compass-middle,
@@ -377,6 +399,16 @@
   width: 30px;
   border-radius: 50%;
   background-color: #629edb;
+}
+
+.circle-fade-enter-active,
+.circle-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.circle-fade-enter-from,
+.circle-fade-leave-to {
+  opacity: 0;
 }
 
 .circle.visited:before,

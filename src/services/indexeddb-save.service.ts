@@ -19,6 +19,19 @@ export interface SaveMetaData {
 // Special dev mode auto-save slot
 export const DEV_AUTO_SAVE_SLOT = '__dev_auto_save__';
 
+// Dev-mode rolling pre-scene checkpoint, saved on every playScene before its actions
+// fire. Hard Scene Reset loads this to re-enter the current scene on clean state.
+export const DEV_PREV_SCENE_SLOT = '__dev_prev_scene__';
+
+// localStorage presence flag ('1'): when set at boot, the loader re-plays the loaded
+// save's own current scene (Hard Scene Reset) instead of restoring its cached text.
+export const DEV_REPLAY_SCENE_KEY = 'dev_replay_scene';
+
+// localStorage marker written by backToEditor: the scene id you were in when you left
+// playtest (absent if outside a scene). The editor "Continue" button reads it to pick
+// which dev save to resume from.
+export const DEV_LEFT_SCENE_KEY = 'dev_left_scene';
+
 export interface SaveDB extends DBSchema {
   saves: {
     key: [gameId: string, slot: string];   // ← compound key

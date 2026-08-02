@@ -73,10 +73,25 @@ interface GameEvents {
   room_enter_before: (roomId: string, dungeonId: string) => boolean | void;
   /** Triggered after entering a room */
   room_enter_after: (roomId: string, dungeonId: string) => boolean | void;
-  /** Triggered before a scene plays */
+  /** Triggered when an encounter is selected — clicked on the map / screen, or cycled to with the toolbar (props never fire). Return false to block the selection. */
+  encounter_selected: (encounterId: string, dungeonId: string) => boolean | void;
+  /** Triggered once when a hidden `{discover: "perception#6"}` encounter is revealed */
+  encounter_discovered: (encounterId: string, dungeonId: string) => boolean | void;
+  /** Triggered when a collectable encounter is collected. `itemSpec` is add_item grammar (e.g. `"berry#2"`) */
+  encounter_collected: (encounterId: string, itemSpec: string, dungeonId: string) => boolean | void;
+  /** Triggered before a scene plays (gate — return false to block) */
   scene_play_before: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
+  /** Triggered when a committed scene is about to run its paragraph actions (after gates/redirects,
+   *  before the actions/assets). The place to stage default actors so they precede the scene's assets. */
+  scene_play: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
   /** Triggered after a scene plays */
   scene_play_after: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
+  /**
+   * Triggered when a scene is about to exit (last-paragraph click, `{exit}` action, `playScene(null)`).
+   * Return false to cancel the exit — e.g. to play a close animation first and re-call
+   * `game.exitScene()` afterward. `skipEvents` is the flag the exit was requested with.
+   */
+  scene_exit_before: (skipEvents: boolean) => boolean | void;
   /** Triggered when an event ends */
   event_end: () => boolean | void;
 
@@ -189,6 +204,35 @@ interface ActionObject {
   onGameLoad?: boolean;
   /** If true, action is deferred until after the current event/scene transition */
   eventDelayed?: boolean;
+  /**
+   * Runs before the paragraph renders and before ANY of its actions fire.
+   * Return a scene id to abort the paragraph — its prose is never shown, its sibling
+   * actions never run, and the reader jumps to that scene instead. Return false or
+   * undefined to let the paragraph proceed normally.
+   *
+   * Gates only run in scene paragraphs. A gated action placed on a choice is dispatched
+   * through `action` like any other and aborts nothing.
+   *
+   * @example
+   * // A stat check: pass and the paragraph plays out; fail and the reader is sent to
+   * // the next block in the same row instead ("shift:1"), never seeing this paragraph.
+   * game.registerAction('check', {
+   *   gate: (spec, ctx) => {
+   *     const mc = game.getCharacter('mc');
+   *     if (mc.getStat('strength') >= 6) return false;      // pass — carry on
+   *     return game.resolveSceneId('shift:1').sceneId;      // fail — go to the next block
+   *   }
+   * });
+   */
+  gate?: (value: any, ctx: GateContext) => string | false | null | undefined;
+}
+
+/** Context handed to an {@link ActionObject.gate} — the paragraph being gated. */
+interface GateContext {
+  /** Full id of the paragraph the gate is deciding on, e.g. `#room.scene.1.1.1` */
+  sceneId: string;
+  /** Dungeon the paragraph belongs to */
+  dungeonId: string;
 }
 
 /**
@@ -235,6 +279,10 @@ interface Asset {
   alpha?: number;
   /** Blur amount in pixels */
   blur?: number;
+  /** Seconds taken to glide to new values when an already-staged asset is re-staged with changes (default 0.5). 0 = snap. No effect on first staging. */
+  tween?: number;
+  /** Easing for the property glide (default 'power2.out') */
+  tween_ease?: string;
   /** Enter transition effect */
   enter?: string;
   /** Enter transition duration in seconds */
@@ -251,6 +299,65 @@ interface Asset {
   skins?: string[];
   /** Whether to loop Spine animation */
   loop?: boolean;
+  /** Runtime slot tints (spine type): RGB multipliers into the slot color (x brightness, may exceed 1 to re-brighten dark art, e.g. recolor red-based hair). Re-applied after skin changes. */
+  slot_colors?: { slot: string; r?: number; g?: number; b?: number; alpha?: number; brightness?: number }[];
+  /** Slot names whose attachment is cleared/hidden (spine type). */
+  slot_remove?: string[];
+}
+
+/**
+ * SceneContext - Opaque snapshot of the live scene state, returned by
+ * game.captureSceneContext() and consumed by game.restoreSceneContext().
+ * Hold it and pass it back — never build or mutate one yourself.
+ */
+interface SceneContext {
+  /** Full id of the captured scene paragraph, or null if no scene was active */
+  sceneId: string | null;
+}
+
+/** Resolved colour grade. Read from game.getGrade(); build one with game.setGrade() instead. */
+interface SceneGrade {
+  /** Brightness multiplier. 1 = unchanged */
+  brightness: number;
+  /** Saturation multiplier. 1 = unchanged, 0 = greyscale */
+  saturate: number;
+  /** Contrast multiplier. 1 = unchanged */
+  contrast: number;
+  /** Hue rotation in degrees. 0 = unchanged */
+  hue: number;
+  /** Tint red channel, 0-255 */
+  r: number;
+  /** Tint green channel, 0-255 */
+  g: number;
+  /** Tint blue channel, 0-255 */
+  b: number;
+  /** Tint opacity, 0-1 */
+  tint_amount: number;
+}
+
+/** The active grade plus the crossfade length that produced it. */
+interface SceneGradeState {
+  grade: SceneGrade;
+  /** Crossfade length in seconds. 0 = applied instantly */
+  duration: number;
+}
+
+/** Object form accepted by game.setGrade(). Explicit fields override the preset. */
+interface SceneGradeInput {
+  /** Preset id — `night`, `sunlit`, `infernal`, `noir`, `none`… see ->builtins.actions#grade for the full table */
+  preset?: string;
+  /** Preset strength, 0-1. Default 1 */
+  amount?: number;
+  /** Crossfade length in seconds. Default 0.8 */
+  duration?: number;
+  brightness?: number;
+  saturate?: number;
+  contrast?: number;
+  hue?: number;
+  /** Tint colour as hex, e.g. '#16264f' */
+  tint?: string;
+  /** Tint opacity, 0-1 */
+  tint_amount?: number;
 }
 
 /**
@@ -273,8 +380,6 @@ interface DungeonLine {
  * Tracks visited rooms, events, flags, and other state.
  */
 interface DungeonData {
-  /** Current dungeon level */
-  dungeonLvl: number;
   /** Set of visited room IDs */
   visitedRooms: Set<string>;
   /** Set of visible room IDs */
@@ -312,6 +417,46 @@ interface SaveOptions {
   forceSave?: boolean;
   /** Suppress "Game saved" notification toast */
   noNotification?: boolean;
+}
+
+/**
+ * One save-migration section: `true` = the whole section, `false` = skip it,
+ * `string[]` = the ids to skip (opt-out mode) or the only ids to sync (opt-in mode).
+ */
+type MigrationScope = boolean | string[];
+
+/** Options for `game.runDefaultSaveMigration()`. Every section it can touch has its own key. */
+interface SaveMigrationOptions {
+  /** `opt-out` (default): sync everything, lists name what to skip. `opt-in`: sync nothing, lists name what to sync. */
+  mode?: 'opt-in' | 'opt-out';
+  /** Stat ids. */
+  stats?: MigrationScope;
+  /** Trait ids. */
+  traits?: MigrationScope;
+  /** Attribute ids. */
+  attributes?: MigrationScope;
+  /** Ability ids. */
+  abilities?: MigrationScope;
+  /** Skin layer ids. */
+  skinLayers?: MigrationScope;
+  /** View ids (`_default` for the default view). Covers static art placement too. */
+  spine?: MigrationScope;
+  /** Template item-slot ids. Backfills missing slots and repositions existing ones — never removes. */
+  itemSlots?: MigrationScope;
+  /** Skill tree ids. */
+  skillTrees?: MigrationScope;
+  /** Learned-skill (tree slot) ids. */
+  learnedSkills?: MigrationScope;
+  /** Status ids. */
+  statuses?: MigrationScope;
+  /** Item trait ids. */
+  itemTraits?: MigrationScope;
+  /** Item attribute ids. */
+  itemAttributes?: MigrationScope;
+  /** Item property ids. */
+  itemProperties?: MigrationScope;
+  /** Item template ids — refreshes the equip-status object and re-binds it on equipped items. */
+  itemStatuses?: MigrationScope;
 }
 
 interface Game {
@@ -447,43 +592,74 @@ interface Game {
   isOldSave(): boolean;
 
   /**
-   * Rebuild every character's state from the current definitions (template + statuses + traits + attributes).
+   * Rebuild every character and every item from the current definitions (template + statuses + traits).
    * No-op if the loaded save's `(gameVersion, mods)` signature matches the current one, or on a new game.
+   * In dev mode the version check is skipped — the migration runs on every save load, so template edits
+   * apply to dev saves without bumping the game version.
    *
-   * Use this from a `game_initiated` listener to migrate old saves when the data model changes:
-   * - Resets template-driven stats / traits / attributes (except those in the ignore lists).
-   * - Purges keys that no longer exist in current definitions (e.g. a stat that was removed).
-   * - Re-applies every held status (preserving stack counts) so status stat-grants pick up new definitions.
-   * - Re-clamps every resource value to its possibly-new max.
+   * Call it from a `game_initiated` listener. Every section takes `true` (sync the whole section),
+   * `false` (skip it) or a list of ids, and `mode` decides what a list means:
+   * - `mode: 'opt-out'` (default) — sync everything; a list names the ids to **skip**.
+   * - `mode: 'opt-in'` — sync nothing; a list names the only ids to **sync**.
+   * An omitted section follows the mode (everything in opt-out, nothing in opt-in).
    *
-   * Player-set state outside statuses (direct `setStat` etc.) is wiped — route persistent boosts through statuses,
-   * or list fields in the ignore options to preserve them.
+   * What each section does:
+   * - `stats`, `traits`, `attributes` — reset to the template value, purge ids that no longer exist.
+   * - `abilities`, `skinLayers` — resync the core-status set to the template's (status- and item-granted
+   *   entries live on their own statuses and re-accumulate on reevaluate).
+   * - `spine` — rebuild core-status spine and static-art views from the template, keyed by view id
+   *   (`_default` for the default view); per-view overrides from other statuses re-accumulate.
+   * - `itemSlots` — backfill template slots the character is missing and reposition the ones that exist
+   *   (x/y only; the slot's type and its equipped item are left alone). Never removes a slot.
+   * - `skillTrees`, `learnedSkills` — backfill template trees, purge deleted ones, and rebuild learned-skill
+   *   statuses from current definitions; levels are preserved, clamped to the new max.
+   * - `statuses` — re-apply every held definition-backed status (stack counts preserved) so stat-grants
+   *   pick up new definitions. Runtime statuses (item, plugin, hand-rolled) are always left alone.
+   * - `itemTraits`, `itemAttributes`, `itemProperties` — same reset/purge for every item in every inventory
+   *   (property *values* are preserved; only stale ids are purged and new template ids backfilled).
+   * - `itemStatuses` — refresh each item's equip-status object from its template and re-bind it on whoever
+   *   is wearing it. Keyed by item template id.
    *
-   * Also rebuilds every item in every inventory: resets template-driven traits / attributes,
-   * purges keys no longer in `item_traits` / `item_attributes`, refreshes the equip-status object,
-   * preserves current property values, backfills new template properties, and purges stale properties.
+   * Resource pools are never touched — snapshot at the start, restored verbatim at the end, so a stats
+   * sync or a status reapply can't clamp or refill them. Characters whose template no longer exists are
+   * skipped entirely.
    * @example
+   * // Full resync, keeping save-owned fields
    * game.on('game_initiated', () => {
    *   game.runDefaultSaveMigration({
-   *     ignoreTraits: ['info', 'bio'],
-   *     ignoreAttributes: ['life_stage'],
-   *     ignoreItemTraits: [],
-   *     ignoreItemAttributes: [],
+   *     traits: ['info', 'bio'],
+   *     attributes: ['life_stage'],
+   *   });
+   * });
+   * @example
+   * // Surgical: re-push art calibration from the editor, touch nothing else
+   * game.on('game_initiated', () => {
+   *   game.runDefaultSaveMigration({
+   *     mode: 'opt-in',
+   *     traits: ['face_shift_x', 'face_shift_y', 'face_shift_scale'],
+   *     spine: true,
+   *     skinLayers: true,
    *   });
    * });
    */
-  runDefaultSaveMigration(options?: { ignoreStats?: string[]; ignoreTraits?: string[]; ignoreAttributes?: string[]; ignoreItemTraits?: string[]; ignoreItemAttributes?: string[]; }): void;
+  runDefaultSaveMigration(options?: SaveMigrationOptions): void;
 
   /**
    * Go to next scene or exit scene if there's no next scene.
+   * `instant` applies only to that fallback exit: it closes immediately instead of the graceful
+   * actor fade-out. Pass true when the whole screen is already changing (e.g. battle end), so a
+   * cast the player never saw doesn't linger through the close animation.
    */
-  nextScene(): void;
+  nextScene(instant?: boolean): void;
 
   /**
-   * Exit the current scene and return to exploration.
-   * @param skipEvents - If true, skip triggering scene exit events
+   * Exit the current scene and return to exploration. Runs a short graceful close
+   * first — the dialogue fades out and staged actors leave with their slot exit
+   * animations — then tears down.
+   * @param skipEvents - If true, room events don't fire after the exit
+   * @param instant - Skip the close animation and tear down immediately
    */
-  exitScene(skipEvents?: boolean): void;
+  exitScene(skipEvents?: boolean, instant?: boolean): void;
 
   // ============================================
   // Event System
@@ -661,6 +837,15 @@ interface Game {
    */
   getService(id: string): any;
 
+  /**
+   * Whether a plugin is installed (its plugin.json was loaded). Reliable at any plugin-script load
+   * time regardless of plugin order — use it to gate optional cross-plugin wiring (listeners on
+   * another plugin's emitters, components for another plugin's slots).
+   * @example
+   * if (game.hasPlugin('rpg_battler')) { game.on('battle_start', onBattle); }
+   */
+  hasPlugin(pluginId: string): boolean;
+
   // ============================================
   // State Management
   // ============================================
@@ -728,6 +913,15 @@ interface Game {
   getDungeonType(): "map" | "screen" | "text";
 
   /**
+   * The currently loaded dungeon object (dungeons are built lazily — only the active one exists).
+   * Exposes config-driven fields like `traits` — custom dungeon traits defined in the
+   * dungeon_traits file (e.g. `level_group`).
+   * @example
+   * const group = game.getCurrentDungeon()?.traits?.level_group;
+   */
+  getCurrentDungeon(): { id: string; dungeon_type: string; traits: Record<string, any>; pooledInventories: { id: string; pool: string; type: 'loot' | 'trade' }[] } | null;
+
+  /**
    * Get a flag value by ID.
    * @param id - Flag ID (can be "flagName" for current dungeon or "dungeonId.flagName" for specific dungeon)
    * @returns The flag value (number)
@@ -736,6 +930,16 @@ interface Game {
    * const otherDungeonFlag = game.getFlag('forest.explored');
    */
   getFlag(id: string): number;
+
+  /**
+   * Set a flag value by ID.
+   * @param id - Flag ID (can be "flagName" for current dungeon or "dungeonId.flagName" for specific dungeon)
+   * @param value - The value to set
+   * @example
+   * game.setFlag('quest_progress', 2);
+   * game.setFlag('forest.explored', 1);
+   */
+  setFlag(id: string, value: number): void;
 
   /**
    * Enter a dungeon room or dungeon.
@@ -747,16 +951,104 @@ interface Game {
   enter(val: string): void;
 
   /**
+   * Id of the room the player is standing in. Null only before the first room loads.
+   * @example
+   * const here = game.getCurrentRoomId();
+   */
+  getCurrentRoomId(): string | null;
+
+  /**
+   * Id of the dungeon whose rooms the player is in — the player is always in one.
+   * This does NOT change while a cross-dungeon scene plays (e.g. a shared scene from
+   * a "global" dungeon): it is where the player physically stands, not where the
+   * running scene's lines live. Null only before the first dungeon loads.
+   * @example
+   * const dungeon = game.getCurrentDungeonId();
+   */
+  getCurrentDungeonId(): string | null;
+
+  /**
+   * Advance every collected collectable's regrow countdown by `turns`, across all
+   * dungeons. Countdowns that reach 0 are cleared — the node becomes visible and
+   * collectable again; entries without regrow are untouched. Called by time-system
+   * plugins (turn_system wires it to `turn_advanced`); the engine never ticks itself.
+   * @example
+   * game.on('turn_advanced', (_t, elapsed) => game.tickCollectables(elapsed));
+   */
+  tickCollectables(turns: number): void;
+
+  /**
+   * Clear a collectable encounter's collected latch immediately — it regrows on the spot.
+   * @example
+   * game.uncollectEncounter('entry.berry_bush');
+   */
+  uncollectEncounter(encounterId: string, dungeonId?: string | null): void;
+
+  /**
+   * Has this collectable encounter been taken (and not yet regrown)?
+   * @example
+   * if (game.isEncounterCollected('entry.berry_bush')) { ... }
+   */
+  isEncounterCollected(encounterId: string, dungeonId?: string | null): boolean;
+
+  /**
+   * Re-run the `discover` checks on the current room, revealing any hidden encounter the party
+   * now meets the threshold for. The engine scans on room entry and scene exit already — call
+   * this after anything else that can move a stat while the player stands still.
+   * @example
+   * // a time plugin: waiting out a buff can uncover something
+   * game.scanDiscoverableEncounters();
+   */
+  scanDiscoverableEncounters(): void;
+
+  /**
    * Play a specific scene in a dungeon. Accepts shorthand that is resolved internally.
    * @param sceneId - The scene ID (shorthand like "room.scene" or full "#room.scene.1.1.1"), or null to exit
    * @param dungeonId - Optional dungeon ID (uses current dungeon if null)
+   * @param options - Pass { root: false } to play as a cutaway: no root-scene staging (default dungeon/room assets, dungeon music, scene_play default actors)
    * @example
    * game.playScene('room1.greetings'); // Shorthand, resolved to #room1.greetings.1.1.1
    * game.playScene('room1.intro', 'forest_dungeon'); // With specific dungeon
    * game.playScene('&my_anchor'); // Jump to anchor
    * game.playScene(null); // Exit current scene
    */
-  playScene(sceneId: string | null, dungeonId?: string | null): void;
+  playScene(sceneId: string | null, dungeonId?: string | null, options?: { root?: boolean }): void;
+
+  /**
+   * Instantly remove every staged actor — no exit animations, pending removals canceled.
+   * @param keepExiting - Leave mid-exit actors alone: they finish their exit animations,
+   * and a following scene re-staging the same character revives them in place (exit killed early)
+   * @example
+   * game.clearActors();       // full instant clear
+   * game.clearActors(true);   // keep actors that are animating out
+   */
+  clearActors(keepExiting?: boolean): void;
+
+  /**
+   * Full id of the currently playing scene paragraph, or null when no scene is active.
+   * @example
+   * if (game.getCurrentSceneId() === null) { ... } // nothing playing
+   */
+  getCurrentSceneId(): string | null;
+
+  /**
+   * Snapshot the live scene state (current paragraph, text, choices, actors, assets, delayed
+   * actions) so an interrupting scene can play and the interrupted one be put back afterward.
+   * Treat the returned SceneContext as opaque — hold it and pass it to restoreSceneContext().
+   * Used by battle systems for mid-battle cutaway scenes.
+   * @example
+   * const ctx = game.captureSceneContext();
+   * game.playScene('1.battle_bark');
+   * game.on('event_end', () => game.restoreSceneContext(ctx));
+   */
+  captureSceneContext(): SceneContext;
+
+  /**
+   * Restore a context captured with captureSceneContext() WITHOUT replaying the paragraph —
+   * no actions re-run, no enter animations. Safe to call synchronously from an `event_end`
+   * listener to hand control straight back to the interrupted scene.
+   */
+  restoreSceneContext(ctx: SceneContext): void;
 
   /**
    * Resolve a shorthand scene reference to a full scene ID and dungeon ID.
@@ -823,6 +1115,15 @@ interface Game {
    * // With asset properties
    * game.addAssets({ id: 'hero', x: 50, y: 30, animation: 'idle' });
    * game.addAssets({ id: 'spine_char', skins: ['default', 'armor'], animation: 'walk' });
+   *
+   * // "false", "clear" and "reset" are fake asset ids. false removes EVERY asset
+   * // (including the dungeon/room defaults); clear sweeps away every non-default
+   * // asset (the backdrop is kept); reset hard-clears the stage and re-stages the
+   * // defaults fresh. Real ids alongside them still stage after.
+   * game.addAssets('false');
+   * game.addAssets('false, forest, pic1');
+   * game.addAssets('clear, batgirl_sex_1');
+   * game.addAssets('reset');
    */
   addAssets(data: string | string[] | Partial<Asset> | Partial<Asset>[]): void;
 
@@ -857,6 +1158,20 @@ interface Game {
    * Remove all assets from the current scene immediately (no exit animations).
    */
   clearAssets(): void;
+
+  /**
+   * Remove every staged asset except the dungeon/room defaults (the backdrop).
+   * Removed assets honor their own exit animations. This is what the "clear"
+   * keyword in an asset directive triggers, e.g. {asset: "clear"}.
+   */
+  clearTransientAssets(): void;
+
+  /**
+   * Hard-clear the stage (no exit animations) and re-stage the dungeon/room
+   * default assets fresh from their templates — restoring the event-start
+   * backdrop. This is what the "reset" keyword triggers, e.g. {asset: "reset"}.
+   */
+  resetToDefaultAssets(): void;
 
   /**
    * Add a flash text effect to the current scene.
@@ -1079,6 +1394,21 @@ interface Game {
   deleteCharacter(character: Character | string): void;
 
   /**
+   * Rebuild a character from its template under the same id — narratively a fresh entity in
+   * the same role. Party membership is kept; statuses, resources, the private inventory and
+   * learned skills are discarded. Triggers character_delete then character_create.
+   * When no character with that id is live, the id is treated as a template id and the
+   * character is created, so content can guarantee a pristine character without knowing
+   * whether one exists yet. Throws when there is neither a live character nor a template.
+   * @param character - Character instance or character ID string
+   * @returns the rebuilt (or newly created) character
+   * @example
+   * // the narrative reuses the `orc` actor for a different orc
+   * game.resetCharacter('orc');
+   */
+  resetCharacter(character: Character | string): Character;
+
+  /**
    * Parse a generic `id<op>value` specification into a typed list of ops.
    * Pure string parsing — no characters, stats, or game data are touched.
    * Plugins use this to avoid hand-rolling regex when accepting the common
@@ -1275,13 +1605,51 @@ interface Game {
   setMusic(val: string | false, disableTransition?: boolean): void;
 
   /**
-   * Play sound effect(s).
+   * Play sound effect(s). Sounds flagged `loop` in the editor repeat their whole file
+   * sequence until stopped. A loop started inside a scene ends with that scene; one started
+   * from a room or dungeon enter action follows the player across the map. Loops are saved
+   * with the run and resume on load.
    * @param val - Sound ID(s) - can be comma-separated string or array
    * @example
    * game.playSounds('door_open');
    * game.playSounds(['sword_swing', 'enemy_hit']);
    */
   playSounds(val: string | string[]): void;
+
+  /**
+   * Stop sound(s) by id, looping or not. Scene sounds also stop automatically when the scene exits.
+   * @param val - Sound ID(s) to stop - comma-separated string or array. Omit to stop everything playing.
+   * @example
+   * game.stopSounds('rain');
+   * game.stopSounds(); // stop every sound currently playing
+   */
+  stopSounds(val?: string | string[]): void;
+
+  // ============================================
+  // Scene Grade
+  // ============================================
+
+  /**
+   * Set the scene colour grade — a day-for-night pass over the backgrounds, the staged actors and
+   * the exploration map art. UI stays at full brightness. Crossfades by default.
+   * Presets cover time of day (`dawn` `dusk` `night` `moonlit` `sunlit` `bright`), weather and place
+   * (`overcast` `stormy` `foggy` `underwater`), elemental and magical (`candlelit` `infernal`
+   * `frozen` `arcane` `void`), state of mind (`sickly` `bloodied` `dream` `nightmare`), and utility
+   * (`memory` `noir`), plus `none` for daylight. Full table in ->builtins.actions#grade.
+   * @param val - Preset id, preset with strength (`"night#0.5"`), `false`/`"none"` to clear, or an object
+   * @param instant - When true, apply with no crossfade
+   * @example
+   * game.setGrade('night');
+   * game.setGrade('night#0.5');        // half strength
+   * game.setGrade(false);              // back to daylight
+   * game.setGrade('night', true);      // no crossfade
+   * game.setGrade({ preset: 'night', amount: 0.5, duration: 2 });
+   * game.setGrade({ brightness: 0.5, saturate: 0.6, tint: '#16264f', tint_amount: 0.25, duration: 1.5 });
+   */
+  setGrade(val: string | boolean | SceneGradeInput | null, instant?: boolean): void;
+
+  /** Get the active scene grade, or null when the scene is at daylight. */
+  getGrade(): SceneGradeState | null;
 
   // ============================================
   // Store System
@@ -1946,6 +2314,9 @@ interface Character {
   /** CSS classes applied to specific skin layers */
   skinLayerStyles: Map<string, string[]>;
 
+  /** Runtime clip-path polygon per skin layer id (e.g. hair trimmed under a hat). Set from a character_render listener; not persisted (re-derived each render). */
+  skinLayerClips: Map<string, string>;
+
   /**
    * Rendered skin layers for display. Set during character_render event.
    * Can be reassigned in character_render listeners to filter/modify displayed layers.
@@ -2127,6 +2498,24 @@ interface Character {
    */
   getStatus(id: string): Status | undefined;
 
+  /**
+   * The live status an equipped item is granting this character, or undefined when the item
+   * grants none or is not equipped. Mutate it in place (stats, abilityModifiers, …) and call
+   * reevaluate() to apply the change — no need to rebuild the status.
+   * @example
+   * const status = character.getItemStatus(gem);
+   * for (const mod of status.abilityModifiers) mod.requires_status = 'chosen_pussy';
+   * character.reevaluate();
+   */
+  getItemStatus(item: Item | string): Status | undefined;
+
+  /**
+   * Recompute everything derived from this character's statuses — stats, traits, abilities,
+   * ability modifiers, skin layers. Called automatically whenever a status is added, removed
+   * or restacked; call it yourself only after mutating a status object by hand.
+   */
+  reevaluate(): void;
+
   /** Check if the character has a status with the given ID. */
   hasStatus(id: string): boolean;
 
@@ -2249,13 +2638,28 @@ interface Character {
   getSpineArtOffset(view?: string): { dx: number, dy: number, scale: number };
 
   /**
-   * Get the resolved art offset for a skin layer. Falls back to the character's
-   * art_dx/art_dy/art_scale traits when the layer doesn't set its own.
+   * Get the static (non-spine) art placement for the given view, resolved from the
+   * template's/statuses' `static_art: [{view, art_dx, art_dy, art_scale}]` entries
+   * (merged per view, last status wins per field). No cross-view fallback — a view
+   * without an entry is neutral (dx 0, dy 0, scale 1). Tuned in the Art Manager.
+   * @param view - View name. _default and '' are equivalent.
    */
-  getSkinLayerArtOffset(layerId: string): { dx: number, dy: number, scale: number };
+  getStaticArtOffset(view?: string): { dx: number, dy: number, scale: number };
+
+  /**
+   * Set/patch the static art placement for a view at runtime. Unset fields keep
+   * their current value. Writes to the core status, so the change persists in
+   * saves; statuses with their own static_art for the same view still override.
+   * @example
+   * character.setStaticArtOffset({ scale: 0.5 }, 'back');
+   */
+  setStaticArtOffset(offset: { dx?: number; dy?: number; scale?: number }, view?: string): void;
 
   /** Spine configs keyed by view ('' = default, 'back' = back view, etc.). Accumulated from statuses, last wins per view. */
   spineViews: Map<string, { atlas: string, skeleton: string, artDx: number, artDy: number, artScale: number }>;
+
+  /** Static art placement keyed by view, same key scheme as spineViews. Accumulated from statuses, last wins per field per view. */
+  staticArtViews: Map<string, { artDx?: number, artDy?: number, artScale?: number }>;
 
   /**
    * Get image layers filtered by requested view. _default and '' are equivalent.
@@ -2458,6 +2862,26 @@ interface Character {
    */
   removeSkinLayerStyle(layerId: string, styleClass: string): void;
 
+  /**
+   * Clip a skin layer to a polygon at render time (keep-inside clip-path, image-space
+   * coordinates — same contract as skin-layer keep masks). Typically called from a
+   * character_render listener; the reactive map re-renders the doll immediately.
+   * @param layerId - The skin layer ID (e.g. 'hair_front')
+   * @param polygon - A CSS polygon string, e.g. "polygon(10% 10%, 90% 10%, 50% 90%)"
+   * @throws Error if skin layer not found on character
+   * @example
+   * character.setSkinLayerClip('hair_front', hatClipPolygon);
+   */
+  setSkinLayerClip(layerId: string, polygon: string): void;
+
+  /**
+   * Remove a skin layer's runtime clip (see setSkinLayerClip).
+   * @param layerId - The skin layer ID
+   * @example
+   * character.clearSkinLayerClip('hair_front');
+   */
+  clearSkinLayerClip(layerId: string): void;
+
   // ============================================
   // Ability Methods
   // ============================================
@@ -2540,6 +2964,14 @@ interface Character {
    * @returns Array of ItemSlots
    */
   getItemSlots(): ItemSlot[];
+
+  /**
+   * The item equipped in a slot instance, or null when the slot is empty.
+   * @param slotId - The slot instance id (as declared in the character's item_slots)
+   * @example
+   * const gem = character.getItemInSlot('insert_pussy');
+   */
+  getItemInSlot(slotId: string): Item | null;
 
   /**
    * Remove an item slot from the character.
@@ -2803,6 +3235,9 @@ interface Item {
 
   /** String attributes (e.g., rarity, type) */
   attributes: Record<string, string>;
+
+  /** Item category id (from item_categories) */
+  category: string;
 
   /** Property objects attached to this item */
   properties: Record<string, Property>;
@@ -3078,6 +3513,18 @@ interface Inventory {
    * @returns Set of recipe IDs
    */
   getRecipes(): Set<string>;
+
+  /**
+   * The apply-button interaction type / CSS class: the `interactive` value, or `'craft'` for a
+   * recipe-bearing inventory, or `''` if the inventory has no apply action. The button label is
+   * resolved from the locale key `apply_button.<type>`.
+   * @returns Interaction type (e.g. `'craft'`), or `''` when there is no apply button
+   * @example
+   * game.on('inventory_open', (inv) => {
+   *   if (inv.getApplyButton() === 'craft') tut.showHint('tut_crafting');
+   * });
+   */
+  getApplyButton(): string;
 
   // ============================================
   // Capacity Methods
@@ -3766,9 +4213,14 @@ interface PoolEntityGroup {
 type _GameEvents = GameEvents;
 type _CustomComponent = CustomComponent;
 type _ActionObject = ActionObject;
+type _GateContext = GateContext;
 type _Asset = Asset;
 type _DungeonLine = DungeonLine;
 type _DungeonData = DungeonData;
+type _SceneContext = SceneContext;
+type _SceneGrade = SceneGrade;
+type _SceneGradeState = SceneGradeState;
+type _SceneGradeInput = SceneGradeInput;
 type _Game = Game;
 type _CharacterSkinLayerObject = CharacterSkinLayerObject;
 type _Character = Character;
@@ -3783,6 +4235,8 @@ type _CollectionSettings = CollectionSettings;
 type _PoolEntry = PoolEntry;
 type _PoolEntityGroup = PoolEntityGroup;
 type _SaveOptions = SaveOptions;
+type _MigrationScope = MigrationScope;
+type _SaveMigrationOptions = SaveMigrationOptions;
 
 // ============================================
 // Global Window Interface
@@ -3793,9 +4247,14 @@ declare global {
   type GameEvents = _GameEvents;
   type CustomComponent = _CustomComponent;
   type ActionObject = _ActionObject;
+  type GateContext = _GateContext;
   type Asset = _Asset;
   type DungeonLine = _DungeonLine;
   type DungeonData = _DungeonData;
+  type SceneContext = _SceneContext;
+  type SceneGrade = _SceneGrade;
+  type SceneGradeState = _SceneGradeState;
+  type SceneGradeInput = _SceneGradeInput;
   interface Game extends _Game { }
   type CharacterSkinLayerObject = _CharacterSkinLayerObject;
   type Character = _Character;
@@ -3809,6 +4268,8 @@ declare global {
   type CollectionSettings = _CollectionSettings;
   type PoolEntry = _PoolEntry;
   type PoolEntityGroup = _PoolEntityGroup;
+  type MigrationScope = _MigrationScope;
+  type SaveMigrationOptions = _SaveMigrationOptions;
 
   interface Window {
     engine: {
@@ -3896,6 +4357,8 @@ declare global {
         AbilityCard: any;
         /** Renders stats + abilities from a BaseStatusObject. Filters stat visibility, displays ability cards with modifier deltas. Props: data (BaseStatusObject), stacks? (number), multiplier? (number), isActive? (boolean) */
         StatusObjectDisplay: any;
+        /** A single status "brick" (icon/name + polarity border) with a StatusCard hover popup. Works applied or unapplied. Props: status (string id | Status | def object), characterId? (string) - live stacks/duration + computed stats, statusInstanceIndex? (number), disableClick? (boolean) - click does nothing to the card (no pin) */
+        StatusBrick: any;
         /** Lists character abilities as selectable items. Shows ability icons and names, with AbilityCard detail view for selected ability. Props: character (Character), showDelta? (boolean, default false) - whether to show base➜merged transitions */
         AbilitiesViewer: any;
 

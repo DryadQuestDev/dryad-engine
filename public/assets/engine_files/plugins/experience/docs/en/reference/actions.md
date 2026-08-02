@@ -4,10 +4,10 @@
 
 ### `xp`
 
-Award XP to characters. Pass a number to award to all party members, or a string for per-character amounts.
+Award XP to characters. Pass a number to award to the MC (`mc_id`) – or to every levelled party member when `shared_level` is on – or a string for per-character amounts.
 
 ```js
-// Award 50 XP to all party members with a level trait
+// Award 50 XP to the MC (whole party with shared_level on)
 { xp: 50 }
 
 // Award different amounts to specific characters
@@ -16,15 +16,21 @@ Award XP to characters. Pass a number to award to all party members, or a string
 
 Per-character format: `"characterId->amount, characterId->amount"`.
 
+The action is delayed: the player reads the paragraph first, the continue-click grants the XP and opens the reward popup (with any level-up fanfare). Mid-battle grants skip the popup and surface in the battle victory panel instead.
+
 ## Config Fields
 
 | Field | Type | Default | Description |
 |---|---|---|---|
+| `mc_id` | string | -- | Character whose level is snapshotted as the dungeon level on first entry, and the target of numeric `xp` grants |
+| `shared_level` | boolean | false | Party-wide progression: numeric `xp` grants the whole party, and a levelled character joining the party is levelled up to the MC's level and XP – receiving each level's status stack and rewards on the way, without reward-panel fanfare |
 | `xp_base` | number | 100 | XP threshold to level up at level 1 |
 | `xp_formula` | chooseOne | `exponential_percent` | Scaling formula: `linear_percent` or `exponential_percent` |
 | `xp_growth` | number | 50 | Growth percentage applied per level |
 | `max_level` | number | 99 | Maximum character level |
 | `level_up_rewards` | schema[] | -- | Currency items awarded to the character's private inventory on each level up. See below. |
+
+The `auto_scaling` flag and the reward/loot keys (`scale_per_level`, `loot_*`, `threat_xp_coef`) are covered in the Rewards & Scaling guide.
 
 ### `level_up_rewards`
 

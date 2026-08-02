@@ -381,6 +381,27 @@ Renders stats and abilities from a `BaseStatusObject`. Filters stat visibility, 
 
 ---
 
+## StatusBrick
+
+Renders a single status as a compact "brick" (icon or name, polarity-colored border) with a StatusCard popup on hover. The same brick CharacterStatuses uses, exposed for standalone use — status pickers, codex entries, sire badges. Works applied or unapplied.
+
+**Props:**
+- `status` (string | Status | object, required) - A status template id, a status def object, or an applied Status instance
+- `characterId` (string, optional) - Owning character; enables live stack/duration badges and computed-stat resolution in the hover card
+- `statusInstanceIndex` (number, optional) - Instance index for a multi-stack status on that character
+- `disableClick` (boolean, optional) - When true, clicking the brick does nothing to the hover card (no pin); use when the brick's click is handled for selection
+
+**Example:**
+```js
+// By template id (unapplied — shows the definition)
+<StatusBrick status="strain_ember" />
+
+// Applied to a character (live stacks/duration)
+<StatusBrick :status="myStatus" :character-id="character.id" />
+```
+
+---
+
 ## AbilitiesViewer
 
 Lists a character's abilities as selectable items. Shows ability icons and names in a horizontal list. Selecting an ability displays its full details via AbilityCard.

@@ -49,6 +49,7 @@ export class MusicPlayer {
     const fade = opts.fade ?? 1.0;
     this._currentId = null;
     if (!this.player) return;
+    gameLogger.info('[music] Music stopped');
     if (fade > 0) {
       this.fadeOut(fade, () => { });
     } else {
@@ -113,7 +114,7 @@ export class MusicPlayer {
     player.src = this.playlist[this.trackIndex];
     player.volume = this.targetVolume;
     player.currentTime = 0;
-    gameLogger.info(`Playing music: ${this.playlist[this.trackIndex]}`);
+    gameLogger.info(`[music] Playing "${this._currentId}": ${this.playlist[this.trackIndex]}`);
     player.play().catch((error: any) => {
       if (error?.name === 'AbortError') {
         return;

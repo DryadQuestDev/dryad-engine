@@ -1,8 +1,9 @@
-import { ref, Ref, computed, type ComputedRef } from "vue";
+import { ref, Ref, computed, nextTick, type ComputedRef } from "vue";
 import gsap from 'gsap';
 
 import { DungeonData } from "../core/dungeon/dungeonData";
 import { Skip } from "../../utility/save-system";
+import { DEV_PREV_SCENE_SLOT } from "../../services/indexeddb-save.service";
 export type DungeonLine = {
   id: string;
   val: string;
@@ -26,10 +27,18 @@ import { Choice } from "../core/content/choice";
 import { Character } from "../core/character/character";
 import { AssetObject } from "../../schemas/assetSchema";
 import { gameLogger } from "../utils/logger";
+import { warmImages } from "../utils/assetPreloader";
 import { CharacterSceneSlotObject } from "../../schemas/characterSceneSlotSchema";
 import { DungeonRoomObject } from "../../schemas/dungeonRoomSchema";
 import { DungeonEncounterObject } from "../../schemas/dungeonEncounterSchema";
 import { DungeonConfigParsed } from "../../editor/editor";
+
+// Scene ids are dot-separated and choice ids end in `*N`, so both are full of
+// regex metacharacters. Without escaping, every `.` is a wildcard.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export type LogObject = {
   content: string;
   isChoice: boolean;
@@ -69,10 +78,204 @@ export type QuestObject = {
 export type SceneSlot = CharacterSceneSlotObject & {
   char: string; // character ID (renamed from characterId)
   isRemoving?: boolean; // Flag to trigger exit animation before removal
+  removalTimeoutId?: number; // Pending removal timer, cleared if the character re-enters
 }
 
 export type SceneAsset = AssetObject & {
   isRemoving?: boolean; // Flag to trigger exit animation before removal
+}
+
+// Day-for-night colour grade applied over the scene and the map art. The tint is kept as separate
+// r/g/b numbers because GSAP can only tween colours as a CSS property on an element, never as a
+// plain object property — and a plain object is what the crossfade tweens.
+export type SceneGrade = {
+  brightness: number;
+  saturate: number;
+  contrast: number;
+  hue: number;
+  r: number;
+  g: number;
+  b: number;
+  tint_amount: number;
+}
+
+// Fully resolved before it is stored, so the view never parses.
+export type SceneGradeState = {
+  grade: SceneGrade;
+  duration: number;
+}
+
+export const IDENTITY_GRADE: SceneGrade = {
+  brightness: 1, saturate: 1, contrast: 1, hue: 0, r: 0, g: 0, b: 0, tint_amount: 0
+};
+
+/** Daylight — nothing to render. The tint colour is ignored while tint_amount is 0. */
+export function isIdentityGrade(g: SceneGrade): boolean {
+  return g.brightness === 1 && g.saturate === 1 && g.contrast === 1 && g.hue === 0 && g.tint_amount === 0;
+}
+
+// Two things learned tuning these against real art:
+//
+// 1. The tint is a linear blend TOWARD a colour — the matrix is scaled by (1 - tint_amount) and the
+//    tint added to the offset column. Any tint therefore drags luminance toward that colour, so a
+//    dark tint darkens. Bright presets use light tint colours; copying a dark-tint preset and merely
+//    raising `brightness` gives muddy grey, not a brighter scene.
+// 2. Pull `saturate` down before leaning on the tint. A source colour that keeps its saturation
+//    fights the blend, so a subtle tint over, say, a yellow-green field reads as no tint at all.
+//    Every preset here that wants a recognisable hue desaturates first.
+const GRADE_PRESETS: Record<string, SceneGrade> = {
+  none: IDENTITY_GRADE,
+
+  // Light & time of day
+  dawn: { brightness: 1.05, saturate: 0.85, contrast: 0.98, hue: 4, r: 255, g: 176, b: 122, tint_amount: 0.28 },
+  dusk: { brightness: 0.82, saturate: 0.92, contrast: 1.02, hue: -6, r: 74, g: 42, b: 78, tint_amount: 0.14 },
+  night: { brightness: 0.55, saturate: 0.55, contrast: 1.06, hue: -10, r: 22, g: 38, b: 79, tint_amount: 0.24 },
+  moonlit: { brightness: 0.62, saturate: 0.45, contrast: 1.10, hue: -14, r: 29, g: 58, b: 122, tint_amount: 0.28 },
+  sunlit: { brightness: 1.18, saturate: 0.95, contrast: 1.02, hue: 3, r: 255, g: 228, b: 176, tint_amount: 0.20 },
+  bright: { brightness: 1.35, saturate: 0.60, contrast: 1.20, hue: 0, r: 255, g: 248, b: 232, tint_amount: 0.18 },
+
+  // Weather & place
+  overcast: { brightness: 0.95, saturate: 0.45, contrast: 0.90, hue: 0, r: 170, g: 180, b: 192, tint_amount: 0.25 },
+  stormy: { brightness: 0.58, saturate: 0.35, contrast: 1.04, hue: 0, r: 42, g: 48, b: 56, tint_amount: 0.22 },
+  foggy: { brightness: 1.08, saturate: 0.30, contrast: 0.78, hue: 0, r: 221, g: 227, b: 232, tint_amount: 0.38 },
+  underwater: { brightness: 0.70, saturate: 0.50, contrast: 1.00, hue: -10, r: 20, g: 112, b: 126, tint_amount: 0.40 },
+
+  // Fire, cold, magic
+  candlelit: { brightness: 0.70, saturate: 0.85, contrast: 1.05, hue: 8, r: 107, g: 58, b: 18, tint_amount: 0.20 },
+  infernal: { brightness: 0.78, saturate: 0.70, contrast: 1.15, hue: -6, r: 160, g: 28, b: 5, tint_amount: 0.40 },
+  frozen: { brightness: 1.02, saturate: 0.35, contrast: 1.06, hue: -6, r: 168, g: 220, b: 240, tint_amount: 0.32 },
+  arcane: { brightness: 0.76, saturate: 0.45, contrast: 1.08, hue: 0, r: 107, g: 46, b: 168, tint_amount: 0.40 },
+  void: { brightness: 0.40, saturate: 0.20, contrast: 1.20, hue: 0, r: 10, g: 6, b: 18, tint_amount: 0.40 },
+
+  // Body & mind
+  sickly: { brightness: 0.72, saturate: 0.60, contrast: 1.08, hue: 35, r: 45, g: 74, b: 30, tint_amount: 0.22 },
+  bloodied: { brightness: 0.70, saturate: 0.55, contrast: 1.12, hue: -4, r: 140, g: 16, b: 16, tint_amount: 0.42 },
+  dream: { brightness: 1.20, saturate: 0.35, contrast: 0.80, hue: 4, r: 255, g: 210, b: 238, tint_amount: 0.35 },
+  nightmare: { brightness: 0.45, saturate: 0.25, contrast: 1.32, hue: 0, r: 26, g: 13, b: 20, tint_amount: 0.35 },
+
+  // Utility
+  memory: { brightness: 0.98, saturate: 0.35, contrast: 0.95, hue: 12, r: 201, g: 168, b: 120, tint_amount: 0.35 },
+  noir: { brightness: 0.95, saturate: 0.00, contrast: 1.25, hue: 0, r: 0, g: 0, b: 0, tint_amount: 0.00 },
+};
+
+export const GRADE_FADE_DURATION = 0.8;
+
+/** Id of the shared feColorMatrix def; art elements reference it as filter: url(#…). */
+export const GRADE_FILTER_ID = 'scene-grade';
+
+/** Same grade, taller filter region — for character slots only. A spine canvas overflows its
+ * slot box vertically (slot.scale plus the viewport pad), and an SVG filter region CLIPS, so
+ * the standard region would cut exactly the head and feet the pad exists to save. Kept as a
+ * separate def so full-screen backgrounds don't pay for a region they can't use. */
+export const GRADE_FILTER_TALL_ID = 'scene-grade-tall';
+
+// A 4x5 affine colour matrix as the flat 20 numbers feColorMatrix wants.
+type ColorMatrix = number[];
+
+const IDENTITY_MATRIX: ColorMatrix = [
+  1, 0, 0, 0, 0,
+  0, 1, 0, 0, 0,
+  0, 0, 1, 0, 0,
+  0, 0, 0, 1, 0,
+];
+
+// b · a, both 4x5 affine (the implicit last row is 0 0 0 0 1), i.e. "apply a, then b".
+function multiplyMatrix(b: ColorMatrix, a: ColorMatrix): ColorMatrix {
+  const out: ColorMatrix = new Array(20);
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 5; col++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += b[row * 5 + k] * a[k * 5 + col];
+      // The offset column also picks up b's own offset, since a's implicit last row is (0,0,0,0,1).
+      if (col === 4) sum += b[row * 5 + 4];
+      out[row * 5 + col] = sum;
+    }
+  }
+  return out;
+}
+
+/**
+ * Fold a grade into the single colour matrix feColorMatrix applies. Composed in the same order the
+ * CSS filter chain used, so the presets keep the look they were tuned to:
+ * brightness -> saturate -> contrast -> hue -> tint.
+ */
+export function gradeMatrix(g: SceneGrade): ColorMatrix {
+  let m = IDENTITY_MATRIX;
+
+  if (g.brightness !== 1) {
+    const b = g.brightness;
+    m = multiplyMatrix([b, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, 1, 0], m);
+  }
+
+  if (g.saturate !== 1) {
+    // The luma weights the filter-effects spec defines saturate() against, so this matches what
+    // CSS saturate() produced before.
+    const s = g.saturate;
+    const lr = 0.213, lg = 0.715, lb = 0.072;
+    m = multiplyMatrix([
+      lr + (1 - lr) * s, lg - lg * s, lb - lb * s, 0, 0,
+      lr - lr * s, lg + (1 - lg) * s, lb - lb * s, 0, 0,
+      lr - lr * s, lg - lg * s, lb + (1 - lb) * s, 0, 0,
+      0, 0, 0, 1, 0,
+    ], m);
+  }
+
+  if (g.contrast !== 1) {
+    const c = g.contrast;
+    const off = 0.5 - 0.5 * c; // pivot around mid-grey
+    m = multiplyMatrix([c, 0, 0, 0, off, 0, c, 0, 0, off, 0, 0, c, 0, off, 0, 0, 0, 1, 0], m);
+  }
+
+  if (g.hue !== 0) {
+    const rad = g.hue * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    m = multiplyMatrix([
+      0.213 + cos * 0.787 - sin * 0.213, 0.715 - cos * 0.715 - sin * 0.715, 0.072 - cos * 0.072 + sin * 0.928, 0, 0,
+      0.213 - cos * 0.213 + sin * 0.143, 0.715 + cos * 0.285 + sin * 0.140, 0.072 - cos * 0.072 - sin * 0.283, 0, 0,
+      0.213 - cos * 0.213 - sin * 0.787, 0.715 - cos * 0.715 + sin * 0.715, 0.072 + cos * 0.928 + sin * 0.072, 0, 0,
+      0, 0, 0, 1, 0,
+    ], m);
+  }
+
+  if (g.tint_amount > 0) {
+    // Blend the result toward the tint colour. Scaling the whole matrix and adding the tint to the
+    // offset column is the matrix form of out = out * (1 - a) + tint * a.
+    const a = g.tint_amount;
+    const keep = 1 - a;
+    const tint = [g.r / 255 * a, g.g / 255 * a, g.b / 255 * a];
+    const scaled = m.slice();
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 5; col++) scaled[row * 5 + col] *= keep;
+      scaled[row * 5 + 4] += tint[row];
+    }
+    m = scaled;
+  }
+
+  return m;
+}
+
+export type ScenePlayOptions = {
+  // false plays the scene as a cutaway — no root-scene staging (default dungeon/room
+  // assets, dungeon music, scene_play default actors) even when no scene is active.
+  root?: boolean;
+}
+
+// Snapshot of the live scene machinery, used to interrupt and later resume a scene
+// (e.g. a battle plugin playing cutaway scenes mid-fight). Restoring never replays
+// the paragraph — it puts the stored presentation state back as-is.
+export type SceneContext = {
+  sceneId: string | null;
+  activeDungeonId: string | null;
+  activeRoomId: string | null;
+  cachedText: string | null;
+  cachedFlashArray: string[];
+  delayedActions: Record<string, any>;
+  reloadActions: Record<string, any>;
+  eventChoices: Choice | Choice[] | null;
+  isChoices: number;
+  sceneSlots: SceneSlot[];
+  assets: SceneAsset[];
+  talkingCharacterId: string | null;
 }
 
 export class DungeonSystem {
@@ -82,6 +285,15 @@ export class DungeonSystem {
   public showLocationCircles: Ref<boolean> = ref(true);
   @Skip()
   public toolbarMinimized: Ref<boolean> = ref(false);
+
+  // False while the current dungeon's art is being fetched. The map hides itself and the
+  // toolbar shows a spinner in place of the dungeon name until every image has decoded.
+  @Skip()
+  public dungeonAssetsLoaded: Ref<boolean> = ref(true);
+
+  // Dungeons whose art has already been warmed — re-entering one never shows the spinner.
+  @Skip()
+  private preloadedDungeons: Set<string> = new Set();
 
   // Computed property to check if there are visible encounters in current room
   @Skip()
@@ -118,6 +330,80 @@ export class DungeonSystem {
     return Game.getInstance();
   }
 
+  /**
+   * A `solo` asset clears the stage: remove every other staged asset (each honoring
+   * its own exit animation) so the incoming one is the only asset on scene. The
+   * backdrop (dungeon/room defaults + `bg`-flagged assets) is preserved.
+   */
+  private applySoloAsset(asset: AssetObject): void {
+    if (!asset.solo) return;
+    const keep = this.getPreservedAssetIds();
+    for (const a of [...this.assets.value]) {
+      if (a.id !== asset.id && !keep.has(a.id) && !a.isRemoving) this.removeAssets(a.id);
+    }
+  }
+
+  /**
+   * IDs of the dungeon- and room-level default assets — the backdrop that is
+   * auto-staged at event start (insertion order matches that staging: dungeon
+   * first, then room). Mirrors playSceneResolver: dungeon defaults apply to any
+   * dungeon type, and room defaults come from the reactive room normally or the
+   * raw room object in replay mode.
+   */
+  private getDefaultAssetIds(): Set<string> {
+    const ids = new Set<string>();
+    const dungeon = this.currentDungeon.value;
+
+    for (const id of dungeon?.default_assets ?? []) ids.add(id);
+
+    if (!this.game.getState('replay_mode')) {
+      for (const id of this.currentRoom.value?.defaultAssets ?? []) ids.add(id);
+    } else {
+      const roomObject = dungeon?.id && this.activeRoomId.value
+        ? this.dungeonRooms.get(dungeon.id)?.get(this.activeRoomId.value)
+        : null;
+      for (const id of roomObject?.default_assets ?? []) ids.add(id);
+    }
+    return ids;
+  }
+
+  /**
+   * IDs of assets that count as the backdrop for `clear`/`solo` sweeps: the
+   * dungeon/room defaults plus any currently-staged asset flagged `bg` at runtime.
+   */
+  private getPreservedAssetIds(): Set<string> {
+    const ids = this.getDefaultAssetIds();
+    for (const a of this.assets.value) {
+      if (a.bg) ids.add(a.id);
+    }
+    return ids;
+  }
+
+  /**
+   * The "clear" keyword (a fake asset id in an add directive): remove every staged
+   * asset except the backdrop (dungeon/room defaults + `bg`-flagged assets), so the
+   * backdrop stays while transient scene visuals are swept away. Removed assets
+   * honor their own exit animations.
+   */
+  public clearTransientAssets(): void {
+    const keep = this.getPreservedAssetIds();
+    for (const a of [...this.assets.value]) {
+      if (!keep.has(a.id) && !a.isRemoving) this.removeAssets(a.id);
+    }
+  }
+
+  /**
+   * The "reset" keyword (a fake asset id in an add directive): hard-clear the whole
+   * stage (no exit animations) and re-stage the dungeon/room defaults fresh from
+   * their templates — restoring the scene to its event-start backdrop, even if a
+   * default had been moved/updated during the scene.
+   */
+  public resetToDefaultAssets(): void {
+    this.assets.value = [];
+    const ids = this.getDefaultAssetIds();
+    if (ids.size) this.addAssets([...ids]);
+  }
+
   // Method to handle asset adding logic
   public addAssets(data: string[] | string | (Partial<AssetObject> & { id: string })): void {
     let assetIds: string[] = [];
@@ -129,7 +415,23 @@ export class DungeonSystem {
       assetIds = data;
     }
 
-    if (assetIds.length > 0) {
+    if (typeof data === 'string' || Array.isArray(data)) {
+
+      // "false", "reset" and "clear" are fake asset ids handled before template lookup:
+      //   false — remove EVERY asset, including the dungeon/room defaults.
+      //   reset — hard-clear the stage and re-stage the dungeon/room defaults.
+      //   clear — remove every non-default asset, keeping the backdrop.
+      // Any real ids alongside them still stage afterwards (e.g. "false, forest, pic1").
+      if (assetIds.includes('false')) {
+        this.clearAssets();
+      }
+      if (assetIds.includes('reset')) {
+        this.resetToDefaultAssets();
+      }
+      if (assetIds.includes('clear')) {
+        this.clearTransientAssets();
+      }
+      assetIds = assetIds.filter(id => id !== 'false' && id !== 'reset' && id !== 'clear');
 
       for (const assetId of assetIds) {
         const template = this.assetsMap.get(assetId);
@@ -152,6 +454,7 @@ export class DungeonSystem {
         // Allow final mutations before adding
         this.game.trigger('asset_render', asset);
 
+        this.applySoloAsset(asset);
         this.assets.value.push(asset);
 
         // add to discovered assets for the gallery system
@@ -177,6 +480,7 @@ export class DungeonSystem {
         Object.assign(existingAsset, data);
         // Allow final mutations after update
         this.game.trigger('asset_render', existingAsset);
+        this.applySoloAsset(existingAsset);
         // add to discovered assets for the gallery system
         this.game.coreSystem.addAssetToGallery(existingAsset);
         gameLogger.info(`[addAsset] Updated existing asset: "${data.id}"`);
@@ -193,6 +497,7 @@ export class DungeonSystem {
       // Allow final mutations before adding
       this.game.trigger('asset_render', asset);
 
+      this.applySoloAsset(asset);
       this.assets.value.push(asset);
 
       // add to discovered assets for the gallery system
@@ -258,6 +563,106 @@ export class DungeonSystem {
     this.assets.value = [];
   }
 
+  // Active colour grade, saved with the run (no @Skip, same as `assets` above). null = daylight.
+  public sceneGrade: Ref<SceneGradeState | null> = ref(null);
+
+  // True while the grade is anything but daylight, including mid-fade. Art elements read this to
+  // decide whether to reference the colour-matrix filter at all, so daylight costs no filter passes.
+  // Presentation only — SceneGradeFilter owns it, and it is rebuilt from sceneGrade on mount.
+  @Skip()
+  public gradeActive: Ref<boolean> = ref(false);
+
+  /**
+   * Set the scene colour grade. Accepts a preset id ("night"), a preset with strength
+   * ("night#0.5"), false/"none" to clear, or an object for manual control.
+   * `instant` skips the crossfade, mirroring setMusic's disableTransition.
+   */
+  public setGrade(val: string | boolean | Record<string, any> | null, instant: boolean = false): void {
+    const resolved = this.resolveGrade(val);
+    if (instant) resolved.duration = 0;
+    this.sceneGrade.value = resolved;
+  }
+
+  /** Null while the scene is at daylight, so callers can test it directly. */
+  public getGrade(): SceneGradeState | null {
+    const active = this.sceneGrade.value;
+    return (!active || isIdentityGrade(active.grade)) ? null : active;
+  }
+
+  // Clearing resolves to an identity grade rather than null so the fade-out length survives —
+  // a null payload would carry no duration and snap.
+  private resolveGrade(raw: string | boolean | Record<string, any> | null): SceneGradeState {
+    const cleared = (): SceneGradeState => ({ grade: { ...IDENTITY_GRADE }, duration: GRADE_FADE_DURATION });
+    // Returning the same object reference leaves the watch unfired, so a bad value is a no-op
+    // rather than silently wiping whatever mood the scene was in.
+    const unchanged = (): SceneGradeState => this.sceneGrade.value ?? cleared();
+    if (raw === false || raw === null || raw === undefined || raw === '') return cleared();
+
+    let duration = GRADE_FADE_DURATION;
+    let grade: SceneGrade;
+
+    if (typeof raw === 'string') {
+      const [presetId, amountStr] = raw.split('#');
+      const preset = GRADE_PRESETS[presetId.trim()];
+      if (!preset) {
+        gameLogger.warn(`Unknown grade preset "${presetId.trim()}". Valid: ${Object.keys(GRADE_PRESETS).join(', ')}`);
+        return unchanged();
+      }
+      const amount = amountStr === undefined ? 1 : parseFloat(amountStr);
+      grade = this.lerpGrade(IDENTITY_GRADE, preset, isNaN(amount) ? 1 : amount);
+    } else if (typeof raw === 'object') {
+      const base = raw.preset ? GRADE_PRESETS[String(raw.preset).trim()] : IDENTITY_GRADE;
+      if (!base) {
+        gameLogger.warn(`Unknown grade preset "${raw.preset}". Valid: ${Object.keys(GRADE_PRESETS).join(', ')}`);
+        return unchanged();
+      }
+      const amount = typeof raw.amount === 'number' ? raw.amount : 1;
+      grade = this.lerpGrade(IDENTITY_GRADE, base, amount);
+
+      // Explicit fields override the preset.
+      for (const key of ['brightness', 'saturate', 'contrast', 'hue', 'tint_amount'] as const) {
+        if (typeof raw[key] === 'number') grade[key] = raw[key];
+      }
+      if (typeof raw.tint === 'string') {
+        const rgb = this.parseHexColor(raw.tint);
+        if (rgb) Object.assign(grade, rgb);
+        else gameLogger.warn(`Invalid grade tint "${raw.tint}" — expected a hex colour like #16264f.`);
+      }
+      if (typeof raw.duration === 'number') duration = raw.duration;
+    } else {
+      // `true` and anything else unusable
+      gameLogger.warn(`Invalid grade value: ${JSON.stringify(raw)}. Expected a preset id, false, or an object.`);
+      return unchanged();
+    }
+
+    return { grade, duration };
+  }
+
+  private lerpGrade(from: SceneGrade, to: SceneGrade, t: number): SceneGrade {
+    const k = Math.max(0, Math.min(1, t));
+    const out = {} as SceneGrade;
+    for (const key of Object.keys(from) as (keyof SceneGrade)[]) {
+      out[key] = from[key] + (to[key] - from[key]) * k;
+    }
+    // The tint colour itself shouldn't wash toward black as strength drops — only its opacity does.
+    out.r = to.r;
+    out.g = to.g;
+    out.b = to.b;
+    return out;
+  }
+
+  private parseHexColor(hex: string): { r: number, g: number, b: number } | null {
+    const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex.trim());
+    if (!m) return null;
+    let body = m[1];
+    if (body.length === 3) body = body.split('').map(c => c + c).join('');
+    return {
+      r: parseInt(body.slice(0, 2), 16),
+      g: parseInt(body.slice(2, 4), 16),
+      b: parseInt(body.slice(4, 6), 16),
+    };
+  }
+
   get global() {
     return Global.getInstance();
   }
@@ -293,6 +698,14 @@ export class DungeonSystem {
   @Skip()
   public isLoadingSave: Ref<boolean> = ref(false);
 
+  // Graceful scene exit: while true the dialogue is fading out (.overlay-closing) and
+  // actors are playing their exit animations; the real teardown runs when it clears.
+  @Skip()
+  public isSceneClosing: Ref<boolean> = ref(false);
+  @Skip()
+  private sceneCloseTimeout: number | null = null;
+  private static readonly SCENE_CLOSE_MS = 400;
+
 
   // Slot templates storage (defined slots that can be referenced by id)
   @Skip()
@@ -309,6 +722,16 @@ export class DungeonSystem {
     }
     return character;
   });
+
+  // Where the story resumes once a delayed branch action (battle, exchange…) finishes.
+  // Scoped to the scene it was clicked from so an unrelated later nextScene can't consume
+  // it. Saved on purpose — a save can land between the click and the action finishing.
+  public pendingResume: { fromSceneId: string | null; target: string } | null = null;
+
+  /** Record the branch to resume into after a delayed branch action completes. */
+  public noteBranchResume(target: string): void {
+    this.pendingResume = { fromSceneId: this.currentSceneId.value, target };
+  }
 
   public cachedText: Ref<string | null> = ref("");
   public cachedFlashArray: Ref<string[]> = ref([]);
@@ -470,16 +893,16 @@ export class DungeonSystem {
 
   // Resolves a friendly scene id (scene / room.scene / dungeon.room.scene / &anchor /
   // next / shift:x / full #id) then plays it — the same two steps the `scene` action does.
-  public playSceneResolver(value: string | null, dungeonId: string | null = null) {
+  public playSceneResolver(value: string | null, dungeonId: string | null = null, options?: ScenePlayOptions) {
     if (!value) {
       this.playScene(null, dungeonId);
       return;
     }
     const resolved = this.resolveSceneId(value);
-    this.playScene(resolved.sceneId, dungeonId ?? resolved.dungeonId);
+    this.playScene(resolved.sceneId, dungeonId ?? resolved.dungeonId, options);
   }
 
-  public playScene(sceneId: string | null, dungeonId: string | null) {
+  public playScene(sceneId: string | null, dungeonId: string | null, options?: ScenePlayOptions) {
 
     this.game.setState('hide_events', false);
 
@@ -490,7 +913,13 @@ export class DungeonSystem {
       return;
     }
 
-    let isRootScene = this.isRootScene.value;
+    // A new scene supersedes any in-flight graceful exit — it replaces the old outright.
+    this.cancelPendingExit();
+
+    // options.root=false plays the scene as a cutaway: no root-scene staging (default
+    // dungeon/room assets, dungeon music, scene_play default actors). Used by battle
+    // systems playing scenes over a running fight.
+    let isRootScene = options?.root ?? this.isRootScene.value;
     //console.warn("isRootScene", isRootScene);
 
     this.isChoices = 0;
@@ -534,7 +963,7 @@ export class DungeonSystem {
         const block2Id = sceneId.replace(/\.1\.1\.1$/, ".1.2.1");
         const block2Line = this.getLineByDungeonId(block2Id, dungeonUsedId);
         if (block2Line) {
-          this.playScene(block2Id, dungeonUsedId);
+          this.playScene(block2Id, dungeonUsedId, options);
           return;
         } else {
           gameLogger.error(`Scene '${sceneId}' has {intro: true} but no block 2 scene '${block2Id}' exists.`);
@@ -543,7 +972,7 @@ export class DungeonSystem {
       }
     }
 
-    gameLogger.info(`Playing scene: ${sceneId}`);
+    gameLogger.info(`[scene] Playing scene: "${sceneId}" (dungeon "${dungeonUsedId}")`);
     let proceed = this.game.trigger('scene_play_before', sceneId, dungeonUsedId, isRootScene);
     if (!proceed) {
       return;
@@ -565,18 +994,33 @@ export class DungeonSystem {
 
     // If paragraph resolved to empty (e.g. inline if{} produced no text), skip to next paragraph
     if (!output.trim() && Object.keys(actions).length === 0) {
-      this.playScene(this.getNextSceneId(sceneId), dungeonUsedId);
+      this.playScene(this.getNextSceneId(sceneId), dungeonUsedId, options);
       return;
     }
 
     // Check for {redirect} first. If there's then resolve and return immediately.
     if (actions["redirect"]) {
-      gameLogger.info("Redirecting to scene:", actions["redirect"]);
+      gameLogger.info(`[redirect] Redirecting to scene: "${actions["redirect"]}"`);
       this.game.logicSystem.resolveActions(actions);
       return;
     }
 
-    if (this.isRootScene.value) {
+    // Gates run before the paragraph renders and before any of its actions fire, so a
+    // gated paragraph shows nothing and changes nothing — the reader goes elsewhere
+    // instead. currentSceneId is already set above, so a gate returning "shift:1"
+    // resolves relative to the paragraph being gated.
+    let gateTarget = this.game.logicSystem.runGates(actions, { sceneId, dungeonId: dungeonUsedId });
+    if (gateTarget) {
+      this.playSceneResolver(gateTarget, dungeonUsedId);
+      return;
+    }
+
+    if (isRootScene) {
+
+      // auto-stage the configured dungeon default assets at event start (any dungeon type)
+      if (this.currentDungeon.value?.default_assets?.length) {
+        this.addAssets(this.currentDungeon.value.default_assets);
+      }
 
       // real scene
       if (!this.game.getState('replay_mode')) {
@@ -607,6 +1051,18 @@ export class DungeonSystem {
 
     this.isRootScene.value = false;
     //console.warn("setting isRootScene to false", this.isRootScene.value);
+
+    // scene is committed (past gates/redirects) and about to run its own actions — the point to
+    // stage default actors so they precede the scene's asset actions. isRootScene is the value
+    // captured at the top, before it was reset above.
+    this.game.trigger('scene_play', sceneId, dungeonUsedId, isRootScene);
+
+    // Dev-only rolling checkpoint: snapshot the state BEFORE this scene's actions fire, so
+    // Hard Scene Reset can reload and re-enter the scene once on clean state. Fire-and-forget —
+    // save(game) serializes synchronously here before any await, so no mutation race.
+    if (localStorage.getItem('devMode') === 'true') {
+      this.game.saveGame(DEV_PREV_SCENE_SLOT, { hidden: true, noNotification: true, forceSave: true });
+    }
 
     // execute actions
     this.game.logicSystem.resolveActions(actions, true);
@@ -667,6 +1123,10 @@ export class DungeonSystem {
 
   // ignore types
   public triggerEvent() {
+
+    if (this.currentSceneId.value) {
+      return;
+    }
     let room = this.currentRoom.value;
     if (!room) {
       return;
@@ -692,6 +1152,11 @@ export class DungeonSystem {
   }
 
   public resetScene() {
+    // A direct reset supersedes any in-flight graceful exit — never tear down twice.
+    this.cancelPendingExit();
+    // Read before currentSceneId is cleared below. enterRoom calls resetScene on every step
+    // of map movement, so ambience started outside a scene must survive an unscened reset.
+    const hadScene = !!this.currentSceneId.value;
     this.talkingCharacterId.value = null;
     this.currentSceneId.value = null;
     this.currentSceneIdAnimated.value = null;
@@ -702,22 +1167,101 @@ export class DungeonSystem {
     this.activeDungeonId.value = null;
     this.activeRoomId.value = null;
     this.eventChoices.value = null;
-    this.sceneSlots.value = [];
+    // Keep actors that are mid-exit: their identity-based removal timers splice them
+    // out when the exit animation finishes (the actor layer stays mounted for them).
+    this.sceneSlots.value = this.sceneSlots.value.filter(s => s.isRemoving);
     this.assets.value = [];
-    // reset dungeon music
-    this.game.setMusic(false);
+
+    // A scene's sounds die with it. Outside a scene — ordinary room movement, which runs this
+    // reset on every step — only the one-shots are cut; looping ambience from room/dungeon
+    // enter actions keeps playing.
+    this.game.coreSystem.stopSounds(undefined, { keepLooping: !hadScene });
 
     if (this.game.coreSystem.getState('game_state') === "exploration") {
+      // reset dungeon music — guarded so a custom game_state (e.g. a battle screen
+      // playing cutaway scenes) keeps its own music when those scenes exit
+      this.game.setMusic(false);
       this.game.coreSystem.setState('overlay_state', 'overlay-navigation');
     }
 
     this.game.coreSystem.setState('block_party_inventory', false);
 
-
+    // The item_view card lives only for the event that showed it.
+    this.game.coreSystem.setState('viewed_item', null);
 
     this.isRootScene.value = true;
     //console.warn("setting isRootScene to true", this.isRootScene.value);
     this.game.trigger('event_end');
+  }
+
+  /**
+   * Instantly remove every staged actor — no exit animations, pending removal
+   * timers canceled. Used by systems that need a clean stage (e.g. battle cutaway
+   * scenes) before staging their own actors.
+   * @param keepExiting - Leave actors that are mid-exit alone (timers intact): they
+   * finish their exit animations on their own, and a following scene that re-stages
+   * the same character revives them in place, killing the exit early.
+   */
+  public clearActors(keepExiting: boolean = false): void {
+    if (keepExiting) {
+      this.sceneSlots.value = this.sceneSlots.value.filter(s => s.isRemoving);
+      return;
+    }
+    for (const slot of this.sceneSlots.value) {
+      this.cancelScheduledRemoval(slot);
+    }
+    this.sceneSlots.value = [];
+  }
+
+  /**
+   * Snapshot the live scene machinery so an interrupting scene (e.g. a mid-battle
+   * cutaway) can play and the interrupted scene be put back afterward. Transient
+   * animation bookkeeping (pending slot/asset removals) is stripped from the copy.
+   */
+  public captureSceneContext(): SceneContext {
+    return {
+      sceneId: this.currentSceneId.value,
+      activeDungeonId: this.activeDungeonId.value,
+      activeRoomId: this.activeRoomId.value,
+      cachedText: this.cachedText.value,
+      cachedFlashArray: [...this.cachedFlashArray.value],
+      delayedActions: { ...this.delayedActionObject },
+      reloadActions: { ...this.reloadActionObject },
+      eventChoices: this.eventChoices.value,
+      isChoices: this.isChoices,
+      sceneSlots: this.sceneSlots.value.map(({ isRemoving, removalTimeoutId, ...slot }) => ({ ...slot })),
+      assets: this.assets.value.map(({ isRemoving, ...asset }) => ({ ...asset })),
+      talkingCharacterId: this.talkingCharacterId.value,
+    };
+  }
+
+  /**
+   * Restore a captured scene context WITHOUT replaying the paragraph — no actions
+   * re-run, no enter animations. Safe to call synchronously from an `event_end`
+   * listener: currentSceneId is set back before `exitScene` reaches `triggerEvent`,
+   * so no room event can fire in the gap.
+   */
+  public restoreSceneContext(ctx: SceneContext): void {
+    // pending removal timers on the outgoing slots would fire against the restored
+    // array — cancel them before swapping
+    for (const slot of this.sceneSlots.value) {
+      this.cancelScheduledRemoval(slot);
+    }
+    this.currentSceneId.value = ctx.sceneId;
+    // matching animated id suppresses the scene-enter animation replay
+    this.currentSceneIdAnimated.value = ctx.sceneId;
+    this.activeDungeonId.value = ctx.activeDungeonId;
+    this.activeRoomId.value = ctx.activeRoomId;
+    this.cachedText.value = ctx.cachedText;
+    this.cachedFlashArray.value = [...ctx.cachedFlashArray];
+    this.delayedActionObject = { ...ctx.delayedActions };
+    this.reloadActionObject = { ...ctx.reloadActions };
+    this.eventChoices.value = ctx.eventChoices;
+    this.isChoices = ctx.isChoices;
+    this.sceneSlots.value = ctx.sceneSlots.map(s => ({ ...s }));
+    this.assets.value = ctx.assets.map(a => ({ ...a }));
+    this.talkingCharacterId.value = ctx.talkingCharacterId;
+    this.isRootScene.value = !ctx.sceneId;
   }
 
   // Scene Slot Helper Methods
@@ -755,10 +1299,10 @@ export class DungeonSystem {
       delete slot.isRemoving;
 
       // Cancel the scheduled removal timeout
-      // if (slot.removalTimeoutId !== undefined) {
-      //    clearTimeout(slot.removalTimeoutId);
-      //    delete slot.removalTimeoutId;
-      //  }
+      if (slot.removalTimeoutId !== undefined) {
+        clearTimeout(slot.removalTimeoutId);
+        delete slot.removalTimeoutId;
+      }
     }
   }
 
@@ -800,6 +1344,12 @@ export class DungeonSystem {
     if (propsString) {
       const props = this.parseInlineProperties(propsString);
       slotData = { ...slotData, ...props };
+    }
+
+    // A missing template with no inline position falls back to center defaults —
+    // almost always a typo'd slot id rather than an intentional ad-hoc placement.
+    if (!template && slotData.x === undefined && slotData.y === undefined) {
+      gameLogger.error(`[actor] Slot "${slotId}" does not exist (no matching slot template) — placing "${charId}" at default center. Check the slot id.`);
     }
 
     // Ensure required fields have defaults
@@ -885,18 +1435,20 @@ export class DungeonSystem {
     let slotData: any = {};
 
     // Load template if id is provided
-    if (data.id) {
-      const template = this.characterSlotTemplates.get(data.id);
-      if (template) {
-        slotData = { ...template };
-      }
+    const template = data.id ? this.characterSlotTemplates.get(data.id) : undefined;
+    if (template) {
+      slotData = { ...template };
     }
 
     // Overwrite with provided data (except char which is handled separately)
     const { char, ...restData } = data;
     slotData = { ...slotData, ...restData };
 
-
+    // A referenced slot id with no matching template and no explicit position
+    // falls back to center defaults — flag it as a likely typo'd slot id.
+    if (data.id && !template && slotData.x === undefined && slotData.y === undefined) {
+      gameLogger.error(`[actor] Slot "${data.id}" does not exist (no matching slot template). Check the slot id.`);
+    }
 
     // Ensure required fields have defaults
     return {
@@ -950,8 +1502,23 @@ export class DungeonSystem {
     const existingSlot = this.findSlotByChar(slot.char);
     this.resolveInheritedAnimations(slot as any, existingSlot);
     if (existingSlot) {
+      const wasRemoving = !!existingSlot.isRemoving;
       // If character is being removed, cancel the removal
       this.cancelScheduledRemoval(existingSlot);
+
+      if (wasRemoving) {
+        // Revive in place: the character was mid-exit and reappears in the next scene —
+        // kill the exit early instead of finishing it and re-entering from scratch.
+        // Mutating THIS slot preserves object identity, so CharacterSlot's isRemoving
+        // true->false watch restores visibility; enter props are stripped so the
+        // revival doesn't replay an enter animation (same treatment as moveActorToSlot).
+        const { enter, enter_duration, enter_delay, enter_ease, ...updates } = slot;
+        Object.assign(existingSlot, updates);
+        gameLogger.info(`[actor] Revived "${slot.char}" mid-exit (exit canceled)`);
+        this.game.coreSystem.addCharacterToGallery(character);
+        this.revealActorsFromHideAssets();
+        return true;
+      }
 
       // Remove the old slot from the array
       this.sceneSlots.value = this.sceneSlots.value.filter(s => s.char !== slot.char);
@@ -964,6 +1531,7 @@ export class DungeonSystem {
     // Add to discovered characters for the gallery system
     this.game.coreSystem.addCharacterToGallery(character);
     gameLogger.info(`[actor] Added "${slot.char}" to scene`);
+    this.revealActorsFromHideAssets();
     return true;
   }
 
@@ -975,6 +1543,16 @@ export class DungeonSystem {
     if (!slot) {
       gameLogger.warn(`[actor] Character "${charId}" not found in scene for removal`);
       return false;
+    }
+
+    // Nothing to animate when the actor layer can't be seen (a hide_actors CG covers it,
+    // or the event layer is hidden) — drop the slot right away instead of holding it
+    // on stage for the exit duration.
+    if (this.areActorsHidden()) {
+      this.cancelScheduledRemoval(slot);
+      this.sceneSlots.value = this.sceneSlots.value.filter(s => s !== slot);
+      gameLogger.info(`[actor] Removed "${charId}" from scene (hidden — no exit animation)`);
+      return true;
     }
 
     // Apply custom exit properties if specified
@@ -990,10 +1568,13 @@ export class DungeonSystem {
     const exitType = slot.exit;
     const delay = (exitType && exitType !== 'none') ? exitDuration * 1000 : 0;
 
-    // Store timeout ID so it can be cancelled if character re-enters
-    setTimeout(() => {
+    // Store timeout ID so it can be cancelled if character re-enters.
+    // Remove by object IDENTITY, never by char id: if this slot was wiped or replaced
+    // meanwhile (scene reset, the char re-staged by a following scene), the stale timer
+    // must not delete the newer slot for the same character.
+    slot.removalTimeoutId = setTimeout(() => {
       if (slot.isRemoving) {
-        this.sceneSlots.value = this.sceneSlots.value.filter(s => s.char !== charId);
+        this.sceneSlots.value = this.sceneSlots.value.filter(s => s !== slot);
       }
     }, delay) as unknown as number;
 
@@ -1018,6 +1599,7 @@ export class DungeonSystem {
     this.resolveInheritedAnimations(updates, existingSlot);
     Object.assign(existingSlot, updates);
     gameLogger.info(`[actor] Updated properties for "${charId}":`, updates);
+    this.revealActorsFromHideAssets();
     return true;
   }
 
@@ -1053,25 +1635,103 @@ export class DungeonSystem {
     Object.assign(existingSlot, updates, { id: newSlotId });
 
     gameLogger.info(`[actor] Moved "${charId}" to slot "${newSlotId}"`);
+    this.revealActorsFromHideAssets();
     return true;
   }
 
+  /**
+   * True when the actor layer isn't visible: a `hide_actors` asset covers it, or the event
+   * layer is hidden entirely (e.g. a battle screen owns the view). Assets that are fading
+   * out don't count — the actors are already showing again behind them.
+   */
+  public areActorsHidden(): boolean {
+    if (this.game.coreSystem.getState('hide_events')) return true;
+    return this.assets.value.some(a => a.hide_actors && !a.isRemoving);
+  }
 
-  public exitScene(skipEvents: boolean = false) {
+  /**
+   * Reveal the actor layer: drop any staged asset flagged `hide_actors` so the actors show again.
+   * Called whenever an actor is staged/moved/updated — the implicit "show the characters" intent.
+   * Uses removeAssets, so each asset honors its own exit animation (fade) or cuts if it has none.
+   */
+  private revealActorsFromHideAssets(): void {
+    for (const a of this.assets.value) {
+      if (a.hide_actors && !a.isRemoving) this.removeAssets(a.id);
+    }
+  }
 
-    // if (!this.currentSceneId.value) return;
 
-
+  public exitScene(skipEvents: boolean = false, instant: boolean = false) {
     if (this.game.getState('replay_mode')) {
       this.game.setState('progression_state', 'gallery');
       this.game.setState('gallery_tab', 'scenes');
       return;
     }
 
+    // Cancellable: a listener can veto the exit entirely.
+    if (!this.game.trigger('scene_exit_before', skipEvents)) {
+      return;
+    }
+
+    if (this.isSceneClosing.value) {
+      if (!instant) {
+        return; // an exit is already closing — swallow repeat clicks
+      }
+      this.cancelPendingExit(); // instant caller (e.g. battle teardown) takes over
+    }
+
+    // Finish right away when there's no visible dialogue to close, or in exploration —
+    // map dialogue <-> scene dialogue switches must be instant; the graceful close is
+    // for custom game states (battle cutaways) where the layer disappears entirely.
+    // Actors still leave with their exit animations: they start now, survive
+    // resetScene's wipe (isRemoving slots are kept), and their timers clean them up.
+    if (instant || !this.currentSceneId.value || this.game.getState('game_state') === 'exploration') {
+      if (!instant) {
+        for (const slot of [...this.sceneSlots.value]) {
+          if (!slot.isRemoving && slot.char) this.removeActorFromScene(slot.char);
+        }
+      }
+      this.finishExitScene(skipEvents);
+      return;
+    }
+
+    // Graceful close: the dialogue fades out (.overlay-closing) while actors leave
+    // with their slot exit animations; the actual teardown runs after the window.
+    this.isSceneClosing.value = true;
+    for (const slot of [...this.sceneSlots.value]) {
+      if (!slot.isRemoving && slot.char) this.removeActorFromScene(slot.char);
+    }
+    this.sceneCloseTimeout = setTimeout(() => {
+      this.sceneCloseTimeout = null;
+      this.isSceneClosing.value = false;
+      this.finishExitScene(skipEvents);
+    }, DungeonSystem.SCENE_CLOSE_MS) as unknown as number;
+  }
+
+  /** Abort a pending graceful scene exit (a new scene or a direct reset superseded it). */
+  private cancelPendingExit(): void {
+    if (this.sceneCloseTimeout !== null) {
+      clearTimeout(this.sceneCloseTimeout);
+      this.sceneCloseTimeout = null;
+    }
+    this.isSceneClosing.value = false;
+  }
+
+  private finishExitScene(skipEvents: boolean): void {
+    gameLogger.info('[exit] Exited scene');
 
     this.resetScene();
+
+    // The scroll may have drifted while the scene was up (hide_map rebuilding the
+    // container, mid-scene teleports) — bring the camera back to the selected
+    // encounter, or the room when nothing is selected.
+    this.centerToActive(true);
     // restore encounter content and redo actions
     // TODO: maybe don't run actions again???
+
+    // A scene is where stats move — a level-up, an item, a buff — so leaving one is the
+    // other moment a hidden encounter can become findable without the player going anywhere.
+    this.scanDiscoverableEncounters();
 
     if (!skipEvents) {
       this.triggerEvent();
@@ -1151,90 +1811,118 @@ export class DungeonSystem {
         return choices!;
       }
 
-      // Look for the next paragraph next
-      let searchId = this.compileSceneId(scene_name, scene_row, scene_block, nextParagraphId);
+      // `>` inline choices are PARAGRAPH-scoped — they hang off the paragraph
+      // directly above them and may sit anywhere in a block. `~` branch choices
+      // are BLOCK-END-scoped — they are the named columns of the *next* row and
+      // may only be offered once this block is exhausted. Hence two separate
+      // lookups: hoisting `~` up here would offer next-row branches while the
+      // reader still has paragraphs left to read in this block.
+      let inlineChoiceLines = this.findLines(
+        lines,
+        new RegExp("^>" + escapeRegExp(`${scene_name}.${scene_row}.${scene_block}.${scene_paragraph}`) + "\\*"),
+      );
 
-      let nextSceneLine = lines.get(searchId);
-      if (nextSceneLine) {
-        choices = this.game.logicSystem.createCustomChoice({
-          id: nextSceneLine.id,
-          name: '',
-          params: { scene: nextSceneLine.id }
+      let nextParagraphLine = lines.get(
+        this.compileSceneId(scene_name, scene_row, scene_block, nextParagraphId),
+      );
+
+      // Inline choices replace the plain "click to continue".
+      if (inlineChoiceLines.length) {
+        choices = inlineChoiceLines.map(line => {
+          // Params verbatim — no auto-advance. A `>` choice that should move the
+          // story writes it explicitly ({scene: "next"}, {enter: ...}, {exit: true});
+          // one that doesn't fires its actions and stays on the paragraph.
+          // Copy: line.params is the shared parsed object and choices may modify theirs.
+          let params: Record<string, any> = line.params ? JSON.parse(JSON.stringify(line.params)) : {};
+          return this.game.logicSystem.createCustomChoice({ id: line.id, name: line.val, params });
         });
+
+        // At a block boundary the two kinds share one menu, as they did in DQ9.
+        if (!nextParagraphLine) {
+          choices.push(...this.createBranchChoices(lines, scene_name, nextRow));
+        }
         return choices;
       }
-      // }
 
-
-
-      // look for the choices
-      let pattern1 = "^>" + scene_name + "." + scene_row + "." + scene_block + "." + scene_paragraph;
-      let pattern2 = "^~" + scene_name + "." + nextRow + ".";
-      let re1 = new RegExp(pattern1);
-      let re2 = new RegExp(pattern2);
-      //console.warn(re2);
-
-
-      choices = [];
-      if (lines) {
-        for (let [id, line] of lines) {
-          let firstChar = id.charAt(0);
-          if (re1.test(id) || re2.test(id)) {
-            //console.warn(id);
-
-            let params: Record<string, any> = {};
-            if (line.params) {
-              params = JSON.parse(JSON.stringify(line.params));
-            }
-            if (firstChar == "~") {
-              let delayedActions = this.getDelayedActions(line.params);
-              if (!Object.keys(delayedActions).length) {
-                // set scene only if there's no event actions
-                params['scene'] = "#" + id.slice(1) + ".1"
-              }
-
-            }
-
-            let choice = this.game.logicSystem.createCustomChoice({
-              id: id,
-              name: line.val,
-              params: params
-            });
-            choices.push(choice);
-          }
-        }
-
-
-      } else {
-        throw new Error(`Dungeon lines not found for dungeon ${dungeonId}`);
-      }
-
-      if (choices.length == 0) {
-        // look for the next row if there's no choices
-        let searchId = this.compileSceneId(scene_name, nextRow, 1, 1);
-        let nextSceneLine = lines.get(searchId);
-
-        if (nextSceneLine) {
-          choices = this.game.logicSystem.createCustomChoice({
-            id: nextSceneLine.id,
-            name: '',
-            params: { scene: nextSceneLine.id }
-          });
-          return choices;
-        }
-
-        // finally if there's no next scene then exit event
-        choices = this.game.logicSystem.createCustomChoice({
-          id: 'exit_event',
+      if (nextParagraphLine) {
+        return this.game.logicSystem.createCustomChoice({
+          id: nextParagraphLine.id,
           name: '',
-          params: { exit: true }
+          params: { scene: nextParagraphLine.id }
         });
-        return choices;
-
       }
 
+      // Block exhausted — offer the next row's branches.
+      choices = this.createBranchChoices(lines, scene_name, nextRow);
+      if (choices.length) {
+        return choices;
+      }
+
+      // Nothing branches: fall through to the next row, or leave the scene.
+      let fallthrough = this.getFallthroughParams(lines, scene_name, scene_row, scene_block, scene_paragraph);
+      return this.game.logicSystem.createCustomChoice({
+        id: fallthrough.scene ?? 'exit_event',
+        name: '',
+        params: fallthrough
+      });
     }
     return choices;
+  }
+
+  private findLines(lines: Map<string, DungeonLine>, re: RegExp): DungeonLine[] {
+    let found: DungeonLine[] = [];
+    for (let [id, line] of lines) {
+      if (re.test(id)) {
+        found.push(line);
+      }
+    }
+    return found;
+  }
+
+  /**
+   * The `~` named columns of `row` — each one a branch the reader can step into.
+   * A branch with no navigation action of its own jumps to its own first paragraph.
+   */
+  private createBranchChoices(lines: Map<string, DungeonLine>, scene_name: string, row: number): Choice[] {
+    let re = new RegExp("^~" + escapeRegExp(`${scene_name}.${row}.`) + "\\d+$");
+    return this.findLines(lines, re).map(line => {
+      let params: Record<string, any> = line.params ? JSON.parse(JSON.stringify(line.params)) : {};
+      const branchBlockId = "#" + line.id.slice(1) + ".1";
+      const isDelayed = !!Object.keys(this.getDelayedActions(line.params)).length;
+      if (!isDelayed) {
+        params['scene'] = branchBlockId;
+      }
+      const choice = this.game.logicSystem.createCustomChoice({ id: line.id, name: line.val, params });
+      if (isDelayed) {
+        // A delayed branch (e.g. {battle}) jumps nowhere now — it runs its action and the
+        // story resumes later. Remember THIS branch as the resume point, otherwise
+        // nextScene falls through to the row's first branch (the one not taken).
+        choice.resumeSceneId = branchBlockId;
+      }
+      return choice;
+    });
+  }
+
+  /**
+   * Where the reader goes when nothing explicit says otherwise: the next paragraph
+   * of this block, else the first paragraph of the next row, else out of the scene.
+   */
+  private getFallthroughParams(
+    lines: Map<string, DungeonLine>,
+    scene_name: string,
+    scene_row: number,
+    scene_block: number,
+    scene_paragraph: number,
+  ): Record<string, any> {
+    let nextParagraph = lines.get(this.compileSceneId(scene_name, scene_row, scene_block, scene_paragraph + 1));
+    if (nextParagraph) {
+      return { scene: nextParagraph.id };
+    }
+    let nextRowLine = lines.get(this.compileSceneId(scene_name, scene_row + 1, 1, 1));
+    if (nextRowLine) {
+      return { scene: nextRowLine.id };
+    }
+    return { exit: true };
   }
 
   // ignore types
@@ -1284,6 +1972,7 @@ export class DungeonSystem {
 
   // ignore types
   public selectEncounter(encounter: DungeonEncounter) {
+    if (!this.game.trigger('encounter_selected', encounter.id, this.currentDungeonId.value ?? '')) return;
     this.selectedEncounterId.value = encounter.id;
     this.centerToActiveEncounter(true);
   }
@@ -1317,6 +2006,119 @@ export class DungeonSystem {
     }
     // console.log("visible encounters", encounters);
     return encounters;
+  }
+
+  // ============================================
+  // HIDDEN ENCOUNTERS  (`@x{discover: "perception#6"}`)
+  // ============================================
+
+  /** Has this encounter already been revealed? Latched for good, and saved. */
+  public isEncounterDiscovered(encounterId: string, dungeonId: string): boolean {
+    return this.getDataByDungeonId(dungeonId)?.uncoveredInteractions.has(encounterId) ?? false;
+  }
+
+  /**
+   * Parse a discover spec — `"perception#6"` or `"perception#6, wits#5"` — and test it
+   * against the party. Each clause is met if ANY party member reaches it (the sharpest
+   * eyes in the group spot it); every clause must be met.
+   */
+  private partyMeetsDiscoverSpec(spec: string, encounterId: string): boolean {
+    const clauses = this.parseDiscoverSpec(spec, encounterId);
+    if (!clauses.length) {
+      return false;
+    }
+    const party = this.game.getParty();
+    return clauses.every(({ statId, threshold }) =>
+      // getStat throws on an unknown stat, so ask first.
+      party.some(character => character.hasStat(statId) && character.getStat(statId) >= threshold),
+    );
+  }
+
+  public parseDiscoverSpec(spec: string, encounterId: string = ""): Array<{ statId: string; threshold: number }> {
+    const clauses: Array<{ statId: string; threshold: number }> = [];
+    for (const part of String(spec).split(',').map(s => s.trim()).filter(Boolean)) {
+      const [statId, rawThreshold] = part.split('#').map(s => s.trim());
+      const threshold = Number(rawThreshold);
+      if (!statId || !rawThreshold || isNaN(threshold)) {
+        gameLogger.error(`[discover] invalid clause "${part}"${encounterId ? ` on encounter "${encounterId}"` : ''} — use "<stat>#<number>", e.g. "perception#6"`);
+        continue;
+      }
+      clauses.push({ statId, threshold });
+    }
+    return clauses;
+  }
+
+  // ============================================
+  // COLLECTABLES  (encounters with collect_item)
+  // ============================================
+
+  /** Has this collectable been taken (and not yet regrown)? */
+  public isEncounterCollected(encounterId: string, dungeonId: string | null = null): boolean {
+    return this.getDataByDungeonId(dungeonId)?.collectedEncounters.has(encounterId) ?? false;
+  }
+
+  /** Latch a collectable as taken, stamping its regrow countdown (-1 = never regrows). */
+  public markEncounterCollected(encounter: DungeonEncounter, dungeonId: string | null = null): void {
+    const countdown = encounter.regrowTurns && encounter.regrowTurns > 0 ? encounter.regrowTurns : -1;
+    this.getDataByDungeonId(dungeonId)?.collectedEncounters.set(encounter.id, countdown);
+  }
+
+  /** Clear a collectable's collected latch — it becomes visible and collectable again. */
+  public uncollectEncounter(encounterId: string, dungeonId: string | null = null): void {
+    this.getDataByDungeonId(dungeonId)?.collectedEncounters.delete(encounterId);
+  }
+
+  /**
+   * Advance every collected collectable's regrow countdown by `turns`, across all
+   * dungeons. Countdowns reaching 0 are cleared — the node regrows. -1 entries (no
+   * regrow) are untouched. Called by time-system plugins (turn_system does, one
+   * line on `turn_advanced`); the engine never calls this on its own.
+   */
+  public tickCollectables(turns: number): void {
+    if (!Number.isFinite(turns) || turns <= 0) {
+      return;
+    }
+    for (const data of this.dungeonDatas.value.values()) {
+      for (const [encounterId, remaining] of data.collectedEncounters) {
+        if (remaining <= 0) continue;
+        const next = remaining - turns;
+        if (next <= 0) {
+          data.collectedEncounters.delete(encounterId);
+        } else {
+          data.collectedEncounters.set(encounterId, next);
+        }
+      }
+    }
+  }
+
+  /**
+   * Reveal every hidden encounter in the current room whose threshold the party now
+   * meets. Runs on room entry and on scene exit — a scene is where stats actually move
+   * (level-up, an item, a buff), so coming back out of one is the other moment a hidden
+   * encounter can become findable without the player going anywhere.
+   */
+  public scanDiscoverableEncounters(): void {
+    const dungeon = this.currentDungeon.value;
+    const room = this.currentRoom.value;
+    if (!dungeon || !room) {
+      return;
+    }
+    const dungeonId = dungeon.id;
+    const data = this.getDataByDungeonId(dungeonId);
+    if (!data) {
+      return;
+    }
+
+    for (const encounter of dungeon.encounters.values()) {
+      if (!encounter.discoverSpec) continue;
+      if (data.uncoveredInteractions.has(encounter.id)) continue;
+      if (!encounter.isHere(room)) continue;
+      if (!this.partyMeetsDiscoverSpec(encounter.discoverSpec, encounter.id)) continue;
+
+      data.uncoveredInteractions.add(encounter.id);
+      gameLogger.info(`[discover] "${encounter.id}" revealed (${encounter.discoverSpec})`);
+      this.game.trigger('encounter_discovered', encounter.id, dungeonId);
+    }
   }
 
   /**
@@ -1493,6 +2295,7 @@ export class DungeonSystem {
     }
 
     // Process each flag operation
+    const applied: string[] = [];
     for (const { key: varName, operator, value: varValue } of operations) {
       let parts = varName.split(".");
       let name: string;
@@ -1517,6 +2320,10 @@ export class DungeonSystem {
       } else if (operator === '<') {
         dungeonData.addFlag(name, -value);
       }
+      applied.push(`${varName}${operator}${varValue}`);
+    }
+    if (applied.length > 0) {
+      gameLogger.info(`[flag] ${applied.join(', ')}`);
     }
   }
 
@@ -1552,7 +2359,14 @@ export class DungeonSystem {
   public dungeonEncounters: Map<string, Map<string, DungeonEncounterObject>> = new Map();
 
   public setMapZoomFactor(factor: number) {
-    this.game.coreSystem.setState('map_zoom_factor', Math.max(0.3, Math.min(factor, 2.0)));
+    const clamped = Math.max(0.3, Math.min(factor, 2.0));
+    if (clamped === this.game.coreSystem.getState<number>('map_zoom_factor')) {
+      return;
+    }
+    this.game.coreSystem.setState('map_zoom_factor', clamped);
+    // The content rescales via --map-zoom-factor on the next render; recenter after
+    // that so zooming keeps the room / selected encounter under the viewport center.
+    nextTick(() => this.centerToActive());
   }
 
   // Holds the current dungeon
@@ -1573,6 +2387,36 @@ export class DungeonSystem {
     }
   }
 
+  /**
+   * Fetch and decode the current dungeon's art (background, fog mask, encounter images) before
+   * the map is shown, so it draws in one piece instead of popping in image by image. The map
+   * hides itself and the toolbar shows a spinner while this runs. Text dungeons have no art to
+   * wait for, and a dungeon is only ever warmed once.
+   */
+  private async preloadDungeonAssets(): Promise<void> {
+    const dungeon = this.currentDungeon.value;
+    if (!dungeon || dungeon.dungeon_type === 'text' || this.preloadedDungeons.has(dungeon.id)) {
+      this.dungeonAssetsLoaded.value = true;
+      return;
+    }
+
+    this.dungeonAssetsLoaded.value = false;
+
+    const images: (string | undefined)[] = [dungeon.image, dungeon.fog_image];
+    for (const encounter of dungeon.encounters.values()) {
+      images.push(encounter.image);
+    }
+
+    await warmImages(images);
+
+    this.preloadedDungeons.add(dungeon.id);
+    // The player may have travelled on while the art was loading.
+    if (this.currentDungeonId.value !== dungeon.id) return;
+
+    this.dungeonAssetsLoaded.value = true;
+    this.centerToActiveLocation(true);
+  }
+
   // ignore types
   public enterDungeon(dungeonId: string, roomId: string) {
     //this.setGameState('Exploration');
@@ -1587,14 +2431,17 @@ export class DungeonSystem {
     // Directly load the dungeon. The watchEffect will see currentDungeon match activeDungeonId.
     this._loadAndSetDungeonActual(dungeonId);
 
+    // Play the dungeon's default music on enter, independent of the resetScene
+    // game_state guard (which only governs scene exits). Must run BEFORE enterRoom:
+    // enterRoom may play a first scene whose {music: X} action should win over this.
+    this.game.setMusic(this.currentDungeon.value?.music || false);
+
     this.enterRoom(roomId);
 
+    // Fire-and-forget: entering stays synchronous, the map just stays hidden until the art lands.
+    this.preloadDungeonAssets();
 
     gameLogger.info(`Dungeon ${dungeonId} loaded and set.`);
-
-
-    // play dungeon music
-    this.game.setMusic(this.currentDungeon.value?.music || false);
 
     // after entering dungeon
     if (this.currentDungeon.value?.actions?.dungeon_enter) {
@@ -1633,6 +2480,9 @@ export class DungeonSystem {
       this.centerToActiveLocation(true);
     }, 0);
     this.selectedEncounterId.value = null;
+
+    // Before room_enter_after, so a listener already sees anything this reveals.
+    this.scanDiscoverableEncounters();
 
     if (room.actions?.room_enter_after) {
       this.game.logicSystem.resolveActions(room.actions.room_enter_after);
@@ -1796,6 +2646,15 @@ export class DungeonSystem {
     //console.warn(this.getCurrentLocation().y);
   }
 
+  /** Center on the selected encounter when one is still visible, else on the current room. */
+  public centerToActive(smooth = false) {
+    if (this.selectedEncounter.value?.getVisibilityState()) {
+      this.centerToActiveEncounter(smooth);
+    } else {
+      this.centerToActiveLocation(smooth);
+    }
+  }
+
   // ignore types
   public centerToActiveEncounter(smooth = false) {
 
@@ -1835,18 +2694,39 @@ export class DungeonSystem {
     });
   }
 
-  public nextScene() {
+  /**
+   * Advance to the next scene. `instant` only matters when there IS no next scene: the fallback
+   * exit closes immediately instead of playing the graceful actor fade-out. Callers that are
+   * already swapping the whole screen (battle teardown) pass true — otherwise a restored cast the
+   * player never saw would linger for SCENE_CLOSE_MS and read as actors flashing in.
+   */
+  public nextScene(instant: boolean = false) {
     let sceneId = this.currentSceneId.value;
     this.game.coreSystem.setState('overlay_state', 'overlay-navigation');
 
     if (!sceneId) {
-      this.exitScene();
+      this.exitScene(false, instant);
       return;
     }
 
     let dungeonId = this.activeDungeonId.value || this.currentDungeonId.value;
     if (!dungeonId) {
       gameLogger.warn("No active dungeon ID, cannot navigate to next scene");
+      return;
+    }
+
+    // A delayed branch choice ({battle} etc.) resumes into the branch the player took,
+    // not the row's first one. Only for the scene it was clicked from — so a mid-battle
+    // cutaway's exit, or a battle that was lost, can never consume it.
+    const resume = this.pendingResume;
+    this.pendingResume = null;
+    if (resume && resume.fromSceneId === sceneId) {
+      if (this.dungeonLines.get(dungeonId)?.has(resume.target)) {
+        this.playScene(resume.target, dungeonId);
+      } else {
+        // The branch has no content of its own — the scene is over.
+        this.exitScene(false, instant);
+      }
       return;
     }
 
@@ -1857,7 +2737,7 @@ export class DungeonSystem {
       this.playScene(nextSceneId, dungeonId);
     } else {
       // No next scene found, exit the scene
-      this.exitScene();
+      this.exitScene(false, instant);
     }
   }
 
@@ -2112,6 +2992,7 @@ export class DungeonSystem {
 
     // Add log (we know it doesn't exist because we checked above)
     goal.logs.push(logId);
+    gameLogger.info(`[quest] Added quest log: ${dungeonId}.${questId}.${goalId}.${logId}`);
 
     // Update goal completion status
     goal.isCompleted = this.isGoalCompleted(quest, goalId);
@@ -2230,6 +3111,11 @@ export class DungeonSystem {
     }
 
     this.resetScene();
+    // A replayed scene starts from daylight — the grade belongs to wherever the player actually is,
+    // not to a gallery replay. Cleared unconditionally so replaying a second scene from inside
+    // replay mode doesn't inherit a grade the first one set. Instant: this is a hard context switch.
+    // Leaving replay reloads the save taken just above, which restores whatever grade was live then.
+    this.setGrade(false, true);
     this.playScene(sceneId, dungeonId);
   }
 

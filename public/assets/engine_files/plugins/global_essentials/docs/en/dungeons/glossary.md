@@ -10,9 +10,18 @@ At a high level, you use special markers to tell the engine what each piece of t
 - `^room_id` – start content for a **room**.
 - `@description` – the **description encounter** for that room.
 - `@some_encounter` – a specific **encounter** in that room.
-- `!` and `~` – **choices** and branching logic.
 - `#` – **events** that can be triggered manually or automatically when conditions are met.
 - `character_id:` – prefix dialogue with a character ID to set the **speaker**.
+
+There are three kinds of **choice**, and they differ in where they attach:
+
+| Marker | Name | Attaches to |
+|---|---|---|
+| `!` | **Choice** | an encounter – the buttons shown when you look at it |
+| `~` | **Branch choice** | the *next row* of a scene – picking one steps into that branch's prose |
+| `>` | **Inline choice** | the paragraph directly above it |
+
+All three take the same params: `if` / `ifOr` to hide a choice, `active` / `activeOr` to grey it out, `clue` to highlight it until the player takes it, and any action. Mark a choice `{clue: true}` and it stands out as an unfollowed hint – and in map dungeons the encounter holding it glows too, until you've picked it. See ->builtins.actions.
 
 The engine parses this text into structured data and uses it to drive:
 
@@ -22,6 +31,20 @@ The engine parses this text into structured data and uses it to drive:
 - When events fire and how they change the game state.
 
 You can build surprisingly rich dungeons just by writing text and using these markers.
+
+---
+
+### Comments: Notes the Engine Ignores
+
+A line starting with `//` is a comment. It must begin at the very start of the line, and it comments out the whole line – the engine drops it before parsing, so you can park an action or a reminder without it running.
+
+```
+// TODO: add the footsteps sound here
+// {sound: "footsteps"}
+riko: This line is shown to the player.
+```
+
+A `//` anywhere else on the line is ordinary text – `riko: Meet me at 10 // sharp` prints the `// sharp` to the player. Keep `//` flush against the left edge, since indenting it turns the line back into prose.
 
 ---
 
@@ -109,6 +132,109 @@ riko: Want to try something different?
 
 ---
 
+### Inline Choices: Buttons On a Paragraph
+
+An **inline choice** is a line starting with `>`. It hangs off the paragraph directly above it, and replaces the normal "click to continue":
+
+```text
+#troglodyte
+1
+%
+The troglodytes are guarding their territory, nothing more. They won't give chase.
+Or you could give them a fight and be done with it.
+>Fight{scene: "&fight_troglodyte"}
+>Run{enter: "10b"}
+```
+
+The text after `>` is the button label. It supports the same `|placeholders|` and `**bold**` / `*italic*` styling as body prose. Everything in `{…}` is the same params object a `~` branch choice takes – any registered action, plus `if` / `ifOr` / `active` / `activeOr`.
+
+**They can sit anywhere in a block, not just at the end.** A choice on a middle paragraph interrupts the read; the rest of the block continues after it:
+
+```text
+%
+The apple hangs low enough to reach.
+>Take it{add_item: "apple", scene: "next"}
+>Leave it be{scene: "next"}
+
+The path winds on past the orchard.
+```
+
+**Navigation is always explicit.** A choice carrying no flow action (`scene`, `enter`, `exit`, …) fires its actions and **stays on the paragraph** – the menu is still there, and the choice can be picked again. To move on, say so: `{scene: "next"}` advances to the next paragraph (or the next row at a block's end). Put it after the other actions, so they land before the story moves. Staying put is useful too – a choice that opens a popup or tweaks state without ending the moment.
+
+**At a block boundary they share the menu with `~` branches.** If an inline choice sits on the *last* paragraph of a block and the next row has `~` branches, the player sees both in one list.
+
+`if` hides a choice; `active` greys it out but leaves it visible:
+
+```text
+>Pick the lock{active: "_item_on(riko, lockpick) = true", scene: "&lock_opened"}
+>Smash the door{if: "_char(riko.stat.strength) > 5", scene: "&door_smashed"}
+```
+
+Inline choices only work inside scenes (`#`). Encounters use `!` instead.
+
+---
+
+### Hidden Encounters: `discover`
+
+Give an `@` encounter a `discover` threshold and it stays invisible until somebody in the party is sharp enough to spot it:
+
+```text
+@bats{discover: "perception#6", if: "_defeated(bats) = false"}
+!listen
+!attack{battle: "bats"}
+Something shifts in the dark above you.
+```
+
+The syntax is `statId#number` – "this stat, at least this high". It's checked against **every party member**, so the sharpest eyes in the group find it. Use a comma for several stats (`"perception#6, wits#4"`); each one has to be met by *someone*.
+
+**Discovery is permanent.** The first time the party clears the threshold, the engine writes the encounter into the save. Drop the stat afterwards – swap out the gear, bench the character, lose the buff – and the encounter stays found. That's the whole point: you can't un-notice a thing.
+
+**`if` keeps working alongside it.** `discover` decides whether you've *found* the encounter; `if` decides whether it's *there right now*, and it keeps evaluating. In the example the bats are revealed forever once you're perceptive enough, yet still vanish once you've killed them.
+
+The check runs when you **enter a room** and when you **leave a scene** – the two moments a stat can have changed. A buff gained while standing in a room won't reveal anything until you step out and back in. A script that moves a stat in place can force the check itself with `game.scanDiscoverableEncounters()`; the turn_system plugin already does this on every turn, so waiting a buff out (or into existence) uncovers what it should.
+
+The engine renders a cue on the encounter when it was found this way:
+
+```text
+Perception[6] check success
+```
+
+Listen for the moment of discovery with the ->builtins.game_emitters `encounter_discovered` emitter.
+
+> Cues render in text dungeons. In map dungeons the encounter simply appears on the map.
+
+---
+
+### Collectables: Items You Pick Up From the Map
+
+A **collectable** is an encounter the player clicks to gain an item – a patch of herbs, a dropped coin, a mushroom ring. Author it entirely in the **Encounters tab**: set the encounter's type to `collectable`, pick the item, and place it. It needs **no entry in the content document** – the engine synthesizes a **Collect** choice and a description from the item's name and description.
+
+Fields on a `collectable` encounter:
+
+| Field | Meaning |
+|---|---|
+| `collect_item` | The item granted |
+| `collect_quantity` | How many one Collect grants (default 1) |
+| `regrow` | Turns until it comes back after collecting. Empty/0 = one-time |
+| `collect_clue` | Glow on the map until collected |
+
+Clicking **Collect** adds the item(s) to the party inventory (with the usual "added" flash) and the encounter fades out. One-time collectables stay gone – the engine remembers, no flags needed. With `regrow`, the node returns after that many map turns (**requires the turn_system plugin** or another time plugin that calls `game.tickCollectables`).
+
+**The content document is optional here.** Write an `@` line with the collectable's id to replace the auto-description with your own prose, or to gate it – `if:` and `discover:` compose with the collected state:
+
+```text
+@berry_bush{discover: "perception#6"}
+A tangle of dark leaves – and under them, heavy clusters of fruit.
+```
+
+You can also write your own choice with a custom label instead of the synthesized Collect – give any `!` choice a `{collect: "item_id#qty"}` param.
+
+Running **Synchronize Content Document** never flags a collectable as redundant – unlike regular encounters, they legitimately live outside the content document.
+
+Listen for pickups with the ->builtins.game_emitters `encounter_collected` emitter. Scripts can also call `game.uncollectEncounter(id)` / `game.isEncounterCollected(id)`.
+
+---
+
 ### Placeholders: Live Values Inside Text
 
 **Placeholders** let you inject dynamic values into text, using the syntax:
@@ -146,6 +272,27 @@ Placeholders are great for:
 
 - Referring to **flag values** in narration (for example, “You have |flag(coins)| coins left.”).  
 - Showing character names, item names, and other data that can change during play.
+
+---
+
+### Text Styling: Emphasis and State Markers
+
+Prose supports standard markdown emphasis plus two **state markers** for things that change during play:
+
+| Syntax | Renders as | Use for |
+|--------|-----------|---------|
+| `*text*` | italic | emphasis |
+| `**text**` | bold | strong emphasis |
+| `+text+` | `<span class="initial">` – purple bold | how a thing looks **before** the world changes |
+| `++text++` | `<span class="altered">` – orange bold | how it looks **after** |
+
+```text
++The great machine sits silent, cold to the touch.+
+if{machine_on}++The great machine roars, pistons hammering.++fi
+```
+
+- Override the default colors by restyling `.initial` / `.altered` in your game CSS.
+- A stray `+` in prose stays literal: `Here's +43 health`, `gain +2 str and +4 agi`, and `C++` are never styled. The marked text must start with a letter and hug its `+` signs.
 
 ---
 

@@ -615,14 +615,22 @@ export class Inventory {
         // every stacking case (unlimited / capped / non-stackable) the same way it would
         // for any newly-added Item. Skip the merge when qty is 0 — that's the "consumed to
         // nothing" path (reduceItemQuantity) and addItem would push a phantom 0-qty clone.
+        //
+        // addItem CLONES in its non-merge paths and discards itemToUnequip, so the post-unequip
+        // hooks must receive the surviving instance — otherwise listener mutations land on a
+        // dead object while the item actually in the inventory keeps stale state.
         const qty = itemToUnequip.quantity;
         this.removeItem(itemToUnequip);
-        if (qty > 0) this.addItem(itemToUnequip, qty, true);
-
-        if (itemToUnequip.actions?.item_unequip_after) {
-            game.logicSystem.resolveActions(itemToUnequip.actions.item_unequip_after);
+        let survivor = itemToUnequip;
+        if (qty > 0) {
+            const created = this.addItem(itemToUnequip, qty, true);
+            if (created.length) survivor = created[0];
         }
-        game.trigger('item_unequip_after', itemToUnequip, character);
+
+        if (survivor.actions?.item_unequip_after) {
+            game.logicSystem.resolveActions(survivor.actions.item_unequip_after);
+        }
+        game.trigger('item_unequip_after', survivor, character);
         return true;
     }
 

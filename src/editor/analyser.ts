@@ -115,8 +115,10 @@ export class Analyser {
         if (this.config.dungeon_type !== 'text') {
             for (const encounterFromFile of this.dungeonEncountersAll) {
 
-                // Skip prop encounters - they don't need associated content
-                if (encounterFromFile.type === 'prop') {
+                // Skip props and collectables - they don't need associated content
+                // (a collectable's description falls back to its item's traits; an
+                // @ line for it is an optional override, never a requirement).
+                if (encounterFromFile.type === 'prop' || encounterFromFile.type === 'collectable') {
                     continue;
                 }
 

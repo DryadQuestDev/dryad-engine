@@ -4,7 +4,7 @@
   "description": "XP and leveling system. Characters with a 'level' trait gain XP and level up automatically.",
   "author": "Nekon",
   "version": "1.0.0",
-  "order": -1,
+  "order": 1,
   "scripts": [
     "main.mjs"
   ],
@@ -13,6 +13,77 @@
       "id": "config_experience",
       "name": "Experience Config",
       "schema": {
+        "mc_id": {
+          "type": "string",
+          "tooltip": "Character id of the MC. Their level is snapshotted as the dungeon level on first entry of each level group."
+        },
+        "auto_scaling": {
+          "type": "boolean",
+          "defaultValue": false,
+          "tooltip": "Enables dungeon-level scaling: level snapshots on dungeon entry, dungeon-bound inventory creation, equipment instance scaling, and level-scaled threat. Off = plain XP and leveling only."
+        },
+        "shared_level": {
+          "type": "boolean",
+          "defaultValue": false,
+          "tooltip": "Party-wide progression: a numeric xp action grants the whole party (off = the MC only), and a character joining the party is levelled up to the MC's level and XP, receiving every level-up bonus on the way (requires a level trait)."
+        },
+        "scale_per_level": {
+          "type": "number",
+          "defaultValue": 0.25,
+          "tooltip": "Reward scaling per dungeon level: effective threat = base threat × (1 + scale_per_level × (dungeon_level − 1)). Also scales equipment stats and ability enhancements."
+        },
+        "price_scale_per_level": {
+          "type": "number",
+          "tooltip": "Price growth per level for scaled equipment, independent of the power curve. Empty = twice scale_per_level (gear value climbs faster than its power, so old gear sells for less relative to replacements). Set equal to scale_per_level to weld value to power."
+        },
+        "loot_equipment_coef": {
+          "type": "number",
+          "defaultValue": 0,
+          "tooltip": "Equipment loot budget = BASE battle threat x this. Not level-scaled: created equipment instances scale their own stats/value to the dungeon level. 0 disables the group."
+        },
+        "loot_income_coef": {
+          "type": "number",
+          "defaultValue": 0,
+          "tooltip": "Income loot budget = EFFECTIVE battle threat (level-scaled) x this, spent on junk-category items; the remainder pays out as the currency item. 0 disables the group."
+        },
+        "loot_max_items": {
+          "type": "number",
+          "defaultValue": 3,
+          "tooltip": "Maximum items each loot group can roll per reward."
+        },
+        "loot_equipment_categories": {
+          "type": "chooseMany",
+          "fromFile": "item_categories",
+          "tooltip": "Item categories the equipment loot group rolls from (and that scale to the dungeon level on creation)."
+        },
+        "loot_income_categories": {
+          "type": "chooseMany",
+          "fromFile": "item_categories",
+          "tooltip": "Item categories the income loot group rolls from (e.g. sellable junk). Empty = the whole income budget pays out as the currency item."
+        },
+        "loot_currency_item": {
+          "type": "chooseOne",
+          "fromFile": "item_templates",
+          "fromFileTypeAnd": {
+            "is_currency": true
+          },
+          "tooltip": "Currency item paid out from the leftover income budget."
+        },
+        "reward_sound_open": {
+          "type": "chooseOne",
+          "fromFile": "sounds",
+          "tooltip": "Sound played when the reward panel appears. Empty = silent."
+        },
+        "reward_sound_level_up": {
+          "type": "chooseOne",
+          "fromFile": "sounds",
+          "tooltip": "Sound played on each level-up rollover of the reward panel's XP bar. Empty = silent."
+        },
+        "threat_xp_coef": {
+          "type": "number",
+          "defaultValue": 5,
+          "tooltip": "XP granted to the party per point of effective threat when a battle is defeated (fight or scripted win). 0 disables defeat XP."
+        },
         "xp_base": {
           "type": "number",
           "defaultValue": 100,
@@ -111,14 +182,26 @@
         "id": "level_up_status",
         "type": "chooseOne",
         "fromFile": "character_statuses",
-        "tooltip": "Status to apply on each level up. Stacks automatically — each level adds one stack. Use for stat growth per level.",
+        "tooltip": "Status to apply on each level up. Stacks automatically – each level adds one stack. Use for stat growth per level.",
         "uid": "xp_trait_level_up_status"
       }
     ],
     "locale": [
       {
         "id": "xp_level_up",
-        "val": "|name| has reached level |level|!"
+        "val": "<span class=\"special\">|name| has reached level |level|!</span>"
+      },
+      {
+        "id": "reward_title",
+        "val": "Rewards"
+      },
+      {
+        "id": "reward_xp",
+        "val": "+|amount| XP"
+      },
+      {
+        "id": "reward_continue",
+        "val": "Continue"
       },
       {
         "id": "xp_label_level",
@@ -130,7 +213,51 @@
       },
       {
         "id": "xp_flash",
-        "val": "|name| has earned |amount| XP"
+        "val": "<span class=\"special\">|name| has earned |amount| XP</span>"
+      }
+    ],
+    "dungeon_traits": [
+      {
+        "id": "level_group",
+        "type": "string",
+        "description": "Dungeons sharing this group share one level snapshot, taken on first entry of any of them. Convention: name it after the group's main dungeon id.",
+        "uid": "XPdtLevelGroup1"
+      }
+    ],
+    "item_traits": [
+      {
+        "id": "spawn_min",
+        "type": "number",
+        "description": "Minimum level for generated drops and shop stock (dungeon level for loot, MC level for trade). Empty = no floor. Authored drop tables and inventories ignore it.",
+        "uid": "XPitSpawnMin1"
+      },
+      {
+        "id": "spawn_max",
+        "type": "number",
+        "description": "Maximum level for generated drops and shop stock (dungeon level for loot, MC level for trade). Empty = no ceiling. Authored drop tables and inventories ignore it.",
+        "uid": "XPitSpawnMax1"
+      }
+    ],
+    "inventory_traits": [
+      {
+        "id": "dungeon",
+        "type": "chooseOne",
+        "fromFile": "_dungeons",
+        "description": "Instantiated on first entry of this dungeon (or any dungeon sharing its level group). Items are created and locked there, picking up the dungeon level.",
+        "uid": "XPinvTrDungeon"
+      },
+      {
+        "id": "pool",
+        "type": "chooseOne",
+        "fromFile": "pool_entries",
+        "description": "Pool entry drawn into this inventory on top of its authored items when it is instantiated (chance mode, one draw per entity).",
+        "uid": "XPinvTrPool"
+      },
+      {
+        "id": "restock",
+        "type": "boolean",
+        "description": "Re-roll the pooled stock (authored items are kept) whenever the MC's level has changed since the last roll. For shops; leave off for chests so contents stay locked.",
+        "uid": "XPinvTrRestock"
       }
     ]
   }

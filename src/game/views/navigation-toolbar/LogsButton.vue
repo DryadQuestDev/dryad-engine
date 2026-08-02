@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import Tooltip from 'primevue/tooltip';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
 
 const togglePopup = () => {
@@ -11,7 +13,7 @@ const togglePopup = () => {
 </script>
 
 <template>
-  <div class="toolbar-item logs" v-tooltip.top="'Logs'" @click="togglePopup" />
+  <div class="toolbar-item logs" v-tooltip.top="global.getString('toolbar.logs')" @click="togglePopup" />
 </template>
 
 <style scoped>

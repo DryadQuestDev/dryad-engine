@@ -22,26 +22,26 @@ The Apply button appears when an inventory has either:
 
 ## The Apply Button
 
-The `interactive` field on inventory templates controls the Apply button:
+The `interactive` field on an inventory template names the interaction (`craft`, `combine`, `enchant`, …). You rarely set it by hand:
 
-The value also becomes a CSS class on the button, allowing custom styling per inventory.
+- An inventory with **recipes** auto-defaults `interactive` to `craft` — a crafting station needs nothing more than its `recipes` list.
+- Set `interactive` explicitly only for a **non-crafting** custom interaction (a puzzle, an item slot, etc.).
 
-**Styling the Apply button:**
+**Button label — from the locale.** The label is resolved from the locale key `apply_button.<interactive>`, falling back to the generic `apply_button`. The game's own locale is checked first, then the engine's, so you can define or override any label without touching the engine:
+
+| Interaction | Locale key | Default (engine) |
+|-------------|-----------|------------------|
+| (loot / none) | `apply_button` | "Apply" |
+| `craft` | `apply_button.craft` | "Craft" |
+| your `enchant` | `apply_button.enchant` | — add it to your game's `locale.json` |
+
+To label a custom interaction, add its key to your game's locale (e.g. `"apply_button.enchant": "Enchant"`). No CSS or engine change needed.
+
+**Styling** still uses the `interactive` value as a CSS class on the button (background, hover, etc.) — just not for the text:
 
 ```css
-/* Base styling for "combine" button */
-.apply-button.combine {
-  background-color: #4a90d9;
-}
-
-.apply-button.combine:hover {
-  background-color: #3a70b9;
-}
-
-/* Set button text using ::before */
-.apply-button.combine::before {
-  content: "Combine";
-}
+.apply-button.enchant { background-color: #9b59b6; }
+.apply-button.enchant:hover { background-color: #8244a5; }
 ```
 
 ---
@@ -85,6 +85,20 @@ Recipes must be **learned** before they can be used.
 |-------|-------|
 | Trigger | Player uses "Blacksmith Manual" item |
 | Action | `{learn_recipe: "iron_sword_recipe, steel_sword_recipe"}` |
+
+### Recipe-scroll items (the easy way)
+
+For a "recipe scroll" item — one whose only purpose is to teach a recipe — set the item template's **`learn_recipe`** field to the recipe id. The engine then adds a **Learn** choice to that item in the inventory automatically (no `choices` wiring), and:
+
+- clicking **Learn** teaches the recipe, consumes the item, and shows the "recipe learned" notification;
+- once the recipe is known the choice is **greyed out**;
+- if the action runs while the recipe is already known (e.g. from a scene), it shows the "already known" notification instead.
+
+| Field | Value |
+|-------|-------|
+| `learn_recipe` | `earth_soul_elixir` |
+
+The underlying action is `learn_recipe_item` (reads the active item's `learn_recipe` field). Its labels live in the engine locale (`learn_recipe`, `recipe.learned`, `recipe.already_known`) and are game-overridable.
 
 ---
 
@@ -197,7 +211,7 @@ The Apply button defaults to "craft" when recipes are assigned.
 
 | Method | Description |
 |--------|-------------|
-| `inventory.getApplyButton()` | Get the apply button label |
+| `inventory.getApplyButton()` | Get the apply button's interaction type / CSS class (`craft` for recipe inventories, else the `interactive` value, else empty). The label is resolved from `apply_button.<type>` in the locale. |
 | `inventory.addRecipe(id)` | Add recipe to inventory |
 | `inventory.getRecipes()` | Get all recipe IDs |
 | `inventory.craft()` | Execute crafting |
@@ -210,10 +224,11 @@ The Apply button defaults to "craft" when recipes are assigned.
 
 | I want to... | Do this |
 |--------------|---------|
-| Create a crafting station | Set `recipes` on inventory template |
-| Learn a recipe | `{learn_recipe: "recipe_id"}` action |
+| Create a crafting station | Set `recipes` on inventory template (`interactive` auto-becomes `craft`) |
+| Learn a recipe | `{learn_recipe: "recipe_id"}` action, or set `learn_recipe` on a scroll item |
 | Custom apply behavior | Listen to `inventory_apply` event |
-| Change button label | Set `interactive` on inventory template |
+| Change / add a button label | Define `apply_button.<interactive>` in your game's `locale.json` |
+| Style the button | `.apply-button.<interactive> { … }` in CSS |
 | Check if recipe learned | `game.getLearnedRecipes().has(id)` |
 
 ---

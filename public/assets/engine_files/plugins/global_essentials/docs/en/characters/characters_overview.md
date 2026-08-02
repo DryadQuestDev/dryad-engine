@@ -160,6 +160,12 @@ If a layer is controlled by "mood" and "hairstyle" attributes, you provide image
 
 The engine automatically picks the right image based on current attribute values.
 
+When a layer watches several attributes, the key segments follow each attribute's `order` field (ascending; unset = 0; ties keep the layer's attribute list order). The order is applied when the layer is saved in the editor.
+
+**Toggling whole layers from scripts:**
+
+Simple show/hide layers don't need a dedicated on/off attribute. The `attr` action falls back to layer visibility when the key is a skin layer id: `attr: "mc.wings = true"` shows the layer, `= false` hides it. Conditions can read it the same way: `{_char(mc.attribute.wings) = true}`.
+
 **Layer styles:**
 
 The `styles` field lets you apply custom CSS classes to a skin layer. This is useful for color variations without needing separate image files.

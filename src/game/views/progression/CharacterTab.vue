@@ -43,7 +43,7 @@ function selectTab(tabId: string) {
   <div class="character-sheet-container" v-if="character && game.getState('selected_character')">
     <div class="character-doll-wrapper">
       <CharacterSlot :key="character.id" :character="character" :slot="{ scale: 1 }" :showItemSlots="true"
-        :enableAppear="true" />
+        :enableAppear="true" :grade="false" />
     </div>
 
     <div class="character-sheet">

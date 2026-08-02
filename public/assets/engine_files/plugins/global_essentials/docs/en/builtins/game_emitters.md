@@ -169,6 +169,67 @@ game.on("room_enter_after", (roomId, dungeonId) => {
 });
 ```
 
+### encounter_selected
+
+Triggered when an encounter is selected — a click on the map or screen, or the toolbar's next-encounter button. Props never fire it. Return `false` to block the selection. Text dungeons render every encounter at once and never select one, so nothing fires there.
+
+**Parameters:**
+- `encounterId` - The ID of the selected encounter (`room.encounter`)
+- `dungeonId` - The ID of the dungeon containing it
+
+**Use cases:**
+- Act on the selection itself, with no choice to press (a statue that grants a stat, a lever that flips)
+- Gate an encounter behind a key item and explain why it will not open
+- Play a per-encounter sound
+
+```js
+game.on("encounter_selected", (encounterId, dungeonId) => {
+  if (encounterId !== "crypt.sealed_door") return;
+  if (game.getFlag("has_key")) return;
+  game.showNotification("The door will not budge.");
+  return false; // the encounter stays unselected
+});
+```
+
+### encounter_discovered
+
+Triggered when a hidden encounter (`@x{discover: "perception#6"}`) is revealed. Fires once — the first time the party meets the threshold — and never again, since discovery is permanent.
+
+**Parameters:**
+- `encounterId` - The ID of the encounter that was revealed (`room.encounter`)
+- `dungeonId` - The ID of the dungeon containing it
+
+**Use cases:**
+- Play a sting or a "you notice something" flash
+- Award experience for spotting it
+- Track how many secrets the player has found
+
+```js
+game.on("encounter_discovered", (encounterId, dungeonId) => {
+  game.playSounds("discovery");
+});
+```
+
+### encounter_collected
+
+Triggered when a collectable encounter is collected (its item granted, the node hidden). Regrow needs no listener — time plugins call `game.tickCollectables` instead.
+
+**Parameters:**
+- `encounterId` - The collected encounter's ID (`room.encounter`)
+- `itemSpec` - What was granted, add_item grammar (e.g. `"berry#2"`)
+- `dungeonId` - The dungeon containing it
+
+**Use cases:**
+- Pickup sounds
+- Gathering experience
+- Quest progress on specific finds
+
+```js
+game.on("encounter_collected", (encounterId, itemSpec, dungeonId) => {
+  game.playSounds("pickup");
+});
+```
+
 ### scene_play_before
 
 Triggered before a scene plays.
@@ -411,12 +472,13 @@ game.on("item_unequip_before", (item, char) => {
 
 ### item_unequip_after
 
-Triggered after unequipping.
+Triggered after unequipping. `item` is the item **as it now exists in the inventory** — the merge-back can replace the equipped instance with a new one (different `uid`), so mutate the item you receive, not a reference captured earlier.
 
 **Use cases:**
 - Remove set bonuses
 - Update character appearance
 - Log equipment changes
+- Undo per-equip mutations written onto the item's status object
 
 ```js
 game.on("item_unequip_after", (item, char) => {

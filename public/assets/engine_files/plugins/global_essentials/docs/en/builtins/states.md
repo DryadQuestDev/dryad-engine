@@ -38,6 +38,7 @@ All built-in game states you can read and write using `game.getState()` and `gam
 | State | Default | Description |
 |-------|---------|-------------|
 | `map_zoom_factor` | `1` | Current map zoom level |
+| `hide_map` | `false` | Hide the map (map dungeons) or background screen image (screen dungeons). Hides the whole map/screen layer, including room circles and encounter markers. No effect on `text` dungeons. |
 
 ---
 

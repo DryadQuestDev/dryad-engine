@@ -1,6 +1,6 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle, addFloatingText } from './rpg-battle-state.mjs';
+import { currentRpgBattle, addFloatingText, requiredSelfStatuses } from './rpg-battle-state.mjs';
 import {
   resolveAbility, processStatusEffects, getStatusStacks,
   removeStatusStacks, getStatusDefinitions, isCharAlive,
@@ -42,7 +42,8 @@ function initCombatantTracking(charId) {
   for (const abId in abilities) {
     const meta = abilities[abId].meta;
     cs.abilities[abId] = {
-      cooldown: meta.cd_on_battle_start || 0,
+      // +1 compensates for the pre-action tick the character gets on their first turn
+      cooldown: meta.cd_on_battle_start ? meta.cd_on_battle_start + 1 : 0,
       charges: meta.charges || -1,
     };
   }
@@ -107,7 +108,8 @@ function passesStaticGates(char, ability, state) {
       if (char.getResource(statId) < meta.costs[statId]) return false;
     }
   }
-  if (meta.require_status_self && getStatusStacks(char.id, meta.require_status_self) <= 0) return false;
+  const requiredSelf = requiredSelfStatuses(meta.require_status_self);
+  if (requiredSelf.length && !requiredSelf.some((id) => getStatusStacks(char.id, id) > 0)) return false;
   if (meta.caster_min_health && char.getResourceRatio('health') * 100 < meta.caster_min_health) return false;
   if (meta.caster_max_health && char.getResourceRatio('health') * 100 > meta.caster_max_health) return false;
   return true;
@@ -524,6 +526,9 @@ export function checkBattleEnd() {
   if (!enemiesAlive) {
     battle.result = 'victory';
     battle.phase = 'finished';
+    // Mark defeated at the moment of victory (not at teardown) so battle_defeated listeners
+    // (defeat rewards) run before the result overlay renders.
+    if (battle.battleId) game.getService('rpg_battle').addDefeated(battle.battleId);
     game.setMusic('victory');
     return true;
   }

@@ -5,7 +5,7 @@ import CustomComponentContainer from './CustomComponentContainer.vue';
 import { computed, watch, onMounted } from 'vue';
 import { useStorage } from '@vueuse/core';
 import Button from 'primevue/button';
-import { DEV_AUTO_SAVE_SLOT } from '../../services/indexeddb-save.service';
+import { DEV_AUTO_SAVE_SLOT, DEV_PREV_SCENE_SLOT, DEV_REPLAY_SCENE_KEY, DEV_LEFT_SCENE_KEY } from '../../services/indexeddb-save.service';
 
 const COMPONENT_ID = 'debug-panel';
 
@@ -57,7 +57,26 @@ function test() {
 
 const isWebMode = import.meta.env.VITE_WEB_MODE === 'true';
 
+// Reload into the pre-scene checkpoint and force-replay the current scene, so an edited
+// scene shows its new content and re-fires its enter actions once on clean state. The
+// checkpoint carries its own currentSceneId, so the replay flag needs no scene id.
+function hardSceneReset() {
+  if (!game.dungeonSystem.currentSceneId.value) return;
+  // Re-assert dev flags: a second app instance (the editor) shares localStorage and can
+  // clear devMode, which would otherwise reload the game with the debug panel gone.
+  localStorage.setItem('devMode', 'true');
+  localStorage.setItem('showDebugPanel', 'true');
+  localStorage.setItem(DEV_REPLAY_SCENE_KEY, '1');
+  game.loadGame(DEV_PREV_SCENE_SLOT);
+}
+
 async function backToEditor() {
+
+  // Record whether we left mid-scene so the editor "Continue" button knows which dev save
+  // to resume from (pre-scene checkpoint for a clean re-enter, else the auto-save).
+  const leftScene = game.dungeonSystem.currentSceneId.value;
+  if (leftScene) localStorage.setItem(DEV_LEFT_SCENE_KEY, leftScene);
+  else localStorage.removeItem(DEV_LEFT_SCENE_KEY);
 
   try {
     // Auto-save to dev slot
@@ -97,6 +116,12 @@ async function backToEditor() {
     <!-- Documentation Button -->
     <div class="docs-button-container">
       <Button label="📚 Documentation" @click="global.setViewer('docs')" class="docs-button" />
+    </div>
+
+    <!-- Hard Scene Reset — only while a scene is playing -->
+    <div v-if="game.dungeonSystem.currentSceneId.value" class="hard-reset-container">
+      <Button label="🔄 Hard Scene Reset" @click="hardSceneReset" class="hard-reset-button" severity="secondary"
+        v-tooltip.left="'Dev tool: reload and re-enter the current scene from scratch — rebuilds its text from your latest content edits and re-runs its enter actions once (on clean pre-scene state).'" />
     </div>
 
     <!-- Custom tabs -->
@@ -239,6 +264,22 @@ async function backToEditor() {
 .back-to-editor-button:active {
   transform: translateY(0);
   background-color: #4c4c4c !important;
+}
+
+.hard-reset-container {
+  background: #e0e0e0;
+  border: 2px solid #999;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.hard-reset-button {
+  width: 100%;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.75rem;
 }
 
 .docs-button-container {

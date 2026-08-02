@@ -7,6 +7,10 @@ const props = defineProps<{
     statusId: string;
     characterId?: string;
     statusInstanceIndex?: number;
+    // Optional chip shown left of the title (e.g. "Consume") + an explicit stack count for previews
+    // where the status isn't applied yet (the item card's "granted on consume" list).
+    titleChip?: string;
+    stacksOverride?: number;
 }>();
 
 const game = Game.getInstance();
@@ -42,6 +46,12 @@ const stacks = computed((): number => {
     return live.currentStacks;
 });
 
+// Stacks shown in the title: an explicit override (preview) wins; otherwise the live stackable count.
+const shownStacks = computed((): number => {
+    if (props.stacksOverride !== undefined) return props.stacksOverride;
+    return statusLiveInstance.value?.isStackable() ? stacks.value : 1;
+});
+
 const rarity = computed((): string => statusLiveInstance.value?.rarity || '');
 
 const mergedStats = computed((): Record<string, number> => {
@@ -74,17 +84,36 @@ const displayData = computed(() => {
 <template>
     <div v-if="statusDef || statusLiveInstance" class="popup-inner">
         <div class="popup-header">
+            <span v-if="titleChip" class="popup-title-chip">{{ titleChip }}</span>
             <span class="popup-title" :class="rarity ? ['item-name', 'rarity_' + rarity] : []">
                 {{ title }}
-                <span v-if="statusLiveInstance?.isStackable() && stacks > 1" class="popup-stack-count">x{{ stacks }}</span>
+                <span v-if="shownStacks > 1" class="popup-stack-count">x{{ shownStacks }}</span>
             </span>
         </div>
         <div class="popup-body">
             <div v-if="description" v-script="{ html: description, context: { character: statusCharacter } }" class="popup-description"></div>
-            <StatusObjectDisplay :data="displayData" :stacks="stacks" :character-id="characterId" />
+            <StatusObjectDisplay :data="displayData" :stacks="shownStacks" :character-id="characterId" />
         </div>
     </div>
     <div v-else class="popup-inner popup-error">
         Unknown status: {{ statusId }}
     </div>
 </template>
+
+<style scoped>
+.popup-title-chip {
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 6px;
+    font-size: 0.68em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #42b983;
+    background: rgba(66, 185, 131, 0.14);
+    border: 1px solid rgba(66, 185, 131, 0.4);
+    border-radius: 6px;
+    padding: 1px 6px;
+    white-space: nowrap;
+}
+</style>

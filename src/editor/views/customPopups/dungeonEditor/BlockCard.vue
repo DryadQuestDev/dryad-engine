@@ -22,6 +22,7 @@ function sceneExistsForRow(rowIndex: number): boolean {
   return sceneExistsForBlock(props.index, `${encId}~${choiceId}`);
 }
 import type { Block, Row, SceneBlock } from '../../../../utility/dungeonEditor/ast';
+import { isCommentLine } from '../../../../utility/dungeonEditor/comments';
 import type { LintIssue } from '../../../../utility/dungeonEditor/lint';
 
 type QuestKind = 'title' | 'main_stage' | 'goal' | 'goal_stage';
@@ -152,7 +153,7 @@ function linesToRows(value: string): Row[] {
   if (value === '') return [];
   return value.split('\n').map((line): Row => {
     if (line === '') return { kind: 'empty' };
-    if (line.startsWith('//')) return { kind: 'comment', text: line };
+    if (isCommentLine(line)) return { kind: 'comment', text: line };
     return { kind: 'text', text: line };
   });
 }
@@ -303,7 +304,7 @@ function onSceneUpdate(newScene: SceneBlock) {
       <template v-if="block.kind !== 'raw'">
         <InputText :model-value="(block as any).id" @update:model-value="(v: any) => updateHeader('id', v ?? '')"
           placeholder="id" class="id-input" :disabled="locked"
-          :class="{ 'input-search-hit': inputMatchesSearch((block as any).id) }" />
+          :class="{ 'input-search-hit': !!(block as any).id && inputMatchesSearch(kindSigil[block.kind] + (block as any).id) }" />
         <InputText v-if="block.kind !== 'room'" :model-value="(block as any).paramsRaw ?? ''"
           @update:model-value="(v: any) => updateHeader('paramsRaw', v ?? '')" placeholder="{params}"
           class="params-input"

@@ -39,7 +39,7 @@ const result = battle.start({
 | `battleId` | string | ID of a battle definition from the Battles tab |
 | `enemies` | array | Inline enemy list (overrides battleId enemies) |
 | `playerParty` | string[] | Character IDs for the player side. Defaults to current party |
-| `background` | string | Background asset ID. Falls back to battle definition's background |
+| `background` | string | Background asset ID. Falls back to the battle definition's background, then the current room's / dungeon's configured default asset |
 
 **Enemy entry fields:**
 
@@ -49,7 +49,7 @@ const result = battle.start({
 | `is_live_instance` | boolean | If true, fetch existing character instead of creating from template |
 | `amount` | number | Number to spawn (default: 1) |
 
-**Failure reasons:** `not_found`, `no_enemies`, `no_party`, `prevented` (emitter returned false).
+**Failure reasons:** `not_found`, `no_enemies`, `no_party`, `prevented` (emitter returned false), `already_active` (a battle is already running — `start()` never replaces a live battle).
 
 ### `end(result)`
 
@@ -81,6 +81,45 @@ game.getService('rpg_battle').addDefeated('forest_ambush');
 ```
 
 Victories from `end('victory')` are tracked automatically -- this is for cases where you want to mark a battle defeated without fighting it.
+
+### Mid-battle scenes — plain `game.playScene()`
+
+During battle, any `game.playScene()` call is intercepted by the plugin and **queued** — if one scene is already showing, the next waits its turn — and the **battle flow pauses** (no turns or actions advance, battle input is blocked) until the player clicks through every queued scene. A scene requested mid-action starts after that action's animations finish. Full scene flow is supported: multiple paragraphs, choices, and branches all work; the battle resumes when the whole scene exits. No dedicated service call is needed.
+
+Queued scenes start on a **clean stage**: the interrupted scene's actors and assets are cleared instantly before each one plays (stage your own cast with plain `{actor: "char->slot"}` — no `{actor: false}` clears needed), and they play as **cutaways** (`root: false`) — no default backgrounds, dungeon music, or `scene_play` default-actor staging, even in script-started battles.
+
+Queued scenes **fade** (an engine behavior for all scene dialogues): the dialogue fades in when the scene starts, and exiting runs the engine's graceful close — actors leave with their slot **exit animations** while the dialogue fades out — before the battle resumes. Actors entering use their slot **enter animations** as usual.
+
+The story scene that triggered the battle is snapshotted before the first queued scene and restored afterward — its actors, assets, and choices come back with it, so the post-victory `nextScene()` resume works unchanged.
+
+```js
+const battle = game.getService('rpg_battle');
+
+// Chyseleia comments on the first turn
+game.on('battle_turn_start', (turn) => {
+    if (turn === 1 && battle.inBattle('prologue_golems')) {
+        game.playScene('1.fight_golems_1.1.1.1');
+    }
+});
+```
+
+Limitation: for battles started from a script (no triggering story scene), a scene's exit briefly leaves no active scene — a viable room event could fire mid-battle. Content-started battles are unaffected.
+
+### `isScenePlaying()`
+
+True while queued battle scenes are pending or one is on screen (battle flow paused).
+
+```js
+if (!game.getService('rpg_battle').isScenePlaying()) { ... }
+```
+
+### `inBattle(battleId)`
+
+True when the running battle definition matches `battleId`. False outside battle and for ad-hoc battles.
+
+```js
+if (game.getService('rpg_battle').inBattle('prologue_clover')) { ... }
+```
 
 ### `checkStaggerThreshold(characterId)`
 

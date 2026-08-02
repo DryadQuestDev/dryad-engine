@@ -7,6 +7,13 @@ export class Choice {
   public name: string = "";
   public params: Record<string, any> = {};
 
+  /**
+   * Where the story resumes after this choice's delayed action finishes (battle, exchange…).
+   * Set on `~` branch choices that carry a delayed action: without it the resume falls
+   * through to the row's FIRST branch instead of the one the player actually took.
+   */
+  public resumeSceneId?: string;
+
   public isVisible: ComputedRef<boolean>; //  if
   public isAvailable: ComputedRef<boolean>; // active
 
@@ -20,6 +27,27 @@ export class Choice {
       : this.isAvailable.value;
   }
 
+  public isChoiceVisible(): boolean {
+    // Same hazard as isChoiceAvailable: reached through Vue's reactive proxy the ref is
+    // already unwrapped, reached raw it is a ComputedRef — and a ComputedRef is a truthy
+    // object, so a bare `&& choice.isVisible` would always pass.
+    return typeof this.isVisible === 'boolean'
+      ? this.isVisible
+      : this.isVisible?.value ?? true;
+  }
+
+  /**
+   * A `{clue: true}` choice the player hasn't taken yet — a hint worth highlighting.
+   * It stops being a clue the moment it is picked, and stays taken across saves
+   * (visitedChoices is persisted).
+   */
+  public isClue(): boolean {
+    if (!this.params.clue || !this.id) {
+      return false;
+    }
+    return !Game.getInstance().dungeonSystem.usedDungeonData.value.visitedChoices.has(this.id);
+  }
+
 
 
   public do() {
@@ -30,6 +58,9 @@ export class Choice {
 
     if (this.id) {
       Game.getInstance().dungeonSystem.usedDungeonData.value.addVisitedChoice(this.id);
+    }
+    if (this.resumeSceneId) {
+      Game.getInstance().dungeonSystem.noteBranchResume(this.resumeSceneId);
     }
     Game.getInstance().logicSystem.resolveActions(this.params);
 

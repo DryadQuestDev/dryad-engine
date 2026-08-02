@@ -3,6 +3,12 @@ import { Editor } from '../../editor';
 import { Global } from '../../../global/global';
 import type { Schemable, Schema } from '../../../utility/schema';
 
+// Resolve a dot-path (e.g. "meta.strain_element") against an object, matching the
+// nested-key support in Editor.filterDataByTypeConditions.
+function getNestedValue(obj: any, path: string): any {
+  return path.split('.').reduce((current, key) => (current && typeof current === 'object' ? current[key] : undefined), obj);
+}
+
 /**
  * Configuration for generating dynamic filter fields from a pool definition.
  */
@@ -154,7 +160,7 @@ export function useGeneratedFields(
       refData = refData.filter((item: any) => {
         for (const key in field.fromFileTypeAnd!) {
           const expected = field.fromFileTypeAnd![key];
-          const actual = item[key];
+          const actual = getNestedValue(item, key);
           if (expected === '$truthy' && !actual) return false;
           if (expected === '$falsy' && !!actual) return false;
           if (expected !== '$truthy' && expected !== '$falsy') {
@@ -172,7 +178,7 @@ export function useGeneratedFields(
       refData = refData.filter((item: any) => {
         for (const key in field.fromFileTypeOr!) {
           const expected = field.fromFileTypeOr![key];
-          const actual = item[key];
+          const actual = getNestedValue(item, key);
           if (expected === '$truthy' && !!actual) return true;
           if (expected === '$falsy' && !actual) return true;
           if (expected !== '$truthy' && expected !== '$falsy') {

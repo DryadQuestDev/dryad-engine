@@ -25,6 +25,10 @@ import { SPINE_REFERENCE_HEIGHT } from './characterReference';
  * smoothing, giving cleaner outlines at the cost of slightly more GPU work. */
 const MIN_RENDER_SCALE = 0.6;
 
+/** Symmetric vertical pad → total canvas height multiplier. Clamped because a mistyped
+ * pad multiplies VRAM for every slot rather than failing visibly. */
+const padFactorOf = (padY: number): number => 1 + 2 * Math.min(Math.max(padY, 0), 1);
+
 interface SpineTransition {
   snapshot: HTMLCanvasElement;
   remaining: number;
@@ -44,6 +48,9 @@ interface SpineSlot {
   artDy: number;
   gameScale: number;
   slotScale: number;
+  /** Symmetric vertical headroom as a fraction of host height, added above AND below the
+   * natural canvas box. 0 = exact unpadded geometry. Fixed at register time. */
+  padY: number;
   width: number;
   height: number;
   transition?: SpineTransition;
@@ -73,6 +80,23 @@ interface RegisterOptions {
   gameScale?: number;
   /** Per-slot scale multiplier (replaces CSS transform scale to keep spine pixels sharp). Default 1. */
   slotScale?: number;
+  /** Symmetric vertical headroom as a fraction of the host element's height, added ABOVE and
+   * BELOW the canvas. The canvas grows to (1 + 2×padY) × host height while baseScale keeps
+   * reading the UNPADDED height, so body size and centre are unchanged — only the crop
+   * boundary moves. Opt-in: omit it (background assets) for exact 1:1 geometry. Default 0. */
+  padY?: number;
+}
+
+/** Runtime tint for one slot: raw RGB multipliers into the slot color. Values × brightness
+ * may exceed 1 on purpose — dark base art (e.g. red hair) is re-brightened into other hues
+ * that way, so channels are passed through unclamped. */
+export interface SlotColorSpec {
+  slot: string;
+  r?: number;
+  g?: number;
+  b?: number;
+  alpha?: number; // 0..1, default 1
+  brightness?: number; // multiplier on rgb, default 1
 }
 
 export interface SpineStats {
@@ -223,7 +247,12 @@ class SpineRendererService {
       // clipped at the edge.
       const canvas2d = document.createElement('canvas');
       const slotScale = options.slotScale ?? 1;
-      const pct = slotScale * 100;
+      const padY = options.padY ?? 0;
+      const padFactor = padFactorOf(padY);
+      const pctW = slotScale * 100;
+      // Height carries the symmetric vertical pad: the canvas overflows the host equally above
+      // and below, so translate(-50%,-50%) still lands the body's centre on the host's centre.
+      const pctH = slotScale * padFactor * 100;
       const initArtDx = options.artDx ?? 0;
       const initArtDy = options.artDy ?? 0;
       const initMirror = options.mirror ?? false;
@@ -234,7 +263,7 @@ class SpineRendererService {
       canvas2d.style.cssText =
         `position:absolute;top:50%;left:50%;` +
         `transform:translate(-50%,-50%) translate(${initDx}cqh, ${initDy}cqh);` +
-        `width:${pct}%;height:${pct}%;display:block;`;
+        `width:${pctW}%;height:${pctH}%;display:block;`;
       // ensure host can anchor an absolute child
       if (getComputedStyle(element).position === 'static') {
         element.style.position = 'relative';
@@ -252,7 +281,9 @@ class SpineRendererService {
       const dpr = window.devicePixelRatio || 1;
       const renderScale = Math.max(slotScale, MIN_RENDER_SCALE);
       const w = Math.max(1, Math.round(rect.width * renderScale * dpr));
-      const h = Math.max(1, Math.round(rect.height * renderScale * dpr));
+      // Round the unpadded height FIRST, then grow it — see renderLoop for why the padded
+      // height must be derived from the reference height rather than the other way round.
+      const h = Math.max(1, Math.round(Math.round(rect.height * renderScale * dpr) * padFactor));
       canvas2d.width = w;
       canvas2d.height = h;
 
@@ -275,6 +306,7 @@ class SpineRendererService {
         artDy: options.artDy ?? 0,
         gameScale: options.gameScale ?? 1,
         slotScale: options.slotScale ?? 1,
+        padY,
         viewport: options.viewport,
         width: w,
         height: h,
@@ -322,6 +354,27 @@ class SpineRendererService {
       transformConstraints: data.transformConstraints?.length ?? 0,
       pathConstraints: data.pathConstraints?.length ?? 0,
     };
+  }
+
+  /** Tint slots by multiplying their slot color (per-instance — attachment colors are shared
+   * skeleton data and must stay untouched). Re-apply after applySkins: setSlotsToSetupPose
+   * resets slot colors. */
+  applySlotColors(spine: Spine, specs: SlotColorSpec[]): void {
+    for (const spec of specs) {
+      if (!spec?.slot) continue;
+      const slot = spine.skeleton.findSlot(spec.slot);
+      if (!slot) continue;
+      const bf = spec.brightness ?? 1;
+      slot.color.set((spec.r ?? 1) * bf, (spec.g ?? 1) * bf, (spec.b ?? 1) * bf, spec.alpha ?? 1);
+    }
+  }
+
+  /** Hide slots by clearing their attachment (per-instance). Re-apply after applySkins. */
+  applySlotRemovals(spine: Spine, slots: string[]): void {
+    for (const name of slots) {
+      const slot = spine.skeleton.findSlot(name);
+      if (slot) slot.setAttachment(null);
+    }
   }
 
   applySkins(spine: Spine, skins: string[]): void {
@@ -389,9 +442,10 @@ class SpineRendererService {
     if (!slot) return;
     slot.slotScale = slotScale;
     // Resize canvas CSS to match new scale; renderLoop picks up backing pixels next frame.
-    const pct = slotScale * 100;
-    slot.canvas2d.style.width = `${pct}%`;
-    slot.canvas2d.style.height = `${pct}%`;
+    // Height re-applies the vertical pad — without it, any slot.scale change would quietly
+    // drop the headroom back to a square canvas and re-crop tall characters.
+    slot.canvas2d.style.width = `${slotScale * 100}%`;
+    slot.canvas2d.style.height = `${slotScale * padFactorOf(slot.padY) * 100}%`;
     // applyCanvasArtTransform multiplies art_dx/dy by slotScale, so re-emit it.
     this.applyCanvasArtTransform(slot);
   }
@@ -430,12 +484,18 @@ class SpineRendererService {
       // CSS display still scales by slotScale; the buffer is over-sampled at
       // low scales so atlas downsampling doesn't produce ragged edges.
       const renderScale = Math.max(slot.slotScale, MIN_RENDER_SCALE);
+      const padFactor = padFactorOf(slot.padY);
       const ow = slot.element.offsetWidth * renderScale;
       const oh = slot.element.offsetHeight * renderScale;
       if (ow <= 0 || oh <= 0) continue;
 
       const w = Math.round(ow * dpr);
-      const h = Math.round(oh * dpr);
+      // hRef is the UNPADDED buffer height — the reference the skeleton is scaled against.
+      // h is the real buffer, taller by padFactor. Deriving h FROM hRef (rather than dividing
+      // a rounded padded height back out) keeps padY=0 bit-identical to the unpadded path, so
+      // background spine assets cannot drift by a subpixel.
+      const hRef = Math.max(1, Math.round(oh * dpr));
+      const h = padFactor === 1 ? hRef : Math.max(1, Math.round(hRef * padFactor));
 
       // Update slot's 2D canvas size if layout changed
       if (w !== slot.width || h !== slot.height) {
@@ -460,8 +520,10 @@ class SpineRendererService {
       // art_scale (slot.artScale) is the per-character/per-asset fine-tune.
       const data = slot.spine.skeleton.data;
       const skelW = data.width || w;
-      const skelH = data.height || h;
-      const baseScale = (h / SPINE_REFERENCE_HEIGHT) * slot.gameScale * slot.artScale;
+      const skelH = data.height || hRef;
+      // hRef, not h: the vertical pad must not change how big the body is drawn. Centring
+      // below still uses h/2 — the pad is symmetric, so the canvas centre is unmoved.
+      const baseScale = (hRef / SPINE_REFERENCE_HEIGHT) * slot.gameScale * slot.artScale;
       const zoom = slot.viewport?.zoom ?? 1;
       const scale = baseScale * zoom;
       const dx = (slot.viewport?.dx ?? 0) * baseScale;

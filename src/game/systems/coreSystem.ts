@@ -1,7 +1,7 @@
 import { save, Skip, Populate } from '../../utility/save-system';
 import { ManifestObject } from '../../schemas/manifestSchema';
 import { Global } from '../../global/global';
-import { IndexedDbSaveService } from '../../services/indexeddb-save.service';
+import { IndexedDbSaveService, DEV_REPLAY_SCENE_KEY } from '../../services/indexeddb-save.service';
 import { Ref, ref, markRaw, type Component, computed, watch, ComputedRef } from 'vue';
 import { useIdle, type UseIdleReturn } from '@vueuse/core';
 import { DebugSettingsType } from '../data/debugSettings';
@@ -10,6 +10,7 @@ import { Property } from '../property';
 import { SoundObject } from '../../schemas/soundSchema';
 import { MusicObject } from '../../schemas/musicSchema';
 import { Character } from '../core/character/character';
+import { Status } from '../core/character/status';
 import { Inventory } from '../core/character/inventory';
 import type { Identifiable } from '../../functions/mergeById';
 import { Game } from '../game';
@@ -58,10 +59,95 @@ export type SaveOptions = {
   noNotification?: boolean;
 }
 
+export type StopSoundOptions = {
+  /** Leave looping sounds alone; stop only the one-shots. */
+  keepLooping?: boolean;
+}
+
+/** One in-flight `playSounds` call: the audio elements for a sound's `files`, kept so it can be stopped. */
+export type SoundPlayback = {
+  id: string;
+  loop: boolean;
+  /** Set by stopSounds. Guards the load callbacks, which fire after a stop if the files were still loading. */
+  stopped: boolean;
+  elements: HTMLAudioElement[];
+}
+
 // EmitterMap is derived from CORE_EMITTER_SIGNATURES for strict type checking.
 // It ensures that EmitterMap perfectly reflects the defined core emitters.
 // CORE_EMITTER_SIGNATURES is now defined in initSystem.ts
 export type EmitterMap = typeof CORE_EMITTER_SIGNATURES;
+
+/**
+ * One save-migration section: `true` = the whole section, `false` = skip it,
+ * `string[]` = the keys to skip (opt-out mode) or the only keys to sync (opt-in mode).
+ */
+export type MigrationScope = boolean | string[];
+
+/** Options for `Game.runDefaultSaveMigration()`. Every mutating section has its own key. */
+export interface SaveMigrationOptions {
+  /** `opt-out` (default): sync everything, lists name what to skip. `opt-in`: sync nothing, lists name what to sync. */
+  mode?: 'opt-in' | 'opt-out';
+  /** Stat ids. */
+  stats?: MigrationScope;
+  /** Trait ids. */
+  traits?: MigrationScope;
+  /** Attribute ids. */
+  attributes?: MigrationScope;
+  /** Ability ids. */
+  abilities?: MigrationScope;
+  /** Skin layer ids. */
+  skinLayers?: MigrationScope;
+  /** View ids (`_default` for the default view). Covers static art placement too. */
+  spine?: MigrationScope;
+  /** Template item-slot ids. Backfills missing slots and repositions existing ones — never removes. */
+  itemSlots?: MigrationScope;
+  /** Skill tree ids. */
+  skillTrees?: MigrationScope;
+  /** Learned-skill (tree slot) ids. */
+  learnedSkills?: MigrationScope;
+  /** Status ids. */
+  statuses?: MigrationScope;
+  /** Item trait ids. */
+  itemTraits?: MigrationScope;
+  /** Item attribute ids. */
+  itemAttributes?: MigrationScope;
+  /** Item property ids. */
+  itemProperties?: MigrationScope;
+  /** Item template ids — refreshes the equip-status object and re-binds it on equipped items. */
+  itemStatuses?: MigrationScope;
+}
+
+/** Resolved section gate: `enabled` short-circuits the whole section, `allows` filters per key. */
+type ScopeFilter = { enabled: boolean; allows(key: string): boolean };
+
+/**
+ * Sync one core-status view map (spine or static art) against the template's.
+ * The internal key for the default view is `''`; devs list it as `_default`.
+ */
+function syncViewMap<T>(current: Map<string, T>, fromTemplate: Map<string, T>, scope: ScopeFilter): void {
+  for (const view of [...current.keys()]) {
+    if (scope.allows(view || '_default') && !fromTemplate.has(view)) current.delete(view);
+  }
+  for (const [view, config] of fromTemplate) {
+    if (scope.allows(view || '_default')) current.set(view, config);
+  }
+}
+
+/** See the `MigrationScope` table in `Game.runDefaultSaveMigration()`. Omitted follows the mode. */
+function resolveScope(value: MigrationScope | undefined, optIn: boolean): ScopeFilter {
+  if (value === true) return { enabled: true, allows: () => true };
+  if (value === false) return { enabled: false, allows: () => false };
+  if (Array.isArray(value)) {
+    const keys = new Set(value);
+    return optIn
+      ? { enabled: keys.size > 0, allows: k => keys.has(k) }
+      : { enabled: true, allows: k => !keys.has(k) };
+  }
+  return optIn
+    ? { enabled: false, allows: () => false }
+    : { enabled: true, allows: () => true };
+}
 
 /**
  * CoreSystem handles all infrastructure and utility logic for the game engine.
@@ -177,32 +263,68 @@ export class CoreSystem {
   }
 
   /**
-   * Rebuild every character's state from current definitions (template + statuses + traits + attributes).
-   * No-op for new games or when the loaded versions match the current ones.
+   * Rebuild every character's state from current definitions (template + statuses + traits).
+   * Resource pools are never touched — snapshot at the start, restored verbatim at the end.
+   * No-op for new games or when the loaded versions match the current ones —
+   * except in dev mode, where it runs on every load regardless of versions.
    *
    * See `Game.runDefaultSaveMigration()` for the public-facing wrapper and full docs.
    */
-  public runDefaultSaveMigration(options: { ignoreStats?: string[]; ignoreTraits?: string[]; ignoreAttributes?: string[]; ignoreItemTraits?: string[]; ignoreItemAttributes?: string[]; } = {}): void {
+  public runDefaultSaveMigration(options: SaveMigrationOptions = {}): void {
     const game = Game.getInstance();
-    if (!this.isOldSave()) return;
+    if (game.isNewGame) return;
+    const sameVersion = !this.isOldSave();
+    if (sameVersion && !game.isDevMode()) return;
+
+    const optIn = options.mode === 'opt-in';
+    const scopes = {
+      stats: resolveScope(options.stats, optIn),
+      traits: resolveScope(options.traits, optIn),
+      attributes: resolveScope(options.attributes, optIn),
+      abilities: resolveScope(options.abilities, optIn),
+      skinLayers: resolveScope(options.skinLayers, optIn),
+      spine: resolveScope(options.spine, optIn),
+      itemSlots: resolveScope(options.itemSlots, optIn),
+      skillTrees: resolveScope(options.skillTrees, optIn),
+      learnedSkills: resolveScope(options.learnedSkills, optIn),
+      statuses: resolveScope(options.statuses, optIn),
+      itemTraits: resolveScope(options.itemTraits, optIn),
+      itemAttributes: resolveScope(options.itemAttributes, optIn),
+      itemProperties: resolveScope(options.itemProperties, optIn),
+      itemStatuses: resolveScope(options.itemStatuses, optIn),
+    };
+    const mode = optIn ? 'opt-in' : 'opt-out';
+    if (!Object.values(scopes).some(s => s.enabled)) {
+      console.log(`[save-migration] ${mode}: nothing enabled, skipped`);
+      return;
+    }
 
     const stringify = (m: Record<string, { version: string }>) =>
       Object.keys(m).sort().map(k => `${k}=${m[k].version}`).join(',');
     const oldSig = stringify(this.loadedSaveVersions ?? {});
     const newSig = stringify(this.getVersions());
 
-    console.log(`[save-migration] ${oldSig || '(none)'} → ${newSig}`);
+    console.log(`[save-migration] ${mode} · ${oldSig || '(none)'} → ${newSig}${sameVersion ? ' (dev mode, no version bump)' : ''}`);
     const migrationStart = performance.now();
 
-    const ignoreStats = new Set(options.ignoreStats ?? []);
-    const ignoreTraits = new Set(options.ignoreTraits ?? []);
-    const ignoreAttributes = new Set(options.ignoreAttributes ?? []);
+    // Resource pools are save-owned. The status remove/re-add below clamps non-replenishable
+    // pools against a transiently-0 max and delta-refills replenishable ones — snapshot every
+    // pool now, raw-restore at the very end so migration never moves them.
+    const resourceSnapshots = new Map<Character, Record<string, number>>();
+    for (const char of game.getAllCharacters()) {
+      resourceSnapshots.set(char, char.snapshotResources());
+    }
 
     const statsMap = game.characterSystem.statsMap;
     const statusesMap = game.characterSystem.statusesMap;
     const traitsMap = game.characterSystem.traitsMap;
     const attributesMap = game.characterSystem.attributesMap;
     const templatesMap = game.characterSystem.templatesMap;
+    const abilityTemplatesMap = game.characterSystem.abilityTemplatesMap;
+    const skinLayersMap = game.characterSystem.skinLayersMap;
+    const skillTreesMap = game.characterSystem.skillTreesMap;
+    const skillSlotsMap = game.characterSystem.skillSlotsMap;
+    const itemSlotsMap = game.itemSystem.itemSlotsMap;
 
     for (const char of game.getAllCharacters()) {
       const template = templatesMap.get(char.templateId);
@@ -210,130 +332,250 @@ export class CoreSystem {
 
       const coreStatus = char.getCoreStatus();
 
-      // 1. Stats
-      const tplStats = (template as any).stats || {};
-      for (const key of Object.keys(coreStatus.stats || {})) {
-        if (ignoreStats.has(key)) continue;
-        if (!statsMap.has(key)) { delete coreStatus.stats[key]; continue; }
-        if (typeof tplStats[key] === 'number') char.setStat(key, tplStats[key]);
-      }
-      for (const key of Object.keys(tplStats)) {
-        if (ignoreStats.has(key)) continue;
-        if (!statsMap.has(key)) continue;
-        if (coreStatus.stats[key] === undefined) char.setStat(key, tplStats[key]);
+      // 1. Stats — reset to the template values. Safe against resource pools only because the
+      // whole migration is wrapped in the snapshot/restore above: setStat delta-adjusts
+      // replenishable resources (like tale's mana-as-lifespan) and that gets undone at the end.
+      if (scopes.stats.enabled) {
+        const tplStats = (template as any).stats || {};
+        for (const key of Object.keys(coreStatus.stats || {})) {
+          if (!scopes.stats.allows(key)) continue;
+          if (!statsMap.has(key)) { delete coreStatus.stats[key]; continue; }
+          if (typeof tplStats[key] === 'number') char.setStat(key, tplStats[key]);
+        }
+        for (const key of Object.keys(tplStats)) {
+          if (!scopes.stats.allows(key)) continue;
+          if (!statsMap.has(key)) continue;
+          if (coreStatus.stats[key] === undefined) char.setStat(key, tplStats[key]);
+        }
       }
 
       // 2. Traits
-      const tplTraits = (template as any).traits || {};
-      for (const key of Object.keys(coreStatus.traits || {})) {
-        if (ignoreTraits.has(key)) continue;
-        if (!traitsMap.has(key)) { delete coreStatus.traits[key]; continue; }
-        if (tplTraits[key] !== undefined) char.setTrait(key, tplTraits[key]);
-      }
-      for (const key of Object.keys(tplTraits)) {
-        if (ignoreTraits.has(key)) continue;
-        if (!traitsMap.has(key)) continue;
-        if (coreStatus.traits[key] === undefined) char.setTrait(key, tplTraits[key]);
+      if (scopes.traits.enabled) {
+        const tplTraits = (template as any).traits || {};
+        for (const key of Object.keys(coreStatus.traits || {})) {
+          if (!scopes.traits.allows(key)) continue;
+          if (!traitsMap.has(key)) { delete coreStatus.traits[key]; continue; }
+          if (tplTraits[key] !== undefined) char.setTrait(key, tplTraits[key]);
+        }
+        for (const key of Object.keys(tplTraits)) {
+          if (!scopes.traits.allows(key)) continue;
+          if (!traitsMap.has(key)) continue;
+          if (coreStatus.traits[key] === undefined) char.setTrait(key, tplTraits[key]);
+        }
       }
 
       // 3. Attributes
-      const tplAttrs = (template as any).attributes || {};
-      for (const key of Object.keys(coreStatus.attributes || {})) {
-        if (ignoreAttributes.has(key)) continue;
-        if (!attributesMap.has(key)) { delete coreStatus.attributes[key]; continue; }
-        if (typeof tplAttrs[key] === 'string') char.setAttribute(key, tplAttrs[key]);
+      if (scopes.attributes.enabled) {
+        const tplAttrs = (template as any).attributes || {};
+        for (const key of Object.keys(coreStatus.attributes || {})) {
+          if (!scopes.attributes.allows(key)) continue;
+          if (!attributesMap.has(key)) { delete coreStatus.attributes[key]; continue; }
+          if (typeof tplAttrs[key] === 'string') char.setAttribute(key, tplAttrs[key]);
+        }
+        for (const key of Object.keys(tplAttrs)) {
+          if (!scopes.attributes.allows(key)) continue;
+          if (!attributesMap.has(key)) continue;
+          if (coreStatus.attributes[key] === undefined) char.setAttribute(key, tplAttrs[key]);
+        }
       }
-      for (const key of Object.keys(tplAttrs)) {
-        if (ignoreAttributes.has(key)) continue;
-        if (!attributesMap.has(key)) continue;
-        if (coreStatus.attributes[key] === undefined) char.setAttribute(key, tplAttrs[key]);
+
+      // 3.5. Abilities — the core-status list is the template-innate set baked at creation;
+      // status-/item-granted abilities live on their own statuses and recompute on reevaluate.
+      if (scopes.abilities.enabled) {
+        const tplAbilities: string[] = (template as any).abilities || [];
+        for (const abilityId of [...coreStatus.abilities]) {
+          if (!scopes.abilities.allows(abilityId)) continue;
+          if (!abilityTemplatesMap.has(abilityId) || !tplAbilities.includes(abilityId)) char.removeAbility(abilityId);
+        }
+        for (const abilityId of tplAbilities) {
+          if (!scopes.abilities.allows(abilityId)) continue;
+          if (!abilityTemplatesMap.has(abilityId)) continue;
+          if (!coreStatus.abilities.has(abilityId)) char.addAbility(abilityId);
+        }
+      }
+
+      // 3.6. Item slots — backfill template slots the character is missing, and reposition the
+      // ones that already exist (slot x/y are saved per character, so an editor reposition can
+      // never reach an old save otherwise). Only x/y are synced: the slot's type and its equipped
+      // item are save-owned. Never remove — runtime-granted slots (item_slot action) get random
+      // uid ids, indistinguishable from a template slot that was deleted.
+      if (scopes.itemSlots.enabled) {
+        const tplSlots: any[] = (template as any).item_slots || [];
+        for (const tplSlot of tplSlots) {
+          if (!tplSlot?.id || !tplSlot?.slot) continue;
+          if (!scopes.itemSlots.allows(tplSlot.id)) continue;
+          if (!itemSlotsMap.has(tplSlot.slot)) continue;
+          const existing = char.itemSlots.find(s => s.id === tplSlot.id);
+          if (existing) {
+            existing.x = tplSlot.x ?? 0;
+            existing.y = tplSlot.y ?? 0;
+          } else {
+            char.addItemSlot(tplSlot.id, tplSlot.slot, tplSlot.x ?? 0, tplSlot.y ?? 0);
+          }
+        }
+      }
+
+      // 3.7. Skin layers — the core-status set is the template-innate set (like abilities);
+      // status-/item-granted layers live on their own statuses and recompute on reevaluate.
+      // Layers granted at runtime by the skin_layer action land on the core status too, so
+      // list those to keep them.
+      if (scopes.skinLayers.enabled) {
+        const tplSkinLayers: string[] = (template as any).skin_layers || [];
+        const layersToRemove = [...coreStatus.skinLayers].filter(l =>
+          scopes.skinLayers.allows(l) && (!skinLayersMap.has(l) || !tplSkinLayers.includes(l)));
+        const layersToAdd = tplSkinLayers.filter(l =>
+          scopes.skinLayers.allows(l) && skinLayersMap.has(l) && !coreStatus.skinLayers.has(l));
+        if (layersToRemove.length) char.removeSkinLayers(layersToRemove);
+        if (layersToAdd.length) char.addSkinLayers(layersToAdd);
+      }
+
+      // 3.8. Spine + static art views — template is authoritative for the core status;
+      // per-view partial overrides from other statuses re-accumulate on reevaluate.
+      // Reuse Status.setValues so the template's entries parse identically to creation.
+      if (scopes.spine.enabled) {
+        const spineParser = new Status();
+        spineParser.setValues({ spine: (template as any).spine || [], static_art: (template as any).static_art || [] } as any);
+        syncViewMap(coreStatus.spineViews, spineParser.spineViews, scopes.spine);
+        syncViewMap(coreStatus.staticArtViews, spineParser.staticArtViews, scopes.spine);
+      }
+      char.reevaluate();
+
+      // 3.9. Skill trees — backfill from template, purge trees whose definition is gone.
+      // Trees granted at runtime (not on the template) survive as long as they still exist.
+      if (scopes.skillTrees.enabled) {
+        const tplSkillTrees: string[] = (template as any).skill_trees || [];
+        for (const treeId of [...char.skillTrees]) {
+          if (scopes.skillTrees.allows(treeId) && !skillTreesMap.has(treeId)) char.removeSkillTree(treeId);
+        }
+        for (const treeId of tplSkillTrees) {
+          if (!scopes.skillTrees.allows(treeId)) continue;
+          if (skillTreesMap.has(treeId) && !char.skillTrees.has(treeId)) char.addSkillTree(treeId);
+        }
+      }
+
+      // 3.10. Learned skills — player progress, so levels are preserved; rebuild each hidden
+      // _skill_* status from the current slot definition so stat-grants pick up new values.
+      // Skills whose tree/slot/skill no longer exists are dropped; levels clamp to the new max.
+      if (scopes.learnedSkills.enabled) {
+        for (const learned of [...char.learnedSkills]) {
+          if (!scopes.learnedSkills.allows(learned.id)) continue;
+          const statusId = char.getSkillStatusId(learned.skillTreeId, learned.id);
+          const tree = skillTreesMap.get(learned.skillTreeId);
+          const slot = tree?.skills?.find((s: any) => s.id === learned.id);
+          const skillData = slot?.skill ? skillSlotsMap.get(slot.skill) : undefined;
+          if (char.statuses.has(statusId)) char.removeStatus(statusId);
+          if (!tree || !slot || !skillData) {
+            char.learnedSkills.splice(char.learnedSkills.indexOf(learned), 1);
+            continue;
+          }
+          learned.level = Math.min(learned.level, slot.max_upgrade_level || 1);
+          if (skillData.status) {
+            const status = new Status();
+            status.id = statusId;
+            status.setValues(skillData.status);
+            status.currentStacks = learned.level;
+            status.isHidden = true;
+            char.addStatus(status);
+          }
+        }
       }
 
       // 4. Status reapply — refresh stat-grants for definition-backed statuses only.
       // Live/runtime statuses (item_<uid>, plugin-spawned, hand-rolled createStatus calls) have no
       // definition to refresh against — leave them entirely intact.
-      const heldSnapshot = char.getStatuses()
-        .filter(s => s.id !== '_core_status' && statusesMap.has(s.id))
-        .map(s => ({ id: s.id, stacks: s.currentStacks }));
-      for (const { id, stacks } of heldSnapshot) {
-        char.removeStatus(id);
-        char.addStatus(game.createStatus(id));
-        if (stacks > 1) char.addStatusStacks(id, stacks - 1);
-      }
-
-      // 5. Re-clamp resources to (possibly new) max
-      for (const [statId, def] of statsMap.entries()) {
-        if ((def as any).is_resource) {
-          const current = char.getResource(statId) || 0;
-          char.setResource(statId, current);
+      if (scopes.statuses.enabled) {
+        const heldSnapshot = char.getStatuses()
+          .filter(s => s.id !== '_core_status' && statusesMap.has(s.id) && scopes.statuses.allows(s.id))
+          .map(s => ({ id: s.id, stacks: s.currentStacks }));
+        for (const { id, stacks } of heldSnapshot) {
+          char.removeStatus(id);
+          char.addStatus(game.createStatus(id));
+          if (stacks > 1) char.addStatusStacks(id, stacks - 1);
         }
       }
     }
 
     // Items: rebuild trait/attribute/property/statusObject shape from current definitions.
-    const ignoreItemTraits = new Set(options.ignoreItemTraits ?? []);
-    const ignoreItemAttributes = new Set(options.ignoreItemAttributes ?? []);
     const itemTemplatesMap = game.itemSystem.itemTemplatesMap;
     const itemTraitsMap = game.itemSystem.itemTraitsMap;
     const itemAttributesMap = game.itemSystem.itemAttributesMap;
     const itemPropertiesMap = game.itemSystem.itemPropertiesMap;
+    const anyItemScope = scopes.itemTraits.enabled || scopes.itemAttributes.enabled
+      || scopes.itemProperties.enabled || scopes.itemStatuses.enabled;
 
-    for (const inv of game.itemSystem.inventories.value.values()) {
+    if (anyItemScope) for (const inv of game.itemSystem.inventories.value.values()) {
       for (const item of inv.items) {
         const tpl = itemTemplatesMap.get(item.id);
         if (!tpl) continue;                                          // template gone (removed mod); leave alone
 
         // Traits
-        const tplTraits = (tpl as any).traits || {};
-        for (const k of Object.keys(item.traits || {})) {
-          if (ignoreItemTraits.has(k)) continue;
-          if (!itemTraitsMap.has(k)) { delete item.traits[k]; continue; }
-          if (tplTraits[k] !== undefined) item.traits[k] = tplTraits[k];
-        }
-        for (const k of Object.keys(tplTraits)) {
-          if (ignoreItemTraits.has(k)) continue;
-          if (!itemTraitsMap.has(k)) continue;
-          if (item.traits[k] === undefined) item.traits[k] = tplTraits[k];
+        if (scopes.itemTraits.enabled) {
+          const tplTraits = (tpl as any).traits || {};
+          for (const k of Object.keys(item.traits || {})) {
+            if (!scopes.itemTraits.allows(k)) continue;
+            if (!itemTraitsMap.has(k)) { delete item.traits[k]; continue; }
+            if (tplTraits[k] !== undefined) item.traits[k] = tplTraits[k];
+          }
+          for (const k of Object.keys(tplTraits)) {
+            if (!scopes.itemTraits.allows(k)) continue;
+            if (!itemTraitsMap.has(k)) continue;
+            if (item.traits[k] === undefined) item.traits[k] = tplTraits[k];
+          }
         }
 
         // Attributes
-        const tplAttrs = (tpl as any).attributes || {};
-        for (const k of Object.keys(item.attributes || {})) {
-          if (ignoreItemAttributes.has(k)) continue;
-          if (!itemAttributesMap.has(k)) { delete item.attributes[k]; continue; }
-          if (typeof tplAttrs[k] === 'string') item.attributes[k] = tplAttrs[k];
-        }
-        for (const k of Object.keys(tplAttrs)) {
-          if (ignoreItemAttributes.has(k)) continue;
-          if (!itemAttributesMap.has(k)) continue;
-          if (item.attributes[k] === undefined) item.attributes[k] = tplAttrs[k];
+        if (scopes.itemAttributes.enabled) {
+          const tplAttrs = (tpl as any).attributes || {};
+          for (const k of Object.keys(item.attributes || {})) {
+            if (!scopes.itemAttributes.allows(k)) continue;
+            if (!itemAttributesMap.has(k)) { delete item.attributes[k]; continue; }
+            if (typeof tplAttrs[k] === 'string') item.attributes[k] = tplAttrs[k];
+          }
+          for (const k of Object.keys(tplAttrs)) {
+            if (!scopes.itemAttributes.allows(k)) continue;
+            if (!itemAttributesMap.has(k)) continue;
+            if (item.attributes[k] === undefined) item.attributes[k] = tplAttrs[k];
+          }
         }
 
         // Properties — preserve current values; purge stale; backfill missing template properties.
-        const tplProps = (tpl as any).properties || {};
-        for (const k of Object.keys(item.properties || {})) {
-          if (!itemPropertiesMap.has(k)) delete item.properties[k];  // stale: purge
-        }
-        for (const k of Object.keys(tplProps)) {
-          if (!itemPropertiesMap.has(k)) continue;
-          if (item.properties[k] === undefined) {
-            const prop = game.itemSystem.createProperty(k, tplProps[k] as number);
-            if (prop) item.properties[k] = prop;
+        if (scopes.itemProperties.enabled) {
+          const tplProps = (tpl as any).properties || {};
+          for (const k of Object.keys(item.properties || {})) {
+            if (!scopes.itemProperties.allows(k)) continue;
+            if (!itemPropertiesMap.has(k)) delete item.properties[k];  // stale: purge
+          }
+          for (const k of Object.keys(tplProps)) {
+            if (!scopes.itemProperties.allows(k)) continue;
+            if (!itemPropertiesMap.has(k)) continue;
+            if (item.properties[k] === undefined) {
+              const prop = game.itemSystem.createProperty(k, tplProps[k] as number);
+              if (prop) item.properties[k] = prop;
+            }
           }
         }
 
         // Status object — refresh from template (no live state to preserve on this field).
-        item.statusObject = (tpl as any).status ? JSON.parse(JSON.stringify((tpl as any).status)) : {};
+        if (scopes.itemStatuses.enabled && scopes.itemStatuses.allows(item.id)) {
+          item.statusObject = (tpl as any).status ? JSON.parse(JSON.stringify((tpl as any).status)) : {};
+        }
       }
     }
 
-    // Equip-status re-bind
-    for (const char of game.getAllCharacters()) {
-      for (const slot of char.itemSlots) {
-        if (!slot.itemUid) continue;
-        const item = game.itemSystem.getItemByUid(slot.itemUid);
-        if (item) Inventory.applyEquipStatus(item, char);
+    // Equip-status re-bind — pushes the refreshed statusObject onto whoever wears the item.
+    if (scopes.itemStatuses.enabled) {
+      for (const char of game.getAllCharacters()) {
+        for (const slot of char.itemSlots) {
+          if (!slot.itemUid) continue;
+          const item = game.itemSystem.getItemByUid(slot.itemUid);
+          if (item && scopes.itemStatuses.allows(item.id)) Inventory.applyEquipStatus(item, char);
+        }
       }
+    }
+
+    // Put back exactly the pools that were loaded (see snapshot above).
+    for (const [char, snap] of resourceSnapshots) {
+      char.restoreResources(snap);
     }
 
     console.log(`[save-migration] done in ${(performance.now() - migrationStart).toFixed(1)}ms`);
@@ -423,7 +665,66 @@ export class CoreSystem {
   @Skip()
   public soundsMap: Map<string, SoundObject> = new Map();
 
+  /**
+   * Everything currently playing, so any sound can be stopped mid-playback.
+   * A flat array rather than a Map keyed by id: two overlapping one-shots of the
+   * same id must stay independently stoppable.
+   */
+  @Skip()
+  public activeSounds: SoundPlayback[] = [];
+
+  /**
+   * Ids of the loops that were playing when the run was saved, so loadGame can resume them.
+   * Deliberately not @Skip()ed — this is the persisted half. Plain data because activeSounds
+   * holds HTMLAudioElements, which JSON.stringify flattens to {}.
+   */
+  public loopingSoundIds: string[] = [];
+
   music: string; // id from MusicMap
+
+  @Skip()
+  private autoplayResumers: (() => void)[] = [];
+  @Skip()
+  private autoplayHandler: (() => void) | null = null;
+
+  private getSoundVolume(): number {
+    return (Global.getInstance().userSettings.value.sound_volume || 0) / 100;
+  }
+
+  /**
+   * Browsers block playback until the page has seen a gesture — always the case right after a
+   * load, which goes through window.location.reload(). Mirrors musicPlayer.waitForInteraction,
+   * but with one shared listener set serving every blocked sound.
+   */
+  private waitForInteraction(resume: () => void) {
+    this.autoplayResumers.push(resume);
+    if (this.autoplayHandler) {
+      return;
+    }
+
+    const handler = () => {
+      document.removeEventListener('click', handler);
+      document.removeEventListener('keydown', handler);
+      document.removeEventListener('touchstart', handler);
+      this.autoplayHandler = null;
+      const resumers = this.autoplayResumers;
+      this.autoplayResumers = [];
+      for (const resumer of resumers) {
+        resumer();
+      }
+    };
+    this.autoplayHandler = handler;
+    document.addEventListener('click', handler);
+    document.addEventListener('keydown', handler);
+    document.addEventListener('touchstart', handler);
+  }
+
+  private releaseSound(playback: SoundPlayback) {
+    const index = this.activeSounds.indexOf(playback);
+    if (index !== -1) {
+      this.activeSounds.splice(index, 1);
+    }
+  }
 
   public playSounds(val: string | string[]) {
     if (!val) {
@@ -439,6 +740,9 @@ export class CoreSystem {
 
     for (let sound of sounds) {
       sound = sound.trim();
+      if (!sound) {
+        continue;
+      }
 
       let compiledSound = this.soundsMap.get(sound);
       if (!compiledSound) {
@@ -446,35 +750,93 @@ export class CoreSystem {
         continue;
       }
       let soundUrls = compiledSound.files;
-      let soundElements: HTMLAudioElement[] = [];
+      if (!soundUrls?.length) {
+        continue;
+      }
+
+      const loop = !!compiledSound.loop;
+      // Re-triggering a loop restarts it rather than stacking a second copy.
+      if (loop) {
+        this.stopSounds(sound);
+      }
+
+      const soundElements: HTMLAudioElement[] = [];
+      const playback: SoundPlayback = { id: sound, loop, stopped: false, elements: soundElements };
       let loadedCount = 0;
 
+      const playNextSound = (index: number) => {
+        // Stopped while still loading: pause() was a no-op, so bail before it starts unhandled.
+        if (playback.stopped) {
+          return;
+        }
+        if (index >= soundElements.length) {
+          if (!loop) {
+            this.releaseSound(playback);
+            return;
+          }
+          index = 0; // the whole sequence repeats
+        }
+        const audio = soundElements[index];
+        audio.currentTime = 0;
+        audio.volume = this.getSoundVolume();
+        audio.play().catch((e: any) => {
+          if (e?.name === 'AbortError') {
+            return;
+          }
+          if (e?.name === 'NotAllowedError') {
+            gameLogger.warn(`[sound] "${sound}" blocked by autoplay policy - waiting for user interaction`);
+            this.waitForInteraction(() => playNextSound(index));
+            return;
+          }
+          gameLogger.error(`Error playing sound: ${sound}`, e);
+        });
+      };
+
       // Load all sounds
-      soundUrls?.forEach((url, index) => {
+      soundUrls.forEach((url, index) => {
         const audio = new Audio(`${url}`);
+        // Registered once at creation — playNextSound may replay this element many times.
+        audio.addEventListener('ended', () => playNextSound(index + 1));
         audio.addEventListener('canplaythrough', () => {
           loadedCount++;
           // If all sounds are loaded, start playing
           if (loadedCount === soundUrls.length) {
+            gameLogger.info(`[sound] Playing sound effect: "${sound}"${loop ? ' (looping)' : ''}`);
             playNextSound(0);
           }
-        });
+        }, { once: true });
         audio.addEventListener('error', (e) => {
           gameLogger.error(`Error loading sound: ${url}`, e);
+          this.releaseSound(playback); // a file that never loads must not leak its handle
         });
         soundElements[index] = audio;
       });
 
-      let playNextSound = (index: number) => {
-        if (index < soundElements.length) {
-          soundElements[index].play();
-          soundElements[index].volume = Global.getInstance().userSettings.value.sound_volume / 100;
-          soundElements[index].addEventListener('ended', () => {
-            soundElements[index] = null as any; // Remove reference to the finished sound
-            playNextSound(index + 1);
-          });
-        }
+      this.activeSounds.push(playback);
+    }
+  }
+
+  /** Stop sound(s) by id, looping or not. Omit `val` to stop everything currently playing. */
+  public stopSounds(val?: string | string[], options?: StopSoundOptions) {
+    const ids = (val === undefined || val === '')
+      ? null // null = match everything
+      : (typeof val === "string" ? val.split(",") : val).map(s => s.trim());
+
+    // Iterate a copy: releaseSound splices the live array.
+    for (const playback of [...this.activeSounds]) {
+      if (ids && !ids.includes(playback.id)) {
+        continue;
       }
+      if (options?.keepLooping && playback.loop) {
+        continue;
+      }
+      playback.stopped = true;
+      for (const audio of playback.elements) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+      this.releaseSound(playback);
+      gameLogger.info(`[sound] Stopped sound: "${playback.id}"`);
     }
   }
 
@@ -944,18 +1306,6 @@ export class CoreSystem {
   }
 
   // ============================================
-  // MUSIC VOLUME WATCHER
-  // ============================================
-
-  // ignore types
-  public initMusicVolumeWatcher() {
-    // music volume change watcher
-    watch(() => Global.getInstance().userSettings.value.music_volume, (newVolume) => {
-      MusicPlayer.getInstance().setVolume(newVolume / 100);
-    });
-  }
-
-  // ============================================
   // COMPUTED PROPERTIES INITIALIZATION
   // ============================================
 
@@ -988,9 +1338,20 @@ export class CoreSystem {
     const game = Game.getInstance();
 
     // Init infrastructure
-    this.initMusicVolumeWatcher();
     this.initPlayTimeTracking();
     this.createComputedProperties(game.dungeonSystem);
+
+    // Looping sounds outlive their play call, so they need a live link to the volume
+    // slider. Registered here rather than in global.ts (like music_volume) because the
+    // registry is game-scoped and Game.getInstance() auto-creates outside a game.
+    watch(() => Global.getInstance().userSettings.value.sound_volume, (newVolume) => {
+      const volume = (newVolume || 0) / 100;
+      for (const playback of this.activeSounds) {
+        for (const audio of playback.elements) {
+          audio.volume = volume;
+        }
+      }
+    });
 
     // Initialize all registrations via InitSystem
     const initSystem = new InitSystem(game);
@@ -1032,6 +1393,10 @@ export class CoreSystem {
     if (!proceed) {
       return;
     }
+
+    // Snapshot which loops are live so loadGame can restart them. Derived here from the one
+    // source of truth rather than mirrored on every play/stop, so it cannot drift.
+    this.loopingSoundIds = this.activeSounds.filter(p => p.loop).map(p => p.id);
 
     const metaData = this.generateSaveMetaData(this.gameManifest, this.modsManifests, options);
     const gameCoreData = save(game);
@@ -1093,13 +1458,25 @@ export class CoreSystem {
 
     game.dungeonSystem._loadAndSetDungeonActual(game.dungeonSystem.currentDungeonId.value!);
 
-    // call onLoad Actions
-    let onLoadActions = game.dungeonSystem.reloadActionObject;
-    game.logicSystem.resolveActions(onLoadActions);
+    // Hard Scene Reset (dev): a presence flag means "re-enter the loaded save's own scene
+    // fresh" instead of restoring its cached text — rebuilds content from the (possibly
+    // edited) disk lines and fires its enter actions exactly once. The scene id comes from
+    // the loaded save (set just before the checkpoint was written), so callers don't pass it.
+    const wantReplay = localStorage.getItem(DEV_REPLAY_SCENE_KEY);
+    if (wantReplay) localStorage.removeItem(DEV_REPLAY_SCENE_KEY);
 
-    // reload event choices
-    if (game.dungeonSystem.currentSceneId.value) {
-      game.dungeonSystem.loadDocChoices();
+    const ds = game.dungeonSystem;
+    if (wantReplay && ds.currentSceneId.value) {
+      ds.playScene(ds.currentSceneId.value, ds.activeDungeonId.value ?? ds.currentDungeonId.value);
+    } else {
+      // call onLoad Actions
+      let onLoadActions = ds.reloadActionObject;
+      game.logicSystem.resolveActions(onLoadActions);
+
+      // reload event choices
+      if (ds.currentSceneId.value) {
+        ds.loadDocChoices();
+      }
     }
 
     // hide progression state
@@ -1107,6 +1484,14 @@ export class CoreSystem {
 
     // load music
     this.setMusic(this.music, true);
+
+    // Resume looping ambience saved with the run. Restarts from the top of the sequence —
+    // playback position isn't persisted, and ambience doesn't need it. Deliberately not done
+    // through reload actions: the player may be in a different scene than the one that
+    // started the loop, so re-firing the original action would be wrong.
+    if (this.loopingSoundIds.length) {
+      this.playSounds(this.loopingSoundIds);
+    }
 
     // Initialize selected character to first party member if not already set
     const initSystem = new InitSystem(game);

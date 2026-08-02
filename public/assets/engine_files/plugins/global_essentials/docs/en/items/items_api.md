@@ -135,9 +135,8 @@ if (recipes.has("iron_sword_recipe")) {
 | `price` | `Record<string, number>` | Base price in currencies |
 | `tradePrice` | `object` | Trade prices (player/trader) |
 | `is_currency` | `boolean` | Whether item is a currency |
-| `is_consumable` | `boolean` | Whether item can be consumed |
-| `consume_duration` | `number` | Status duration on consume (-1 = permanent) |
-| `consume_max_stacks` | `number` | Max stacks for consume status (-1 = unlimited) |
+| `isConsumable()` | `boolean` | Derived — true if the item applies a consume status, restores a resource, or has a consume action script |
+| `apply_statuses_on_consume` | `{ status, stacks }[]` | Status templates applied on consume |
 | `consume_percentage` | `Record<string, number>` | % of max resource to restore/reduce on consume |
 | `consume_absolute` | `Record<string, number>` | Flat resource amount to restore/reduce on consume |
 | `slots` | `string[]` | Equipment slot IDs item can equip to |

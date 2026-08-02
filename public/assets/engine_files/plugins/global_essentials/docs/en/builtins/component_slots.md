@@ -110,15 +110,18 @@ Each slot passes **context props** to registered components, giving them access 
 
 ### navigation-toolbar
 
-| ID | Description |
-|----|-------------|
-| `toolbar-back` | Back button |
-| `toolbar-encounter-nav` | Encounter navigation |
-| `toolbar-toggle-circles` | Toggle interaction circles |
-| `toolbar-zoom-controls` | Zoom in/out |
-| `toolbar-center-room` | Center on current room |
-| `toolbar-logs` | Open logs |
-| `toolbar-minimize` | Minimize toolbar |
+| ID | Order | Description |
+|----|-------|-------------|
+| `toolbar-back` | 1 | Back button |
+| `toolbar-encounter-nav` | 2 | Encounter navigation |
+| `toolbar-logs` | 3 | Open logs |
+| `toolbar-dungeon-name` | 20 | Dungeon name (spinner while the dungeon's art loads) |
+| `toolbar-toggle-circles` | 30 | Toggle interaction circles |
+| `toolbar-zoom-controls` | 31 | Zoom in/out |
+| `toolbar-center-room` | 32 | Center on current room |
+| `toolbar-minimize` | 33 | Minimize toolbar |
+
+The dungeon name stretches to fill the bar, so everything below order 20 sits in the left group and everything above it in the right group. Pick your button's `order` accordingly.
 
 ### inventory-header
 

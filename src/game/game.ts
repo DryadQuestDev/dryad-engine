@@ -3,13 +3,13 @@ import { Global } from '../global/global';
 import copy from 'fast-copy';
 import { computed, ComputedRef } from 'vue';
 
-import { DungeonSystem, DungeonLine, SceneAsset } from './systems/dungeonSystem';
+import { DungeonSystem, DungeonLine, SceneAsset, SceneContext, ScenePlayOptions, SceneGradeState } from './systems/dungeonSystem';
 import { DungeonData } from './core/dungeon/dungeonData';
 import { ActionObject, AspectRenderer, LogicSystem, PoolSettings, PoolDrawResult, CollectionSettings } from './systems/logicSystem';
 import { NarrativeSystem } from './systems/narrativeSystem';
 import { CharacterSystem, StatComputerFunction, type StatGroupResolverFunction } from './systems/characterSystem';
 import { ItemSystem } from './systems/itemSystem';
-import { CoreSystem, type EmitterMap, type CustomComponent, type SaveOptions } from './systems/coreSystem';
+import { CoreSystem, type EmitterMap, type CustomComponent, type SaveOptions, type SaveMigrationOptions } from './systems/coreSystem';
 import { gameLogger } from './utils/logger';
 import { preloadCharacterAssets, type PreloadCharacterAssetsOptions } from './utils/assetPreloader';
 import { Character } from './core/character/character';
@@ -155,9 +155,18 @@ export class Game {
   }
 
   /**
-   * Rebuild every character's state from current definitions when the loaded save's versions differ from the current.
+   * Rebuild every character and item from current definitions when the loaded save's versions differ from the current
+   * (in dev mode it runs on every load, version bump or not).
+   *
+   * Each section — stats, traits, attributes, abilities, skinLayers, spine, itemSlots, skillTrees, learnedSkills,
+   * statuses, itemTraits, itemAttributes, itemProperties, itemStatuses — takes `true` (whole section), `false`
+   * (skip it) or a list of ids. `mode: 'opt-out'` (default) syncs everything and the lists name what to skip;
+   * `mode: 'opt-in'` syncs nothing and the lists name what to sync. Omitting a section follows the mode.
+   *
+   * Resource pools are never touched: snapshot at the start, restored verbatim at the end, so a stats sync or
+   * status reapply can't clamp or refill them. Item slots are backfilled and repositioned — never removed.
    */
-  public runDefaultSaveMigration(options: { ignoreStats?: string[]; ignoreTraits?: string[]; ignoreAttributes?: string[]; ignoreItemTraits?: string[]; ignoreItemAttributes?: string[]; } = {}): void {
+  public runDefaultSaveMigration(options: SaveMigrationOptions = {}): void {
     this.coreSystem.runDefaultSaveMigration(options);
   }
 
@@ -241,6 +250,14 @@ export class Game {
     return svc;
   }
 
+  /**
+   * Whether a plugin is installed (its plugin.json was loaded). Reliable at any plugin-script
+   * load time regardless of plugin order — configs load in a pass before any script runs.
+   */
+  public hasPlugin(pluginId: string): boolean {
+    return this.coreSystem.pluginConfigs.has(pluginId);
+  }
+
   // ============================================
   // PUBLIC API: State Management
   // ============================================
@@ -266,16 +283,20 @@ export class Game {
     const open = [...this.getOpenPopups()];
     for (const id of ids) if (id && !open.includes(id)) open.push(id);
     this.setState('popup_state', open);
+    gameLogger.info(`[popup] Popup stack: [${open.join(', ')}]`);
   }
 
   /** Close one or more specific popups, leaving the rest of the stack open. */
   public closePopup(...ids: string[]): void {
-    this.setState('popup_state', this.getOpenPopups().filter(p => !ids.includes(p)));
+    const open = this.getOpenPopups().filter(p => !ids.includes(p));
+    this.setState('popup_state', open);
+    gameLogger.info(`[popup] Popup stack: [${open.join(', ')}]`);
   }
 
   /** Close every open popup. */
   public closeAllPopups(): void {
     this.setState('popup_state', []);
+    gameLogger.info('[popup] Closed all popups');
   }
 
   /** The currently open popup ids, bottom-to-top (last = topmost). */
@@ -292,33 +313,137 @@ export class Game {
     return this.dungeonSystem.currentDungeon.value?.dungeon_type as "map" | "screen" | "text";
   }
 
-  public nextScene() {
-    this.dungeonSystem.nextScene();
+  /**
+   * The currently loaded dungeon object (dungeons are built lazily — only the active one exists).
+   * Exposes config-driven fields like `traits` (dungeon_traits values, e.g. level_group).
+   */
+  public getCurrentDungeon() {
+    return this.dungeonSystem.currentDungeon.value || null;
   }
 
-  public exitScene(skipEvents: boolean = false) {
-    this.dungeonSystem.exitScene(skipEvents);
+  /**
+   * Advance to the next scene. `instant` applies only when there is no next scene: the fallback
+   * exit closes immediately instead of the graceful actor fade-out. Pass true when the whole
+   * screen is already changing (e.g. battle end), so a restored cast the player never saw doesn't
+   * linger through the close animation.
+   */
+  public nextScene(instant: boolean = false) {
+    this.dungeonSystem.nextScene(instant);
+  }
+
+  /**
+   * Exit the current scene. Runs a short graceful close first — the dialogue fades out
+   * and staged actors leave with their slot exit animations — then tears down.
+   * @param skipEvents - When true, room events don't fire after the exit
+   * @param instant - Skip the close animation and tear down immediately
+   */
+  public exitScene(skipEvents: boolean = false, instant: boolean = false) {
+    this.dungeonSystem.exitScene(skipEvents, instant);
   }
 
   public getFlag(id: string): number {
     return this.dungeonSystem.getFlag(id);
   }
 
+  public setFlag(id: string, value: number): void {
+    this.dungeonSystem.processFlagAction(`${id} = ${value}`);
+  }
+
   public enter(val: string): void {
     this.dungeonSystem.enter(val);
+  }
+
+  /** Id of the room the player is standing in. Null only before the first room loads. */
+  public getCurrentRoomId(): string | null {
+    return this.dungeonSystem.currentRoomId.value;
+  }
+
+  /**
+   * Id of the dungeon whose rooms the player is in — the player is always in one.
+   * This does NOT change while a cross-dungeon scene plays (e.g. a shared scene from
+   * a "global" dungeon): it is where the player physically stands, not where the
+   * running scene's lines live. Null only before the first dungeon loads.
+   */
+  public getCurrentDungeonId(): string | null {
+    return this.dungeonSystem.currentDungeonId.value;
+  }
+
+  /**
+   * Advance every collected collectable's regrow countdown by `turns`, across all
+   * dungeons. Countdowns that reach 0 are cleared — the node becomes visible and
+   * collectable again; entries without regrow are untouched. Called by time-system
+   * plugins (turn_system wires it to `turn_advanced`); the engine never ticks itself.
+   */
+  public tickCollectables(turns: number): void {
+    this.dungeonSystem.tickCollectables(turns);
+  }
+
+  /** Clear a collectable's collected latch immediately — it regrows on the spot. */
+  public uncollectEncounter(encounterId: string, dungeonId: string | null = null): void {
+    this.dungeonSystem.uncollectEncounter(encounterId, dungeonId);
+  }
+
+  /** Has this collectable encounter been taken (and not yet regrown)? */
+  public isEncounterCollected(encounterId: string, dungeonId: string | null = null): boolean {
+    return this.dungeonSystem.isEncounterCollected(encounterId, dungeonId);
+  }
+
+  /**
+   * Re-run the `discover` checks on the current room, revealing any hidden encounter the party
+   * now meets the threshold for. The engine already scans on room entry and scene exit — call
+   * this after anything else that can move a stat while the player stands still (time-system
+   * plugins call it when the clock advances).
+   */
+  public scanDiscoverableEncounters(): void {
+    this.dungeonSystem.scanDiscoverableEncounters();
   }
 
   /**
    * Plays a scene, resolving friendly id forms the same way the `scene` action does:
    * `scene`, `room.scene`, `dungeon.room.scene` (each optionally `#`-prefixed),
    * `&anchor`, `&dungeon.anchor`, `next`, `shift:x`, or a full `#room.scene.1.1.1` id.
+   * Pass `{ root: false }` to play it as a cutaway — no root-scene staging (default
+   * dungeon/room assets, dungeon music, `scene_play` default actors).
    */
-  public playScene(sceneId: string | null, dungeonId: string | null = null): void {
-    this.dungeonSystem.playSceneResolver(sceneId, dungeonId);
+  public playScene(sceneId: string | null, dungeonId: string | null = null, options?: ScenePlayOptions): void {
+    this.dungeonSystem.playSceneResolver(sceneId, dungeonId, options);
   }
 
   public resolveSceneId(value: string): { sceneId: string | null, dungeonId: string | null } {
     return this.dungeonSystem.resolveSceneId(value);
+  }
+
+  /** Full id of the currently playing scene paragraph, or null when no scene is active. */
+  public getCurrentSceneId(): string | null {
+    return this.dungeonSystem.currentSceneId.value;
+  }
+
+  /**
+   * Instantly remove every staged actor — no exit animations, pending removals canceled.
+   * @param keepExiting - Leave mid-exit actors alone: they finish their exit animations,
+   * and a following scene re-staging the same character revives them in place.
+   */
+  public clearActors(keepExiting: boolean = false): void {
+    this.dungeonSystem.clearActors(keepExiting);
+  }
+
+  /**
+   * Snapshot the live scene state (current paragraph, text, choices, actors, assets,
+   * delayed actions) so an interrupting scene can play and the interrupted one be put
+   * back afterward. Pair with {@link restoreSceneContext}. Used by battle systems for
+   * mid-battle cutaway scenes.
+   */
+  public captureSceneContext(): SceneContext {
+    return this.dungeonSystem.captureSceneContext();
+  }
+
+  /**
+   * Restore a context captured with {@link captureSceneContext} WITHOUT replaying the
+   * paragraph — no actions re-run, no enter animations. Safe to call synchronously
+   * from an `event_end` listener to hand control straight back to the interrupted scene.
+   */
+  public restoreSceneContext(ctx: SceneContext): void {
+    this.dungeonSystem.restoreSceneContext(ctx);
   }
 
   public getDungeonId(dungeonId: string | null = null): string {
@@ -351,6 +476,16 @@ export class Game {
 
   public clearAssets(): void {
     this.dungeonSystem.clearAssets();
+  }
+
+  /** Remove every staged asset except the dungeon/room defaults (the backdrop). */
+  public clearTransientAssets(): void {
+    this.dungeonSystem.clearTransientAssets();
+  }
+
+  /** Hard-clear the stage and re-stage the dungeon/room default assets fresh. */
+  public resetToDefaultAssets(): void {
+    this.dungeonSystem.resetToDefaultAssets();
   }
 
   public addFlash(flash: string): void {
@@ -439,6 +574,10 @@ export class Game {
     this.characterSystem.deleteCharacter(character);
   }
 
+  public resetCharacter(character: Character | string): Character {
+    return this.characterSystem.resetCharacter(character);
+  }
+
   /**
    * Parse a generic `id<op>value` specification into a typed list of ops.
    */
@@ -511,8 +650,25 @@ export class Game {
     this.coreSystem.setMusic(val, false, disableTransition);
   }
 
+  /**
+   * Play sound effect(s) by id. Sounds flagged `loop` in the editor repeat their whole
+   * file sequence until stopped, or until the scene exits.
+   */
   public playSounds(val: string | string[]) {
     this.coreSystem.playSounds(val);
+  }
+
+  /** Stop sound(s) by id, looping or not. Omit `val` to stop every sound currently playing. */
+  public stopSounds(val?: string | string[]) {
+    this.coreSystem.stopSounds(val);
+  }
+
+  public setGrade(val: string | boolean | Record<string, any> | null, instant: boolean = false) {
+    this.dungeonSystem.setGrade(val, instant);
+  }
+
+  public getGrade(): SceneGradeState | null {
+    return this.dungeonSystem.getGrade();
   }
 
   // ============================================

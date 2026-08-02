@@ -6,6 +6,7 @@ import type {
   SceneRow,
   TemplateBlock,
 } from './ast';
+import { isCommentLine } from './comments';
 
 type OpenBlock = EncounterBlock | SceneBlock | TemplateBlock;
 
@@ -132,7 +133,7 @@ function appendGenericLine(block: EncounterBlock | TemplateBlock, line: string, 
     block.rows.push({ kind: 'empty' });
     return;
   }
-  if (line.startsWith('//')) {
+  if (isCommentLine(line)) {
     block.rows.push({ kind: 'comment', text: line });
     return;
   }

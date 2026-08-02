@@ -114,7 +114,7 @@ function updateColumn<K extends keyof SceneColumn>(
           <div class="col-header">
             <span class="col-index">{{ colIdx + 1 }}</span>
             <span class="col-sigil"
-              v-tooltip.top="column.kind === '~' ? 'Choice' : 'Column'">{{ column.kind }}</span>
+              v-tooltip.top="column.kind === '~' ? 'Branch choice' : 'Column'">{{ column.kind }}</span>
             <template v-if="column.kind === '~'">
               <InputText :model-value="column.name ?? ''"
                 @update:model-value="(v: any) => updateColumn(rowIdx, colIdx, 'name', v ?? '')"
@@ -149,7 +149,7 @@ function updateColumn<K extends keyof SceneColumn>(
         <button type="button" class="add-btn add-btn--tilde" @click="addColumn(rowIdx, '~')">
           <span class="add-btn__plus">+</span>
           <span class="add-btn__sigil">~</span>
-          <span class="add-btn__label">choice</span>
+          <span class="add-btn__label">branch</span>
         </button>
       </div>
     </div>
@@ -167,9 +167,9 @@ function updateColumn<K extends keyof SceneColumn>(
       </button>
     </div>
 
-    <Dialog v-model:visible="choiceDialogVisible" modal header="Add choice row" :style="{ width: '20rem' }">
+    <Dialog v-model:visible="choiceDialogVisible" modal header="Add branch row" :style="{ width: '20rem' }">
       <div class="choice-dialog-body">
-        <label for="choice-count">How many choices?</label>
+        <label for="choice-count">How many branches?</label>
         <InputNumber input-id="choice-count" v-model="choiceCount" :min="1" :max="20" showButtons />
       </div>
       <template #footer>

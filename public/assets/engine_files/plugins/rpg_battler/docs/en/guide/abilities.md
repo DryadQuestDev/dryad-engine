@@ -29,8 +29,8 @@ These fields control **when** an ability can be used:
 | Field | Type | Description |
 |---|---|---|
 | `target` | chooseOne | What this ability can target (see target types above). Default: `enemy`. |
-| `require_status_self` | chooseOne (`character_statuses`) | Usability gate: the caster must have ≥1 stack of this status or the ability is unusable (greyed out). |
-| `require_status_self_consume` | boolean | When true, removes 1 stack of `require_status_self` from the caster on cast. (e.g. `require_status_self: preparation` + consume = the old Preparation behavior.) |
+| `require_status_self` | chooseMany (`character_statuses`) | Usability gate: the caster must have ≥1 stack of **any** listed status or the ability is unusable (greyed out). When several modifiers contribute to this list, their entries union. |
+| `require_status_self_consume` | boolean | When true, removes 1 stack of the first `require_status_self` status the caster holds on cast. (e.g. `require_status_self: [preparation]` + consume = the old Preparation behavior.) |
 | `caster_min_health` | number | Caster must have MORE than X% HP for the ability to be usable. |
 | `caster_max_health` | number | Caster must have LESS than X% HP for the ability to be usable. |
 | `target_min_health` | number | Target must have LESS than X% HP (execute abilities). |
@@ -39,7 +39,7 @@ These fields control **when** an ability can be used:
 | `charges` | number | Maximum uses per battle. 0 = unlimited (cooldown only). Resets between battles. |
 | `cd_on_battle_start` | number | Initial cooldown applied when battle starts (delays first use). |
 | `cd_group` | string | Shared cooldown group. When cast, all abilities with the same `cd_group` on this character also go on cooldown (using the cast ability's cooldown value). |
-| `unamplified` | boolean | When true, the ability scales from raw `power` only; `power_amplifier` is ignored. |
+| `unamplified` | boolean | When true, the ability scales from raw `power` only — both `power_bonus` and `power_amplifier` are ignored. |
 | `channel` | boolean | Marks the ability as a **channel** (see below). |
 | `school` | chooseOne | Flavour/synergy tag (`fire`, `water`, `light`, ...) from `plugins_data/rpg_battler/schools`. Does **not** affect mitigation — reserved for future school-synergy systems. |
 | `projectile` | chooseOne | VFX definition from the **Projectiles** tab (`plugins_data/rpg_battler/projectiles`). **Leave empty for a melee cast** (caster lunges). The def drives the animation: a `travel_image` makes a sprite fly caster→target then play the hit VFX; a def with only a `hit_image` manifests the VFX at the target (no travel). Each sprite can be a single image or a spritesheet (`*_type: sheet` + `*_frames`/`*_fps`); a sheet may be a single horizontal row or a grid via `*_cols` (frames-per-row — a partial last row is trimmed). On-screen sizes come from `projectile_travel_size` / `projectile_hit_size` in the battler **Config** tab. Reusable across abilities. |

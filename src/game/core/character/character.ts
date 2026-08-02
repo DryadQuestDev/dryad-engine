@@ -1,5 +1,5 @@
 import { computed, ComputedRef, reactive, Ref, ref } from "vue";
-import { Status, SpineViewConfig } from "./status";
+import { Status, SpineViewConfig, StaticArtViewConfig } from "./status";
 import { Skip, Populate, load } from "../../../utility/save-system";
 import { Game } from "../../game";
 import { EntityStatObject } from "../../../schemas/entityStatSchema";
@@ -32,9 +32,6 @@ export type ImageLayerMeta = {
   image: string;
   layerId: string;
   mask?: string;
-  artDx: number;
-  artDy: number;
-  artScale: number;
 };
 
 export class Character {
@@ -82,6 +79,9 @@ export class Character {
 
   // Spine configs keyed by view ('' = default, 'back' = back view, etc.). _default normalizes to ''.
   public spineViews: Map<string, SpineViewConfig> = new Map();
+
+  // Static (non-spine) art placement keyed by view, same key scheme as spineViews.
+  public staticArtViews: Map<string, StaticArtViewConfig> = new Map();
 
 
   // Skills Logic
@@ -141,6 +141,7 @@ export class Character {
           }
         }
 
+        gameLogger.info(`[skill] "${this.id}" upgraded ${skillTreeId}.${id} to level ${newLevel}`);
         // Trigger skill learned event
         game.trigger('skill_learned', skillTreeId, id, newLevel);
       }
@@ -169,6 +170,7 @@ export class Character {
         game.logicSystem.resolveActions(skillSlot.params);
       }
 
+      gameLogger.info(`[skill] "${this.id}" learned ${skillTreeId}.${id}${newSkill.level > 1 ? ` at level ${newSkill.level}` : ''}`);
       // Trigger skill learned event
       game.trigger('skill_learned', skillTreeId, id, newSkill.level);
     }
@@ -324,14 +326,10 @@ export class Character {
       const layerMasks = layerData?.masks as Record<string, string> | undefined;
 
       if (layerImages?.[imageKey]) {
-        const offset = this.getSkinLayerArtOffset(layer.id);
         result.push({
           image: layerImages[imageKey],
           layerId: layer.id,
           mask: layerMasks?.[imageKey],  // Same key as image
-          artDx: offset.dx,
-          artDy: offset.dy,
-          artScale: offset.scale,
         });
       }
     }
@@ -450,6 +448,11 @@ export class Character {
 
   // custom css classes to apply to the skin layer
   public skinLayerStyles: Map<string, string[]> = new Map();
+
+  // runtime clip-path polygon per layer id (e.g. hair trimmed under a hat). @Skip: re-derived
+  // from data on every character_render, so it must not linger in saves.
+  @Skip()
+  public skinLayerClips: Map<string, string> = new Map();
 
   // rendered layers (filtered by character_render event)
   // Mutations happen in reevaluate() (outside reactive context) so no infinite loop
@@ -573,19 +576,35 @@ export class Character {
   }
 
   /**
-   * Get art offset for a skin layer. Falls back to character art_dx/art_dy/art_scale
-   * traits when the layer doesn't set its own.
+   * Get static (non-spine) art offset for the given view, from the merged
+   * static_art entries. No cross-view fallback — a view without an entry
+   * renders neutral (0/0/1), so tuning one view never moves another.
    */
-  public getSkinLayerArtOffset(layerId: string): { dx: number, dy: number, scale: number } {
-    const layer = Game.getInstance().characterSystem.skinLayersMap.get(layerId) as any;
-    const traitDx = this.getTrait('art_dx');
-    const traitDy = this.getTrait('art_dy');
-    const traitScale = this.getTrait('art_scale');
+  public getStaticArtOffset(view?: string): { dx: number, dy: number, scale: number } {
+    const config = this.staticArtViews.get(this.normalizeView(view));
+    if (!config) return { dx: 0, dy: 0, scale: 1 };
     return {
-      dx: typeof layer?.art_dx === 'number' ? layer.art_dx : (typeof traitDx === 'number' ? traitDx : 0),
-      dy: typeof layer?.art_dy === 'number' ? layer.art_dy : (typeof traitDy === 'number' ? traitDy : 0),
-      scale: typeof layer?.art_scale === 'number' ? layer.art_scale : (typeof traitScale === 'number' ? traitScale : 1),
+      dx: config.artDx ?? 0,
+      dy: config.artDy ?? 0,
+      scale: config.artScale ?? 1,
     };
+  }
+
+  /**
+   * Set/patch the static art placement for a view at runtime. Unset fields
+   * keep their current core-status value. Writes to the core status, so the
+   * change persists in saves and later statuses can still override per view.
+   */
+  public setStaticArtOffset(offset: { dx?: number; dy?: number; scale?: number }, view?: string): void {
+    const key = this.normalizeView(view);
+    const coreStatus = this.getCoreStatus();
+    const existing = coreStatus.staticArtViews.get(key);
+    coreStatus.staticArtViews.set(key, {
+      artDx: offset.dx ?? existing?.artDx,
+      artDy: offset.dy ?? existing?.artDy,
+      artScale: offset.scale ?? existing?.artScale,
+    });
+    this.reevaluate();
   }
 
   /** Get all available view names for this character (excludes '' default). */
@@ -717,6 +736,7 @@ export class Character {
     const newAbilities = new Set<string>();
     const newStatIds = new Set<string>();
     const newSpineViews = new Map<string, SpineViewConfig>();
+    const newStaticArtViews = new Map<string, StaticArtViewConfig>();
 
     for (const status of this.statuses.values()) {
       // Properties: latest status overwrites (unless is_merge)
@@ -748,11 +768,10 @@ export class Character {
         }
       }
 
-      // Abilities: accumulate (check requires_status on the template)
+      // Abilities: accumulate. Status-gating happens later, in computeFinalAbilities, off the
+      // merged meta.require_status — the post-merge check is what lets modifiers inject gates.
       if (status.abilities) {
         for (const abilityId of status.abilities) {
-          const abTemplate = game.characterSystem.abilityTemplatesMap.get(abilityId);
-          if (abTemplate?.requires_status && !this.statuses.has(abTemplate.requires_status as string)) continue;
           newAbilities.add(abilityId);
         }
       }
@@ -774,6 +793,18 @@ export class Character {
           const existing = newSpineViews.get(viewKey);
           newSpineViews.set(viewKey, {
             ...config,
+            artDx: config.artDx ?? existing?.artDx,
+            artDy: config.artDy ?? existing?.artDy,
+            artScale: config.artScale ?? existing?.artScale,
+          });
+        }
+      }
+
+      // Static art: same per-view partial-override as spine.
+      if (status.staticArtViews.size > 0) {
+        for (const [viewKey, config] of status.staticArtViews) {
+          const existing = newStaticArtViews.get(viewKey);
+          newStaticArtViews.set(viewKey, {
             artDx: config.artDx ?? existing?.artDx,
             artDy: config.artDy ?? existing?.artDy,
             artScale: config.artScale ?? existing?.artScale,
@@ -821,6 +852,7 @@ export class Character {
 
     // Spine: unified map ('' = default, 'back' = back view, etc.)
     this.spineViews = newSpineViews;
+    this.staticArtViews = newStaticArtViews;
 
     // Initialize skinLayerStyles for new skin layers
     for (const layerId of newSkinLayers) {
@@ -883,12 +915,20 @@ export class Character {
 
       // Merge with modifier if exists (using same merge function!)
       const modifier = this.abilityModifiers[abilityId];
-      if (modifier) {
-        result[abilityId] = this.mergeAbilityData(baseAbility, modifier);
-      } else {
-        // No modifier, just normalize the base template
-        result[abilityId] = this.mergeAbilityData(baseAbility, { meta: {}, effects: {} });
+      const merged = modifier
+        ? this.mergeAbilityData(baseAbility, modifier)
+        : this.mergeAbilityData(baseAbility, { meta: {}, effects: {} });
+
+      // meta.require_status: the ability exists only while the character holds ANY listed
+      // status — otherwise it is filtered here, which hides it from every consumer (panel,
+      // sheet, battle, AI). Checked post-merge so modifiers (e.g. equipped items) can inject it.
+      const gates = merged.meta.require_status;
+      if (gates) {
+        const list = Array.isArray(gates) ? gates : [gates];
+        if (list.length && !list.some((id: string) => this.statuses.has(id))) continue;
       }
+
+      result[abilityId] = merged;
     }
 
     // Sort by order, then cooldown
@@ -1077,6 +1117,25 @@ export class Character {
     this.skinLayerStyles.set(layerId, updatedStyles);
   }
 
+  /**
+   * Clip a skin layer to a polygon at render time (keep-inside clip-path, image-space
+   * coordinates — same contract as skin-layer keep masks). Typically set from a
+   * character_render listener; the reactive map re-renders the doll with no reevaluate().
+   * @param layerId The skin layer ID (e.g. 'hair_front')
+   * @param polygon A CSS polygon string, e.g. "polygon(10% 10%, ...)"
+   */
+  public setSkinLayerClip(layerId: string, polygon: string): void {
+    if (!this.skinLayers.has(layerId)) {
+      throw new Error(`Skin layer "${layerId}" not found on character ${this.id}`);
+    }
+    this.skinLayerClips.set(layerId, polygon);
+  }
+
+  /** Remove a layer's runtime clip. */
+  public clearSkinLayerClip(layerId: string): void {
+    this.skinLayerClips.delete(layerId);
+  }
+
 
   // TODO: remove this
   /*
@@ -1089,6 +1148,17 @@ export class Character {
 
 
   public addStatus(status: Status, applyArgs?: { stacks?: number; duration?: number; source?: string }) {
+    // Mutual-exclusion group: a status with a group_id supersedes any OTHER status in the same group
+    // (e.g. big_blessing replaces small_blessing). Same-id reapply is left to the merge path below.
+    // This is the single choke point for every application (status action, consumable, battle effect).
+    if (status.groupId) {
+      const supersededIds: string[] = [];
+      for (const [id, existing] of this.statuses) {
+        if (id !== status.id && existing.groupId === status.groupId) supersededIds.push(id);
+      }
+      for (const id of supersededIds) this.removeStatus(id);
+    }
+
     // Check if status with this id already exists
     const existingStatus = this.statuses.get(status.id);
 
@@ -1305,6 +1375,21 @@ export class Character {
   }
 
 
+  /** Raw copy of current resource pools. Save-owned state — see restoreResources. */
+  public snapshotResources(): Record<string, number> {
+    return { ...this.resources };
+  }
+
+  /**
+   * Raw-restore pools from snapshotResources, bypassing clamp/delta logic and resource-change
+   * events. Save-migration internal: status remove/re-add would otherwise clamp non-replenishable
+   * pools against a transiently-0 max and delta-refill replenishable ones. Resources initialized
+   * after the snapshot (e.g. a brand-new resource stat) keep their init value.
+   */
+  public restoreResources(snapshot: Record<string, number>): void {
+    Object.assign(this.resources, snapshot);
+  }
+
   public getResource(name: string): number {
     let stat = Game.getInstance().characterSystem.statsMap.get(name);
     if (!stat) {
@@ -1318,6 +1403,16 @@ export class Character {
 
   public getStatus(id: string): Status | undefined {
     return this.statuses.get(id);
+  }
+
+  /**
+   * The live status an equipped item is granting this character (see Inventory.applyEquipStatus),
+   * or undefined when the item grants none or is not equipped. Mutating it is allowed — call
+   * reevaluate() afterwards.
+   */
+  public getItemStatus(item: Item | string): Status | undefined {
+    const uid = typeof item === 'string' ? item : item.uid;
+    return this.statuses.get("item_" + uid);
   }
 
   public hasStatus(id: string): boolean {
@@ -1536,6 +1631,13 @@ export class Character {
     return this.itemSlots;
   }
 
+  /** The item equipped in this slot instance, or null when the slot is empty. */
+  public getItemInSlot(slotId: string): Item | null {
+    const itemUid = this.getItemSlotById(slotId)?.itemUid;
+    if (!itemUid) return null;
+    return this.getPartyInventory()?.getItemByUid(itemUid) || null;
+  }
+
   public removeItemSlot(slot: ItemSlot): void {
     this.itemSlots = this.itemSlots.filter(s => s !== slot);
   }
@@ -1645,6 +1747,7 @@ export class Character {
     }
 
     inventory.equipSlot(slot, resolvedItem, this);
+    gameLogger.info(`[equip] Equipped "${resolvedItem.id}" on "${this.id}"`);
   }
 
   /**
@@ -1663,7 +1766,9 @@ export class Character {
       throw new Error(`No slot found with item uid "${itemUid}" on character "${this.id}"`);
     }
 
+    const equippedItem = inventory.getItemByUid(itemUid);
     inventory.unequipSlot(slot, this);
+    gameLogger.info(`[equip] Unequipped "${equippedItem?.id ?? itemUid}" from "${this.id}"`);
   }
 
   // ignore types
@@ -1682,7 +1787,7 @@ export class Character {
     }
 
     // consume choice
-    if (item.is_consumable && !item.isEquipped) {
+    if (item.isConsumable() && !item.isEquipped) {
       const params = {
         consume_item: {
           itemUid: item.uid,
@@ -1694,6 +1799,24 @@ export class Character {
         name: Global.getInstance().getString("consume_item"),
         params: params
       });
+      choices.push(choice);
+    }
+
+    // learn-recipe choice (recipe scrolls) — grayed out once the recipe is known
+    if (item.learn_recipe && !item.isEquipped) {
+      const recipeId = item.learn_recipe;
+      const params = {
+        learn_recipe_item: {
+          itemUid: item.uid,
+          characterId: this.id,
+        }
+      };
+      let choice = Game.getInstance().logicSystem.createCustomChoice({
+        id: "learn_recipe_item",
+        name: Global.getInstance().getString("learn_recipe"),
+        params: params
+      });
+      choice.isAvailable = computed(() => !Game.getInstance().itemSystem.learnedRecipes.value.has(recipeId));
       choices.push(choice);
     }
 

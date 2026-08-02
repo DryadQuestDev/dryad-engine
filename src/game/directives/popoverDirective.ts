@@ -21,6 +21,8 @@ export type PopoverBinding =
         sticky?: boolean;
         /** When true, clicking the anchor closes the popup immediately instead of pinning it. For action triggers like ability buttons. */
         dismissOnClick?: boolean;
+        /** When true, clicking the anchor does nothing to the popup — no pin, no dismiss; the card stays hover-only. Use when the anchor's click is handled for another purpose (e.g. a selection toggle). */
+        disableClick?: boolean;
         closable?: boolean;
         width?: number | string;
         placement?: Placement;
@@ -33,6 +35,7 @@ type Normalized = {
     props: Record<string, unknown>;
     sticky: boolean;
     dismissOnClick: boolean;
+    disableClick: boolean;
     closable: boolean;
     width: number | string | undefined;
     placement: Placement | undefined;
@@ -61,6 +64,7 @@ function normalize(value: PopoverBinding, modifiers: Record<string, boolean>): N
             props: { html: value },
             sticky: false,
             dismissOnClick: false,
+            disableClick: false,
             closable: false,
             width: undefined,
             placement: placementMod,
@@ -73,6 +77,7 @@ function normalize(value: PopoverBinding, modifiers: Record<string, boolean>): N
             props: value.props ?? {},
             sticky: value.sticky === true,
             dismissOnClick: value.dismissOnClick === true,
+            disableClick: value.disableClick === true,
             closable: value.closable === true,
             width: value.width,
             placement: value.placement ?? placementMod,
@@ -85,6 +90,7 @@ function normalize(value: PopoverBinding, modifiers: Record<string, boolean>): N
             props: { html: value.html, context: value.context },
             sticky: value.sticky === true,
             dismissOnClick: value.dismissOnClick === true,
+            disableClick: value.disableClick === true,
             closable: value.closable === true,
             width: value.width,
             placement: value.placement ?? placementMod,
@@ -124,6 +130,7 @@ export const popover: Directive<HTMLElement, PopoverBinding> = {
             const cur = (el as any)[OPTS] as Normalized;
             const entry = buildEntry(el, cur);
             if (!entry) return;
+            if (cur!.disableClick) return;
             if (cur!.dismissOnClick) { closePopupsByKey(entry.key); return; }
             if (cur!.sticky) togglePin(entry);
             else clickTransient(entry);

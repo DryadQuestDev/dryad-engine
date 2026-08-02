@@ -1,7 +1,8 @@
 {
   "guide": [
     "overview",
-    "xp_formulas"
+    "xp_formulas",
+    "rewards_and_scaling"
   ],
   "reference": [
     "actions",

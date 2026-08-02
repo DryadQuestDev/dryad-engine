@@ -11,8 +11,17 @@ node_modules
 temp
 dist
 dist-ssr
+dist-capacitor
 production
 *.local
+
+# Android signing material — never commit, anywhere
+*.jks
+*.keystore
+
+# Capacitor scaffold + per-build icon/strings stamps — create it with
+# scripts/setup-android.sh; engine-owned bits live in android-overrides/
+android/
 
 # Editor directories and files
 .vscode/*

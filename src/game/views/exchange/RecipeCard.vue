@@ -1,15 +1,25 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { Inventory } from '../../core/character/inventory';
 import { ItemRecipeObject } from '../../../schemas/itemRecipeSchema';
 
 const game = Game.getInstance();
 
 const props = defineProps<{
   recipe: ItemRecipeObject;
+  // The crafting inventory + the party inventory, so each ingredient can show whether it's on hand.
+  inventory?: Inventory | null;
+  partyInventory?: Inventory | null;
 }>();
 
-// Get input items with images, quantities, and rarity
+// Total unequipped quantity of an item across the crafting and party inventories.
+function availableQuantity(itemId: string): number {
+  return (props.inventory?.getItemQuantity(itemId) || 0)
+    + (props.partyInventory?.getItemQuantity(itemId) || 0);
+}
+
+// Get input items with images, quantities, rarity, and whether enough are on hand
 const inputItems = computed(() => {
   if (!props.recipe.input_items) return [];
 
@@ -17,12 +27,14 @@ const inputItems = computed(() => {
     const template = game.itemSystem.itemTemplatesMap.get(input.item_id || '');
     const traits = template?.traits as any;
     const attributes = template?.attributes as any;
+    const quantity = input.quantity || 1;
     return {
       id: input.item_id,
       name: traits?.name || input.item_id,
       image: traits?.image || '',
-      quantity: input.quantity || 1,
-      rarity: attributes?.rarity || ''
+      quantity,
+      rarity: attributes?.rarity || '',
+      available: availableQuantity(input.item_id || '') >= quantity
     };
   });
 });
@@ -34,12 +46,13 @@ const outputItems = computed(() => {
   return props.recipe.output_items.map(output => {
     const template = game.itemSystem.itemTemplatesMap.get(output.item_id || '');
     const traits = template?.traits as any;
+    const attributes = template?.attributes as any;
     return {
       id: output.item_id,
       name: traits?.name || output.item_id,
       image: traits?.image || '',
       quantity: output.quantity || 1,
-      rarity: traits?.rarity || ''
+      rarity: attributes?.rarity || ''
     };
   });
 });
@@ -57,7 +70,7 @@ const outputItems = computed(() => {
     <div v-if="inputItems.length > 0" class="recipe-section">
       <h4 class="section-title">Ingredients</h4>
       <div class="items-list">
-        <div v-for="item in inputItems" :key="item.id" class="recipe-item">
+        <div v-for="item in inputItems" :key="item.id" class="recipe-item" :class="{ 'ingredient-available': item.available }">
           <img v-if="item.image" :src="item.image" :alt="item.name" class="item-image" />
           <span class="item-name" :class="item.rarity ? `rarity_${item.rarity}` : ''">{{ item.name }} (x{{ item.quantity
             }})</span>
@@ -153,6 +166,16 @@ const outputItems = computed(() => {
   border-color: rgba(66, 185, 131, 0.3);
 }
 
+/* Ingredient the player has enough of for this recipe */
+.recipe-item.ingredient-available {
+  background: rgba(66, 185, 131, 0.22);
+  border-color: rgba(66, 185, 131, 0.6);
+}
+
+.recipe-item.ingredient-available:hover {
+  background: rgba(66, 185, 131, 0.3);
+}
+
 .item-image {
   width: 32px;
   height: 32px;
@@ -162,7 +185,8 @@ const outputItems = computed(() => {
 
 .item-name {
   font-size: 0.95em;
-  color: #e6edf3;
+  /* rarity_<x> classes set --rarity-color (style.css); fall back to the neutral text color */
+  color: var(--rarity-color, #e6edf3);
   font-weight: 500;
 }
 </style>

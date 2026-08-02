@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
           <div ref="canvasRef" class="preview-canvas" @mousedown="handleMouseDown">
             <!-- Asset Preview using BackgroundAsset component -->
             <div v-if="assetPath || isSpineAsset" class="asset-wrapper">
-              <BackgroundAsset :key="componentKey" :asset="previewAsset" @spine-loaded="onSpineLoaded" />
+              <BackgroundAsset :key="componentKey" :asset="previewAsset" :grade="false" @spine-loaded="onSpineLoaded" />
             </div>
 
             <!-- No Asset Message -->

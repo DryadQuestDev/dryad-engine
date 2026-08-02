@@ -141,40 +141,48 @@ const displayOptions = computed(() => {
 </template>
 
 <style scoped>
+/* Fixed label column + flexible control column, so every row's title and control
+   start at the same x regardless of label length or field type. Width comes from
+   .gform so all rows in a form share one track. */
 .g-field-renderer {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--gfield-label-width, 130px) minmax(0, 1fr);
   align-items: center;
-  gap: 0.75rem;
+  column-gap: 0.75rem;
   width: 100%;
-  text-align: right;
 }
 
 .g-field-label {
   font-weight: 500;
-  min-width: 120px; /* Adjust as needed */
-  flex-shrink: 0;
+  text-align: left;
+  min-width: 0;
+  overflow-wrap: anywhere; /* long labels wrap inside the column instead of widening it */
+  line-height: 1.3;
 }
 
+/* min-width: 0 keeps a chip-filled MultiSelect or a long selected value from
+   bulging past the control track. */
 .g-field-input {
   width: 100%;
-  flex-grow: 1;
-}
-.g-field-input .p-inputtext {  /* Target PrimeVue's inner input if needed */
-    width: 100%;
-}
-.g-field-input.p-select, .g-field-input.p-multiselect { /* Target PrimeVue's Select/MultiSelect */
-    width: 100%;
+  min-width: 0;
 }
 
+/* Small controls sit at the control column's start edge rather than stretching. */
 .g-field-boolean-wrapper {
   display: flex;
   align-items: center;
+  justify-self: start;
 }
 
-.unsupported-field {
-  color: red;
-  font-style: italic;
-  padding: 0.5rem 0;
+.g-field-color-picker {
+  justify-self: start;
+}
+
+@media (max-width: 480px) {
+  .g-field-renderer {
+    grid-template-columns: 1fr;
+    row-gap: 0.35rem;
+  }
 }
 
 </style>

@@ -10,6 +10,20 @@ import type { ManifestObject } from '../../schemas/manifestSchema';
 export const SPINE_REFERENCE_HEIGHT = 700;
 
 /**
+ * Symmetric vertical headroom the CHARACTER spine viewport reserves above AND below the
+ * body box, as a fraction of that box's height. The canvas is rendered (1 + 2×PAD) taller
+ * than the slot, while the renderer keeps computing baseScale from the UNPADDED height —
+ * so body size, body centre, art_dx/art_dy, slot.scale and face_shift_* are all unchanged.
+ * The pad only moves the crop boundary outward, so tall skeletons (and animations that
+ * reach past the exported setup-pose AABB) stop losing their head and feet at the canvas
+ * edge. Characters only: background spine assets pass no pad and keep exact 1:1 geometry.
+ */
+export const SPINE_VIEWPORT_PAD_Y = 0.15;
+
+/** Total height multiplier for the character spine canvas (CSS box and backing buffer). */
+export const SPINE_VIEWPORT_PAD_FACTOR = 1 + 2 * SPINE_VIEWPORT_PAD_Y;
+
+/**
  * CSS `aspect-ratio` value for the character wrapper. Both spine and static
  * characters render into this shape so slot anchors line up regardless of art
  * source. Wider than the body's natural 5/7 frame so wide accessories (axes,

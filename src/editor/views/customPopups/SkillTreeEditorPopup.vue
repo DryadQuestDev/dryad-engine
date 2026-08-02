@@ -244,7 +244,7 @@ const arrowConnections = computed(() => {
     <!-- Canvas -->
     <div class="canvas-container">
       <!-- Background image (positioned absolutely behind SVG) -->
-      <BackgroundAsset v-if="showBackgroundImage && backgroundAsset" :asset="backgroundAsset" class="skill-tree-background" />
+      <BackgroundAsset v-if="showBackgroundImage && backgroundAsset" :asset="backgroundAsset" :grade="false" class="skill-tree-background" />
 
       <svg ref="svgContainer" :width="canvasWidth" :height="canvasHeight" class="skill-tree-canvas"
         @mousemove="onMouseMove" @mouseup="onMouseUp" @mouseleave="onMouseUp">

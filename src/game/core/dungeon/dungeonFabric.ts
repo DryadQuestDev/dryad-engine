@@ -1,3 +1,4 @@
+import { computed as vueComputed } from "vue";
 import { Dungeon } from "./dungeon";
 import { gameLogger } from "../../utils/logger";
 import { Global } from "../../../global/global";
@@ -37,6 +38,9 @@ export class DungeonFabric {
         dungeon.image = this.dungeonConfig.image || '';
         dungeon.image_scaling = this.dungeonConfig.image_scaling || 1;
 
+        // Default assets apply to any dungeon type (staged at event start).
+        dungeon.default_assets = this.dungeonConfig.default_assets || [];
+
         if (this.dungeonConfig.dungeon_type === 'map') {
             dungeon.padding = this.dungeonConfig.padding || 0;
             dungeon.fog_default = this.dungeonConfig.fog_default || 0;
@@ -49,6 +53,7 @@ export class DungeonFabric {
 
         dungeon.music = this.dungeonConfig.music || '';
         dungeon.actions = this.dungeonConfig.actions || {};
+        dungeon.traits = this.dungeonConfig.traits || {};
 
 
         // TODO: move assets load later to when entering Adventure Screen, not when creating a dungeon
@@ -157,7 +162,21 @@ export class DungeonFabric {
 
             let roomId = encounterObject.id.split('.')[0];
 
-            encounter.room = dungeon.getRoomById(roomId)!;
+            // A bad id must not kill the whole dungeon — name the culprit and skip it.
+            let room: DungeonRoom | null = null;
+            try {
+                room = dungeon.getRoomById(roomId);
+            } catch {
+                // fall through to the error below
+            }
+            if (!room) {
+                gameLogger.error(
+                    `Encounter "${encounterObject.id}" in dungeon "${dungeon.id}" names room "${roomId}", ` +
+                    `which does not exist. Encounter ids must be "room_id.encounter_id" (e.g. "room1.${encounterObject.id.split('.').pop()}"). Skipping it.`,
+                );
+                continue;
+            }
+            encounter.room = room;
             encounter.x = encounterObject.x ?? 0;
             encounter.y = encounterObject.y ?? 0;
             encounter.z = encounterObject.z ?? 25;
@@ -169,6 +188,18 @@ export class DungeonFabric {
 
 
             encounter.polygon = encounterObject.polygon ?? '';
+
+            if (encounterObject.type === 'collectable') {
+                if (encounterObject.collect_item) {
+                    const quantity = encounterObject.collect_quantity ?? 1;
+                    encounter.collectSpec = encounterObject.collect_item + (quantity > 1 ? '#' + quantity : '');
+                    encounter.regrowTurns = encounterObject.regrow ?? 0;
+                    encounter.collectClue = !!encounterObject.collect_clue;
+                } else {
+                    gameLogger.error(`Collectable encounter "${encounterObject.id}" in dungeon "${dungeon.id}" has no collect_item — treating it as a plain encounter.`);
+                }
+            }
+
             encounter.init();
             encounters.set(encounter.id, encounter);
         }
@@ -254,8 +285,22 @@ export class DungeonFabric {
                         if (params) {
                             // Debug: console.warn("ENCOUNTER PARAMS");
                             // Debug: console.warn(params);
-                            let computed = game.logicSystem.buildComputed(params);
-                            encounter.isVisible = computed;
+                            let ifClause = game.logicSystem.buildComputed(params);
+
+                            if (params.discover) {
+                                encounter.discoverSpec = params.discover;
+                                let encounterKey = encounter.id;
+                                let dungeonKey = dungeon.id;
+                                // Hidden until the party meets the threshold, which latches it
+                                // for good. `if` keeps evaluating alongside, so the encounter can
+                                // still hide again for other reasons (defeated, quest done…) —
+                                // it just never re-hides because the stat that revealed it dropped.
+                                encounter.isVisible = vueComputed(
+                                    () => game.dungeonSystem.isEncounterDiscovered(encounterKey, dungeonKey) && ifClause.value,
+                                );
+                            } else {
+                                encounter.isVisible = ifClause;
+                            }
 
                             if (params.rooms) {
                                 let extraRooms = params.rooms.split(",").map((x: string) => x.trim()).filter(Boolean);
@@ -286,7 +331,7 @@ export class DungeonFabric {
 
         // init !choices
         for (let [id, encounter] of dungeon.encounters) {
-            this.initChoices(encounter, choicesLines, dungeon.id);
+            this.initChoices(encounter, choicesLines, dungeon);
         }
 
         for (let [id, room] of dungeon.rooms) {
@@ -294,16 +339,78 @@ export class DungeonFabric {
                 gameLogger.error(`Room '${id}' in dungeon '${dungeon.id}' has no entry in content document. Synchronize content in the editor via Dungeons -> Config.`);
                 continue;
             }
-            this.initChoices(room.descriptionEncounter, choicesLines, dungeon.id);
+            this.initChoices(room.descriptionEncounter, choicesLines, dungeon);
+        }
+
+        // Collectables last, so the collected-latch wraps whatever visibility an
+        // optional @ line built, and the synthesized choice lands after authored ones.
+        for (let [, encounter] of dungeon.encounters) {
+            this.initCollectable(encounter, dungeon);
         }
 
     }
 
-    private initChoices(encounter: DungeonEncounter, choicesLines: DungeonLine[], dungeonId: string) {
+    /**
+     * Wire a `type: 'collectable'` encounter: hidden while collected, a synthesized
+     * Collect choice, and an item-derived description when no @ line authored one.
+     */
+    private initCollectable(encounter: DungeonEncounter, dungeon: Dungeon) {
+        if (!encounter.collectSpec) {
+            return;
+        }
+        let game = Game.getInstance();
+        let encounterId = encounter.id;
+        let dungeonId = dungeon.id;
+
+        // The latch composes over the @ line's if:/discover: (or the default true).
+        let baseVisible = encounter.isVisible;
+        encounter.isVisible = vueComputed(() => {
+            if (game.dungeonSystem.isEncounterCollected(encounterId, dungeonId)) {
+                return false;
+            }
+            return typeof baseVisible === 'boolean' ? baseVisible : baseVisible?.value ?? true;
+        });
+
+        let itemId = encounter.collectSpec.split('#')[0];
+        let template = game.itemSystem.itemTemplatesMap.get(itemId);
+        if (!template) {
+            gameLogger.error(`Collectable "${encounterId}" grants unknown item "${itemId}".`);
+        }
+        let traits = template?.traits as Record<string, any> | undefined;
+
+        if (!encounter.rawContent && template) {
+            // Name in its rarity color, like everywhere else the engine names items.
+            encounter.rawContent = `<b>${game.itemSystem.getItemNameHtml(itemId)}</b>. ${traits?.description || ''}`;
+        }
+
+        // No sprite assigned (manually or via encounters_default)? Use the item's icon.
+        if (!encounter.image && traits?.image) {
+            encounter.image = traits.image;
+        }
+
+        // The author may have written their own {collect: ...} choice for a custom label.
+        let hasCollectChoice = encounter.choices.some(choice => choice.params && choice.params.collect);
+        if (!hasCollectChoice) {
+            let params: Record<string, any> = {
+                collect: { spec: encounter.collectSpec, encounter: encounterId },
+            };
+            if (encounter.collectClue) {
+                params.clue = true;
+            }
+            encounter.choices.push(game.logicSystem.createCustomChoice({
+                id: `!${encounterId}.collect`,
+                name: Global.getInstance().getString('collect'),
+                params: params,
+            }));
+        }
+    }
+
+    private initChoices(encounter: DungeonEncounter, choicesLines: DungeonLine[], dungeon: Dungeon) {
         if (!encounter) return;
         let game = Game.getInstance();
+        let dungeonId = dungeon.id;
         let parts = encounter.id.split(".");
-        let pattern = "^!" + parts[0] + "\." + parts[1] + "\.";
+        let pattern = "^!" + parts[0] + "\\." + parts[1] + "\\.";
         // Debug: console.warn(encounter.id);
         // Debug: console.warn(pattern);
         let re = new RegExp(pattern);
@@ -328,6 +435,21 @@ export class DungeonFabric {
 
                 // Build params object
                 let params = line.params ? JSON.parse(JSON.stringify(line.params)) : {};
+
+                // ^pool refs are placement-scoped: redirect the choice's own copy to a unique
+                // per-placement inventory id (dungeon.room.encounter.choice). The raw ref stays
+                // in dungeonLines; the redirect is also recorded on the dungeon so consumers
+                // (e.g. the experience plugin) can instantiate without re-scanning the content.
+                for (let key of ["loot", "trade"] as const) {
+                    let ref = params[key];
+                    if (typeof ref === "string" && ref.startsWith("^")) {
+                        let instanceId = "^" + dungeonId + "." + line.id.slice(1);
+                        params[key] = instanceId;
+                        if (!dungeon.pooledInventories.some(entry => entry.id === instanceId)) {
+                            dungeon.pooledInventories.push({ id: instanceId, pool: ref.slice(1), type: key });
+                        }
+                    }
+                }
 
                 // add default action
                 let eventDelayed = game.logicSystem.getDelayedActions(params);

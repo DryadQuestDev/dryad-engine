@@ -19,6 +19,14 @@ export const BaseStatusSchema = {
             art_scale: { type: 'number', tooltip: 'Scale multiplier for this spine\'s art. 1 = native.' },
         }
     },
+    static_art: {
+        type: 'schema[]', tooltip: 'Static (non-spine) art placement per view. Entry with view = _default (or empty) applies to the default view. Merged per view across statuses — last status wins per field. A view without an entry renders neutral (0/0/1).', objects: {
+            view: { type: 'chooseOne', fromFile: 'character_views', tooltip: 'View this placement applies to (e.g. back). _default or empty = default view.' },
+            art_dx: { type: 'number', tooltip: 'X shift in % for static art in this view.' },
+            art_dy: { type: 'number', tooltip: 'Y shift in % for static art in this view.' },
+            art_scale: { type: 'number', tooltip: 'Scale multiplier for static art in this view. 1 = native.' },
+        }
+    },
 } as const satisfies Schema;
 
 export type BaseStatusObject = SchemaToType<typeof BaseStatusSchema>;
@@ -46,6 +54,7 @@ export const CharacterStatusSchema = {
     duration: { type: 'number', tooltip: 'How long the status lasts. -1 = permanent (default). Interpretation depends on the game/plugin (e.g. clock turns in battle).' },
     multi_stack: { type: 'boolean', tooltip: 'If true, each apply creates an independent instance with its own duration (DD-style). If false, reapply refreshes the single instance.' },
     duration_increment: { type: 'boolean', show: { multi_stack: '$falsy' }, tooltip: 'Single-stack only: reapplying adds the new duration to the existing one (accumulate) instead of refreshing to the max.' },
+    group_id: { type: 'string', tooltip: 'Mutual-exclusion group. Applying this status removes any other status sharing this group_id first, so ranked variants replace each other (e.g. small_blessing / big_blessing). Works no matter how the status is applied (status action, consumable, battle effect).' },
     image: { type: 'file', fileType: 'image', tooltip: 'Image to display for the status effect.' },
     polarity: { type: 'chooseOne', options: ['positive', 'neutral', 'negative'], tooltip: 'Visual indicator for the status: positive (green), neutral (gray), negative (red).' },
     is_hidden: { type: 'boolean', tooltip: 'If true, this status is hidden from the UI but still exists in data.' },

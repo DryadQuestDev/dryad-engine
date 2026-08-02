@@ -74,6 +74,8 @@ const POV = {
     "Am":        ["Am",        "Are"],
     "was":       ["was",       "were"],
     "Was":       ["Was",       "Were"],
+    "wasn't":    ["wasn't",    "weren't"],
+    "Wasn't":    ["Wasn't",    "Weren't"],
     // Contractions — lowercase key = mid-sentence, uppercase key = sentence start
     "i'm":       ["I'm",       "you're"],
     "I'm":       ["I'm",       "You're"],
@@ -87,6 +89,10 @@ const POV = {
     "We're":     ["We're",     "You're"],
     "we've":     ["we've",     "you've"],
     "We've":     ["We've",     "You've"],
+    "we'll":     ["we'll",     "you'll"],
+    "We'll":     ["We'll",     "You'll"],
+    "we'd":      ["we'd",      "you'd"],
+    "We'd":      ["We'd",      "You'd"],
 };
 
 /** Resolve all POV words based on game setting. */

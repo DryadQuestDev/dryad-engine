@@ -11,12 +11,13 @@ import Textarea from 'primevue/textarea';
 import ToggleSwitch from 'primevue/toggleswitch';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
-import { startPlaytest, openLoadGamePopup } from '../editor-screen/usePlaytest';
+import { startPlaytest, continuePlaytest, openLoadGamePopup } from '../editor-screen/usePlaytest';
 import { Global } from '../../../global/global';
 import { parseToAst } from '../../../utility/dungeonEditor/parseToAst';
 import { serializeAst } from '../../../utility/dungeonEditor/serializeAst';
 import { exportDocumentAsHtml, exportDocumentAsText } from '../../../utility/dungeonEditor/exportHtml';
 import { lintDungeonContent, type LintIssue } from '../../../utility/dungeonEditor/lint';
+import { convertPov } from '../../../utility/dungeonEditor/povConvert';
 import { buildDocumentIndex, type IndexCategory } from '../../../utility/dungeonEditor/index';
 import {
   newEncounter,
@@ -52,10 +53,21 @@ function stripHtml(s: string): string {
   return (tmp.textContent || '').replace(/\s+/g, ' ');
 }
 
+const kindSigil: Record<Block['kind'], string> = {
+  room: '^',
+  encounter: '@',
+  scene: '#',
+  template: '$',
+  raw: '—',
+};
+
 function blockMatches(block: Block, needle: string): boolean {
   const q = needle.toLowerCase();
   if (block.kind === 'raw') return stripHtml(block.text).toLowerCase().includes(q);
-  if ((block as any).id && String((block as any).id).toLowerCase().includes(q)) return true;
+  // Ids are stored bare (parse strips the sigil), but authors search the way
+  // ids are written in source — `#introduction`. Matching against sigil+id
+  // covers both the bare and the prefixed query in one check.
+  if ((block as any).id && (kindSigil[block.kind] + String((block as any).id)).toLowerCase().includes(q)) return true;
   if ('paramsRaw' in block && block.paramsRaw && block.paramsRaw.toLowerCase().includes(q)) return true;
   if (block.kind === 'encounter' || block.kind === 'template') {
     for (const row of block.rows) {
@@ -671,6 +683,42 @@ function onRawEdit(v: string) {
   }
 }
 
+// ── POV conversion (gender_pov plugin) ──
+
+const isPovActive = computed(() =>
+  editorInstance.pluginManager.pluginList.value.includes('gender_pov'));
+
+const povFeedback = ref<number | null>(null);
+let povFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+// The MC id from the gender_pov plugin config — only that character's `id:` replicas
+// convert (other characters' speech is their own first person, not the narrator's).
+// Same _core→mod merge walk the runtime uses: last-defined mc_id wins.
+async function readPovMcId(): Promise<string | undefined> {
+  const game = editorInstance.selectedGame;
+  if (!game) return undefined;
+  let mcId: string | undefined;
+  for (const mod of editorInstance.getModList(editorInstance.selectedMod || '_core')) {
+    try {
+      const config = await global.readJson(`games_files/${game}/${mod}/plugins_data/gender_pov/config.json`) as { mc_id?: string } | null;
+      if (config?.mc_id) mcId = config.mc_id;
+    } catch { /* no config in this mod */ }
+  }
+  return mcId;
+}
+
+async function convertPovDoc() {
+  const mcId = await readPovMcId();
+  const result = convertPov(serialized.value, { mcId });
+  if (result.count > 0) {
+    replaceDocBlocks(result.text);
+    commit();
+  }
+  povFeedback.value = result.count;
+  if (povFeedbackTimer) clearTimeout(povFeedbackTimer);
+  povFeedbackTimer = setTimeout(() => { povFeedback.value = null; }, 1500);
+}
+
 const copyFeedback = ref<'text' | 'html' | null>(null);
 let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -829,9 +877,11 @@ const matchingBlockIndices = computed<Set<number> | null>(() => {
 });
 
 // Occurrence-level match state for the counter and the prev/next arrows.
-// Source of truth is the rendered `.at-search` spans in DOM order — PlainEditor
-// re-applies them ~200ms after query/content changes, so counts are read
-// lazily (at jump time) or behind debounces, never synchronously.
+// Source of truth is the rendered DOM in document order: `.at-search` prose
+// spans (PlainEditor re-applies them ~200ms after query/content changes) plus
+// `.input-search-hit` tinted inputs (block ids, params, choice/column names),
+// so counts are read lazily (at jump time) or behind debounces, never
+// synchronously.
 const matchCount = ref(0);
 const activeMatchPos = ref(0);
 
@@ -842,8 +892,10 @@ function collectMatchEls(): HTMLElement[] {
   // count them as one. Separate hits always have at least one non-hit char
   // between them (a text node or a non-search span), so previousSibling —
   // not previousElementSibling, which would skip the text node — is the test.
-  return Array.from(root.querySelectorAll<HTMLElement>('.at-search'))
+  // Only spans need this dedup; tinted inputs are whole-field hits.
+  return Array.from(root.querySelectorAll<HTMLElement>('.at-search, .input-search-hit'))
     .filter((el) => {
+      if (!el.classList.contains('at-search')) return true;
       const prev = el.previousSibling;
       return !(prev instanceof HTMLElement && prev.classList.contains('at-search'));
     });
@@ -1213,14 +1265,6 @@ function jumpToSceneSub(blockIndex: number, rowIdx: number, colIdx?: number) {
   });
 }
 
-const kindSigil: Record<Block['kind'], string> = {
-  room: '^',
-  encounter: '@',
-  scene: '#',
-  template: '$',
-  raw: '—',
-};
-
 type QuestKind = 'title' | 'main_stage' | 'goal' | 'goal_stage';
 
 function questKindOf(id: string | undefined): QuestKind | null {
@@ -1265,6 +1309,11 @@ function questKindOf(id: string | undefined): QuestKind | null {
           v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
             ? 'You have unsaved changes'
             : 'Start playtesting with dev mode (Ctrl/Cmd+P)'" @click="startPlaytest" />
+        <Button icon="pi pi-replay" label="Continue" size="small" severity="success"
+          :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
+          v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
+            ? 'You have unsaved changes'
+            : 'Resume your last playtest and hard-reset the scene you were on — reloads with your latest content edits and re-plays the scene fresh (plain resume if you left outside a scene).'" @click="continuePlaytest" />
         <Button icon="pi pi-file-arrow-up" size="small" text
           :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
           v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
@@ -1292,6 +1341,10 @@ function questKindOf(id: string | undefined): QuestKind | null {
         <Button label="Quest" icon="pi pi-plus" size="small" text class="quest-btn quest-btn--title"
           @click="addQuest" />
         <span class="toolbar-divider" aria-hidden="true"></span>
+        <Button v-if="isPovActive" :label="povFeedback !== null ? `Converted ${povFeedback}` : '|I| POV'"
+          :icon="povFeedback !== null ? 'pi pi-check' : undefined" size="small" severity="secondary"
+          v-tooltip.bottom="'Convert first-person prose (I, me, my…) to POV |placeholders|. Skips dialogue in quotes, {params}, [code] and // lines. Of `id:` replicas, only the MC\'s convert (mc_id in the Gender & POV plugin config). Review before saving.'"
+          @click="convertPovDoc" />
         <Button :label="copyFeedback === 'text' ? 'Copied!' : 'Copy text'"
           :icon="copyFeedback === 'text' ? 'pi pi-check' : 'pi pi-copy'" size="small" severity="secondary"
           v-tooltip.bottom="'Copy as plain DryadScript source. Paste anywhere (editors, chat, email) to share the raw dungeon text.'"

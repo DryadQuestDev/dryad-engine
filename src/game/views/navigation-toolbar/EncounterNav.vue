@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import Tooltip from 'primevue/tooltip';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
 
 const isInactive = () => {
@@ -24,9 +26,9 @@ const isCounterVisible = () => {
 </script>
 
 <template>
-  <div class="toolbar-item icon_encounter" :class="{ 'inactive': isInactive() }" v-tooltip.top="'Next encounter'"
+  <div class="toolbar-item icon_encounter" :class="{ 'inactive': isInactive() }" v-tooltip.top="global.getString('toolbar.next_encounter')"
     @click="handleClick" />
-  <div v-if="isCounterVisible()" class="toolbar-item encounter-counter" v-tooltip.top="'Current encounter'">
+  <div v-if="isCounterVisible()" class="toolbar-item encounter-counter" v-tooltip.top="global.getString('toolbar.current_encounter')">
     <span class="button-text">{{ counterText }}</span>
   </div>
 </template>

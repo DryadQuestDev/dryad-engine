@@ -6,6 +6,7 @@ import { Global } from '../../../../global/global';
 import type { DungeonRoom } from '../../../core/dungeon/dungeonRoom';
 import { gsap } from 'gsap';
 
+import { GRADE_FILTER_ID } from '../../../systems/dungeonSystem';
 import { DungeonData } from '../../../core/dungeon/dungeonData';
 import type { DungeonEncounter } from '../../../core/dungeon/dungeonEncounter'; // Import DungeonEncounter type
 
@@ -30,6 +31,16 @@ const getEncounterImage = (encounter: DungeonEncounter) => {
   if (!encounter.image) return 'assets/engine_assets/encounters/ph.png';
   return encounter.image;
 };
+const setMapContainer = (el: unknown) => {
+  const prev = game.dungeonSystem.gameMapContainer.value;
+  game.dungeonSystem.gameMapContainer.value = el as HTMLElement | null;
+  // A freshly created container starts at scroll 0,0 — the v-if on isHideMap
+  // rebuilds the element mid-scene when hide_map toggles off.
+  if (el && el !== prev) {
+    nextTick(() => game.dungeonSystem.centerToActive());
+  }
+};
+
 const isDragging = ref(false);
 const startX = ref(0);
 const startY = ref(0);
@@ -316,8 +327,6 @@ onMounted(() => {
   if (isScene.value) {
     startWatchingResize();
   }
-  // Center camera to active location
-  game.dungeonSystem.centerToActiveLocation();
 });
 
 onUnmounted(() => {
@@ -325,7 +334,9 @@ onUnmounted(() => {
 });
 
 const isHideMap = computed(() => {
-  return dungeon.value?.dungeon_type === 'text';
+  // 'text' dungeons never have a map; hide_map lets any dungeon hide its map
+  // (map dungeons) or background screen image (screen dungeons) on demand.
+  return dungeon.value?.dungeon_type === 'text' || !!game.getState('hide_map');
 });
 
 const subWrapperOffsets = computed(() => {
@@ -360,6 +371,13 @@ const subWrapperOffsets = computed(() => {
   };
 });
 
+// Applied per art element rather than to a shared wrapper, so the map's UI — compass, room circles,
+// debug room ids — is excluded by simply not carrying it. The fog and the polygon hit-outlines are
+// left alone too.
+const gradeFilter = computed(() =>
+  game.dungeonSystem.gradeActive.value ? `url(#${GRADE_FILTER_ID})` : undefined
+);
+
 const isMapInteractive = computed(() => {
   return !game.dungeonSystem.currentSceneId.value && game.getState('overlay_state') === 'overlay-navigation';
 });
@@ -377,8 +395,11 @@ const isMapInteractive = computed(() => {
 -->
 
 
-  <div :id="COMPONENT_ID" :ref="el => game.dungeonSystem.gameMapContainer.value = el as HTMLElement"
-    class="game-map-container" :class="{ 'pan-enabled': dungeon?.dungeon_type !== 'screen' }" v-if="dungeon && !isHideMap"
+  <div :id="COMPONENT_ID" :ref="setMapContainer"
+    class="game-map-container" :class="{
+      'pan-enabled': dungeon?.dungeon_type !== 'screen',
+      'assets-loading': !game.dungeonSystem.dungeonAssetsLoaded.value
+    }" v-if="dungeon && !isHideMap"
     @pointerdown="handlePointerDown" @pointermove="handlePointerMove" @pointerup="handlePointerUp"
     @pointercancel="handlePointerCancel" @wheel="handleMouseWheel" @click="handleMapClick"
     :style="{ cursor: isDragging ? 'grabbing' : 'default' }">
@@ -398,62 +419,74 @@ const isMapInteractive = computed(() => {
         <div class="map">
 
           <img v-if="dungeon?.image" class="map-image" draggable="false" :src="dungeon.image"
-            :style="{ transform: 'scale(' + (dungeon.image_scaling ?? 1) + ')' }" />
+            :style="{ transform: 'scale(' + (dungeon.image_scaling ?? 1) + ')', filter: gradeFilter }" />
 
 
 
           <!--compass-->
-          <div v-if="dungeon.dungeon_type === 'map' && game.dungeonSystem.currentRoom.value" class="compass"
-            :style="{ left: game.dungeonSystem.currentRoom.value.xCompass + 'px', top: game.dungeonSystem.currentRoom.value.yCompass + 'px' }">
-            <div class="compass-middle"></div>
-            <template v-for="neighbor in game.dungeonSystem.currentRoom.value.neighborsWithDirection"
-              :key="neighbor.angle">
-              <div v-if="isMapInteractive" @click="game.dungeonSystem.enterRoom(neighbor.room.id)" class="compass-arrow"
-                :style="{ '--rotation': neighbor.angle + 'deg' }"></div>
-            </template>
-          </div>
+          <!-- keyed by room: moving cross-fades the old compass out and the new one in -->
+          <transition name="compass-fade">
+            <div v-if="dungeon.dungeon_type === 'map' && game.dungeonSystem.currentRoom.value" class="compass"
+              :key="game.dungeonSystem.currentRoom.value.id"
+              :style="{ left: game.dungeonSystem.currentRoom.value.xCompass + 'px', top: game.dungeonSystem.currentRoom.value.yCompass + 'px' }">
+              <div class="compass-middle"></div>
+              <template v-for="neighbor in game.dungeonSystem.currentRoom.value.neighborsWithDirection"
+                :key="neighbor.angle">
+                <transition name="compass-fade">
+                  <div v-if="isMapInteractive" @click="game.dungeonSystem.enterRoom(neighbor.room.id)"
+                    class="compass-arrow" :style="{ '--rotation': neighbor.angle + 'deg' }"></div>
+                </transition>
+              </template>
+            </div>
+          </transition>
 
 
           <!-- encounters -->
+          <!-- The visibility v-if sits on each <transition>'s CHILD, never on the <transition>
+               itself: gating the Transition component means it mounts/unmounts wholesale, and Vue
+               skips `enter` on a Transition's own first render (no `appear`) and skips `leave`
+               while it is unmounting — so the fade hooks would never fire. With the child gated,
+               the Transition stays put and encounters fade as they show/hide. Encounters already
+               visible when the map first renders still appear instantly, which is what we want. -->
           <template v-for="encounter in dungeon.encounters.values()" :key="encounter.id">
-            <template v-if="encounter.isVisible">
-              <transition @enter="(el, done) => onImageEnter(el, done, encounter)"
-                @leave="(el, done) => onImageLeave(el, done, encounter)" :css="false" v-if="!encounter.polygon">
-                <div class="encounter-wrapper" :id="encounter.id" :style="{
-                  left: encounter.x + 'px',
-                  top: encounter.y + 'px',
-                  transform: 'scale(' + (encounter.scale ?? 1) + ')',
-                  zIndex: encounter.z
-                }">
-                  <img v-if="!encounter.polygon" :style="{
-                    '--scale-shadow': 1 / encounter.scale,
-                    filter: encounter.scaleShadow, // Assuming scaleShadow is a complete CSS filter string
-                    transform: 'rotate(' + (encounter.rotation ?? 0) + 'deg)'
-                  }" :class="{
+            <transition v-if="!encounter.polygon" @enter="(el, done) => onImageEnter(el, done, encounter)"
+              @leave="(el, done) => onImageLeave(el, done, encounter)" :css="false">
+              <!-- Grade on the wrapper, not the img: the img's filter is where the interactable /
+                   clue drop-shadow glows land, and taking it over would kill them. -->
+              <div v-if="encounter.isVisible" class="encounter-wrapper" :id="encounter.id" :style="{
+                left: encounter.x + 'px',
+                top: encounter.y + 'px',
+                transform: 'scale(' + (encounter.scale ?? 1) + ')',
+                zIndex: encounter.z,
+                filter: gradeFilter
+              }">
+                <img :style="{
+                  '--scale-shadow': 1 / encounter.scale,
+                  filter: encounter.scaleShadow, // Assuming scaleShadow is a complete CSS filter string
+                  transform: 'rotate(' + (encounter.rotation ?? 0) + 'deg)'
+                }" :class="{
 
-                    'interactable': isMapInteractive && encounter.isHere(game.dungeonSystem.currentRoom.value) && !encounter.isProp(),
+                  'interactable': isMapInteractive && encounter.isHere(game.dungeonSystem.currentRoom.value) && !encounter.isProp(),
+                  'clue': isMapInteractive && encounter.isClue(),
+                  'active': isMapInteractive && encounter === game.dungeonSystem.selectedEncounter.value && !encounter.isProp()
+                }" draggable="false" class="map_image" :src="getEncounterImage(encounter)"
+                  @click="interact(encounter)"
+                  @animationend="InteractionAnimationDone($event as AnimationEvent, encounter)" />
+              </div>
+            </transition>
+            <transition v-else @enter="(el, done) => onPolygonEnter(el, done, encounter)"
+              @leave="(el, done) => onPolygonLeave(el, done, encounter)" :css="false">
+              <svg v-if="encounter.isVisible && encounter.isHere(game.dungeonSystem.currentRoom.value)"
+                :width="dungeon.widthBackground" :height="dungeon.heightBackground" class="svg_contour"
+                :style="{ zIndex: encounter.z }">
+                <polygon :id="encounter.id" class="poly_encounter " @click="interact(encounter)" fill="none"
+                  stroke-width="1" :points="encounter.polygon" :class="{
+                    'interactable': isMapInteractive && !encounter.isProp(),
                     'clue': isMapInteractive && encounter.isClue(),
                     'active': isMapInteractive && encounter === game.dungeonSystem.selectedEncounter.value && !encounter.isProp()
-                  }" draggable="false" class="map_image" :src="getEncounterImage(encounter)"
-                    @click="interact(encounter)"
-                    @animationend="InteractionAnimationDone($event as AnimationEvent, encounter)" />
-                </div>
-              </transition>
-              <transition @enter="(el, done) => onPolygonEnter(el, done, encounter)"
-                @leave="(el, done) => onPolygonLeave(el, done, encounter)" :css="false"
-                v-if="encounter.polygon && encounter.isHere(game.dungeonSystem.currentRoom.value)">
-                <svg :width="dungeon.widthBackground" :height="dungeon.heightBackground" class="svg_contour"
-                  v-if="encounter.polygon && encounter.isHere(game.dungeonSystem.currentRoom.value)"
-                  :style="{ zIndex: encounter.z }">
-                  <polygon :id="encounter.id" class="poly_encounter " @click="interact(encounter)" fill="none"
-                    stroke-width="1" :points="encounter.polygon" :class="{
-                      'interactable': isMapInteractive && !encounter.isProp(),
-                      'clue': isMapInteractive && encounter.isClue(),
-                      'active': isMapInteractive && encounter === game.dungeonSystem.selectedEncounter.value && !encounter.isProp()
-                    }" @animationend="InteractionAnimationDone($event as AnimationEvent, encounter)" />
-                </svg>
-              </transition>
-            </template>
+                  }" @animationend="InteractionAnimationDone($event as AnimationEvent, encounter)" />
+              </svg>
+            </transition>
           </template>
         </div>
       </div>
@@ -534,12 +567,15 @@ const isMapInteractive = computed(() => {
 
 
       <!--rooms-->
-      <template v-if="dungeon.dungeon_type === 'map'" v-for="room of dungeon.rooms.values()">
+      <template v-if="dungeon.dungeon_type === 'map'" v-for="room of dungeon.rooms.values()" :key="room.id">
         <!--circle-->
-        <div
-          v-if="isMapInteractive && room != game.dungeonSystem.currentRoom.value && room.isVisible() && game.dungeonSystem.showLocationCircles.value"
-          :class="{ 'visited': room.isVisited() }" @click="clickRoom(room); $event.stopPropagation()"
-          :style="{ left: room.xCircleWithPadding + 'px', top: room.yCircleWithPadding + 'px' }" class="circle"></div>
+        <!-- v-if on the transition's child, same as the encounters above -->
+        <transition name="circle-fade">
+          <div
+            v-if="isMapInteractive && room != game.dungeonSystem.currentRoom.value && room.isVisible() && game.dungeonSystem.showLocationCircles.value"
+            :class="{ 'visited': room.isVisited() }" @click="clickRoom(room); $event.stopPropagation()"
+            :style="{ left: room.xCircleWithPadding + 'px', top: room.yCircleWithPadding + 'px' }" class="circle"></div>
+        </transition>
 
         <!--debug-->
         <div v-if="game.coreSystem.getDebugSetting('ids_on_map')" :style="{

@@ -12,7 +12,12 @@
     {
       "id": "rpg-overlay-tuner",
       "name": "Overlay Tuner",
-      "tabs": ["character_templates", "character_statuses", "item_templates", "skill_slots"],
+      "tabs": [
+        "character_templates",
+        "character_statuses",
+        "item_templates",
+        "skill_slots"
+      ],
       "script": "scripts/editor/OverlayTuner.mjs",
       "css": "scripts/editor/OverlayTuner.css"
     }
@@ -82,7 +87,16 @@
         "background": {
           "type": "chooseOne",
           "fromFile": "assets",
-          "tooltip": "Background asset for the battle scene (from assets.json)."
+          "tooltip": "Background asset for the battle scene (from assets.json). Leave empty to fall back to the current room's / dungeon's configured default asset."
+        },
+        "loot": {
+          "type": "chooseOne",
+          "fromFile": "item_inventories",
+          "tooltip": "Loot inventory granted when this battle is defeated (by fight victory or a scripted defeat). Empty = the inventory with the same id as the battle, if one exists."
+        },
+        "bonus_threat": {
+          "type": "number",
+          "tooltip": "Flat threat added on top of the enemy-sum for this battle (boss auras, scripted stakes). Included in getThreat and every threat-driven reward."
         },
         "enemies": {
           "type": "schema[]",
@@ -321,6 +335,11 @@
         "id": "battle_overlay_y_offset",
         "type": "number",
         "tooltip": "Vertical fine-adjust (%) for the battle overlay (health bar, tokens), measured from the slot top. Tune per character height (short/tall). Positive = down."
+      },
+      {
+        "id": "threat",
+        "type": "number",
+        "tooltip": "Reward weight of this NPC. A battle's threat is the sum over its enemy party; reward systems scale defeat payouts off it."
       }
     ],
     "item_traits": [
@@ -352,17 +371,17 @@
       {
         "id": "require_status_self",
         "role": "meta",
-        "type": "chooseOne",
+        "type": "chooseMany",
         "fromFile": "character_statuses",
         "ingame_description": "Requires [v:status]",
-        "description": "Usability gate: the caster must have at least 1 stack of this status or the ability is unusable (greyed out)."
+        "description": "Usability gate: the caster must have at least 1 stack of ANY of these statuses or the ability is unusable (greyed out)."
       },
       {
         "id": "require_status_self_consume",
         "role": "meta",
         "type": "boolean",
         "ingame_description": "Consume on cast",
-        "description": "When true, removes 1 stack of require_status_self from the caster on cast."
+        "description": "When true, removes 1 stack of the first require_status_self status the caster holds on cast."
       },
       {
         "id": "bonus_action",
@@ -439,7 +458,7 @@
         "id": "flat",
         "role": "meta",
         "type": "boolean",
-        "description": "When true, this ability's damage / heal / status-stack values are taken as-is and do NOT scale with the caster's `power` (overrides `power_amplifier` too — implies `unamplified`). Target armor / resists and heal amplifier stats still apply. Use for items, scrolls, environmental triggers, or anything where the caster is the user rather than the source."
+        "description": "When true, this ability's damage / heal / status-stack values are taken as-is and do NOT scale with the caster's `power` (overrides `power_amplifier` too – implies `unamplified`). Target armor / resists and heal amplifier stats still apply. Use for items, scrolls, environmental triggers, or anything where the caster is the user rather than the source."
       },
       {
         "id": "channel",
@@ -454,7 +473,7 @@
         "type": "chooseOne",
         "fromFile": "plugins_data/rpg_battler/schools",
         "order": -90,
-        "description": "Flavour/synergy tag for this ability (fire, water, light, ...). Does not affect mitigation — mitigation follows damage_type. Reserved for future school-synergy systems."
+        "description": "Flavour/synergy tag for this ability (fire, water, light, ...). Does not affect mitigation – mitigation follows damage_type. Reserved for future school-synergy systems."
       },
       {
         "id": "projectile",
@@ -476,7 +495,8 @@
         "role": "aspect",
         "type": "number",
         "ingame_description": "Deal [v] [damage_type] damage",
-        "description": "Damage as % of caster's power (base-100: 120 = 120%)"
+        "description": "Damage as % of caster's power (base-100: 120 = 120%)",
+        "scales": true
       },
       {
         "id": "damage_type",
@@ -494,21 +514,24 @@
         "role": "aspect",
         "type": "number",
         "ingame_description": "Heal [v]",
-        "description": "Healing as % of caster's power (base-100: 100 = 100%), applied to the effect's target(s)."
+        "description": "Healing as % of caster's power (base-100: 100 = 100%), applied to the effect's target(s).",
+        "scales": true
       },
       {
         "id": "healing_self",
         "role": "aspect",
         "type": "number",
         "ingame_description": "Heal self for [v]% power",
-        "description": "Heal the caster for this % of caster power. Independent of the ability's target (useful on offensive abilities)."
+        "description": "Heal the caster for this % of caster power. Independent of the ability's target (useful on offensive abilities).",
+        "scales": true
       },
       {
         "id": "lifesteal",
         "role": "aspect",
         "type": "number",
         "ingame_description": "Steal [v]% of damage dealt as HP",
-        "description": "Heals caster for this % of damage dealt (after defenses)."
+        "description": "Heals caster for this % of damage dealt (after defenses).",
+        "scales": true
       },
       {
         "id": "status_apply_target",
@@ -524,7 +547,8 @@
         "role": "aspect",
         "type": "number",
         "ingame_hide": true,
-        "description": "Stacks to apply per status in status_apply_target. Default 1. For power-scaled statuses: actual = power × value / 100."
+        "description": "Stacks to apply per status in status_apply_target. Default 1. For power-scaled statuses: actual = power × value / 100.",
+        "scales": true
       },
       {
         "id": "status_duration_target",
@@ -548,7 +572,8 @@
         "role": "aspect",
         "type": "number",
         "ingame_hide": true,
-        "description": "Stacks to apply per status in status_apply_self. Default 1."
+        "description": "Stacks to apply per status in status_apply_self. Default 1.",
+        "scales": true
       },
       {
         "id": "status_duration_self",
@@ -640,7 +665,8 @@
         "role": "aspect",
         "type": "number",
         "ingame_hide": true,
-        "description": "Stacks to apply per status in status_apply_allies. Default 1."
+        "description": "Stacks to apply per status in status_apply_allies. Default 1.",
+        "scales": true
       },
       {
         "id": "status_duration_allies",
@@ -680,7 +706,8 @@
         "role": "aspect",
         "type": "number",
         "ingame_hide": true,
-        "description": "Stacks to apply per status in status_apply_enemies. Default 1."
+        "description": "Stacks to apply per status in status_apply_enemies. Default 1.",
+        "scales": true
       },
       {
         "id": "status_duration_enemies",
@@ -711,21 +738,22 @@
         "role": "aspect",
         "type": "number",
         "ingame_description": "Hit up to [v] neighbors",
-        "description": "Also hits up to N neighbors of the primary target. Works for both enemy and ally targets — neighbors are determined from the target's party."
+        "description": "Also hits up to N neighbors of the primary target. Works for both enemy and ally targets – neighbors are determined from the target's party."
       },
       {
         "id": "splash_only",
         "role": "aspect",
         "type": "boolean",
         "ingame_description": "Skip primary target",
-        "description": "When true, the primary target is excluded from this effect — only splash neighbors are hit. Requires splash."
+        "description": "When true, the primary target is excluded from this effect – only splash neighbors are hit. Requires splash."
       },
       {
         "id": "bounce",
         "role": "aspect",
         "type": "number",
         "ingame_description": "Bounces to [v] random targets",
-        "description": "After the ability resolves, the whole ability re-resolves this many more times on random targets of the same side (random enemies if it targets enemies, random allies if it targets allies), with a short delay between bounces. By default a hop cannot land on the previous target (see bounce_same); the chain ends early if no valid target remains. Bounces re-apply the effects only — they do NOT re-pay cost or trigger cooldown/charges again."
+        "description": "After the ability resolves, the whole ability re-resolves this many more times on random targets of the same side (random enemies if it targets enemies, random allies if it targets allies), with a short delay between bounces. By default a hop cannot land on the previous target (see bounce_same); the chain ends early if no valid target remains. Bounces re-apply the effects only – they do NOT re-pay cost or trigger cooldown/charges again.",
+        "scales": true
       },
       {
         "id": "bounce_same",
@@ -740,7 +768,7 @@
         "type": "chooseOne",
         "fromFile": "character_templates",
         "ingame_description": "Summon [v:character]",
-        "description": "Spawn a combatant from this character template onto the caster's side. It joins the battle and acts this round based on its speed (not added to the persistent party). One summon per effect — add more effects to summon multiple. Ignored on bounces."
+        "description": "Spawn a combatant from this character template onto the caster's side. It joins the battle and acts this round based on its speed (not added to the persistent party). One summon per effect – add more effects to summon multiple. Ignored on bounces."
       }
     ],
     "locale": [
@@ -1040,6 +1068,7 @@
         "is_safe_removal": true,
         "order": -100,
         "color": "c0392b",
+        "description": "Hit-point resource. The character is defeated when it reaches 0. The only resource stat the battler manages.",
         "ingame_description": "Hit points. When health reaches 0, the character is defeated."
       },
       {
@@ -1049,7 +1078,18 @@
           "battle"
         ],
         "order": -99,
+        "description": "Base scaling stat. Ability damage = effective power x (damage aspect / 100); healing scales the same way. Effective power = (power + power_bonus) x (1 + power_amplifier/100), except `unamplified` abilities which use raw power only.",
         "ingame_description": "Base damage multiplier for abilities and healing."
+      },
+      {
+        "id": "power_bonus",
+        "name": "Power Bonus",
+        "tags": [
+          "battle"
+        ],
+        "order": -98.5,
+        "description": "Flat gear-style addition to power, applied before power_amplifier – so it gets amplified too. Ignored by `unamplified` abilities (basic attack uses raw power).",
+        "ingame_description": "Flat power added before amplification. Ignored by `unamplified` abilities, so a basic attack does not benefit from it."
       },
       {
         "id": "power_amplifier",
@@ -1058,6 +1098,7 @@
           "battle"
         ],
         "order": -98,
+        "description": "Percent multiplier on (power + power_bonus): effective power = (power + power_bonus) x (1 + value/100). 100 doubles power. Ignored by `unamplified` abilities.",
         "ingame_description": "Percentage boost applied to power for ability scaling. 100 = +100% = doubles power."
       },
       {
@@ -1067,6 +1108,7 @@
           "battle"
         ],
         "order": -98,
+        "description": "Turn-order sort key – combatants act from highest to lowest speed each round. No other effect.",
         "ingame_description": "Determines turn order in battle. Higher speed acts first."
       },
       {
@@ -1076,6 +1118,7 @@
           "battle"
         ],
         "order": -97,
+        "description": "Flat amount subtracted from each physical burst hit after all multipliers. Result is floored at 1 damage; negative armor adds damage instead. DoT ticks ignore armor (they use resists).",
         "ingame_description": "Flat reduction to physical hit damage. Always leaves at least 1 damage; negative values increase damage taken."
       },
       {
@@ -1085,6 +1128,7 @@
           "battle"
         ],
         "order": -96,
+        "description": "Flat amount subtracted from each magic burst hit after all multipliers. Result is floored at 1 damage; negative armor adds damage instead. DoT ticks ignore armor (they use resists).",
         "ingame_description": "Flat reduction to magic hit damage. Always leaves at least 1 damage; negative values increase damage taken."
       },
       {
@@ -1094,6 +1138,7 @@
           "battle"
         ],
         "order": -63,
+        "description": "Percent chance (0-100) rolled on each damaging hit. Only rolled when above 0.",
         "ingame_description": "Chance to critically hit (0-100%)."
       },
       {
@@ -1103,6 +1148,7 @@
           "battle"
         ],
         "order": -62,
+        "description": "Bonus percent damage on a critical hit: damage x (1 + value/100). 50 = 1.5x total, 150 = 2.5x – this is the bonus on top, not the total multiplier.",
         "ingame_description": "Extra damage on critical hit (%). 50 = 1.5x damage."
       },
       {
@@ -1112,6 +1158,7 @@
           "battle"
         ],
         "order": -61,
+        "description": "Percent chance (0-100) to negate an incoming hit entirely.",
         "ingame_description": "Chance to avoid incoming damage entirely (0-100%)."
       },
       {
@@ -1121,6 +1168,7 @@
           "battle"
         ],
         "order": -95,
+        "description": "Percent reduction applied to each burn DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
         "ingame_description": "Reduces burn DoT damage (%). Above 100% the burn heals instead."
       },
       {
@@ -1130,6 +1178,7 @@
           "battle"
         ],
         "order": -94,
+        "description": "Percent reduction applied to each poison DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
         "ingame_description": "Reduces poison DoT damage (%). Above 100% the poison heals instead."
       },
       {
@@ -1139,6 +1188,7 @@
           "battle"
         ],
         "order": -93,
+        "description": "Percent reduction applied to each bleed DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
         "ingame_description": "Reduces bleed DoT damage (%). Above 100% the bleed heals instead."
       },
       {
@@ -1148,6 +1198,7 @@
           "battle"
         ],
         "order": -45,
+        "description": "Additive percent modifier on outgoing damage. Summed with the per-missing-HP and per-ally bonuses, then damage x max(1 + total/100, 0.1).",
         "ingame_description": "Additive % modifier to all outgoing damage."
       },
       {
@@ -1157,6 +1208,7 @@
           "battle"
         ],
         "order": -44,
+        "description": "Additive percent modifier on incoming damage: damage x max(1 + value/100, 0.1), applied before armor. Positive = takes more damage.",
         "ingame_description": "Additive % modifier to all incoming damage. Positive = take more."
       },
       {
@@ -1166,6 +1218,7 @@
           "battle"
         ],
         "order": -35,
+        "description": "Percent boost to healing this character casts – heals, self-heals, and lifesteal: healing x (1 + value/100).",
         "ingame_description": "Multiplier for healing effects cast by this character."
       },
       {
@@ -1175,6 +1228,7 @@
           "battle"
         ],
         "order": -34,
+        "description": "Additive percent modifier on healing this character receives: healing x (1 + value/100). Positive = receives more.",
         "ingame_description": "Additive % modifier to all incoming healing. Positive = receive more."
       },
       {
@@ -1184,6 +1238,7 @@
           "battle"
         ],
         "order": -58,
+        "description": "Battle-start seed for the shield status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each shield stack absorbs 1 damage before health.",
         "ingame_description": "Starting shield stacks at battle start. Each stack absorbs 1 damage."
       },
       {
@@ -1193,6 +1248,7 @@
           "battle"
         ],
         "order": -24,
+        "description": "Battle-start seed for the preparation status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Preparation gates certain powerful abilities.",
         "ingame_description": "Starting preparation stacks at battle start."
       },
       {
@@ -1202,7 +1258,8 @@
           "battle"
         ],
         "order": -40,
-        "ingame_description": "% of received damage reflected back to attacker."
+        "description": "Battle-start seed for the thorns status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each stack reflects 1 flat damage to the attacker per hit taken; stacks are not consumed.",
+        "ingame_description": "Starting thorns stacks at battle start. Each stack reflects 1 damage back to the attacker per hit."
       },
       {
         "id": "damage_per_missing_health",
@@ -1211,6 +1268,7 @@
           "battle"
         ],
         "order": -43,
+        "description": "Adds value x missing-health fraction x 100 percentage points to outgoing damage. Example: 0.5 at half health = +25% damage.",
         "ingame_description": "% damage bonus scaled by fraction of missing HP."
       },
       {
@@ -1220,6 +1278,7 @@
           "battle"
         ],
         "order": -42,
+        "description": "Adds this many percentage points to outgoing damage per living ally, excluding self.",
         "ingame_description": "% damage bonus per alive ally."
       },
       {
@@ -1229,6 +1288,7 @@
           "battle"
         ],
         "order": -5,
+        "description": "Intended: attacks mark the target, and each mark raises this attacker's damage against it by this stat's value in percent. Not wired up in the plugin scripts yet – defined for future use.",
         "ingame_description": "Marks target on attack. Each mark increases damage from this attacker by this stat's value %."
       },
       {
@@ -1238,6 +1298,7 @@
           "battle"
         ],
         "order": -30,
+        "description": "Base stagger stacks needed to stun this character: effective threshold = ceil(base x (1 + stagger_threshold_pct/100)). 0 or below = cannot be staggered. On trigger the target is stunned and all stagger is consumed.",
         "ingame_description": "Stagger tokens needed to trigger a stun. Higher = harder to stagger."
       },
       {
@@ -1247,6 +1308,7 @@
           "battle"
         ],
         "order": -29,
+        "description": "Percent multiplier on stagger_threshold: effective threshold = ceil(base x (1 + value/100)). Braced grants +100 while recovering from a stun.",
         "ingame_description": "Additive % bonus to stagger threshold. Granted by Braced and similar effects."
       },
       {
@@ -1256,7 +1318,8 @@
           "battle"
         ],
         "order": -41,
-        "ingame_description": "Extra damage % dealt to staggered targets — while stunned and through the braced recovery."
+        "description": "Percent extra damage against staggered targets: damage x (1 + value/100). Active while the target is stunned and through the braced recovery window.",
+        "ingame_description": "Extra damage % dealt to staggered targets – while stunned and through the braced recovery."
       }
     ],
     "character_statuses": [
@@ -1275,6 +1338,7 @@
         "description": "<p>Recovering from a stun: stagger threshold doubled, but exposed to bonus stun damage.</p>",
         "image": "assets/engine_assets/plugins/rpg_battler/braced.webp",
         "duration": 3,
+        "polarity": "positive",
         "tags": [
           "buff"
         ],

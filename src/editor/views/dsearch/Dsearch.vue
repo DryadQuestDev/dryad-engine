@@ -68,6 +68,15 @@ const formState = reactive({
   tag: {} as Record<string, { logic: boolean; values: Record<string, boolean> }>,
 });
 
+// --- Two-way sync with shared editor.idFilter (Dbookmarks search box) ---
+watch(() => editor.idFilter.value, (v) => {
+  if (formState.id !== v) formState.id = v;
+}, { immediate: true });
+
+watch(() => formState.id, (v) => {
+  if (editor.idFilter.value !== v) editor.idFilter.value = v;
+});
+
 // --- Helper Functions ---
 
 // Safely get nested properties (can be moved to a utility file)
@@ -328,6 +337,9 @@ watch(() => props.schema, (newSchema) => {
         });
 
          clearFilters(); // Reset form values but keep structure
+         // Re-apply the per-tab persisted ID filter (restored into editor.idFilter by Dform
+         // before the async schema load completes) — schema change must not wipe it
+         formState.id = editor.idFilter.value;
     } else {
         // Clear everything if schema is null
         showIdField.value = false;
@@ -337,6 +349,7 @@ watch(() => props.schema, (newSchema) => {
         stringArraySchemaFields.value = [];
         combinedTagFieldsForTemplate.value = [];
         clearFilters(); // Also clear values
+        formState.id = editor.idFilter.value; // Keep persisted ID filter through null-schema transitions
     }
 }, { immediate: true });
 
@@ -441,9 +454,12 @@ const isFormDirty = computed(() => {
 });
 
 // --- Emit dirty state changes ---
+// immediate: the persisted ID filter is restored during setup, so isFormDirty can start out
+// true without ever changing — without an initial emit the parent keeps a stale false and
+// its activeObject watcher resets filteredItems to the full list on save
 watch(isFormDirty, (newValue) => {
   emit('update:isDirty', newValue);
-});
+}, { immediate: true });
 
 // --- Watcher to trigger clear ---
 watch(() => props.triggerClear, (newValue, oldValue) => {

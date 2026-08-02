@@ -9,24 +9,6 @@
   "data": {
     "character_traits": [
       {
-        "id": "art_dx",
-        "type": "number",
-        "description": "Default x shift in % for static skin layers. Falls through to layers that don't override art_dx themselves. Spine entries use their own art_dx, not this trait.",
-        "uid": "px4dO7PysJYh"
-      },
-      {
-        "id": "art_dy",
-        "type": "number",
-        "description": "Default y shift in % for static skin layers. Falls through to layers that don't override art_dy themselves. Spine entries use their own art_dy, not this trait.",
-        "uid": "2vnRqYZmymQn"
-      },
-      {
-        "id": "art_scale",
-        "type": "number",
-        "description": "Default scale multiplier for static skin layers. Falls through to layers that don't override art_scale. Spine entries use their own art_scale, not this trait.",
-        "uid": "IlTj1SBqYLI6"
-      },
-      {
         "id": "face_shift_scale",
         "type": "number",
         "description": "Scaling of the character doll to fit inside the face container.",
@@ -129,6 +111,12 @@
         "type": "number",
         "description": "Item weight (for encumbrance)",
         "uid": "3pR7tYvW5nDx"
+      },
+      {
+        "id": "item_level",
+        "type": "number",
+        "description": "Visual level indicator shown on the item card.",
+        "uid": "GEitItemLevel1"
       }
     ],
     "item_properties": [
@@ -224,6 +212,15 @@
         "description": "Hide this ability from UI (character sheet, battle log)",
         "uid": "GeDfAbHidden",
         "order": -93
+      },
+      {
+        "id": "require_status",
+        "role": "meta",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "description": "The ability exists for the character only while they have ANY of these statuses - otherwise it is hidden everywhere (ability panel, character sheet, battle, AI). Merged from modifiers, so items and statuses can inject it.",
+        "uid": "GeDfAbReqStatus",
+        "order": -92
       }
     ],
     "dev/encounters_default": [

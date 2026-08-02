@@ -24,7 +24,8 @@ function handleDragStart(event: DragEvent, item: Item) {
 <template>
   <div :id="COMPONENT_ID" class="item-grid">
     <template v-for="(item, index) in items" :key="item?.uid || `empty-${index}`">
-      <ItemSlot v-if="item" :item="item" :disabled="props.disabled === true" :pinnable="isMobile" @dragstart="handleDragStart" />
+      <ItemSlot v-if="item" :item="item" :disabled="props.disabled === true" :pinnable="isMobile"
+        @dragstart="handleDragStart" />
       <div v-else class="empty-slot"></div>
     </template>
 
@@ -42,6 +43,7 @@ function handleDragStart(event: DragEvent, item: Item) {
   width: 100%;
   height: 100%;
   overflow: auto;
+  max-height: 400px;
 }
 
 /* Empty slot styling */

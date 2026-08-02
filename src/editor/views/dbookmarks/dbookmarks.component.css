@@ -8,6 +8,35 @@
     margin-top: 20px;
 }
 
+.id_search {
+    margin-top: 5px;
+    position: relative;
+}
+
+.id_search .id-search-input {
+    width: 100%;
+    padding-right: 28px;
+}
+
+.id_search .id-search-input.has-value {
+    border: 2px solid #f59e0b;
+    box-shadow: 0 0 4px rgba(245, 158, 11, 0.6);
+}
+
+.id-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    color: #6c757d;
+    font-size: 0.85em;
+}
+
+.id-search-clear:hover {
+    color: #333333;
+}
+
 .dbookmarks button {
     width: 100%;
     margin-bottom: 5px;

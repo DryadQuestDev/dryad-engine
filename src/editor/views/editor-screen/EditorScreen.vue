@@ -11,6 +11,7 @@ import Button from 'primevue/button';
 import DungeonSelect from '../shared/DungeonSelect.vue';
 import {
   startPlaytest,
+  continuePlaytest,
   openLoadGamePopup,
   showLoadGamePopup,
   showPlaytestModsPopup,
@@ -148,6 +149,11 @@ function searchDungeon(event: Event): void {
         <Button class="playtest-button" icon="pi pi-play" label="Playtest" @click="startPlaytest"
           :disabled="!editor.selectedGame || editor.hasUnsavedChanges.value"
           v-tooltip.bottom="editor.hasUnsavedChanges.value ? 'You have unsaved changes' : 'Start playtesting with dev mode (Ctrl/Cmd+P)'" />
+
+        <!-- Continue Button — resume last playtest, hard-reset the scene you were on -->
+        <Button icon="pi pi-replay" label="Continue" severity="success" @click="continuePlaytest"
+          :disabled="!editor.selectedGame || editor.hasUnsavedChanges.value"
+          v-tooltip.bottom="editor.hasUnsavedChanges.value ? 'You have unsaved changes' : 'Resume your last playtest and hard-reset the scene you were on — reloads with your latest content edits and re-plays the scene fresh (plain resume if you left outside a scene).'" />
 
         <!-- Load Game Button -->
         <Button icon="pi pi-file-arrow-up" @click="openLoadGamePopup"

@@ -110,7 +110,10 @@ tab plus one tab per category, with a name search box; items with no category ap
 | price | Trading value in various currencies |
 | max_stack | How many can stack (1 = no stacking) |
 | is_currency | Whether this item is money |
+| learn_recipe | Recipe id this item teaches — adds a "Learn" choice that learns it and consumes the item (see ->items.apply) |
 | status | What stats/abilities/skin layers to apply when equipped |
+
+A `traits.item_level` number renders as a level badge on the item card – a purely visual indicator. Systems that scale item instances (e.g. the experience plugin's dungeon-level scaling) stamp it on creation.
 
 **Example - Iron Sword:**
 
@@ -136,8 +139,11 @@ tab plus one tab per category, with a name search box; items with no category ap
 |-------|-------------|
 | maxSize | Maximum number of stacks (0 = unlimited) |
 | maxWeight | Maximum total weight (0 = unlimited) |
-| recipes | Which crafting recipes are available here |
+| recipes | Which crafting recipes are available here (auto-makes this a `craft` station — see ->items.apply) |
+| interactive | Custom apply interaction (`craft`, `enchant`, …). Auto-set to `craft` when `recipes` are present; set by hand only for non-crafting interactions |
 | items | Starting items in this inventory |
+| traits | Custom inventory data (definitions live in the `inventory_traits` editor tab; plugins can inject their own, e.g. the experience plugin's `dungeon` trait) |
+| auto_create | Instantiate this inventory at game start. An inventory opened via `loot:`/`trade:` must have a live instance – without one, opening throws "Inventory not found". Use it for GLOBAL inventories (shops, shared stashes). For dungeon chests prefer the experience plugin's `dungeon` inventory trait: the inventory is created on first entry of the bound dungeon (or any dungeon sharing its level group), so contents pick up the dungeon level and lock at entry (no save-scumming). Leave both OFF for battle-loot inventories: those are read as pure drop tables by the reward system (never instantiated) |
 
 **Special inventories:**
 
@@ -161,14 +167,17 @@ tab plus one tab per category, with a name search box; items with no category ap
 
 ## Consumable Items
 
-Items can be marked as consumable for one-time-use effects like potions, scrolls, and buff foods. Enable `is_consumable` in the item template to unlock the consume fields.
+Items are consumable for one-time-use effects (potions, scrolls, buff foods). There is **no
+`is_consumable` flag** — an item is consumable when it has any consume effect: it applies a status,
+restores/reduces a resource, or defines a consume action script. When it does, a **Consume** choice
+appears in the inventory automatically.
 
 ### What Happens on Consume
 
 | Step | What happens |
 |------|--------------|
 | 1 | `item_consume_before` event fires (return false to cancel) |
-| 2 | Item's status is applied to the character (visible, stackable) |
+| 2 | Each `apply_statuses_on_consume` status is applied (by template id, with stacks) |
 | 3 | Percentage-based resource changes are applied |
 | 4 | Flat resource changes are applied |
 | 5 | Item quantity is reduced by 1 (removed if last in stack) |
@@ -178,26 +187,22 @@ Items can be marked as consumable for one-time-use effects like potions, scrolls
 
 | Field | Description |
 |-------|-------------|
-| `is_consumable` | Enable consume functionality |
-| `consume_duration` | How many turns the applied status lasts. -1 or empty = permanent |
-| `consume_max_stacks` | Max stacks when consuming the same item multiple times. -1 = unlimited |
-| `consume_percentage` | Percentage of max resource to restore/reduce (e.g., heal 25% of max health) |
-| `consume_absolute` | Flat resource amount to restore/reduce (e.g., restore 50 health) |
-| `status` | Status to apply on consume (same field used by equipment) |
+| `apply_statuses_on_consume` | List of `{ status, stacks }`. Applies real **status templates** — each carries its own `duration`, `max_stacks`, `polarity`, and `group_id` (no per-item shaping fields). |
+| `consume_percentage` | Percentage of max resource to restore/reduce (e.g. heal 25% of max health) |
+| `consume_absolute` | Flat resource amount to restore/reduce (e.g. restore 50 health) |
+| `status` | Status applied on **equip** (independent of consume). See below. |
 
-### Stacking Behavior
+### Equip status and consume statuses are independent
 
-Consuming the same item type multiple times produces the same status ID, so the engine's status stacking applies automatically. Use `consume_max_stacks` to cap how many stacks can accumulate.
+`status` is applied on **equip**; `apply_statuses_on_consume` on **consume**. An item can carry both
+and they can differ — e.g. a Golden Apple gives +2 luck while equipped, and +10 health when eaten.
 
-### Consume vs Equip
+### Duration, stacking, and mutual exclusion live on the status
 
-| | Equip | Consume |
-|---|-------|---------|
-| **Duration** | While equipped | Temporary or permanent |
-| **Status visibility** | Hidden | Visible |
-| **Reversible** | Unequip removes | Cannot undo |
-| **Stacking** | One per slot | Stackable |
-| **Quantity** | Unchanged | Reduced by 1 |
+Because consume statuses are real templates, their `duration` / `max_stacks` / `multi_stack` come from
+the status itself. To make ranked variants replace each other (small_blessing → big_blessing), give
+them the same **`group_id`** on the status template — applying one removes any other in the group,
+regardless of how it was applied (status action, consumable, or battle effect).
 
 ---
 
@@ -234,7 +239,7 @@ Scene actions for items (used in dungeon content). See ->builtins.actions for fu
 | `add_item` | Add items to an inventory by id (`"sword, potion#5"`). |
 | `consume_item` | Consume the active/target item. |
 | `item_slot` | Add/remove equipment *slots* on a character (`"alice->extra_ring, bob->!ring_3"`). |
-| `loot` / `trade` | Open a loot / trade exchange. |
+| `loot` / `trade` | Open a loot / trade exchange. A `^pool` value opens a placement-unique pool-generated inventory (experience plugin's Rewards & Scaling guide). |
 | `learn_recipe` | Learn crafting recipe(s). |
 
 > Prefer `equip` over `equip_item`/`unequip_item` for normal scripting: it takes stable character and

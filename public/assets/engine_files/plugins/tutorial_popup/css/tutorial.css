@@ -4,6 +4,7 @@
   gap: 14px;
   width: 560px;
   max-width: 90dvw;
+  max-height: 85dvh;
   padding: 24px 26px;
   background: linear-gradient(160deg, rgba(20, 24, 30, 0.96), rgba(12, 14, 18, 0.96));
   color: rgba(255, 255, 255, 0.92);
@@ -25,10 +26,14 @@
   border-radius: 6px;
 }
 
+/* Scrolls on its own so a long hint (a walkthrough with screenshots) keeps the title and
+   the footer buttons in view. */
 .tutorial-body {
   font-size: 15px;
   line-height: 1.55;
   color: rgba(255, 255, 255, 0.85);
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .tutorial-body p {
@@ -37,6 +42,13 @@
 
 .tutorial-body p:last-child {
   margin-bottom: 0;
+}
+
+/* Pictures embedded in the record's content, alongside the single top image. */
+.tutorial-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
 }
 
 .tutorial-footer {

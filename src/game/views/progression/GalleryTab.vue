@@ -850,7 +850,7 @@ onMounted(() => {
               <p>This asset has not been discovered yet</p>
             </div>
             <div v-else class="discovered-asset" @click="toggleFullscreen" v-show="!isFullscreen">
-              <BackgroundAsset v-if="previewAssetDiscovered" :key="selectedItemId ?? ''" :asset="previewAssetDiscovered" />
+              <BackgroundAsset v-if="previewAssetDiscovered" :key="selectedItemId ?? ''" :asset="previewAssetDiscovered" :grade="false" />
             </div>
           </template>
         </div>
@@ -870,7 +870,7 @@ onMounted(() => {
         </template>
         <template v-else-if="selectedItem.type === 'asset'">
           <div class="fullscreen-asset">
-            <BackgroundAsset v-if="previewAssetDiscovered" :key="(selectedItemId ?? '') + '_fs'" :asset="previewAssetDiscovered" />
+            <BackgroundAsset v-if="previewAssetDiscovered" :key="(selectedItemId ?? '') + '_fs'" :asset="previewAssetDiscovered" :grade="false" />
           </div>
         </template>
       </div>
@@ -1284,11 +1284,15 @@ onMounted(() => {
   position: relative;
 }
 
+/* overflow-y is hidden rather than auto: the spine canvas is taller than the doll (viewport
+   pad), and scrollable overflow only ever extends downward — so `auto` would grow a permanent
+   vertical scrollbar for headroom that can't be scrolled to anyway. Horizontal stays auto. */
 .undiscovered-character {
   filter: brightness(0);
   width: 100%;
   height: calc(100% - 20px);
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   display: flex;
   justify-content: safe left;
   align-items: start;
@@ -1299,7 +1303,8 @@ onMounted(() => {
 .discovered-asset {
   width: 100%;
   height: calc(100% - 20px);
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   display: flex;
   justify-content: safe left;
   align-items: start;
@@ -1395,7 +1400,8 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .fullscreen-character.undiscovered {

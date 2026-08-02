@@ -47,6 +47,26 @@ const remaining = game.getService('xp').getXpToNext('hero');
 | `characterId` | string | Character to check |
 | **Returns** | number | XP remaining to next level |
 
+## `reward`
+
+Defeat-reward and dungeon-scaling service (see the Rewards & Scaling guide).
+
+| Method | Description |
+|---|---|
+| `getPending()` | Reactive pending-reward object the reward panel renders (`{ items, resources, characters }` – characters carry per-member XP gains, level range, and stat diffs) |
+| `effectiveThreat(battleId)` | Battle definition's threat × the current dungeon-level scale |
+| `getDungeonLevel()` | The current dungeon's (level group's) snapshot, 1 outside dungeons |
+| `dungeonScale(level)` | Reward multiplier for a dungeon level |
+| `recordResource(statId, amount)` | Record a game-resource gain for the reward display (merged per stat id) |
+| `clearPending()` | Reset the pending reward |
+| `openRewardPopup()` | Open the reward popup (guarded against double-open) |
+
+```js
+// Scale a hand-authored payout by the same curve the generator uses
+const reward = game.getService('reward');
+const gold = Math.round(10 * reward.dungeonScale(reward.getDungeonLevel()));
+```
+
 ## Common Patterns
 
 ### Award XP after battle victory

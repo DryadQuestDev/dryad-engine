@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch, onUnmounted } from 'vue';
 import { AssetObject } from '../../schemas/assetSchema';
-import { spineRenderer, type SpineStats } from '../utils/spineRenderer';
+import { spineRenderer, type SpineStats, type SlotColorSpec } from '../utils/spineRenderer';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 const props = defineProps<{
@@ -22,6 +22,16 @@ const zindex = computed(() => props.asset.z ?? 0);
 
 
 const makeSlotId = () => `spine_asset_${props.asset.id || ''}_${Date.now()}`;
+
+// Slot tints/removals must be re-applied after anything that resets the skeleton pose
+// (applySkins calls setSlotsToSetupPose, which clears slot colors and attachments).
+const applySlotEffects = () => {
+  if (!spineInstance) return;
+  const colors = (props.asset as any).slot_colors as SlotColorSpec[] | undefined;
+  const removals = (props.asset as any).slot_remove as string[] | undefined;
+  if (colors?.length) spineRenderer.applySlotColors(spineInstance, colors);
+  if (removals?.length) spineRenderer.applySlotRemovals(spineInstance, removals);
+};
 
 const initSpine = async () => {
   if (!spineContainerRef.value || !spineAtlasPath.value || !spineSkeletonPath.value) return;
@@ -57,6 +67,8 @@ const initSpine = async () => {
     if (props.asset.timescale !== undefined && spineInstance.state) {
       spineInstance.state.timeScale = props.asset.timescale;
     }
+
+    applySlotEffects();
   } catch (error) {
     console.error('Failed to initialize Spine Asset:', error);
   }
@@ -99,7 +111,17 @@ watch(() => JSON.stringify(props.asset.skins), (newVal, oldVal) => {
   if (skins && skins.length > 0) {
     spineRenderer.applySkins(spineInstance, skins);
   }
+  applySlotEffects();
 });
+
+// Watch for slot tint/removal changes. Reset to setup pose first so a removal taken OUT of
+// the list restores its attachment (animation attachment timelines re-assert every frame).
+watch(() => JSON.stringify([(props.asset as any).slot_colors, (props.asset as any).slot_remove]),
+  (newVal, oldVal) => {
+    if (newVal === oldVal || !spineInstance) return;
+    spineInstance.skeleton.setSlotsToSetupPose();
+    applySlotEffects();
+  });
 
 // Watch for timescale changes
 watch(() => props.asset.timescale, (newTimescale) => {

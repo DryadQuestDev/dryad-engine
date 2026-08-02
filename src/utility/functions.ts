@@ -77,6 +77,12 @@ export function parseText(text: string): Record<string, any>[] {
     let scene_row = 0;
     let scene_block = 0;
     let scene_paragraph = 0;
+    // Paragraph number of the last text line actually emitted in the current block.
+    // `>` binds to this rather than to scene_paragraph, which a blank line has
+    // already incremented — otherwise a `>` group separated from its prose by a
+    // blank line would bind to a paragraph that was never emitted, and the choices
+    // would be silently unreachable. 0 = no paragraph to attach to (orphan).
+    let last_text_paragraph = 0;
     let anchor = "";
 
     let fillingContent = false;
@@ -157,6 +163,7 @@ export function parseText(text: string): Record<string, any>[] {
                 scene_row = 1;
                 scene_block = 1;
                 scene_paragraph = 1;
+                last_text_paragraph = 0;
                 anchor = "";
                 inside = "#"; // Set context for subsequent lines
             } break;
@@ -164,15 +171,21 @@ export function parseText(text: string): Record<string, any>[] {
             case "%": {
                 scene_block++;
                 scene_paragraph = 1;
+                last_text_paragraph = 0;
                 fillingContent = false;
                 anchor = "";
             } break;
 
             case ">": {
-                let s_p = scene_paragraph; // - 1;
+                let s_p = last_text_paragraph;
                 let id = ">" + room_id + "." + scene_name + "." + scene_row + "." + scene_block + "." + s_p + "*" + choice_counter;
                 choice_counter++;
                 arr.push({ id: id, val: paragraphContent, params: params });
+                // Rewind the counter a blank line above us may have advanced. Otherwise
+                // `para \n\n >choice \n\n para` burns a paragraph number on nothing, and
+                // the paragraph below the choice is unreachable — the fallthrough looks
+                // for the number that got skipped.
+                scene_paragraph = last_text_paragraph;
                 params = null;
                 anchor = "";
             } break;
@@ -180,6 +193,7 @@ export function parseText(text: string): Record<string, any>[] {
             case "~": {
                 scene_block++;
                 scene_paragraph = 1;
+                last_text_paragraph = 0;
                 let id = "~" + room_id + "." + scene_name + "." + scene_row + "." + scene_block;
                 arr.push({ id: id, val: paragraphContent, params: params });
                 params = null;
@@ -242,6 +256,7 @@ export function parseText(text: string): Record<string, any>[] {
                                     scene_row = parseInt(matchNumber[0]);
                                     scene_block = 0;
                                     scene_paragraph = 1;
+                                    last_text_paragraph = 0;
                                 } else {//if text
                                     id = "#" + room_id + "." + scene_name + "." + scene_row + "." + scene_block + "." + scene_paragraph;
                                     if (fillingContent) {
@@ -250,6 +265,7 @@ export function parseText(text: string): Record<string, any>[] {
                                         arr.push({ id: id, val: paragraph, params: params, anchor: anchor });
                                         params = null;
                                     }
+                                    last_text_paragraph = scene_paragraph;
                                     fillingContent = true;
                                     params = null;
                                 }

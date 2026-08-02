@@ -5,9 +5,6 @@ import { Populate, Skip } from "../../../utility/save-system";
 
 export class DungeonData {
 
-
-    public dungeonLvl: number = 1;
-
     public visitedRooms: Set<string> = new Set();
     public visibleRooms: Set<string> = new Set();
 
@@ -39,6 +36,12 @@ export class DungeonData {
 
     @Populate(Map, { mode: 'merge' })
     public flags: Map<string, number> = new Map();
+
+    // Encounters whose collectable has been taken → turns until it regrows (-1 = never).
+    // A countdown, not a timestamp: the engine stays clock-agnostic and only decrements
+    // this when a time plugin says time passed (game.tickCollectables).
+    @Populate(Map, { mode: 'merge' })
+    public collectedEncounters: Map<string, number> = new Map();
 
 
 

@@ -7,7 +7,18 @@
   "scripts": [
     "main.mjs"
   ],
-  "tabs": [],
+  "tabs": [
+    {
+      "id": "config",
+      "name": "Config",
+      "schema": {
+        "mc_id": {
+          "type": "string",
+          "tooltip": "Character id of the MC/narrator. The dungeon editor's POV convert button only converts this character's `id:` replicas - other characters' speech stays literal."
+        }
+      }
+    }
+  ],
   "data": {
     "character_attributes": [
       {

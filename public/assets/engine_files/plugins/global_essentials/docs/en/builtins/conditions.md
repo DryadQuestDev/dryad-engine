@@ -12,7 +12,8 @@ All built-in conditions for choice visibility checks and conditional logic.
 | `_room_visited` | Whether a room has been visited | `_room_visited(room5) = true` |
 | `_scene` | Whether a scene is currently active | `_scene = true` |
 | `_selected_character` | ID of currently selected character | `_selected_character = alice` |
-| `_item_on` | Whether character has item equipped | `_item_on(alice, sword) = true` |
+| `_item_on` | Whether character has item equipped (no item id = the active item) | `_item_on(alice, sword) = true`, `_item_on(mc) = true` |
+| `_item_count` | Quantity of an item in an inventory (party by default; unequipped stacks only) | `_item_count(pickaxe) > 0`, `_item_count(chest.gold) >= 100` |
 | `_char` | Get a character property value | `_char(alice.stat.strength) > 10` |
 | `_skill` | Get learned skill level (0 if not learned) | `_skill(alice.fire_magic.fireball) > 0` |
 
@@ -36,10 +37,11 @@ The `_char` condition accesses character properties by path: `characterId.type.k
 | Type | Description | Example |
 |------|-------------|---------|
 | `trait` | Character traits | `_char(alice.trait.name) = Alice` |
-| `attribute` | Character attributes | `_char(alice.attribute.class) = warrior` |
+| `attribute` | Character attributes. If the key is a skin layer id (not an attribute), returns whether the layer is active (true/false) | `_char(alice.attribute.class) = warrior`, `_char(mc.attribute.wings) = true` |
 | `stat` | Character stats (computed value) | `_char(alice.stat.strength) > 10` |
 | `resource` | Character resources | `_char(alice.resource.health) >= 50` |
 | `skinStyle` | Active skin layer styles | `_char(alice.skinStyle.hat) = wizard` |
+| `status` | Whether the character has a status (1/0) | `_char(alice.status.poisoned) = 1` |
 
 ---
 

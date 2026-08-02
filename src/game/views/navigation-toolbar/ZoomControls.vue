@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import Tooltip from 'primevue/tooltip';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
 
 const zoomText = computed(() => {
@@ -11,7 +13,7 @@ const zoomText = computed(() => {
 });
 
 const zoomTooltip = computed(() => {
-  return `Current zoom: ${Math.round(game.coreSystem.getState<number>('map_zoom_factor') * 100)}%`;
+  return global.getString('toolbar.zoom_current', { zoom: Math.round(game.coreSystem.getState<number>('map_zoom_factor') * 100) });
 });
 
 const handleZoomIn = () => {
@@ -29,11 +31,11 @@ const isVisible = () => {
 
 <template>
   <template v-if="isVisible()">
-    <div class="toolbar-item zoom-in" v-tooltip.top="'Zoom in'" @click="handleZoomIn" />
+    <div class="toolbar-item zoom-in" v-tooltip.top="global.getString('toolbar.zoom_in')" @click="handleZoomIn" />
     <div class="toolbar-item zoom-value" v-tooltip.top="zoomTooltip">
       <span class="button-text">{{ zoomText }}</span>
     </div>
-    <div class="toolbar-item zoom-out" v-tooltip.top="'Zoom out'" @click="handleZoomOut" />
+    <div class="toolbar-item zoom-out" v-tooltip.top="global.getString('toolbar.zoom_out')" @click="handleZoomOut" />
   </template>
 </template>
 

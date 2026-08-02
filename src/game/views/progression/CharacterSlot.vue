@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Character } from '../../core/character/character';
 import { computed, ref, onMounted, watch } from 'vue';
-import { SceneSlot } from '../../systems/dungeonSystem';
+import { SceneSlot, GRADE_FILTER_TALL_ID } from '../../systems/dungeonSystem';
 import CharacterDoll from './CharacterDoll.vue';
 import ItemSlots from './ItemSlots.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
@@ -9,7 +9,7 @@ import { Game } from '../../game';
 import { useCharacterAnimation } from '../../../composables/useCharacterAnimation';
 import { OVERLAY_BASE_SCALE } from '../../utils/characterReference';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   character: Character;
   slot: Partial<SceneSlot>; // Partial because 'char' is not needed when character is provided directly
   showItemSlots?: boolean;
@@ -26,9 +26,24 @@ const props = defineProps<{
   overlayOffsetX?: number;
   overlayOffsetY?: number;
   instantLayers?: boolean; // Disable fade transition on layer changes (for combat animations)
-}>();
+  /**
+   * Whether the scene colour grade applies to this doll's art. True for world dolls (scene actors,
+   * battle fighters); pass false when the doll is chrome rather than world — the character sheet,
+   * the viewer popup, gallery previews.
+   */
+  grade?: boolean;
+}>(), { grade: true });
 
 const game = Game.getInstance();
+
+// The grade sits on the art wrapper, never on .character-slot: that root also holds the overlay
+// wrapper (in-battle name/HP/tokens) and the item slots, which are UI and must stay lit.
+// Uses the TALL grade def: an SVG filter region clips, and the doll's spine canvas paints far
+// outside this wrapper vertically (slot.scale plus the viewport pad), so the standard ±25%
+// region would slice heads and feet the moment a grade came up.
+const scaleWrapperFilter = computed(() =>
+  (props.grade && game.dungeonSystem.gradeActive.value) ? `url(#${GRADE_FILTER_TALL_ID})` : 'none'
+);
 
 // Use animation composable
 const animationControls = useCharacterAnimation({
@@ -88,17 +103,14 @@ const isSpineRendering = computed(() =>
 );
 
 
-// Trait art_dx/dy/scale apply to ALL static rendering (any view) — including the
-// back action overlays that swap in for spine views (e.g. Ane back hit/attack/cast).
-// Spine paths apply their own per-spine-entry offset via the renderer's canvas CSS,
-// so the wrapper returns 0/0/1 there to avoid double-shift.
+// Static placement comes from the per-view static_art entries (merged across
+// statuses) — including the back action overlays that swap in for spine views
+// (e.g. Ane back hit/attack/cast). Spine paths apply their own per-spine-entry
+// offset via the renderer's canvas CSS, so the wrapper returns 0/0/1 there to
+// avoid double-shift.
 const animatedArtOffset = computed(() => {
   if (isSpineRendering.value) return { dx: 0, dy: 0, scale: 1 };
-  return {
-    dx: props.character.getTrait('art_dx') || 0,
-    dy: props.character.getTrait('art_dy') || 0,
-    scale: props.character.getTrait('art_scale') || 1,
-  };
+  return props.character.getStaticArtOffset(props.view);
 });
 
 const artScale = computed(() => animatedArtOffset.value.scale);
@@ -232,10 +244,20 @@ onMounted(() => {
   }
 });
 
-// Watch for isRemoving flag to trigger exit animation
-watch(() => props.slot.isRemoving, (isRemoving) => {
-  if (isRemoving && characterRef.value) {
+// Watch isRemoving to drive the exit — and to restore visibility on re-entry.
+// When a character exits then is re-staged before the removal timer fires, the
+// slot is still in the scene, so the actor directive routes through
+// moveActorToSlot, which cancels the removal (clears isRemoving) and mutates
+// THIS slot in place — no remount, so onMounted never re-runs. Meanwhile the
+// interrupted exit (force-completed by completeAllCharacterAnimations) left the
+// element stranded at opacity:0. The isRemoving true->false transition is the
+// reliable re-entry signal; snap the element back to a clean visible state.
+watch(() => props.slot.isRemoving, (isRemoving, wasRemoving) => {
+  if (!characterRef.value) return;
+  if (isRemoving) {
     animationControls.playExit();
+  } else if (wasRemoving) {
+    animationControls.resetToVisible();
   }
 });
 
@@ -357,6 +379,9 @@ const onLeave = (_el: Element, done: () => void) => {
   height: 100%;
   transform: v-bind("scaleWrapperTransform");
   transform-origin: 50% 50%;
+  /* Scene colour grade. Deliberately here and not on .character-slot — the slot root also contains
+     the overlay wrapper (name/HP/tokens) and the item slots, which are UI. */
+  filter: v-bind("scaleWrapperFilter");
 }
 
 .character-slot-rotation-wrapper {

@@ -13,3 +13,9 @@ export const EntityTraitSchema = {
 } as const satisfies Schema;
 
 export type EntityTraitObject = SchemaToType<typeof EntityTraitSchema>;
+
+// Data-only trait tabs (dungeon/inventory traits): values are read straight from template data,
+// never from a live instance, so is_persistent has no effect there and is hidden from the form.
+// Character and item traits keep it (character.ts / item.ts getTrait consult it).
+const { is_persistent: _omitted, ...dataTraitFields } = EntityTraitSchema;
+export const DataEntityTraitSchema = dataTraitFields as Omit<typeof EntityTraitSchema, 'is_persistent'>;

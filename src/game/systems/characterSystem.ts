@@ -23,6 +23,9 @@ import { AbilityDefinitionObject } from "../../schemas/abilityDefinitionSchema";
 import { AbilityTemplateObject } from "../../schemas/abilityTemplateSchema";
 import { AbilityGroupObject } from "../../schemas/abilityGroupSchema";
 
+/** Sentinel for the `max` keyword in resource ops — swapped for the character's cap at execution. */
+const MAX_RESOURCE = Symbol('max_resource');
+
 // Type for the function that computes stats
 export type StatComputerFunction = (character: Character) => Record<string, number>;
 
@@ -138,8 +141,19 @@ export class CharacterSystem {
     const targetEffects = normalizeEffects(target.effects);
     const sourceEffects = normalizeEffects(source.effects);
 
+    // Meta is last-wins, except list-valued keys, which union (deduped) — two modifiers
+    // contributing to the same list key (e.g. require_status_self from two items) both survive.
+    const mergedMeta: any = { ...(target.meta || {}), ...(source.meta || {}) };
+    for (const key in mergedMeta) {
+      const targetValue = target.meta?.[key];
+      const sourceValue = source.meta?.[key];
+      if (Array.isArray(targetValue) && Array.isArray(sourceValue)) {
+        mergedMeta[key] = Array.from(new Set([...targetValue, ...sourceValue]));
+      }
+    }
+
     const result: any = {
-      meta: { ...(target.meta || {}), ...(source.meta || {}) },
+      meta: mergedMeta,
       effects: { ...targetEffects }
     };
 
@@ -351,6 +365,7 @@ export class CharacterSystem {
       return;
     }
     this.partyIds.value.add(character.id);
+    gameLogger.info(`[party] Added "${character.id}" to party`);
     // character.inventoryId = PARTY_INVENTORY_ID; 
 
     if (character.actions?.character_join_party) {
@@ -402,6 +417,43 @@ export class CharacterSystem {
     this.game.trigger('character_delete', character);
   }
 
+  /**
+   * Destroy a character and rebuild it from its template under the same id — narratively a
+   * fresh entity in the same role. Party membership is preserved; statuses, resources, the
+   * private inventory and learned skills are all discarded.
+   * When nothing is live the id is treated as a template id and the character is created, so
+   * content can guarantee a pristine character without knowing whether one exists yet.
+   * The template is resolved BEFORE the delete so a bad templateId can never leave a hole.
+   */
+  public resetCharacter(character: Character | string): Character {
+    const existing = typeof character === 'string' ? this.getCharacter(character) : character;
+
+    // Nothing live: fall back to id-as-template-id, the shape createDefaultEntities uses.
+    // Covers auto_create:false templates and characters deleted earlier in the run.
+    if (!existing) {
+      const id = character as string;
+      if (!this.templatesMap.has(id)) {
+        throw new Error(`No live character or template found for "${id}".`);
+      }
+      const created = this.createCharacter(id, id);
+      this.addCharacter(created, false);
+      return created;
+    }
+
+    const templateId = existing.templateId;
+    if (!templateId || !this.templatesMap.has(templateId)) {
+      throw new Error(`Character "${existing.id}" has no known template ("${templateId}") to reset from.`);
+    }
+
+    const id = existing.id;
+    const wasInParty = this.partyIds.value.has(id);
+
+    this.deleteCharacter(existing);
+    const fresh = this.createCharacter(id, templateId);
+    this.addCharacter(fresh, wasInParty);
+    return fresh;
+  }
+
 
   public removeFromParty(character: Character | string) {
     if (typeof character === 'string') {
@@ -420,7 +472,9 @@ export class CharacterSystem {
       this.transferEquippedItems(character, partyInventory, privateInventory);
     }
 
-    this.partyIds.value.delete(character.id);
+    if (this.partyIds.value.delete(character.id)) {
+      gameLogger.info(`[party] Removed "${character.id}" from party`);
+    }
     //character.inventoryId = "";
 
     // if the character that is leaving the party is the selected character, select the first party member
@@ -466,6 +520,9 @@ export class CharacterSystem {
    * Process character modifications from string or object format.
    * Supports operations: = (set), < (reduce), > (increase)
    *
+   * Resources accept the keyword `max` in place of a number — it resolves to that character's
+   * cap for the resource, so `resource: "ane.health = max"` is a full heal.
+   *
    * @param data String format: "alice.trait.name=New Name, eleanor.resource.health<25.5, alice.skinStyle.hat>class1, alice.skinStyle.hat=[class1, class2]"
    *             Object format: { "alice.trait.name": "New Name", "eleanor.resource.health": -25.5 }
    * @param forcedType When set (e.g. by the `attr`/`stat`/`trait`/`resource`/`skin_style` shortcut
@@ -501,7 +558,11 @@ export class CharacterSystem {
       }
 
       let value: any = entry.value;
-      if (type === 'stat' || type === 'resource') {
+      if (type === 'resource' && String(value).trim().toLowerCase() === 'max') {
+        // "max" resolves per-character at execution time (the resource's cap is the
+        // same-named stat) — a plain big number would miss it on can_overflow resources.
+        value = MAX_RESOURCE;
+      } else if (type === 'stat' || type === 'resource') {
         const n = Number(value);
         if (!Number.isFinite(n)) {
           gameLogger.error(`Invalid numeric value: "${value}" for ${entry.id}`);
@@ -517,6 +578,7 @@ export class CharacterSystem {
     }
 
     // Execute operations
+    const applied: string[] = [];
     for (const op of operations) {
       const character = this.getCharacter(op.charId);
       if (!character) {
@@ -525,6 +587,9 @@ export class CharacterSystem {
       }
 
       try {
+        // What actually landed — resolved sentinels (e.g. `max`) become real numbers, so the
+        // summary log reports the applied value and never stringifies a Symbol.
+        let appliedValue: any = op.value;
         switch (op.type) {
           case 'trait':
             if (op.operator !== '=') {
@@ -534,13 +599,23 @@ export class CharacterSystem {
             character.setTrait(op.key, op.value);
             break;
 
-          case 'attribute':
+          case 'attribute': {
             if (op.operator !== '=') {
               gameLogger.error(`Attributes only support "=" operator. Got "${op.operator}" for ${op.charId}.attribute.${op.key}`);
               continue;
             }
+            // Fallback: key is not an attribute but IS a skin layer id → visibility toggle.
+            // Attribute wins on id collision (see load-time shadowing warning in global.ts).
+            if (!this.attributesMap.has(op.key) && this.skinLayersMap.has(op.key)) {
+              const v = String(op.value);
+              if (v === 'true') character.addSkinLayers([op.key]);
+              else if (v === 'false') character.removeSkinLayers([op.key]);
+              else gameLogger.error(`"${op.key}" is a skin layer, not an attribute — value must be "true" or "false" to toggle visibility. Got "${v}" for ${op.charId}.${op.key}`);
+              break;
+            }
             character.setAttribute(op.key, String(op.value));
             break;
+          }
 
           case 'stat':
             if (op.operator === '=') {
@@ -556,18 +631,22 @@ export class CharacterSystem {
             }
             break;
 
-          case 'resource':
+          case 'resource': {
+            // "max" (MAX_RESOURCE) means this character's cap for that resource.
+            const resourceValue = op.value === MAX_RESOURCE ? character.getStat(op.key) : op.value;
+            appliedValue = resourceValue;
             if (op.operator === '=') {
               // Set resource to exact value
-              character.setResource(op.key, op.value);
+              character.setResource(op.key, resourceValue);
             } else if (op.operator === '>') {
               // Increase resource
-              character.addResource(op.key, op.value);
+              character.addResource(op.key, resourceValue);
             } else if (op.operator === '<') {
               // Decrease resource
-              character.addResource(op.key, -op.value);
+              character.addResource(op.key, -resourceValue);
             }
             break;
+          }
 
           case 'skinStyle':
             if (op.operator === '=') {
@@ -584,10 +663,15 @@ export class CharacterSystem {
 
           default:
             gameLogger.error(`Unknown type "${op.type}" for character modification`);
+            continue;
         }
+        applied.push(`${op.charId}.${op.type}${op.key ? '.' + op.key : ''}${op.operator}${appliedValue}`);
       } catch (error) {
         gameLogger.error(`Error processing char action for ${op.charId}.${op.type}.${op.key}: ${error}`);
       }
+    }
+    if (applied.length > 0) {
+      gameLogger.info(`[char] ${applied.join(', ')}`);
     }
   }
 
@@ -617,6 +701,7 @@ export class CharacterSystem {
 
       try {
         character.addSkinLayers([skinLayerId]);
+        gameLogger.info(`[skin_layer] Added "${skinLayerId}" to "${charId}"`);
       } catch (error) {
         gameLogger.error(`Error adding skin layer: ${error}`);
       }
@@ -649,6 +734,7 @@ export class CharacterSystem {
 
       try {
         character.removeSkinLayers([skinLayerId]);
+        gameLogger.info(`[skin_layer] Removed "${skinLayerId}" from "${charId}"`);
       } catch (error) {
         gameLogger.error(`Error removing skin layer: ${error}`);
       }
@@ -721,6 +807,7 @@ export class CharacterSystem {
 
       try {
         character.addItemSlot(Game.getInstance().createUid(), slotId.trim(), x, y);
+        gameLogger.info(`[item_slot] Added slot "${slotId.trim()}" to "${charId}"`);
       } catch (error) {
         gameLogger.error(`Error adding item slot: ${error}`);
       }
@@ -756,6 +843,7 @@ export class CharacterSystem {
         if (slots.length > 0) {
           // Remove the first slot with this ID
           character.removeItemSlot(slots[0]);
+          gameLogger.info(`[item_slot] Removed slot "${slotId}" from "${charId}"`);
         } else {
           gameLogger.warn(`No item slot "${slotId}" found for character ${charId}`);
         }

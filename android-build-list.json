@@ -1,0 +1,14 @@
+[
+  {
+    "id": "tutorial",
+    "app_id": "com.dryadengine.tutorial",
+    "app_name": "Dryad Engine Tutorial",
+    "games": [
+      {
+        "id": "tutorial",
+        "source": "production/dryad-engine-linux/assets",
+        "mods": ["_core", "lewd"]
+      }
+    ]
+  }
+]

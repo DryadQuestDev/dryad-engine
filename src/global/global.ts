@@ -27,6 +27,7 @@ import { PluginObject } from '../schemas/pluginShema';
 import { updateGamePlayOrder } from '../utility/game-order-tracker';
 import { gameLogger } from '../game/utils/logger';
 import { showConfirm, showAlert } from '../services/dialogService';
+import { MusicPlayer } from '../services/musicPlayer';
 
 // expose imports
 import * as Vue from 'vue';
@@ -64,6 +65,7 @@ import SkillTree from '../game/views/progression/SkillTree.vue';
 import SkillSlot from '../game/views/progression/SkillSlot.vue';
 import AbilityCard from '../game/views/progression/AbilityCard.vue';
 import StatusObjectDisplay from '../game/views/progression/StatusObjectDisplay.vue';
+import StatusBrick from '../game/views/progression/StatusBrick.vue';
 import AbilitiesViewer from '../game/views/progression/AbilitiesViewer.vue';
 import CharacterViewer from '../game/views/progression/CharacterViewer.vue';
 import CharacterViewerPopup from '../game/views/progression/CharacterViewerPopup.vue';
@@ -92,8 +94,18 @@ export class Global {
   public isWebSite = import.meta.env.VITE_WEB_MODE === 'true' && !(window as any).Capacitor;
   public nsfwEnabled = useStorage('nsfwEnabled', false);
 
+  // Hosts where the engine's own 18+ gate applies (our hosted web builds).
+  // Anywhere else (itch.io etc.) the hosting platform provides its own age gate.
+  public nsfwGatedHosts = ['dryadengine.com', 'localhost', '127.0.0.1'];
+
+  public get isNsfwGated(): boolean {
+    if (!this.isWebSite) return false;
+    const host = window.location.hostname;
+    return this.nsfwGatedHosts.some(h => host === h || host.endsWith('.' + h));
+  }
+
   public isNsfwAllowed(manifest: ManifestObject): boolean {
-    if (!this.isWebSite) return true;
+    if (!this.isNsfwGated) return true;
     if (!manifest.nsfw) return true;
     return this.nsfwEnabled.value;
   }
@@ -229,6 +241,11 @@ export class Global {
     localStorage.setItem('user-settings', JSON.stringify(mergedSettings));
 
     this.userSettings = useStorage('user-settings', mergedSettings);
+
+    // Live music volume: registered here (not per-game) so it also covers main-menu music
+    watch(() => this.userSettings.value.music_volume, (newVolume) => {
+      MusicPlayer.getInstance().setVolume(newVolume / 100);
+    });
   }
 
   private async initLanguages() {
@@ -270,6 +287,7 @@ export class Global {
 
   public addNotification(message: string) {
     message = this.game.resolveString(message).output;
+    gameLogger.info(`[notification] ${message}`);
     const newNotification: NotificationItem = {
       id: Date.now() + this.notificationCounter++, // Simple unique ID
       message: message,
@@ -531,6 +549,12 @@ export class Global {
     game.characterSystem.statsVisibleMap = new Map(Array.from(game.characterSystem.statsMap.entries()).filter(([_, stat]) => !stat.is_hidden));
     game.characterSystem.attributesMap = await this.fetchMapValues(gameId, `character_attributes`, modsIds);
     game.characterSystem.skinLayersMap = await this.fetchMapValues(gameId, `character_skin_layers`, modsIds);
+    // Attribute ids shadow skin-layer ids in the attr/char action and _char condition fallbacks
+    /*for (const id of game.characterSystem.skinLayersMap.keys()) {
+      if (game.characterSystem.attributesMap.has(id)) {
+       gameLogger.warn(`Id "${id}" is both a character attribute and a skin layer. The attribute takes precedence: "attr: ${id} = true" sets the attribute, never the layer visibility.`);
+       }
+    }*/
     game.characterSystem.traitsMap = await this.fetchMapValues(gameId, `character_traits`, modsIds, 'order');
     game.characterSystem.templatesMap = await this.fetchMapValues(gameId, `character_templates`, modsIds);
     game.characterSystem.statusesMap = await this.fetchMapValues(gameId, `character_statuses`, modsIds);
@@ -879,6 +903,7 @@ export class Global {
         SkillSlot,
         AbilityCard,
         StatusObjectDisplay,
+        StatusBrick,
         AbilitiesViewer,
       }
     };

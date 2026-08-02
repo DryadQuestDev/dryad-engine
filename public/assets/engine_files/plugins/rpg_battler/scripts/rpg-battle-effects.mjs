@@ -1,6 +1,6 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle, parseFloatingText, addFloatingText } from './rpg-battle-state.mjs';
+import { currentRpgBattle, parseFloatingText, addFloatingText, requiredSelfStatuses } from './rpg-battle-state.mjs';
 import { summonCombatant } from './rpg-battle-flow.mjs';
 
 const { game } = window.engine;
@@ -15,11 +15,13 @@ const DOT_RESIST = { burn: 'resist_burn', poison: 'resist_poison', bleeding: 're
 let _actionPower = null;
 
 /**
- * Compute the effective scaling stat for an ability: `power * (1 + power_amplifier/100)`,
- * unless the ability opts out via `meta.unamplified`. `power_amplifier` is a percentage
- * (100 = +100% = doubles power). Used by both runtime (resolveAbility) and tooltip
- * (powerScaledRenderer). Games drive `power_amplifier` through normal stat channels — typically
- * a stat computer or a buff status.
+ * Compute the effective scaling stat for an ability: `(power + power_bonus) * (1 + power_amplifier/100)`,
+ * unless the ability opts out via `meta.unamplified`, which uses raw `power` alone — so a basic
+ * attack benefits from neither the bonus nor the amplifier. `power_bonus` is flat (gear-style),
+ * `power_amplifier` is a percentage (100 = +100% = doubles power); because the bonus sits inside
+ * the amplified term, the two multiply. Used by both runtime (resolveAbility) and tooltip
+ * (powerScaledRenderer). Games drive both stats through normal stat channels — typically a stat
+ * computer, an equipped item's status, or a buff.
  * @param {Character} character
  * @param {{ meta?: any } | undefined} ability
  * @returns {number}
@@ -27,8 +29,9 @@ let _actionPower = null;
 export function getEffectivePower(character, ability) {
   const base = character.getStat('power');
   if (ability?.meta?.unamplified) return base;
+  const bonus = character.getStat('power_bonus') || 0;
   const amp = character.getStat('power_amplifier') || 0;
-  return base * (1 + amp / 100);
+  return (base + bonus) * (1 + amp / 100);
 }
 
 /**
@@ -183,6 +186,7 @@ export function processStatusEffects(characterId) {
       const dmg = applyDefenses(rawDmg, dmgType, character);
       if (dmg > 0) {
         character.addResource('health', -dmg);
+        game.trigger('battle_took_damage', character, dmg, dmgType, null);
         results.push({ type: 'status_dot', targetId: characterId, amount: dmg, rawAmount: rawDmg, damageType: dmgType, statusId: status.id, statusName, defeated: isLethallyDefeated(characterId) });
       } else if (dmg < 0) {
         // Resist above 100% turned the tick into healing.
@@ -423,7 +427,10 @@ export function applyDamage(target, amount, damageType, casterId) {
     }
   }
 
-  if (remaining > 0) target.addResource('health', -remaining);
+  if (remaining > 0) {
+    target.addResource('health', -remaining);
+    game.trigger('battle_took_damage', target, remaining, damageType || 'physical', casterId || null);
+  }
 
   // Thorns (thorns-only): 1 flat damage per stack per hit. Not consumed.
   if (casterId && remaining > 0) {
@@ -433,6 +440,7 @@ export function applyDamage(target, amount, damageType, casterId) {
       if (caster) {
         thornsReflected = thorns.currentStacks;
         caster.addResource('health', -thornsReflected);
+        game.trigger('battle_took_damage', caster, thornsReflected, 'thorns', target.id);
       }
     }
   }
@@ -584,9 +592,12 @@ export function resolveAbility(casterId, abilityId, targetId, { isBounce = false
     }
   }
 
-  // Consume the self status requirement on cast (skipped on bounces)
-  if (!isBounce && meta.require_status_self && meta.require_status_self_consume) {
-    removeStatusStacks(casterId, meta.require_status_self, 1);
+  // Consume the self status requirement on cast (skipped on bounces). With an OR-list
+  // requirement, the first listed status the caster actually holds pays the cost.
+  if (!isBounce && meta.require_status_self_consume) {
+    const held = requiredSelfStatuses(meta.require_status_self)
+      .find((id) => getStatusStacks(casterId, id) > 0);
+    if (held) removeStatusStacks(casterId, held, 1);
   }
 
   game.trigger('battle_action_cast', caster, abilityId);

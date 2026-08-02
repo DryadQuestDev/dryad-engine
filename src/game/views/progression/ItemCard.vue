@@ -4,6 +4,7 @@ import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import StatusObjectDisplay from './StatusObjectDisplay.vue';
+import StatusCard from '../popups/cards/StatusCard.vue';
 import { Item } from '../../core/character/item';
 
 // for displaying item's info on hover like name, description, stats, etc.
@@ -26,9 +27,14 @@ const rarityClass = computed(() => {
 const isQuest = computed(() => props.item.attributes['rarity'] === 'quest');
 const questLabel = computed(() => Global.getInstance().getString('item_tag.quest'));
 
+// Visual level indicator (generic `item_level` trait; stamped by whatever scales the item)
+const itemLevel = computed(() => props.item.getTrait('item_level') || 0);
+
 const itemCategory = computed(() => game.itemSystem.itemCategoriesMap.get(props.item.category));
 const categoryIcon = computed(() => itemCategory.value?.icon || '');
 const categoryName = computed(() => itemCategory.value?.singular || itemCategory.value?.name || '');
+
+const itemImage = computed(() => props.item.getTrait('image') || '');
 
 // Get weight for single item (not multiplied by quantity)
 const itemWeight = computed(() => {
@@ -39,94 +45,85 @@ const itemWeight = computed(() => {
   return null;
 });
 
-// Consume effects for tooltip display
-const consumeEffects = computed(() => {
-  if (!props.item.is_consumable) return [];
+// Consume resource effects (restore/reduce), rendered as text.
+const consumeResourceEffects = computed(() => {
   const effects: Array<{ text: string; isPositive: boolean }> = [];
   const global = Global.getInstance();
-
-  for (const statId in props.item.consume_percentage) {
-    const pct = props.item.consume_percentage[statId];
-    if (!pct) continue;
-    const stat = game.characterSystem.statsMap.get(statId);
-    const name = stat?.name || statId;
-    const key = pct > 0 ? 'item_consume_restore' : 'item_consume_reduce';
-    const isGood = stat?.reduction_is_good ? pct < 0 : pct > 0;
-    effects.push({ text: global.getString(key, { amount: Math.abs(pct) + '%', resource: name }), isPositive: isGood });
-  }
-
-  for (const statId in props.item.consume_absolute) {
-    const amt = props.item.consume_absolute[statId];
-    if (!amt) continue;
-    const stat = game.characterSystem.statsMap.get(statId);
-    const name = stat?.name || statId;
-    const key = amt > 0 ? 'item_consume_restore' : 'item_consume_reduce';
-    const isGood = stat?.reduction_is_good ? amt < 0 : amt > 0;
-    effects.push({ text: global.getString(key, { amount: String(Math.abs(amt)), resource: name }), isPositive: isGood });
-  }
+  const collect = (map: Record<string, number> | undefined, isPct: boolean) => {
+    for (const statId in map) {
+      const val = map[statId];
+      if (!val) continue;
+      const stat = game.characterSystem.statsMap.get(statId);
+      const name = stat?.name || statId;
+      const key = val > 0 ? 'item_consume_restore' : 'item_consume_reduce';
+      const isGood = stat?.reduction_is_good ? val < 0 : val > 0;
+      const amount = isPct ? Math.abs(val) + '%' : String(Math.abs(val));
+      effects.push({ text: global.getString(key, { amount, resource: name }), isPositive: isGood });
+    }
+  };
+  collect(props.item.consume_percentage, true);
+  collect(props.item.consume_absolute, false);
   return effects;
 });
 
-// Consume max stacks display (only if not unlimited)
-const consumeMaxStacksText = computed(() => {
-  if (!props.item.is_consumable) return null;
-  const so = props.item.statusObject;
-  if (!so || Object.keys(so).length === 0) return null;
-  const ms = props.item.consume_max_stacks;
-  if (ms === -1 || ms === undefined) return null;
-  return Global.getInstance().getString('item_consume_max_stacks', { stacks: String(ms) });
-});
+// Statuses granted on consume — each rendered as a full StatusCard (carries its own stats/duration).
+const consumeStatuses = computed(() =>
+  (props.item.apply_statuses_on_consume || [])
+    .filter((e): e is { status: string; stacks?: number } => !!e?.status)
+    .map(e => ({ statusId: e.status, stacks: e.stacks || 1 }))
+);
 
-// Consume duration display (only if item has a status to apply)
-const consumeDurationText = computed(() => {
-  if (!props.item.is_consumable) return null;
-  const so = props.item.statusObject;
-  if (!so || Object.keys(so).length === 0) return null;
-  const d = props.item.consume_duration;
-  const global = Global.getInstance();
-  return (d === -1 || d === undefined)
-    ? global.getString('item_consume_duration_permanent')
-    : global.getString('item_consume_duration', { duration: String(d) });
-});
+const hasConsume = computed(() => consumeStatuses.value.length > 0 || consumeResourceEffects.value.length > 0);
+const consumeLabel = computed(() => Global.getInstance().getString('consumable_label'));
 </script>
 
 <template>
   <div :id="COMPONENT_ID" class="item-card">
 
     <div class="card-header">
-      <div class="header-top">
-        <h3 class="item-name" :class="rarityClass">{{ item.getTrait('name') || 'Item Name' }}</h3>
-        <span v-if="isQuest" class="quest-tag">{{ questLabel }}</span>
-        <!-- Item cost display (only if item has price) -->
-        <div v-if="item.isTradable()" class="item-cost">
-          <div v-for="(amount, currencyId) in item.price" :key="currencyId" class="cost-item">
-            <img v-if="game.itemSystem.itemTemplatesMap.get(currencyId)?.traits"
-              :src="(game.itemSystem.itemTemplatesMap.get(currencyId)?.traits as any)?.image" :alt="currencyId"
-              class="cost-currency-icon" />
-            <span class="cost-amount">{{ amount }}</span>
+      <img v-if="itemImage" :src="itemImage" :alt="item.getTrait('name') || ''" class="item-card-image" />
+      <div class="card-header-text">
+        <div class="header-top">
+          <h3 class="item-name" :class="rarityClass">
+            <span v-if="itemLevel > 0" class="item-level-tag">Lv {{ itemLevel }}</span>
+            {{ item.getTrait('name') || 'Item Name' }}
+          </h3>
+          <span v-if="isQuest" class="quest-tag">{{ questLabel }}</span>
+          <!-- Item cost display (only if item has price) -->
+          <div v-if="item.isTradable()" class="item-cost">
+            <div v-for="(amount, currencyId) in item.price" :key="currencyId" class="cost-item">
+              <img v-if="game.itemSystem.itemTemplatesMap.get(currencyId)?.traits"
+                :src="(game.itemSystem.itemTemplatesMap.get(currencyId)?.traits as any)?.image" :alt="currencyId"
+                class="cost-currency-icon" />
+              <span class="cost-amount">{{ amount }}</span>
+            </div>
           </div>
         </div>
-      </div>
-      <div v-if="categoryName" class="item-category-line">
-        <img v-if="categoryIcon" :src="categoryIcon" :alt="categoryName" class="item-category-icon" />
-        <span class="item-category-name">{{ categoryName }}</span>
+        <div v-if="categoryName" class="item-category-line">
+          <img v-if="categoryIcon" :src="categoryIcon" :alt="categoryName" class="item-category-icon" />
+          <span class="item-category-name">{{ categoryName }}</span>
+        </div>
       </div>
     </div>
 
     <div class="card-body">
       <div v-script="item.getTrait('description') || ''" class="item-description"></div>
 
-      <!-- Consume effects display -->
-      <div v-if="consumeEffects.length > 0 || consumeMaxStacksText || consumeDurationText" class="consume-effects">
-        <div v-for="(effect, i) in consumeEffects" :key="i" class="consume-effect"
-          :class="effect.isPositive ? 'positive' : 'negative'">
-          {{ effect.text }}
-        </div>
-        <div v-if="consumeMaxStacksText" class="consume-duration">{{ consumeMaxStacksText }}</div>
-        <div v-if="consumeDurationText" class="consume-duration">{{ consumeDurationText }}</div>
-      </div>
-
+      <!-- Equip status (equip stats info) — shown first -->
       <StatusObjectDisplay :data="item.statusObject" :character-id="characterId" />
+
+      <!-- Consumable: one label at the top of the green border, then resource effects + the status
+           cards granted on consume (stack count lives in each card's title) -->
+      <div v-if="hasConsume" class="consume-section">
+        <div class="consume-label">{{ consumeLabel }}</div>
+        <div v-for="(effect, i) in consumeResourceEffects" :key="'r' + i" class="consume-effect"
+          :class="effect.isPositive ? 'positive' : 'negative'">{{ effect.text }}</div>
+        <div v-if="consumeStatuses.length" class="consume-statuses">
+          <StatusCard v-for="(cs, i) in consumeStatuses" :key="'s' + i"
+            :status-id="cs.statusId" :character-id="characterId"
+            :stacks-override="cs.stacks" />
+        </div>
+      </div>
 
       <!-- Weight display (for single item) -->
       <div v-if="itemWeight !== null" class="item-weight-info">
@@ -153,9 +150,26 @@ const consumeDurationText = computed(() => {
 }
 
 .card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   border-bottom: 1px solid #555;
   padding-bottom: 8px;
   margin-bottom: 8px;
+}
+
+.item-card-image {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.card-header-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .header-top {
@@ -169,6 +183,24 @@ const consumeDurationText = computed(() => {
   font-size: 1.15em;
   font-weight: bold;
   color: #42b983;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Inline with the title, in front of the name — flows with the text instead of reserving a
+   flex slot that squeezes the name into wrapping */
+.item-level-tag {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 0.6em;
+  font-weight: 700;
+  color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.12);
+  border: 1px solid rgba(138, 180, 248, 0.4);
+  border-radius: 8px;
+  padding: 1px 7px;
+  margin-right: 2px;
+  white-space: nowrap;
 }
 
 .quest-tag {
@@ -205,9 +237,10 @@ const consumeDurationText = computed(() => {
 
 .item-cost {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .cost-item {
@@ -238,12 +271,23 @@ const consumeDurationText = computed(() => {
   line-height: 1.4;
 }
 
-.consume-effects {
-  margin: 0 0 8px 0;
+.consume-section {
+  margin: 8px 0;
   padding: 6px 8px;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   border-left: 3px solid #42b983;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.consume-label {
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #42b983;
 }
 
 .consume-effect {
@@ -259,10 +303,20 @@ const consumeDurationText = computed(() => {
   color: #e06c75;
 }
 
-.consume-duration {
-  font-size: 0.85em;
-  color: #999;
-  margin-top: 4px;
+.consume-statuses {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* StatusCard renders with the global popup chrome (built for hover popups). Strip it for the inline
+   card list: no popup padding, and the title follows immediately after the Consume chip. */
+.consume-statuses :deep(.popup-inner) {
+  padding: 0;
+}
+
+.consume-statuses :deep(.popup-header) {
+  justify-content: flex-start;
 }
 
 .item-weight-info {

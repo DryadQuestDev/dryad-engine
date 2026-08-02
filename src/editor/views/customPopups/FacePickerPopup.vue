@@ -6,7 +6,7 @@ import type { EditorCustomPopupProps } from '../../editor';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { spineRenderer, type SpineStats } from '../../../game/utils/spineRenderer';
 import { applyTrackMap, buildEditorSpineTrackMapFromLayers, buildEditorSpineSkinsFromLayers } from '../../../game/utils/spineAnimationGroups';
-import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO, SPINE_REFERENCE_HEIGHT, SPINE_REFERENCE_WIDTH } from '../../../game/utils/characterReference';
+import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO, SPINE_REFERENCE_HEIGHT, SPINE_REFERENCE_WIDTH, SPINE_VIEWPORT_PAD_Y } from '../../../game/utils/characterReference';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import Slider from 'primevue/slider';
 import Select from 'primevue/select';
@@ -251,8 +251,8 @@ function initializeLocalValues() {
 const storedPreviewMode = useStorage<'spine' | 'static'>('facepicker_previewMode', 'spine');
 
 const hasSpineForActiveView = computed(() =>
-  !!findSpineEntry(artLocal.value.spine, selectedView.value)
-  || !!findSpineEntry(artCore.value?.spine, selectedView.value)
+  !!findViewEntry(artLocal.value.spine, selectedView.value)
+  || !!findViewEntry(artCore.value?.spine, selectedView.value)
 );
 const hasStaticForActiveView = computed(() => imageLayers.value.length > 0);
 
@@ -275,8 +275,8 @@ const spineDisplayOffset = computed(() => {
   if (effectivePreviewMode.value === 'spine') {
     return { dx: localArtDx.value, dy: localArtDy.value, scale: localArtScale.value };
   }
-  const entry = findSpineEntry(artLocal.value.spine, selectedView.value)
-    || findSpineEntry(artCore.value?.spine, selectedView.value);
+  const entry = findViewEntry(artLocal.value.spine, selectedView.value)
+    || findViewEntry(artCore.value?.spine, selectedView.value);
   return {
     dx: typeof entry?.art_dx === 'number' ? entry.art_dx : 0,
     dy: typeof entry?.art_dy === 'number' ? entry.art_dy : 0,
@@ -288,33 +288,31 @@ const staticDisplayOffset = computed(() => {
   if (effectivePreviewMode.value === 'static') {
     return { dx: localArtDx.value, dy: localArtDy.value, scale: localArtScale.value };
   }
+  const entry = findViewEntry(artLocal.value.static_art, selectedView.value)
+    || findViewEntry(artCore.value?.static_art, selectedView.value);
   return {
-    dx: artLocal.value.traits?.art_dx ?? artCore.value?.traits?.art_dx ?? 0,
-    dy: artLocal.value.traits?.art_dy ?? artCore.value?.traits?.art_dy ?? 0,
-    scale: artLocal.value.traits?.art_scale ?? artCore.value?.traits?.art_scale ?? 1,
+    dx: typeof entry?.art_dx === 'number' ? entry.art_dx : 0,
+    dy: typeof entry?.art_dy === 'number' ? entry.art_dy : 0,
+    scale: typeof entry?.art_scale === 'number' ? entry.art_scale : 1,
   };
 });
 
-// Read art offset from the source matching the effective mode:
-//   'spine' → matching spine entry's art_dx/art_dy/art_scale (no fallback)
-//   'static' → character traits (the static fallback for any unset layer)
+// Read art offset from the entry matching the effective mode and selected view:
+//   'spine' → matching spine entry's art_dx/art_dy/art_scale
+//   'static' → matching static_art entry's art_dx/art_dy/art_scale
+// Neither has cross-view fallback — a view without an entry is neutral (0/0/1).
 function loadArtOffsetForView() {
-  if (effectivePreviewMode.value === 'spine') {
-    const entry = findSpineEntry(artLocal.value.spine, selectedView.value)
-      || findSpineEntry(artCore.value?.spine, selectedView.value);
-    localArtDx.value = typeof entry?.art_dx === 'number' ? entry.art_dx : 0;
-    localArtDy.value = typeof entry?.art_dy === 'number' ? entry.art_dy : 0;
-    localArtScale.value = typeof entry?.art_scale === 'number' ? entry.art_scale : 1;
-  } else {
-    localArtDx.value = artLocal.value.traits?.art_dx ?? artCore.value?.traits?.art_dx ?? 0;
-    localArtDy.value = artLocal.value.traits?.art_dy ?? artCore.value?.traits?.art_dy ?? 0;
-    localArtScale.value = artLocal.value.traits?.art_scale ?? artCore.value?.traits?.art_scale ?? 1;
-  }
+  const arr = effectivePreviewMode.value === 'spine' ? 'spine' : 'static_art';
+  const entry = findViewEntry(artLocal.value[arr], selectedView.value)
+    || findViewEntry(artCore.value?.[arr], selectedView.value);
+  localArtDx.value = typeof entry?.art_dx === 'number' ? entry.art_dx : 0;
+  localArtDy.value = typeof entry?.art_dy === 'number' ? entry.art_dy : 0;
+  localArtScale.value = typeof entry?.art_scale === 'number' ? entry.art_scale : 1;
 }
 
-function findSpineEntry(spineArray: any, view: string): any {
-  if (!Array.isArray(spineArray)) return null;
-  return spineArray.find((s: any) => viewMatches(s.view, view)) || null;
+function findViewEntry(viewArray: any, view: string): any {
+  if (!Array.isArray(viewArray)) return null;
+  return viewArray.find((s: any) => viewMatches(s.view, view)) || null;
 }
 
 // Switching views or toggling spine ↔ static reloads the baseline values.
@@ -360,23 +358,18 @@ function updateItemTraits() {
   local.traits.face_shift_y = localY.value;
   local.traits.face_shift_scale = localScale.value;
 
-  // Art offset target follows the effective preview mode: spine entry for the
-  // active view, or character traits when tuning the static fallback.
-  if (effectivePreviewMode.value === 'spine') {
-    if (!Array.isArray(local.spine)) local.spine = [];
-    let entry = (local.spine as any[]).find((s: any) => viewMatches(s.view, selectedView.value));
-    if (!entry) {
-      entry = { view: selectedView.value === DEFAULT_VIEW ? '_default' : selectedView.value };
-      (local.spine as any[]).push(entry);
-    }
-    entry.art_dx = localArtDx.value;
-    entry.art_dy = localArtDy.value;
-    entry.art_scale = localArtScale.value;
-  } else {
-    local.traits.art_dx = localArtDx.value;
-    local.traits.art_dy = localArtDy.value;
-    local.traits.art_scale = localArtScale.value;
+  // Art offset target follows the effective preview mode: the spine entry or
+  // the static_art entry for the active view — find-or-create either way.
+  const arrKey = effectivePreviewMode.value === 'spine' ? 'spine' : 'static_art';
+  if (!Array.isArray(local[arrKey])) local[arrKey] = [];
+  let entry = (local[arrKey] as any[]).find((s: any) => viewMatches(s.view, selectedView.value));
+  if (!entry) {
+    entry = { view: selectedView.value === DEFAULT_VIEW ? '_default' : selectedView.value };
+    (local[arrKey] as any[]).push(entry);
   }
+  entry.art_dx = localArtDx.value;
+  entry.art_dy = localArtDy.value;
+  entry.art_scale = localArtScale.value;
 
   suppressNextPropSync = true;
   emit('update:item', localItem.value);
@@ -509,7 +502,7 @@ function handleMouseUp() {
 }
 
 // Art drag: mousedown on the character doll wrapper. Works for any view since each spine
-// entry / character traits has its own art offset.
+// / static_art entry has its own per-view art offset.
 function handleArtMouseDown(event: MouseEvent) {
   isArtDragging.value = true;
   artDragStartX.value = event.clientX;
@@ -569,6 +562,7 @@ async function initSpinePlayer() {
       atlasUrl: spineAtlasRef.value,
       artScale: spineDisplayOffset.value.scale,
       gameScale: getSpineCharacterScale(selectedView.value, editor.getMergedManifest()),
+      padY: SPINE_VIEWPORT_PAD_Y,
     });
 
     if (!spine) return;
@@ -789,7 +783,7 @@ onMounted(() => {
           Art Offset
           <span class="hint" style="font-weight: normal; text-transform: none;">
             <template v-if="effectivePreviewMode === 'spine'">(spine entry: <code>{{ selectedView }}</code>)</template>
-            <template v-else>(character traits)</template>
+            <template v-else>(static_art entry: <code>{{ selectedView }}</code>)</template>
           </span>
         </div>
 

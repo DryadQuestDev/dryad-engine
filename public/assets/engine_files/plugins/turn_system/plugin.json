@@ -1,0 +1,40 @@
+{
+  "id": "turn_system",
+  "name": "Turn System",
+  "description": "Global map-turn clock. A saved turn counter advances on each room entry (and via the turn action/service), ticking limited status durations on all characters and firing turn_advanced. Adds a Wait button to the map toolbar.",
+  "author": "Nekon",
+  "version": "1.0.0",
+  "order": -1,
+  "scripts": [
+    "main.mjs"
+  ],
+  "tabs": [
+    {
+      "id": "config_turns",
+      "name": "Turn Config",
+      "schema": {
+        "show_turn_counter": {
+          "type": "boolean",
+          "defaultValue": false,
+          "tooltip": "Show the current turn number next to the Wait button in the map toolbar."
+        }
+      }
+    }
+  ],
+  "data": {
+    "locale": [
+      {
+        "id": "turn_status_expired",
+        "val": "**|status|** expired for |name|"
+      },
+      {
+        "id": "turn_waited",
+        "val": "A turn passes."
+      },
+      {
+        "id": "turn_wait_tooltip",
+        "val": "Wait a turn"
+      }
+    ]
+  }
+}

@@ -43,12 +43,12 @@ const hasAnyArt = computed(() => !!props.character?.hasArt());
 // Use static face when:
 // 1. staticFaceForce + spine character: forced static to avoid expensive spine rendering (logs, sidebar)
 // 2. face_static_precedence trait is true: per-character opt-in to prefer face_static over crop
-// 3. Non-spine character with face_static: original behavior (face_static always wins)
+// 3. Non-spine character whose doll has no active image layers: face_static is the only renderable
 const useStaticFace = computed(() => {
   if (!hasFaceStatic.value) return false;
   if (props.staticFaceForce && props.character?.isSpineCharacter()) return true;
   if (props.character?.getTrait('face_static_precedence') === true) return true;
-  if (!props.character?.isSpineCharacter()) return true;
+  if (!props.character?.isSpineCharacter() && props.character?.imageLayersWithMeta.length === 0) return true;
   return false;
 });
 
@@ -215,6 +215,11 @@ const centerFontSize = computed(() => Math.max(10, sizeNum.value * 0.14) + 'px')
 .character-face-doll-container :deep(.character-doll),
 .character-face-doll-container :deep(.character-doll-spine) {
   position: absolute;
+  /* Pin explicitly: with auto offsets the doll keeps its STATIC position, which ancestors can
+     move (e.g. a text-align: center container centers the zero-width static inline box and
+     shifts the whole crop sideways). */
+  top: 0;
+  left: 0;
   width: v-bind("SPINE_REFERENCE_WIDTH_PX");
   height: v-bind("SPINE_REFERENCE_HEIGHT_PX");
   transform: translate(v-bind("faceShiftX + '%'"), v-bind("faceShiftY + '%'")) scale(v-bind("faceShiftScale"));

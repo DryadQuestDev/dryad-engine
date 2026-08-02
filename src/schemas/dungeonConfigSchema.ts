@@ -15,7 +15,9 @@ export const DungeonConfigSchema = {
   fog_default: { type: 'number', tooltip: "Default visibility radius for fog of war in pixels. Set to 0 to disable fog.", show: { dungeon_type: ['map'] }, defaultValue: 200 },
   fog_shadow_coef: { type: 'number', step: 0.1, defaultValue: 1.5, tooltip: "Shadow gradient multiplier for fog edges. 1 = no gradient, higher values = softer transitions.", show: { dungeon_type: ['map'] } },
   fog_image: { type: 'file', fileType: 'image', tooltip: 'Custom fog mask image. If not set, the default image will be used.', show: { dungeon_type: ['map'] } },
+  default_assets: { type: 'chooseMany', fromFile: 'assets', fromFileTypeAnd: { hide_actors: '$falsy' }, tooltip: 'Assets staged automatically when an event starts. Only assets that do not hide the scene actors are listed.' },
   music: { type: 'chooseOne', fromFile: 'music', tooltip: 'Background music to play in this dungeon.' },
+  traits: { type: 'schema', fromFile: 'dungeon_traits', fromFileType: 'custom', tooltip: 'Custom dungeon traits defined in the dungeon_traits file (General tab). E.g. level_group to share a dungeon-level snapshot between linked dungeons.' },
   actions: {
     type: 'schema', tooltip: 'Action scripts triggered by dungeon events.', objects: {
       dungeon_create: { type: 'textarea', tooltip: 'Script executed when the dungeon is created, including when loading from a save file (dungeons are not serialized).' },

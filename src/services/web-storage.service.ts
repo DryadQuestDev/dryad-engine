@@ -137,7 +137,8 @@ export class WebStorageService implements StorageService {
     // --- Game/Mod Methods (compose from listFolders + readJson) ---
 
     async getGamesList(): Promise<ManifestObject[]> {
-        const gameFolders = await this.listFolders('games_files');
+        // Sorted so the game list order is deterministic (matches desktop)
+        const gameFolders = (await this.listFolders('games_files')).sort();
         const games: ManifestObject[] = [];
         for (const gameFolder of gameFolders) {
             const manifest = await this.readJson(`games_files/${gameFolder}/_core/manifest.json`);

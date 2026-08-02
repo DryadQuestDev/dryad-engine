@@ -61,7 +61,7 @@ export class EditorMap {
         },
         {
             tab: 'encounters',
-            states: ['drag', 'add', 'set_image', 'set_polygon', 'delete']
+            states: ['drag', 'add', 'collectable', 'set_image', 'set_polygon', 'delete']
         }
     ];
 
@@ -73,6 +73,7 @@ export class EditorMap {
         'rooms.delete': 'pi-trash',
         'encounters.drag': 'pi-arrows-alt',
         'encounters.add': 'pi-plus',
+        'encounters.collectable': 'pi-box',
         'encounters.set_image': 'pi-image',
         'encounters.set_polygon': 'pi-pencil',
         'encounters.delete': 'pi-trash',

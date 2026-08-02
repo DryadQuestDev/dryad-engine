@@ -23,10 +23,13 @@ Elemental *flavour* (fire, water, light, ...) is carried by an ability's **schoo
 ### 1. Raw Damage
 
 ```
-rawDamage = power * (abilityDamage / 100)
+effectivePower = (power + power_bonus) * (1 + power_amplifier / 100)
+rawDamage      = effectivePower * (abilityDamage / 100)
 ```
 
-Where `power` is the caster's power stat and `abilityDamage` is the ability's `damage` aspect value.
+Where `abilityDamage` is the ability's `damage` aspect value, `power_bonus` is flat added power (typically from equipment) and `power_amplifier` is a percentage boost (100 = +100% = doubles power). The bonus sits **inside** the amplified term, so the two multiply each other.
+
+An ability with `meta.unamplified` scales from **raw `power` alone** — neither the bonus nor the amplifier applies, which is what makes a basic attack a floor that gear and buffs cannot raise. `meta.flat` goes further and ignores `power` entirely.
 
 ### 2. Critical Hit
 

@@ -4,7 +4,7 @@ import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { spineRenderer } from '../../utils/spineRenderer';
 import { spineCache } from '../../utils/spineCache';
-import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../utils/characterReference';
+import { getSpineCharacterScale, CHARACTER_VIEWPORT_ASPECT_RATIO, SPINE_VIEWPORT_PAD_Y } from '../../utils/characterReference';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 const props = defineProps<{
@@ -104,6 +104,7 @@ const initSpine = async () => {
       artDy: offset.dy,
       gameScale: getSpineCharacterScale(props.view, Game.getInstance().getMergedManifest()),
       slotScale: props.slotScale ?? 1,
+      padY: SPINE_VIEWPORT_PAD_Y,
     });
 
     if (!result) return;

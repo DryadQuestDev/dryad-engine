@@ -7,7 +7,19 @@
   "scripts": [
     "main.mjs"
   ],
-  "tabs": [],
+  "tabs": [
+    {
+      "id": "config",
+      "name": "Config",
+      "schema": {
+        "disable_in_dev_mode": {
+          "type": "boolean",
+          "defaultValue": false,
+          "tooltip": "Skip tutorial popups while dev mode is active. Players are unaffected."
+        }
+      }
+    }
+  ],
   "data": {
     "game_settings": [
       {

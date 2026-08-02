@@ -1,6 +1,7 @@
 import { jsonrepair } from 'jsonrepair';
 import type { Block, Document } from './ast';
-import { findBraceRanges, stripCodeBlocks } from './lint';
+import { stripCodeBlocks, stripCommentLines } from './comments';
+import { findBraceRanges } from './lint';
 
 export type IndexCategory = 'action' | 'flag' | 'anchor' | 'loot' | 'trade';
 
@@ -69,7 +70,8 @@ class IndexBuilder {
 
   scanBraces(text: string, blockIndex: number): void {
     if (!text) return;
-    const sanitized = stripCodeBlocks(text);
+    // Commented-out actions are not actions — the engine never sees them.
+    const sanitized = stripCodeBlocks(stripCommentLines(text));
     for (const [start, end] of findBraceRanges(sanitized)) {
       if (isConditionKeyword(sanitized, start)) continue;
       const segment = sanitized.slice(start, end);
@@ -93,7 +95,7 @@ class IndexBuilder {
 
   scanAnchors(text: string, blockIndex: number): void {
     if (!text) return;
-    const sanitized = stripCodeBlocks(text);
+    const sanitized = stripCodeBlocks(stripCommentLines(text));
     const re = /(^|\n)&(\w+)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(sanitized)) !== null) {

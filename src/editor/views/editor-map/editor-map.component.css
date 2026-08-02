@@ -150,6 +150,12 @@
     /* Thicker stroke */
 }
 
+/* Room selected as a collectable's home */
+.map-svg g rect.selected-for-collectable {
+    stroke: #7ddc8a;
+    stroke-width: 3;
+}
+
 
 
 

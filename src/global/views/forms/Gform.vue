@@ -38,6 +38,8 @@ onMounted(() => {
 
 <style scoped>
 .gform {
+  /* Shared label column width for every GfieldRenderer row in this form. */
+  --gfield-label-width: 130px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1rem;
   margin: 1rem 0;

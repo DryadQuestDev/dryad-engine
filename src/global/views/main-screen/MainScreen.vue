@@ -266,7 +266,7 @@ async function initFromQuery(): Promise<boolean> {
     .filter((m): m is ManifestObject => !!m);
   const anyNsfw = target.nsfw || requestedMods.some(m => m.nsfw);
 
-  if (anyNsfw && global.isWebSite && !global.nsfwEnabled.value) {
+  if (anyNsfw && global.isNsfwGated && !global.nsfwEnabled.value) {
     const confirmed = await showConfirm({
       message: 'This content is intended for adults only. Are you 18 or older?',
       header: 'Age Verification',
@@ -379,6 +379,7 @@ onUnmounted(() => {
         v-for="(asset, i) in landingBgs"
         :key="(asset.id || '') + '_' + i"
         :asset="asset"
+        :grade="false"
       />
     </div>
 
@@ -402,7 +403,7 @@ onUnmounted(() => {
           <i class="pi pi-bars"></i>
           <span>Menu</span>
         </button>
-        <div v-if="global.isWebSite" class="main-screen-nsfw" @click="toggleNsfw">
+        <div v-if="global.isNsfwGated" class="main-screen-nsfw" @click="toggleNsfw">
           <span class="main-screen-nsfw-label">18+</span>
           <button
             type="button"

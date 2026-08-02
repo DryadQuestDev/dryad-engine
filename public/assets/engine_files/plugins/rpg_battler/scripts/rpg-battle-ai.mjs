@@ -1,6 +1,6 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle, getBattleDisplayName } from './rpg-battle-state.mjs';
+import { currentRpgBattle, getBattleDisplayName, requiredSelfStatuses } from './rpg-battle-state.mjs';
 import {
   calculateRawDamage, applyDefenses, getStatusStacks, getStatusDefinitions,
   getSide, getAliveEnemies, getAliveAllies, isCharAlive, expandSplashTargets,
@@ -277,7 +277,7 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
       let synergy = false;
       for (const abId in abilities) {
         const ab = abilities[abId];
-        if (ab.meta?.require_status_self && selfApplied.includes(ab.meta.require_status_self)) { synergy = true; break; }
+        if (requiredSelfStatuses(ab.meta?.require_status_self).some((id) => selfApplied.includes(id))) { synergy = true; break; }
         for (const eId in ab.effects) {
           const req = ab.effects[eId].require_status_target;
           if (req && targetApplied.includes(req)) { synergy = true; break; }

@@ -23,6 +23,7 @@ export interface CharacterAnimationControls {
   // Animation control methods
   playEnter: () => void;
   playExit: () => void;
+  resetToVisible: () => void;
   playMove: (from: { x?: number; y?: number; scale?: number }, to: { x?: number; y?: number; scale?: number }) => void;
   startIdle: () => void;
   stopIdle: () => void;
@@ -305,6 +306,31 @@ export function useCharacterAnimation(
         });
       }
     }
+  };
+
+  /**
+   * Snap the element back to a clean, fully-visible resting state.
+   * Used when a reused element (same v-for key) is re-entered after an exit
+   * left it stranded at opacity:0 — the keyed element is not remounted, so
+   * onMounted/playEnter never re-runs to restore visibility.
+   */
+  const resetToVisible = () => {
+    const element = elementRef.value;
+    const content = contentRef.value;
+    if (!element || !content) return;
+
+    if (loopAnimation.value) {
+      loopAnimation.value.kill();
+      loopAnimation.value = null;
+    }
+    gsap.killTweensOf(element);
+    gsap.killTweensOf(content);
+
+    gsap.set(element, { opacity: 1, x: 0, y: 0, scale: 1, filter: 'none', transformOrigin: transformOrigin.value });
+    gsap.set(content, { rotation: 0, rotationX: 0, rotationY: 0, transformOrigin: transformOrigin.value });
+
+    isAnimating.value = false;
+    currentAnimation.value = null;
   };
 
   /**
@@ -750,6 +776,7 @@ export function useCharacterAnimation(
     animatedScale,
     playEnter,
     playExit,
+    resetToVisible,
     playMove,
     startIdle,
     stopIdle,

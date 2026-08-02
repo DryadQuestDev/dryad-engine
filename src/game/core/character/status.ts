@@ -13,6 +13,13 @@ export type SpineViewConfig = {
     artScale?: number;
 };
 
+// Same optionality contract as SpineViewConfig: unset = inherit from prior status layer.
+export type StaticArtViewConfig = {
+    artDx?: number;
+    artDy?: number;
+    artScale?: number;
+};
+
 export type StatusInstance = {
     stacks: number;
     duration: number;   // -1 = permanent
@@ -29,6 +36,8 @@ export class Status {
     public description: string = "";
     public polarity: string = "";
     public rarity: string = "";
+    // Mutual-exclusion group: applying a status supersedes any other status sharing this id.
+    public groupId: string = "";
 
     public isHidden: boolean = false;
 
@@ -44,6 +53,9 @@ export class Status {
 
     // Spine configs keyed by view ('' = default, 'back' = back view, etc.)
     public spineViews: Map<string, SpineViewConfig> = new Map();
+
+    // Static (non-spine) art placement keyed by view, same key scheme as spineViews.
+    public staticArtViews: Map<string, StaticArtViewConfig> = new Map();
 
     // Per-instance storage. Single-stack statuses always have length 1.
     // Multi-stack statuses append a new instance per apply (DD-style).
@@ -126,6 +138,20 @@ export class Status {
             }
         }
 
+        // Static art placement: array of { view?, art_dx?, art_dy?, art_scale? }.
+        // Fields are conditionally included so the merge can fall back to prior layers.
+        if ((obj as any).static_art && Array.isArray((obj as any).static_art)) {
+            for (const entry of (obj as any).static_art as any[]) {
+                const rawView = entry.view || '';
+                const key = rawView === '_default' ? '' : rawView;
+                const view: StaticArtViewConfig = {};
+                if (typeof entry.art_dx === 'number') view.artDx = entry.art_dx;
+                if (typeof entry.art_dy === 'number') view.artDy = entry.art_dy;
+                if (typeof entry.art_scale === 'number') view.artScale = entry.art_scale;
+                this.staticArtViews.set(key, view);
+            }
+        }
+
         // Resolve ability_modifiers: string IDs (from editor) → deep-cloned template objects
         const rawMods: any[] = obj.ability_modifiers || [];
         const resolved: any[] = [];
@@ -156,6 +182,7 @@ export class Status {
         if ('image' in obj && obj.image) this.image = obj.image;
         if ('rarity' in obj && typeof obj.rarity === 'string') this.rarity = obj.rarity;
         if ('polarity' in obj && obj.polarity) this.polarity = obj.polarity;
+        if ('group_id' in obj && (obj as any).group_id) this.groupId = (obj as any).group_id;
         if ('tags' in obj && obj.tags) this.tags = obj.tags as string[];
         if ('duration' in obj && typeof obj.duration === 'number') {
             this._instances = [{ stacks: this._instances[0]?.stacks ?? 1, duration: obj.duration }];

@@ -85,6 +85,10 @@ Each round:
 2. The `battle_turn_start` emitter fires
 3. Each character takes their turn in speed order
 
+### Mid-Battle Scenes
+
+Game scripts can play dungeon scenes over the battle with plain `game.playScene(sceneRef)` — scripted dialogue, tutorial barks, story beats. The plugin intercepts scene plays during battle: they queue up and the battle flow pauses at the next safe point (turn start, or after the current action's animations) until the player clicks through them all; battle input is blocked while a scene shows. The story scene that triggered the battle is restored afterward. See [Services](../reference/services.md) for details.
+
 ### Battle End
 
 The battle ends immediately when all characters on one side are defeated:

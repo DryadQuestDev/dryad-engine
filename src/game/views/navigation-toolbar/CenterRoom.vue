@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import Tooltip from 'primevue/tooltip';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
 
 const handleClick = () => {
@@ -15,7 +17,7 @@ const isVisible = () => {
 </script>
 
 <template>
-  <div v-if="isVisible()" class="toolbar-item center-room" v-tooltip.top="'Center on current room'"
+  <div v-if="isVisible()" class="toolbar-item center-room" v-tooltip.top="global.getString('toolbar.center_room')"
     @click="handleClick" />
 </template>
 

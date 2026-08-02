@@ -99,10 +99,14 @@ In any status form, the **abilities** section uses the same form as ability temp
 
 **How modifiers merge:**
 - **Numbers** sum together (damage 50 + modifier 25 = 75)
-- **Arrays** concatenate
+- **Arrays** concatenate (deduped — applies to list-valued meta fields too)
 - **Other types** last value wins
 
 This lets you create buffs like "Fire Mastery: +25 damage to Fireball" without editing the base ability template.
+
+**Conditional modifiers:** a modifier template can set `requires_status` — it only applies while the character has that status, and the character sheet shows it as an *inactive improvement* otherwise. The modified ability itself stays available.
+
+**Status-gated abilities (`meta.require_status`):** an ability whose meta lists one or more statuses **exists for the character only while they hold any of them** — otherwise it is hidden everywhere (ability panel, character sheet, battle, AI). Because the gate lives in meta, modifiers can inject it at runtime — an equipped item can gate the spell it grants behind a stance, form or attunement. Gates from several modifiers union: the ability exists while *any* listed status is held.
 
 ---
 

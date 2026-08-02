@@ -123,7 +123,7 @@ function isGoalCompleted(goalId: string): boolean {
                 completed: isQuestCompleted(quest)
               }" @click="selectQuest(dungeonId, quest.id)">
                 <span class="quest-status-icon"></span>
-                <span class="quest-title">{{ dungeonSystem.getQuestTitle(dungeonId, quest.id) }}</span>
+                <span class="quest-title" v-script="dungeonSystem.getQuestTitle(dungeonId, quest.id)"></span>
               </div>
             </div>
           </template>
@@ -139,7 +139,7 @@ function isGoalCompleted(goalId: string): boolean {
         <div v-if="selectedQuest" class="quest-details">
           <h2 class="quest-details-title" :class="{ completed: isQuestCompleted(selectedQuest) }">
             <span v-if="isQuestCompleted(selectedQuest)" class="title-check-icon"></span>
-            {{ dungeonSystem.getQuestTitle(selectedQuest.dungeonId, selectedQuest.id) }}
+            <span v-script="dungeonSystem.getQuestTitle(selectedQuest.dungeonId, selectedQuest.id)"></span>
           </h2>
 
           <!-- Main logs (non-collapsible, shown at top) -->
@@ -157,9 +157,8 @@ function isGoalCompleted(goalId: string): boolean {
                 @click="toggleGoal(goal.id)">
                 <span class="collapse-icon"></span>
                 <span class="goal-status-icon"></span>
-                <span class="goal-title">{{ dungeonSystem.getGoalTitle(selectedQuest.dungeonId, selectedQuest.id,
-                  goal.id)
-                  }}</span>
+                <span class="goal-title"
+                  v-script="dungeonSystem.getGoalTitle(selectedQuest.dungeonId, selectedQuest.id, goal.id)"></span>
               </div>
 
               <div v-if="!isGoalCollapsed(goal.id)" class="goal-logs">

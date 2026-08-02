@@ -108,7 +108,9 @@ export class ElectronStorageService implements StorageService {
     }
 
     async getGamesList(): Promise<ManifestObject[]> {
-        let gameFolders = await this.listFolders('games_files');
+        // readdir order is filesystem-dependent (arbitrary on ext4) — sort so
+        // the game list is deterministic across platforms
+        let gameFolders = (await this.listFolders('games_files')).sort();
         let games: ManifestObject[] = [];
         for (let gameFolder of gameFolders) {
             let gameManifest = await this.readJson(`games_files/${gameFolder}/_core/manifest.json`);

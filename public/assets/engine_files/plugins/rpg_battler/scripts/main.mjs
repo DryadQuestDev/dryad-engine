@@ -1,6 +1,7 @@
 /// <reference path="./dtypes.d.ts" />
 
 import { currentRpgBattle, addFloatingText, pushLog } from './rpg-battle-state.mjs';
+import { isBattleScenePauseActive, teardownBattleScenes, resetBattleScenes } from './rpg-battle-scenes.mjs';
 import { initBattleTracking, summonCombatant, previewAbilityUsable } from './rpg-battle-flow.mjs';
 import { checkStaggerThreshold, getStatusDefinitions, getEffectivePower, applyDefenses, applyDamageInstance, applyStatusEffect, logEffect } from './rpg-battle-effects.mjs';
 import { RpgBattleScreen } from './components/RpgBattleScreen.mjs';
@@ -55,6 +56,13 @@ game.registerEmitter('battle_character_defeated');
 // AFTER cooldowns/tokens/statuses have ticked and DoTs processed, BEFORE the stun check.
 // Args: (characterId). Not cancellable. Use for reactive effects depending on post-tick state.
 game.registerEmitter('character_turn_post_tick');
+// Emitter: battle_took_damage
+// Fired after a combatant's health is actually reduced in battle — ability hits and service
+// dealDamage (post-shield), thorns reflections, and DoT ticks. Fully shield-absorbed hits
+// don't fire. Fires AFTER the HP change is applied.
+// Args: (target: Character, damage: number, damageType: string, casterId: string | null).
+// Not cancellable.
+game.registerEmitter('battle_took_damage');
 
 // ── Aspect renderers ──
 
@@ -142,18 +150,38 @@ game.registerState('rpg_defeated_battles', []);
 
 // ── Defeated battles ──
 
+// Emitter: battle_defeated
+// Fired ONCE when a battle definition is first marked defeated — by fight victory or by any
+// script/action calling addDefeated (a scripted defeat). Args: (battleId: string).
+// The single hook for defeat rewards: rpg_defeated_battles is the only tracking state.
+game.registerEmitter('battle_defeated');
+
 function addDefeated(battleId) {
   const defeated = game.getState('rpg_defeated_battles') || [];
   if (!defeated.includes(battleId)) {
     defeated.push(battleId);
     game.setState('rpg_defeated_battles', defeated);
+    game.trigger('battle_defeated', battleId);
   }
 }
 
-game.registerCondition('_defeated', (battleId) => {
-  const defeated = game.getState('rpg_defeated_battles') || [];
-  return defeated.includes(battleId);
+// Action: win — {win: "<battleId>"} marks a battle definition defeated from a scene: the same flag
+// a fight victory sets, firing battle_defeated once. Delayed, so it runs on the continue-click
+// after the paragraph is read — letting battle_defeated listeners (e.g. defeat rewards) present
+// their UI over the finished paragraph and gate the scene until dismissed.
+game.registerAction('win', {
+  eventDelayed: true,
+  action: (/** @type {string} */ battleId) => {
+    if (typeof battleId === 'string' && battleId) addDefeated(battleId);
+  },
 });
+
+/** @param {string} battleId @returns {boolean} */
+function isDefeated(battleId) {
+  return (game.getState('rpg_defeated_battles') || []).includes(battleId);
+}
+
+game.registerCondition('_defeated', isDefeated);
 
 // ── Party size helpers ──
 
@@ -280,6 +308,36 @@ function applyDifficultyToEnemies(battle) {
 }
 
 
+/**
+ * Fallback battle background when a battle sets none: the configured default asset
+ * of the current room, else the current (map) dungeon. Read from the parsed dungeon
+ * data so it reflects the editor config, not whatever happens to be staged.
+ * @returns {string | null} an asset id, or null when no default is configured
+ */
+function resolveSceneDefaultBackground() {
+  const dungeonId = game.getCurrentDungeonId();
+  if (!dungeonId) return null;
+
+  // Room-level default (most specific) — rooms data is keyed by room id.
+  const roomId = game.getCurrentRoomId();
+  if (roomId) {
+    try {
+      const rooms = game.getData(`dungeons/${dungeonId}/rooms`, true);
+      const roomDefaults = rooms?.get?.(roomId)?.default_assets;
+      if (roomDefaults?.length) return roomDefaults[0];
+    } catch { /* dungeon has no rooms data */ }
+  }
+
+  // Dungeon-level default from `_config_.default_assets`.
+  try {
+    const lines = game.getData(`dungeons/${dungeonId}/content_parsed`, true);
+    const config = lines?.get?.('_config_')?.params;
+    if (config?.default_assets?.length) return config.default_assets[0];
+  } catch { /* dungeon has no parsed content */ }
+
+  return null;
+}
+
 // ── Battle service ──
 
 game.registerService('rpg_battle', {
@@ -287,6 +345,14 @@ game.registerService('rpg_battle', {
    * @param {StartRpgBattleParams} params
    */
   async start(params) {
+    // Re-entry guard: a stray battle action while a battle runs (e.g. input reaching
+    // the parked scene's delayed {battle} choice) must not replace the live battle —
+    // the screen is already mounted and would never re-drive the new one.
+    if (currentRpgBattle.value) {
+      console.warn('rpg_battler: battle already active - ignoring start()');
+      return { ok: false, reason: 'already_active' };
+    }
+
     let enemyEntries = params.enemies;
     let background = params.background || null;
 
@@ -299,6 +365,9 @@ game.registerService('rpg_battle', {
       enemyEntries = def.enemies;
       if (!background && def.background) background = def.background;
     }
+
+    // No explicit background → fall back to the dungeon/room's configured default asset.
+    if (!background) background = resolveSceneDefaultBackground();
 
     if (!enemyEntries || enemyEntries.length === 0) {
       console.warn('rpg_battler: no enemies provided');
@@ -384,12 +453,26 @@ game.registerService('rpg_battle', {
     // Initialize ability states, tokens from source stats, sort turn order, start turn 1
     initBattleTracking();
 
+    // Drop any scene-queue state left over from a previous battle's teardown BEFORE
+    // battle_start fires — scenes queued by battle_start listeners must survive.
+    resetBattleScenes();
+
     if (!game.trigger('battle_start')) {
       currentRpgBattle.value = null;
       return { ok: false, reason: 'prevented' };
     }
 
     applyDifficultyToEnemies(battle);
+
+    // Opening statuses on the whole player party (e.g. an ambush advantage):
+    // { battle: { battleId: "bats", statuses: ["advantage"] } }
+    if (params.statuses?.length) {
+      for (const statusId of params.statuses) {
+        for (const charId of battle.playerParty) {
+          applyStatusEffect(charId, charId, statusId, 1);
+        }
+      }
+    }
 
     // Preload every combatant's battle assets behind a loading screen — all
     // battle_state poses, masks, spines, plus any characters their abilities
@@ -435,6 +518,46 @@ game.registerService('rpg_battle', {
   addDefeated(battleId) {
     addDefeated(battleId);
   },
+  /** @param {string} battleId @returns {boolean} */
+  isDefeated(battleId) {
+    return isDefeated(battleId);
+  },
+  /**
+   * Base threat of a battle DEFINITION — Σ template threat × amount over its enemies. Pre-battle
+   * estimate; unscaled base value.
+   * @param {string} battleId @returns {number}
+   */
+  getThreat(battleId) {
+    const def = game.getData('plugins_data/rpg_battler/battles', true)?.get(battleId);
+    let total = def?.bonus_threat || 0;
+    for (const entry of def?.enemies || []) {
+      const template = game.getData('character_templates', true)?.get(entry.character_id);
+      total += (template?.traits?.threat || 0) * (entry.amount || 1);
+    }
+    return total;
+  },
+  /**
+   * Base threat summed over the LIVE enemy party. Traits are frozen per-template, so this equals
+   * the definition sum — call from a battle_end listener (roster is deleted by battle_closed).
+   * @returns {number}
+   */
+  getLiveThreat() {
+    let total = 0;
+    for (const id of currentRpgBattle.value?.enemyParty || []) {
+      total += game.getCharacter(id)?.getTrait('threat') || 0;
+    }
+    return total;
+  },
+  /**
+   * Loot inventory id for a battle: the definition's `loot` field, else the inventory sharing the
+   * battle's id, else null.
+   * @param {string} battleId @returns {string|null}
+   */
+  getBattleLoot(battleId) {
+    const def = game.getData('plugins_data/rpg_battler/battles', true)?.get(battleId);
+    if (def?.loot) return def.loot;
+    return game.getData('item_inventories', true)?.has(battleId) ? battleId : null;
+  },
   checkStaggerThreshold,
   /**
    * Effective power for a character (amplifier-aware), independent of battle state — safe to
@@ -447,6 +570,10 @@ game.registerService('rpg_battle', {
     return getEffectivePower(character, ability);
   },
   /** @returns {boolean} whether a battle is currently active */
+  /** Id of the running battle definition, or null outside battle / for ad-hoc battles. */
+  getBattleId() {
+    return currentRpgBattle.value?.battleId || null;
+  },
   isActive() {
     return !!currentRpgBattle.value;
   },
@@ -518,6 +645,18 @@ game.registerService('rpg_battle', {
   summon(character, side) {
     return summonCombatant(character, side);
   },
+  /** True while queued battle scenes are pending or one is on screen (battle flow paused). */
+  isScenePlaying() {
+    return isBattleScenePauseActive();
+  },
+  /**
+   * True when the running battle definition matches `battleId`. False outside battle
+   * and for ad-hoc battles.
+   * @param {string} battleId
+   */
+  inBattle(battleId) {
+    return !!battleId && currentRpgBattle.value?.battleId === battleId;
+  },
 });
 
 // ── Action: battle ──
@@ -543,6 +682,10 @@ game.registerAction('battle', {
 export function endRpgBattle(result) {
   const battle = currentRpgBattle.value;
   if (!battle) return;
+
+  // Abort any queued/open battle scene and put the parked story scene back BEFORE
+  // the state restore below and the nextScene() resume at the bottom.
+  teardownBattleScenes();
 
   battle.result = result;
   battle.phase = 'finished';
@@ -583,8 +726,11 @@ export function endRpgBattle(result) {
 
   // Resume the scene that triggered the battle only on victory — on defeat it must not
   // continue as if won; the game's battle_closed listener owns what happens next.
+  // instant: teardownBattleScenes put the parked cast back so a CONTINUING scene keeps its actors.
+  // When the scene has nothing left, that restored cast was never on screen (the battle covered it),
+  // so closing gracefully would fade it out — actors appearing for a moment before vanishing.
   if (result === 'victory') {
-    game.nextScene();
+    game.nextScene(true);
   }
 }
 

@@ -8,11 +8,23 @@ import { CustomChoiceObject } from "../../schemas/customChoiceSchema";
 import { PoolDefinitionObject } from "../../schemas/poolDefinitionSchema";
 import { PoolEntryObject } from "../../schemas/poolEntrySchema";
 
+export type GateContext = { sceneId: string; dungeonId: string };
+
 export type ActionObject = {
     action?: Function;
     choiceModifier?: Function;
     onGameLoad?: boolean;
     eventDelayed?: boolean;
+    /**
+     * Runs before the paragraph renders and before ANY of its actions fire.
+     * Return a scene id to abort the paragraph — its prose is never shown, its
+     * sibling actions never run, and the reader jumps to that scene instead.
+     * Return false/undefined to let the paragraph proceed normally.
+     *
+     * Gates only run in scene paragraphs. A gated action placed on a choice is
+     * dispatched through `action` like any other and does not abort anything.
+     */
+    gate?: (value: any, ctx: GateContext) => string | false | null | undefined;
 }
 
 // Simplified type for createCustomChoice - only requires id, name, and action
@@ -428,7 +440,8 @@ export class LogicSystem {
             params = JSON.parse(this.fixJson(params)) as Record<string, any>;
         }
 
-        let skip = ["if", "ifOr", "active", "activeOr"];
+        // Data-only choice params: read off the Choice, never dispatched as actions.
+        let skip = ["if", "ifOr", "active", "activeOr", "clue"];
         for (let param of Object.keys(params)) {
             if (skip.includes(param)) {
                 continue;
@@ -452,6 +465,26 @@ export class LogicSystem {
                 actionObject.action?.(params[param]);
             }
         }
+    }
+
+    /**
+     * Run the gates among these actions, if any. The first gate to return a scene id
+     * wins: the caller must abandon the paragraph and play that scene instead.
+     * Returns null when nothing gates and the paragraph should proceed normally.
+     */
+    public runGates(params: Record<string, any>, ctx: GateContext): string | null {
+        for (let param of Object.keys(params)) {
+            let gate = this.actionRegistry.get(param)?.gate;
+            if (!gate) {
+                continue;
+            }
+            let target = gate(params[param], ctx);
+            if (target) {
+                gameLogger.info(`[gate] "${param}" aborted ${ctx.sceneId} -> ${target}`);
+                return target;
+            }
+        }
+        return null;
     }
 
     public getDelayedActions(params: Record<string, any>): Record<string, any> {
@@ -497,12 +530,14 @@ export class LogicSystem {
     // takes: my_placeholder(arg1, arg2)
     private resolvePlaceholder(value: string): string {
         // Parse function syntax: name or name(arg1, arg2)
-        const funcMatch = value.match(/^([a-zA-Z0-9_'\-]+)(?:\(([^)]*)\))?$/);
+        const funcMatch = value.match(/^([a-zA-Z0-9_'’\-]+)(?:\(([^)]*)\))?$/);
         if (!funcMatch) {
             throw new Error(`Invalid placeholder format: ${value}`);
         }
 
-        const placeholderId = funcMatch[1];
+        // Prose is written with curly apostrophes, placeholders are registered with
+        // straight ones — normalize so |i’m| finds the "i'm" registration.
+        const placeholderId = funcMatch[1].replace(/’/g, "'");
         const argsString = funcMatch[2] || '';
 
         let placeholder = this.placeholderRegistry.get(placeholderId);
@@ -555,6 +590,26 @@ export class LogicSystem {
         return { output: output, actions: resultActions };
     }
 
+    /**
+     * Resolve a choice label. Same pipeline as resolveString minus the two stages
+     * that have side effects: resolveTextActions (would dispatch actions) and
+     * resolveLoreLinks (`[[!id]]` discovers the record on sight). Labels live in a
+     * `computed` that re-evaluates on every render, so anything with a side effect
+     * would fire over and over.
+     *
+     * Returns HTML — resolveTextStyles emits <strong>/<em> — so render it with v-html.
+     */
+    public resolveLabel(input: string): string {
+        if (!input) return "";
+        let output = this.resolveCode(input);
+        output = this.ifLogic(output);
+        output = this.resolveTextPlaceholders(output);
+        output = this.resolveNarrativeSlots(output);
+        output = this.resolveTemplate(output);
+        output = this.resolveTextStyles(output);
+        return output;
+    }
+
     private resolveCode(text: string): string {
         const codeRegex = /\[code\]([\s\S]*?)\[\/code\]/g;
         return text.replace(codeRegex, (match, codeContent) => {
@@ -597,7 +652,15 @@ export class LogicSystem {
 
     public resolveTextStyles(text: string): string {
 
-        let output = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+        // ++altered++ — the changed state of a thing. Must run before the single-`+` rule.
+        let output = text.replace(/\+\+([^+\n]+?)\+\+/g, "<span class='altered'>$1</span>");
+
+        // +initial+ — the initial state. Guarded so arithmetic-style pluses never match:
+        // the opener can't follow a word char or lead into a digit ("gain +2 str and +4 agi"
+        // stays literal), and the closer must end a word ("a+b+c", "C++" stay literal).
+        output = output.replace(/(?<![\w+])\+([^\s+\d][^+\n]*?)\+(?![\w+])/g, "<span class='initial'>$1</span>");
+
+        output = output.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
 
         output = output.replace(/\*(.*?)\*/g, '<i>$1</i>');
 
@@ -736,7 +799,13 @@ export class LogicSystem {
                 Object.assign(accumulatedActions, parsedJson);
 
             } catch (error) {
-                gameLogger.error(`Failed to process JSON object: "${jsonStringWithBraces}"`, (error as Error).message);
+                // fixJson shields `.` followed by a digit so 1.5 survives, which means a leading-dot
+                // number reaches jsonrepair verbatim - and jsonrepair doesn't repair those. The raw
+                // "Unexpected token '.'" gives the author nothing to act on, so name the rule.
+                const hint = /[:,[]\s*\.\d/.test(jsonStringWithBraces)
+                    ? ' — numbers need a leading zero: write 0.55, not .55'
+                    : '';
+                gameLogger.error(`Failed to process JSON object: "${jsonStringWithBraces}"${hint}`, (error as Error).message);
                 // The JSON string is removed from the text even if processing fails, as per requirements.
             }
 
@@ -979,7 +1048,7 @@ export class LogicSystem {
         }
 
         if (!choice.nameComputed) {
-            choice.nameComputed = computed(() => choice.name);
+            choice.nameComputed = computed(() => this.resolveLabel(choice.name));
         }
     }
 

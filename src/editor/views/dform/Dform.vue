@@ -59,8 +59,8 @@ const itemsPerPage = computed({
   set: (val: number) => { dformSettings.value.itemsPerPage = val; }
 });
 
-// Per-tab state (pagination + bookmark) in a single localStorage object
-const dformTabState = useStorage('dform-tab-state', {} as Record<string, { currentPage: number, activeBookmark: string }>);
+// Per-tab state (pagination + bookmark + id filter) in a single localStorage object
+const dformTabState = useStorage('dform-tab-state', {} as Record<string, { currentPage: number, activeBookmark: string, idFilter?: string }>);
 const tabKey = computed(() => `${editor.mainTab}-${editor.secondaryTab}`);
 
 // --- Static bookmarks that should not trigger page navigation ---
@@ -89,6 +89,8 @@ watch(
 
     // Restore sidebar highlight immediately, but defer scroll to when items arrive
     editor.activeBookmarkId.value = tabState?.activeBookmark || 'new_item';
+    // Restore the shared ID filter before the async schema load — Dsearch re-applies it after its reset
+    editor.idFilter.value = tabState?.idFilter ?? '';
     pendingRestore = true;
     // Fade out stale content during tab transition
     const editorRight = document.querySelector('.editor-right');
@@ -111,6 +113,11 @@ watch([() => editor.isArray.value, tabKey], ([isArray]) => {
 watch(currentPage, (newPage) => {
   dformTabState.value[tabKey.value] = { ...dformTabState.value[tabKey.value], currentPage: newPage };
   editor.activeItemUids.value = new Set();
+});
+
+// Persist the shared ID filter per tab
+watch(() => editor.idFilter.value, (newFilter) => {
+  dformTabState.value[tabKey.value] = { ...dformTabState.value[tabKey.value], idFilter: newFilter };
 });
 
 // Calculate total pages

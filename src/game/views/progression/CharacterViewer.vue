@@ -66,7 +66,7 @@ function selectCharacter(index: number) {
             <div class="viewer-doll-stage">
                 <div class="viewer-doll-wrapper">
                     <CharacterSlot :character="selectedCharacter" :slot="{ scale: 1 }" :showItemSlots="true"
-                        :disableItemInteraction="true" />
+                        :disableItemInteraction="true" :grade="false" />
                 </div>
             </div>
 

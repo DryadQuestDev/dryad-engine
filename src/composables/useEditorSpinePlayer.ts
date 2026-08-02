@@ -2,6 +2,7 @@ import { ref, watch, onBeforeUnmount, type Ref } from 'vue';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
 import { spineRenderer, type SpineStats } from '../game/utils/spineRenderer';
 import { applyTrackMap } from '../game/utils/spineAnimationGroups';
+import { SPINE_VIEWPORT_PAD_Y } from '../game/utils/characterReference';
 
 interface Options {
   containerRef: Ref<HTMLElement | null>;
@@ -53,6 +54,9 @@ export function useEditorSpinePlayer(opts: Options) {
         artDy: opts.artDy?.value ?? 0,
         gameScale: opts.gameScale?.value ?? 1,
         slotScale: opts.slotScale?.value ?? 1,
+        // Every consumer of this composable previews a character, so the pad is fixed here
+        // rather than exposed as an option — the editor must frame art the way the game does.
+        padY: SPINE_VIEWPORT_PAD_Y,
       });
       if (!spine) return;
 

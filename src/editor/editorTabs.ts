@@ -3,7 +3,7 @@ import { CharacterStatusSchema } from "../schemas/characterStatusSchema";
 import { EntityAttributeSchema } from "../schemas/entityAttributeSchema";
 import { CharacterSkinLayerSchema } from "../schemas/characterSkinLayerSchema";
 import { PropertySchema } from "../schemas/propertySchema";
-import { EntityTraitSchema } from "../schemas/entityTraitSchema";
+import { EntityTraitSchema, DataEntityTraitSchema } from "../schemas/entityTraitSchema";
 import { StatusMetaSchema } from "../schemas/statusMetaSchema";
 import { CharacterTemplateSchema } from "../schemas/characterTemplateSchema";
 import { DungeonConfigObject, DungeonConfigSchema } from "../schemas/dungeonConfigSchema";
@@ -172,6 +172,14 @@ export const EDITOR_TABS: EditorTab[] = [
         isArray: true,
         requiresMod: true,
       },
+      {
+        id: 'dungeon_traits',
+        schema: DataEntityTraitSchema,
+        file: 'dungeon_traits',
+        title: 'dungeon_trait',
+        isArray: true,
+        requiresMod: true,
+      },
 
       /*
       {
@@ -218,7 +226,9 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
         requiresDungeon: true,
         showMap: true,
-        specificDungeonTypes: ['map', 'screen'],
+        // text included so collectables can be authored there too — the runtime
+        // loads encounters.json for every dungeon type.
+        specificDungeonTypes: ['map', 'screen', 'text'],
       },
     ],
   },
@@ -407,6 +417,14 @@ export const EDITOR_TABS: EditorTab[] = [
         isArray: true,
         requiresMod: true,
         customPopups: ['face-picker'],
+      },
+      {
+        id: 'inventory_traits',
+        schema: DataEntityTraitSchema,
+        file: 'inventory_traits',
+        title: 'inventory_trait',
+        isArray: true,
+        requiresMod: true,
       },
       {
         id: 'inventories',

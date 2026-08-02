@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
-import Quill from 'quill';
+import Quill, { Parchment } from 'quill';
 import Editor from 'primevue/editor';
 import Textarea from 'primevue/textarea';
 import Button from 'primevue/button';
@@ -32,6 +32,28 @@ class CustomVideo extends BlockEmbed {
   }
 }
 Quill.register(CustomVideo, true);
+
+// Quill drops any attribute that isn't a registered format when it round-trips
+// HTML through its Delta model, which silently strips class="..." from authored
+// markup. Registering class as a block attributor makes it survive the trip.
+// ql-* classes are excluded — those belong to Quill's own formats (ql-align-*)
+// and capturing them here would double-apply them.
+class PreserveClassAttributor extends Parchment.Attributor {
+  add(node: HTMLElement, value: string): boolean {
+    if (!value) return false;
+    value.split(/\s+/).forEach(c => c && node.classList.add(c));
+    return true;
+  }
+  remove(node: HTMLElement): void {
+    [...node.classList].filter(c => !c.startsWith('ql-')).forEach(c => node.classList.remove(c));
+    if (!node.classList.length) node.removeAttribute('class');
+  }
+  value(node: HTMLElement): string {
+    return [...node.classList].filter(c => !c.startsWith('ql-')).join(' ');
+  }
+}
+
+Quill.register(new PreserveClassAttributor('block-class', 'class', { scope: Parchment.Scope.BLOCK }), true);
 
 interface Props {
   modelValue: string | null | undefined;

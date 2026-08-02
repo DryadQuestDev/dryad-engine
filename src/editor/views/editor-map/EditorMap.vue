@@ -5,6 +5,7 @@ import { Global } from '../../../global/global';
 import type { DungeonRoomObject } from '../../../schemas/dungeonRoomSchema';
 import type { DungeonEncounterObject } from '../../../schemas/dungeonEncounterSchema';
 import EncounterEditPopup from '../encounter-edit-popup/EncounterEditPopup.vue';
+import CollectablePopup from '../collectable-popup/CollectablePopup.vue';
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
 import { computePosition, flip, shift, offset } from '@floating-ui/vue';
@@ -12,10 +13,35 @@ import { computePosition, flip, shift, offset } from '@floating-ui/vue';
 const editor = Editor.getInstance();
 const global = Global.getInstance();
 
+// Item templates, loaded once: icons for the collectable sprite fallback (mirrors the
+// runtime, where a collectable with no image renders its item's traits.image) and the
+// option list for the "new collectable" popup's item picker.
+const itemImages = ref<Map<string, string>>(new Map());
+const collectableItemOptions = ref<Array<{ label: string; value: string }>>([]);
+onMounted(async () => {
+  try {
+    const items = await editor.loadFullData('item_templates') as Array<{ id?: string; traits?: { name?: string; image?: string } }>;
+    itemImages.value = new Map(
+      (items ?? [])
+        .filter(item => item?.id && item?.traits?.image)
+        .map(item => [item.id!, item.traits!.image!]),
+    );
+    collectableItemOptions.value = (items ?? [])
+      .filter(item => item?.id)
+      .map(item => ({ label: item.traits?.name || item.id!, value: item.id! }));
+  } catch {
+    // no item_templates in this game — the fallback simply stays unavailable
+  }
+});
+
 // Fallback function for encounter images
 const getEncounterImage = (encounter: DungeonEncounterObject) => {
-  if (!encounter.image) return 'assets/engine_assets/encounters/ph.png';
-  return encounter.image;
+  if (encounter.image) return encounter.image;
+  if (encounter.type === 'collectable' && encounter.collect_item) {
+    const itemImage = itemImages.value.get(encounter.collect_item);
+    if (itemImage) return itemImage;
+  }
+  return 'assets/engine_assets/encounters/ph.png';
 };
 
 // --- Point Type ---
@@ -45,6 +71,7 @@ interface PopupConfig {
   context?: any; // To store related data like coordinates
   position: { top: number, left: number };
   onConfirm: (value: string, context?: any) => { isValid: boolean, error?: string }; // Returns validation result
+  onInput?: (value: string, context?: any) => void; // Fires on every keystroke, for live preview
   onCancel?: () => void;
 }
 // --- End Interface ---
@@ -84,6 +111,12 @@ const popupConfig = ref<PopupConfig | null>(null); // Holds the current popup co
 const isEncounterPopupVisible = ref(false);
 const selectedEncounterForEdit = ref<DungeonEncounterObject | null>(null);
 // --- End Encounter Edit Popup State ---
+
+// --- Collectable placement state (collectableItemOptions loaded in onMounted above) ---
+const selectedRoomForCollectable = ref<DungeonRoomObject | null>(null);
+const isCollectablePopupVisible = ref(false);
+const collectablePopupCoords = ref<{ x: number; y: number }>({ x: 0, y: 0 });
+// --- End Collectable placement state ---
 
 // --- State for Polygon Editing ---
 const selectedEncounterForPolygon = ref<DungeonEncounterObject | null>(null);
@@ -497,6 +530,36 @@ const stateHandlers: StateHandler[] = [
     onMouseMove: () => { }, onMouseUp: () => { }, onMouseLeave: () => { }
   },
   {
+    id: 'encounters.collectable',
+    icon: 'pi-box',
+    // Two-step gesture: shift-click a room to pick its home, then click the map to place.
+    onMouseDown: (event: MouseEvent, payload?: { room?: DungeonRoomObject; modName?: string }) => {
+      if (event.button !== 0 || !editor.map) return;
+
+      // Shift + click a room → select it as the collectable's home (toggle).
+      if (event.shiftKey && payload?.room) {
+        if (payload.modName !== editor.selectedMod) return;
+        event.stopPropagation();
+        selectedRoomForCollectable.value =
+          selectedRoomForCollectable.value?.id === payload.room.id ? null : payload.room;
+        return;
+      }
+
+      // Plain click on the map background → place, if a room is selected.
+      if (event.shiftKey || payload?.room) return;
+      if (!selectedRoomForCollectable.value) return;
+
+      const modEncData = editor.map?.editorObject?.encounters.find(
+        (mod: { mod: string; val: DungeonEncounterObject[] }) => mod.mod === editor.selectedMod);
+      if (!modEncData || editor.activeObject.value !== modEncData.val) return;
+
+      event.stopPropagation();
+      collectablePopupCoords.value = { x: mouseX.value, y: mouseY.value };
+      isCollectablePopupVisible.value = true;
+    },
+    onMouseMove: () => { }, onMouseUp: () => { }, onMouseLeave: () => { }
+  },
+  {
     id: 'encounters.set_image',
     icon: 'pi-image',
     onMouseDown: (event: MouseEvent, payload?: { encounter: DungeonEncounterObject; modName: string }) => {
@@ -626,6 +689,62 @@ const stateHandlers: StateHandler[] = [
         event.stopPropagation(); return;
       }
 
+      // Option 5: ctrl + click a room -> popup to set circle fog radius
+      if (event.ctrlKey && payload) {
+        const { room: clickedRoomProto, modName } = payload;
+        if (modName !== editor.selectedMod) return;
+        const activeRooms = editor.activeObject.value;
+        if (!Array.isArray(activeRooms)) return;
+        const roomInArray = activeRooms.find(r => r.id === clickedRoomProto.id);
+        if (!roomInArray) return;
+        event.stopPropagation();
+
+        // Select the room as well, mirroring shift-select.
+        selectedRoomForFogPolygon.value = roomInArray;
+        fogPolygonPoints.value = parsePolygonString(roomInArray.fog?.shape === 'polygon' ? roomInArray.fog.points : undefined);
+        fogDraggingPointIndex.value = -1;
+        fogHoveredPointIndex.value = -1;
+
+        const currentRadius = roomInArray.fog?.shape === 'circle' ? roomInArray.fog.radius : undefined;
+        const fallback = editor.map?.editorObject?.config?.fog_default;
+        const originalFog = roomInArray.fog ? { ...roomInArray.fog } : undefined;
+
+        // Apply a raw radius string to the room's fog; empty/0 reverts to the dungeon default.
+        const applyRadius = (raw: string) => {
+          const trimmed = raw.trim();
+          if (trimmed === '' || Number(trimmed) === 0) {
+            delete roomInArray.fog;
+            return;
+          }
+          const radius = Number(trimmed);
+          if (!Number.isFinite(radius) || radius < 0) return; // ignore invalid input live
+          roomInArray.fog = { shape: 'circle', radius: Math.round(radius) };
+        };
+
+        showPopup({
+          title: 'Set Fog Radius',
+          label: 'Radius (px, empty = default):',
+          initialValue: currentRadius != null ? String(currentRadius)
+            : (fallback != null ? String(fallback) : ''),
+          position: { top: event.clientY + 5, left: event.clientX + 5 },
+          onInput: (value) => applyRadius(value),
+          onConfirm: (value) => {
+            const trimmed = value.trim();
+            const radius = Number(trimmed);
+            if (trimmed !== '' && (!Number.isFinite(radius) || radius < 0)) {
+              return { isValid: false, error: 'Enter a positive number.' };
+            }
+            applyRadius(value);
+            return { isValid: true };
+          },
+          onCancel: () => {
+            if (originalFog) roomInArray.fog = originalFog;
+            else delete roomInArray.fog;
+          },
+        });
+        return;
+      }
+
       if (!selectedRoomForFogPolygon.value) return;
 
       if (event.altKey) {
@@ -726,8 +845,11 @@ const setActiveHandlerVue = () => { // Renamed from setActiveHandler to avoid co
   if (activeHandler.value?.id === 'rooms.fog_polygon' && newActiveStateId !== 'rooms.fog_polygon') {
     deselectRoomForFogPolygon();
   }
+  if (activeHandler.value?.id === 'encounters.collectable' && newActiveStateId !== 'encounters.collectable') {
+    selectedRoomForCollectable.value = null;
+  }
 
-  const statesThatShowGenericPopup = ['rooms.add', 'encounters.add'];
+  const statesThatShowGenericPopup = ['rooms.add', 'encounters.add', 'rooms.fog_polygon'];
   if (isPopupVisible.value && !statesThatShowGenericPopup.includes(newActiveStateId)) {
     hidePopup();
   }
@@ -887,10 +1009,17 @@ function hidePopup() {
   popupStyle.value = {};
 }
 
+// Live preview: forward each keystroke to the popup's onInput handler (if any).
+watch(popupInputValue, (value) => {
+  if (isPopupVisible.value) popupConfig.value?.onInput?.(value, popupConfig.value.context);
+});
+
 function confirmPopupAction() {
   if (!popupConfig.value) return;
   const result = popupConfig.value.onConfirm(popupInputValue.value, popupConfig.value.context);
   if (result.isValid) {
+    // Confirmed changes are final: don't let hidePopup's onCancel revert them.
+    popupConfig.value.onCancel = undefined;
     hidePopup();
   } else {
     popupError.value = result.error || "An unknown error occurred.";
@@ -901,6 +1030,57 @@ function confirmPopupAction() {
 function isRoomSelectedForConnection(room: DungeonRoomObject): boolean {
   return selectedRoomForConnection.value?.room.id === room.id;
 }
+
+// --- Collectable placement methods ---
+function isRoomSelectedForCollectable(room: DungeonRoomObject): boolean {
+  return selectedRoomForCollectable.value?.id === room.id;
+}
+
+/** Lowest free N such that `<roomId>.collectableN` isn't taken across the merged list. */
+function nextCollectableId(roomId: string): string {
+  const taken = new Set<number>();
+  const re = new RegExp(`^${roomId}\\.collectable(\\d+)$`);
+  for (const modEnc of editor.map?.editorObject?.encounters ?? []) {
+    for (const enc of modEnc.val as DungeonEncounterObject[]) {
+      const m = enc.id?.match(re);
+      if (m) taken.add(Number(m[1]));
+    }
+  }
+  let n = 1;
+  while (taken.has(n)) n++;
+  return `${roomId}.collectable${n}`;
+}
+
+function handleCollectableConfirm(payload: { item: string; quantity: number; regrow: number }): void {
+  const room = selectedRoomForCollectable.value;
+  const modEncData = editor.map?.editorObject?.encounters.find(
+    (mod: { mod: string; val: DungeonEncounterObject[] }) => mod.mod === editor.selectedMod);
+  if (!room || !modEncData || editor.activeObject.value !== modEncData.val) {
+    isCollectablePopupVisible.value = false;
+    return;
+  }
+
+  const newEncounter: DungeonEncounterObject = {
+    id: nextCollectableId(room.id),
+    uid: editor.createUid(),
+    type: 'collectable',
+    collect_item: payload.item,
+    collect_quantity: payload.quantity,
+    x: collectablePopupCoords.value.x,
+    y: collectablePopupCoords.value.y,
+  };
+  if (payload.regrow > 0) newEncounter.regrow = payload.regrow;
+
+  modEncData.val.push(newEncounter);
+  editor.hasUnsavedChanges.value = true;
+  isCollectablePopupVisible.value = false;
+  // Keep the room selected so several can be placed in a row.
+}
+
+function handleCollectableCancel(): void {
+  isCollectablePopupVisible.value = false;
+}
+// --- End Collectable placement methods ---
 
 // --- Encounter Edit Popup Methods ---
 function showEncounterEditPopup(encounter: DungeonEncounterObject): void {
@@ -1216,6 +1396,7 @@ const hideTooltip = () => {
                     class="room-rect" :class="{
                       'active': modRooms.mod === editor.selectedMod,
                       'selected-for-connection': isRoomSelectedForConnection(room),
+                      'selected-for-collectable': isRoomSelectedForCollectable(room) && editor.map.activeState.value === 'encounters.collectable',
                       'selected-for-fog': selectedRoomForFogPolygon?.id === room.id && editor.map.activeState.value === 'rooms.fog_polygon'
                     }" @mousedown="onMouseDownHandler($event, { room: room, modName: modRooms.mod })" />
                   <text class="room-id-text" :x="(room.x ?? 0) + editor.map.room_size_halfed"
@@ -1272,6 +1453,10 @@ const hideTooltip = () => {
   <!-- Encounter Edit Popup -->
   <EncounterEditPopup v-if="isEncounterPopupVisible && selectedEncounterForEdit" :encounter="selectedEncounterForEdit!"
     :isVisible="isEncounterPopupVisible" @save="handleEncounterSave" @close="hideEncounterEditPopup" />
+
+  <!-- New Collectable Popup -->
+  <CollectablePopup :isVisible="isCollectablePopupVisible" :roomId="selectedRoomForCollectable?.id ?? ''"
+    :items="collectableItemOptions" @confirm="handleCollectableConfirm" @cancel="handleCollectableCancel" />
 
   <!-- Floating Tooltip -->
   <div v-if="tooltipVisible" ref="tooltipFloating" class="floating-tooltip" :style="{

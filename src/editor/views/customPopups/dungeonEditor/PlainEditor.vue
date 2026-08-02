@@ -104,6 +104,18 @@ function findRecordRanges(text: string): Array<[number, number]> {
   return ranges;
 }
 
+// `>Label` inline choices. Only the sigil + label — the trailing `{…}` params
+// are already covered by findBalancedBraces.
+function findInlineChoiceRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const re = /^>[^\n{]*/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+
 function findCommentRanges(text: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   const re = /^[ \t]*\/\/[^\n]*/gm;
@@ -180,6 +192,25 @@ function findEmphasisRanges(text: string): { double: Array<[number, number]>; si
     if (!overlaps) single.push([s, e]);
   }
   return { double, single };
+}
+
+// `++text++` (altered state) / `+text+` (initial state) — mirrors the runtime
+// resolveTextStyles guards, so what colors here is exactly what styles in game:
+// the single-`+` opener can't follow a word char or lead into a digit, and the
+// closer must end a word ("+43 health", "a+b+c", "C++" all stay plain).
+function findStateRanges(text: string): { altered: Array<[number, number]>; initial: Array<[number, number]> } {
+  const altered: Array<[number, number]> = [];
+  const initial: Array<[number, number]> = [];
+  let m: RegExpExecArray | null;
+  const alteredRe = /\+\+([^+\n]+?)\+\+/g;
+  while ((m = alteredRe.exec(text)) !== null) {
+    altered.push([m.index, m.index + m[0].length]);
+  }
+  const initialRe = /(?<![\w+])\+([^\s+\d][^+\n]*?)\+(?![\w+])/g;
+  while ((m = initialRe.exec(text)) !== null) {
+    initial.push([m.index, m.index + m[0].length]);
+  }
+  return { altered, initial };
 }
 
 const HL_COLORS = ['yellow', 'pink', 'orange', 'green', 'blue', 'purple'] as const;
@@ -311,7 +342,10 @@ const STYLE_BR = `color:#00838f;${FAUX_BOLD};background:rgba(0,188,212,0.16);pad
 const STYLE_PLACEHOLDER = `color:#2e7d32;${FAUX_BOLD}`;
 const STYLE_RECORD = `color:#1565c0;${FAUX_BOLD}`;
 const STYLE_COMMENT = 'color:#888;font-style:italic';
+const STYLE_CHOICE = `color:#c62828;${FAUX_BOLD}`;
 const STYLE_SEARCH = 'background:#fff59d;color:#000';
+const STYLE_INITIAL = `color:#a100ff;${FAUX_BOLD}`;
+const STYLE_ALTERED = `color:#c95500;${FAUX_BOLD}`;
 
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -339,6 +373,13 @@ function renderOverlay(text: string, hls: Highlight[]): string {
     }
   };
 
+  // Choice first: placeholders / records / braces inside a label keep their own
+  // color by overwriting it per-character below. Same for +/++ state spans —
+  // tokens nested inside (e.g. `++|$color|++`) overwrite per-char.
+  setTok(STYLE_CHOICE, findInlineChoiceRanges(text));
+  const stateRanges = findStateRanges(text);
+  setTok(STYLE_ALTERED, stateRanges.altered);
+  setTok(STYLE_INITIAL, stateRanges.initial);
   setTok(STYLE_BRACE, findBalancedBraces(text));
   setTok(STYLE_ANCHOR, findAnchorRanges(text));
   setTok(STYLE_BR, findBrRanges(text));

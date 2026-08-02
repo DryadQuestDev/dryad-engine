@@ -11,6 +11,7 @@ import ProgressionContainer from './progression/ProgressionContainer.vue';
 import PopupContainer from './PopupContainer.vue';
 import LogsPopup from './LogsPopup.vue';
 import OverlayContainer from './overlays/OverlayContainer.vue';
+import SceneGradeFilter from './SceneGradeFilter.vue';
 
 const global = Global.getInstance();
 const game = Game.getInstance();
@@ -69,14 +70,21 @@ const shouldShowDebugPanel = computed(() => {
         </div>
 
 
+        <!-- Stays mounted while actors are still playing their exit animations
+             (sceneSlots keeps mid-exit slots after the scene itself tore down). -->
         <div class="events-body"
-          v-if="game.dungeonSystem.currentSceneId.value && !game.coreSystem.getState('hide_events')">
+          v-if="(game.dungeonSystem.currentSceneId.value || game.dungeonSystem.sceneSlots.value.length > 0) && !game.coreSystem.getState('hide_events')">
           <!--  && !game.coreSystem.getState('progression_state')-->
           <div :class="{ 'events-zone': game.coreSystem.getDebugSetting('events_zone') }" class="events-wrapper"
             id="events-wrapper">
             <EventsContainer />
           </div>
         </div>
+
+        <!-- Colour-matrix def for the scene grade. Draws nothing: the art elements themselves
+             (BackgroundAsset, CharacterSlot's art wrapper, the map) reference it as a CSS filter,
+             so UI is excluded by construction rather than by stacking order. -->
+        <SceneGradeFilter />
 
         <div class="overlay-wrapper" v-show="!game.coreSystem.getState('progression_state')">
           <OverlayContainer />

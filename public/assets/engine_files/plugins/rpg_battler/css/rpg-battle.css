@@ -1177,7 +1177,9 @@
 .rpg-char-tokens {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.33cqh;
+  /* Wider than it looks like it needs: the plate borders used to separate
+     adjacent chips, so without them the icons run together. */
+  gap: 0.8cqh;
   padding: 0.33cqh 0;
   justify-content: center;
   pointer-events: none;
@@ -1188,27 +1190,21 @@
   display: flex;
   align-items: center;
   gap: 1px;
-  padding: 1px 3px;
-  border-radius: 3px;
   font-size: 10px;
   font-weight: 700;
   color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  /* No plate behind the digit any more — needs a hard outline, not a soft
+     shadow, to stay legible over light battle art. */
+  text-shadow:
+    1px 1px 0 rgba(0, 0, 0, 1), -1px 1px 0 rgba(0, 0, 0, 1),
+    1px -1px 0 rgba(0, 0, 0, 1), -1px -1px 0 rgba(0, 0, 0, 1),
+    0 0 3px rgba(0, 0, 0, 0.9);
 }
 
-.rpg-token.positive {
-  background: rgba(66, 185, 131, 0.4);
-  border: 1px solid rgba(66, 185, 131, 0.6);
-}
-
+/* Polarity lives in the number color alone. Positive and neutral both stay
+   white so debuffs are the only marked case and read as the alarm. */
 .rpg-token.negative {
-  background: rgba(239, 68, 68, 0.4);
-  border: 1px solid rgba(239, 68, 68, 0.6);
-}
-
-.rpg-token.neutral {
-  background: rgba(168, 85, 247, 0.4);
-  border: 1px solid rgba(168, 85, 247, 0.6);
+  color: #ff6b6b;
 }
 
 .rpg-token-icon {
@@ -1218,7 +1214,8 @@
   filter: drop-shadow(1px 1px 0px rgba(0, 0, 0, 1));
 }
 
-.rpg-token-stacks {
+.rpg-token-stacks,
+.rpg-token-duration {
   font-size: 10px;
   line-height: 1;
 }

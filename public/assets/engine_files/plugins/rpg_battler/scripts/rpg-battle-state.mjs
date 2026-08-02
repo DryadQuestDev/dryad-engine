@@ -16,6 +16,20 @@ export function getSpeedMult() {
 /** @type {import('vue').Ref<RpgBattle | null>} */
 export const currentRpgBattle = ref(null);
 
+// ── require_status_self ──
+
+/**
+ * Normalize a `meta.require_status_self` value to a status-id list. The field is a
+ * chooseMany with OR semantics — holding ANY listed status satisfies the gate. Plain
+ * strings (modifier-injected metas, older data) are accepted too.
+ * @param {string | string[] | undefined} value
+ * @returns {string[]}
+ */
+export function requiredSelfStatuses(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 // ── Display name ──
 
 /**

@@ -67,11 +67,11 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   <div v-if="visibleChoices.length > 0" class="choice-list" :class="game.dungeonSystem.choiceType.value">
     <template v-for="(choice, index) in visibleChoices" :key="choice.id">
       <div @click.stop="handleChoice(choice)" class="choice"
-        :class="{ visited: isChoiceVisited(choice), unavailable: !choice.isAvailable }">
+        :class="{ visited: isChoiceVisited(choice), unavailable: !choice.isAvailable, clue: choice.isClue() }">
         <span v-if="game.dungeonSystem.choiceType.value != 'encounter'">
           {{ index + 1 }}.
         </span>
-        {{ choice.nameComputed || choice.name }}
+        <span v-script="{ html: (choice.nameComputed as unknown as string) || choice.name, resolver: false }"></span>
       </div>
     </template>
   </div>
@@ -125,6 +125,14 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 .choice.visited {
   color: #d1d1d1;
   font-weight: normal;
+}
+
+/* An untaken {clue: true} hint. Same orange as the map encounter glow. Declared BEFORE
+   .unavailable so that a greyed-out choice wins on equal specificity — a choice you
+   cannot pick should not beckon. */
+.choice.clue {
+  color: #ff6600;
+  text-shadow: 0 0 6px rgba(255, 102, 0, 0.5);
 }
 
 .choice.unavailable {

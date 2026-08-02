@@ -8,6 +8,7 @@ The RPG Battler provides named slots where other plugins or game scripts can inj
 |---|---|---|---|
 | `rpg-sidebar-top` | Top of the battle sidebar | `character` (Character) | Content injected above the turn/info display in the sidebar. Character is the active combatant. |
 | `rpg-sidebar-bottom` | Bottom of the battle sidebar | `character` (Character) | Content injected below the turn order display in the sidebar. Character is the active combatant. |
+| `rpg-battle-result` | Battle result overlay (between the Victory/Defeat text and the Continue button) | `result` ('victory' \| 'defeat') | Content injected into the end-of-battle overlay. The battle roster is still live here — for post-battle result content (e.g. a rewards panel). |
 
 ## Ability Panel Slots
 

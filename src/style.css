@@ -449,6 +449,18 @@ span.lore-link:focus-visible,
   color: #e06c75;
 }
 
+/* `+text+` / `++text++` prose states: how a thing looked before, and after, the
+   world changed. Overridable from game/plugin CSS (loaded after this sheet). */
+.initial {
+  color: #a100ff;
+  font-weight: bold;
+}
+
+.altered {
+  color: #c95500;
+  font-weight: bold;
+}
+
 .game-body-content a {
   color: #5fb3ff;
   text-decoration: underline;
@@ -695,6 +707,12 @@ span.lore-link:focus-visible,
   color: var(--rarity-color) !important;
 }
 
+/* Generic consumer for inline rarity-colored names (notifications, prose spans).
+   `.rarity` is only ever emitted alongside a `rarity_<tier>` class, so this is safe. */
+.rarity {
+  color: var(--rarity-color);
+}
+
 /* Apply rarity color to item icon outlines */
 .item-slot-wrapper .item-icon {
   outline: 2px solid var(--rarity-color);
@@ -857,10 +875,6 @@ span.lore-link:focus-visible,
 
 .apply-button.craft:hover {
   background-color: rgb(75, 150, 0);
-}
-
-.apply-button.craft::before {
-  content: "Craft";
 }
 
 /* Glass popup primitives — shared by MenuContainer, install dialogs, and any

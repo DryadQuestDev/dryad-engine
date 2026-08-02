@@ -30,15 +30,10 @@ const usable = computed(() => {
   return game.isAbilityUsable(props.characterId, props.abilityId);
 });
 
-// Auto-detect inactive state from requires_status on the ability template
-const isEffectivelyInactive = computed(() => {
-  if (props.isInactive !== undefined) return props.isInactive;
-  const template = game.characterSystem.abilityTemplatesMap.get(props.abilityId);
-  if (!template?.requires_status || !props.characterId) return false;
-  const char = game.getCharacter(props.characterId);
-  if (!char) return false;
-  return !char.getStatuses().some((s: any) => s.id === template.requires_status);
-});
+// Callers (e.g. StatusObjectDisplay's inactive improvements) drive the inactive state via the
+// prop. Status-gated abilities themselves never reach a card — meta.require_status filters them
+// out of the character's abilities entirely.
+const isEffectivelyInactive = computed(() => props.isInactive ?? false);
 
 // Get ability meta (name, icon, description)
 const abilityMeta = computed((): Record<string, any> | undefined => {

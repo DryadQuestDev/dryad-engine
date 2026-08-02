@@ -8,6 +8,7 @@ import { Global } from '../../../global/global';
 // PrimeVue components
 import InputSwitch from 'primevue/inputswitch';
 import InputNumber from 'primevue/inputnumber';
+import InputText from 'primevue/inputtext';
 
 const editor = Editor.getInstance();
 const global = Global.getInstance();
@@ -45,6 +46,7 @@ const props = defineProps({
 const emit = defineEmits<{
   (e: 'clear-requested'): void;
   (e: 'bookmark-click', bookmarkId: string): void;
+  (e: 'id-search-input', value: string): void;
 }>();
 
 // --- Computed: Group items by page ---
@@ -165,6 +167,22 @@ const isAddButtonDisabled = computed(() => {
   return !newItemId.value;
 });
 
+// --- ID Search (shared binding with Dsearch "ID contains") ---
+// Same visibility condition as Dsearch's showIdField
+const showIdSearch = computed(() => {
+  const schema = editor.schema.value as any;
+  return editor.isArray.value && !!(schema?.['id'] && schema['id'].type !== 'schema');
+});
+
+function onIdSearchInput(value: string | undefined) {
+  emit('id-search-input', value ?? '');
+}
+
+function clearIdSearch() {
+  editor.idFilter.value = '';
+  emit('id-search-input', ''); // reset any pending autoselect from just-typed text
+}
+
 </script>
 
 <template>
@@ -177,6 +195,12 @@ const isAddButtonDisabled = computed(() => {
         <Button raised icon="pi pi-save" @click="saveActiveObject"
           :severity="editor.hasUnsavedChanges.value ? 'warning' : 'secondary'" size="small" class="mt-2" :disabled="!editor.hasUnsavedChanges.value">Save
           {{ currentSubtabName }}</Button>
+      </div>
+      <div class="id_search" v-if="showIdSearch">
+        <InputText v-model="editor.idFilter.value" placeholder="Search ID" size="small" class="id-search-input"
+          :class="{ 'has-value': !!editor.idFilter.value }" @update:modelValue="onIdSearchInput" />
+        <i v-if="editor.idFilter.value" class="pi pi-times id-search-clear" aria-label="Clear ID search"
+          @click="clearIdSearch"></i>
       </div>
     </div>
     <div class="bookmark_list" v-if="editor.isArray.value">

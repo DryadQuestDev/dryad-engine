@@ -10,18 +10,20 @@ export const ItemTemplateSchema = {
     slots: { type: 'chooseMany', fromFile: 'item_slots', tooltip: 'Equipment slots where this item can be equipped.' },
     price: { type: 'schema', fromFile: 'item_templates', fromFileType: 'number', fromFileTypeAnd: { is_currency: true }, tooltip: 'Price of the item in various currencies. Only items marked as currency appear as options.' },
     is_currency: { type: 'boolean', tooltip: 'If true, the item can be used as currency for the \'price\' field. You might need to reload the tab to update the price options.' },
+    learn_recipe: { type: 'chooseOne', fromFile: 'item_recipes', tooltip: 'If set, the item shows a "Learn" choice in the inventory that teaches this recipe (grayed out once learned). Learning consumes the item.' },
     traits: { type: 'schema', fromFile: 'item_traits', fromFileType: 'custom', tooltip: 'Custom item traits defined in item_traits file.' },
     attributes: { type: 'schema', fromFile: 'item_attributes', fromFileType: 'chooseOne', tooltip: 'Item attributes with selectable values from item_attributes file.' },
     properties: { type: 'schema', fromFile: 'item_properties', fromFileType: 'number', tooltip: 'Numeric properties (e.g., weight) from item_properties file.' },
-    is_consumable: { type: 'boolean', tooltip: 'If true, the item can be consumed for one-time effects.' },
-    consume_duration: { type: 'number', tooltip: 'Duration (turns) for the status applied on consume. -1 or empty = permanent.', show: { is_consumable: [true] } },
-    consume_max_stacks: { type: 'number', tooltip: 'Max stacks for the consume status. -1 = unlimited. Consuming the same item again adds stacks. Default: -1.', show: { is_consumable: [true] } },
-    consume_polarity: { type: 'chooseOne', options: ['positive', 'neutral', 'negative'], tooltip: 'Polarity of the consume status: positive (green), neutral (gray), negative (red).', show: { is_consumable: [true] } },
-    consume_status_id: { type: 'string', tooltip: 'Custom status ID for the consume effect. Items sharing the same ID will replace each other instead of stacking. If empty, defaults to "consume_" + item ID.', show: { is_consumable: [true] } },
-    consume_percentage: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', fromFileTypeAnd: { is_resource: true }, tooltip: 'Percentage of max resource to restore/reduce on consume. Positive = restore, negative = reduce.', show: { is_consumable: [true] } },
-    consume_absolute: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', fromFileTypeAnd: { is_resource: true }, tooltip: 'Flat resource amount to restore/reduce on consume. Positive = restore, negative = reduce.', show: { is_consumable: [true] } },
+    apply_statuses_on_consume: {
+        type: 'schema[]', tooltip: 'Statuses applied when the item is CONSUMED (referencing status templates, which carry their own duration/max_stacks/polarity/group_id). Any entry makes the item show a "Consume" choice. An item can also carry an equip `status` — the two are independent (e.g. +2 luck on equip, +10 health on consume).', objects: {
+            status: { type: 'chooseOne', fromFile: 'character_statuses', tooltip: 'Status template to apply on consume.' },
+            stacks: { type: 'number', tooltip: 'Stacks to apply (default 1).' },
+        }
+    },
+    consume_percentage: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', fromFileTypeAnd: { is_resource: true }, tooltip: 'Percentage of max resource to restore/reduce on consume. Positive = restore, negative = reduce. Any entry makes the item consumable.' },
+    consume_absolute: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', fromFileTypeAnd: { is_resource: true }, tooltip: 'Flat resource amount to restore/reduce on consume. Positive = restore, negative = reduce. Any entry makes the item consumable.' },
     status: {
-        type: 'schema', tooltip: 'The status to apply to the character when equipped.', objects: {
+        type: 'schema', tooltip: 'The status to apply to the character when EQUIPPED (independent of consume effects).', objects: {
             ...AppliedStatusSchema
         }
     },

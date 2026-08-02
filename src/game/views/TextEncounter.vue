@@ -49,6 +49,7 @@ function getEncounterContent(encounter: DungeonEncounter): string {
   return game.logicSystem.resolveString(encounter.rawContent).output;
 }
 
+
 function getEncounterVisibleChoices(encounter: DungeonEncounter) {
   return encounter.choices.filter(choice => choice?.isVisible && choice.name);
 }
@@ -87,12 +88,14 @@ function navigateToNeighbor(neighborRoom: any) {
         <!-- Mini map floated right inside the description encounter so its text + choices wrap around it -->
         <TextMap v-if="encounter === game.dungeonSystem.currentRoom.value?.descriptionEncounter" mode="mini"
           class="embedded-mini-map" @openFullMap="openFullMap" @closeFullMap="closeFullMap" />
+        <div v-if="encounter.discoverSpec" class="encounter-discover-cue">{{ encounter.getDiscoverCue() }}</div>
         <div class="text-dungeon-encounter-content"
           v-script="{ html: getEncounterContent(encounter), resolver: false }"></div>
         <div v-if="getEncounterVisibleChoices(encounter).length > 0" class="text-dungeon-encounter-choices">
           <div v-for="choice in getEncounterVisibleChoices(encounter)" :key="choice.id" class="text-dungeon-choice"
-            :class="{ unavailable: !choice.isAvailable }" @click.stop="handleEncounterChoice(choice)">
-            {{ choice.nameComputed || choice.name }}
+            :class="{ unavailable: !choice.isAvailable, clue: choice.isClue() }"
+            @click.stop="handleEncounterChoice(choice)">
+            <span v-script="{ html: (choice.nameComputed as unknown as string) || choice.name, resolver: false }"></span>
           </div>
         </div>
       </div>
@@ -129,6 +132,13 @@ function navigateToNeighbor(neighborRoom: any) {
   min-height: 250px;
 }
 
+.encounter-discover-cue {
+  font-weight: bold;
+  text-align: center;
+  color: #7ddc8a;
+  margin-bottom: 0.4em;
+}
+
 .text-dungeon-encounter-content {
   line-height: 1.4em;
 }
@@ -152,6 +162,13 @@ function navigateToNeighbor(neighborRoom: any) {
 
 .text-dungeon-choice:hover::before {
   content: "➺";
+}
+
+/* An untaken {clue: true} hint. Same orange as the map encounter glow. Declared BEFORE
+   .unavailable so that a greyed-out choice wins on equal specificity. */
+.text-dungeon-choice.clue {
+  color: #ff6600;
+  text-shadow: 0 0 6px rgba(255, 102, 0, 0.5);
 }
 
 .text-dungeon-choice.unavailable {

@@ -7,6 +7,7 @@
 | `battle_start` | `()` | Yes | Before battle begins. Return false to prevent the battle from starting |
 | `battle_end` | `(result)` | No | When battle ends, before pre-battle states are restored and the roster is cleaned up. `result`: `"victory"` or `"defeat"`. Battle data (rosters, statuses) is still readable here; state writes get overwritten by the restore — use `battle_closed` for those |
 | `battle_closed` | `(result)` | No | After the battle is fully torn down: pre-battle states restored, battle statuses removed, spawned enemies deleted, battle cleared. Fires before the triggering scene resumes (victory only — on defeat the scene stays halted). Safe place to set post-battle game state |
+| `battle_defeated` | `(battleId)` | No | Once, when a battle definition is FIRST marked defeated — by fight victory (at the moment victory is detected, before the result overlay renders) or by the `win` action / `addDefeated` service call. The single hook for defeat rewards |
 | `battle_turn_start` | `(turnNumber)` | No | At the start of a new round |
 
 ## Actions
@@ -18,6 +19,7 @@
 | `battle_action_apply` | `(caster, event)` | Yes | Per-effect per-target, after all math, before state mutation. See event fields below. Return false to skip this effect on this target |
 | `battle_action_applied` | `(caster, event)` | No | Per-effect per-target, AFTER state mutations. Same event fields as `battle_action_apply`. Use for reactive effects (rage-on-hit, counters, on-kill triggers) |
 | `battle_action_end` | `(caster, abilityId, results)` | No | After ability effects have fully resolved. `results`: array of `RpgEffectResult` objects |
+| `battle_took_damage` | `(target, damage, damageType, casterId)` | No | After a combatant's health is actually reduced — ability hits and `dealDamage` (post-shield), thorns reflections (`damageType: "thorns"`), and DoT ticks (`casterId: null`). Fully shield-absorbed hits don't fire. Fires AFTER the HP change is applied |
 
 ### Battle state & helpers — via the `rpg_battle` service
 

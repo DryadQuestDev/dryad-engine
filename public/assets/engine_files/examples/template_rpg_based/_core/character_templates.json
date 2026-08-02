@@ -47,10 +47,7 @@
       "face_shift_y": 11.313607354130689,
       "face_shift_scale": 1.01,
       "name": "Riko",
-      "title_color": "00ffee",
-      "art_dx": 5.016903132477717,
-      "art_dy": -1.3613791426014936,
-      "art_scale": 1
+      "title_color": "00ffee"
     },
     "gallery": {
       "gallery_id": "characters",
@@ -71,6 +68,15 @@
     "computed_stats": [],
     "skill_trees": [],
     "abilities": [],
-    "add_to_party": true
+    "add_to_party": true,
+    "static_art": [
+      {
+        "uid": "5RENHqSvMLga",
+        "view": "_default",
+        "art_dx": 5.016903132477717,
+        "art_dy": -1.3613791426014936,
+        "art_scale": 1
+      }
+    ]
   }
 ]

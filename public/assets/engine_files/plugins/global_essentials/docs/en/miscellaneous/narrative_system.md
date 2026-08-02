@@ -110,6 +110,8 @@ Segment content supports the full text resolution pipeline:
 | `\|$templateId\|` | Template reference | `\|$greeting\|` |
 | `*text*` | Italic | `*whispered*` |
 | `**text**` | Bold | `**important**` |
+| `+text+` | Initial state (`.initial` span) | `+The machine sleeps.+` |
+| `++text++` | Altered state (`.altered` span) | `++The machine roars.++` |
 
 Slots can nest other slots, enabling hierarchical narrative composition:
 

@@ -18,6 +18,7 @@ export class Dungeon {
     public fog_default!: number;
     public fog_shadow_coef!: number;
     public fog_image!: string;
+    public default_assets!: string[];
 
     // init
     widthBackground: number = 0;
@@ -35,6 +36,14 @@ export class Dungeon {
     public encounters: Map<string, DungeonEncounter> = new Map();
 
     public actions: any = {};
+
+    // Custom dungeon traits from config (defined in the dungeon_traits file), e.g. level_group.
+    public traits: Record<string, any> = {};
+
+    // ^pool refs found on this dungeon's choices during build: the placement-unique inventory id
+    // each choice was redirected to, plus the raw pool ref and whether it was a loot or trade
+    // action. Consumers instantiate these without re-scanning the parsed content.
+    public pooledInventories: { id: string; pool: string; type: 'loot' | 'trade' }[] = [];
 
     public getRoomById(id: string): DungeonRoom | null {
         if (!id) {

@@ -97,7 +97,7 @@ const characterImages = computed(() => {
 //          The spine renderer applies dx/dy as a CSS transform on its canvas, so the
 //          wrapper transform must NOT translate again — we only return scale here for
 //          potential composition. (dx/dy returned as 0 to avoid double-shifting.)
-//   Static: character art_* traits.
+//   Static: the default-view static_art entry (scene slots preview the default view).
 const characterArtOffset = computed(() => {
   if (!useCharacterArtOffset.value) return { dx: 0, dy: 0, scale: 1 };
   if (isSpineCharacter.value) {
@@ -108,11 +108,12 @@ const characterArtOffset = computed(() => {
       scale: typeof entry?.art_scale === 'number' ? entry.art_scale : 1,
     };
   }
-  if (!selectedCharacter.value?.traits) return { dx: 0, dy: 0, scale: 1 };
+  const staticArr = (selectedCharacter.value as any)?.static_art;
+  const entry = Array.isArray(staticArr) ? staticArr.find((e: any) => isDefaultViewSpineEntry(e)) : null;
   return {
-    dx: selectedCharacter.value.traits.art_dx || 0,
-    dy: selectedCharacter.value.traits.art_dy || 0,
-    scale: selectedCharacter.value.traits.art_scale || 1
+    dx: typeof entry?.art_dx === 'number' ? entry.art_dx : 0,
+    dy: typeof entry?.art_dy === 'number' ? entry.art_dy : 0,
+    scale: typeof entry?.art_scale === 'number' ? entry.art_scale : 1,
   };
 });
 

@@ -84,10 +84,31 @@ watch(() => editor.activeObject.value, (newActiveObject) => {
   debouncedActiveObjectUpdateHandler(newActiveObject);
 }, { deep: true, immediate: true });
 
+// --- Autoselect first match when the ID search box drives the filter ---
+// Set on typing in the Dbookmarks search input, consumed when the (debounced) sift result arrives
+const pendingIdAutoselect = ref(false);
+
+function handleIdSearchInput(value: string) {
+  pendingIdAutoselect.value = value.trim() !== '';
+}
+
+// Typing then switching tabs within the sift debounce window must not hijack the restored bookmark
+watch([() => editor.mainTab, () => editor.secondaryTab], () => {
+  pendingIdAutoselect.value = false;
+});
+
 // --- Handler for updates from Dform/Dsearch ---
 function handleFilteredUpdate(newFilteredData: any[]) {
   //console.log('[EditorContent] Received filtered-update event:', newFilteredData);
   filteredItems.value = newFilteredData;
+  if (pendingIdAutoselect.value) {
+    pendingIdAutoselect.value = false;
+    const first = newFilteredData[0];
+    if (first?.uid && editor.activeBookmarkId.value !== first.uid) {
+      editor.activeBookmarkId.value = first.uid; // mirror Dbookmarks.scrollToBookmark
+      handleBookmarkClick(first.uid);
+    }
+  }
 }
 
 // --- Handler for dirty state updates from Dform/Dsearch ---
@@ -147,7 +168,8 @@ onMounted(() => {
     <!-- Left Column (Bookmarks) -->
     <div class="column editor-left" v-if="isLeftColumnVisible">
       <Dbookmarks :items="filteredItems" :isFilterActive="isFilterFormDirty" :paginationData="paginationData"
-        @clear-requested="requestClearFilters" @bookmark-click="handleBookmarkClick" />
+        @clear-requested="requestClearFilters" @bookmark-click="handleBookmarkClick"
+        @id-search-input="handleIdSearchInput" />
     </div>
 
     <!-- Right Column (Form/Map) -->

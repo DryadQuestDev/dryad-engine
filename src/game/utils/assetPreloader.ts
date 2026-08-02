@@ -28,6 +28,14 @@ function warmImage(url: string): Promise<void> {
     return img.decode().catch(() => { });
 }
 
+/**
+ * Fetch and decode a list of images, skipping empties and anything already warmed.
+ * Never rejects — a missing file just resolves.
+ */
+export async function warmImages(urls: (string | undefined | null)[]): Promise<void> {
+    await Promise.all(urls.map((url) => warmImage(url ?? '')));
+}
+
 function candidateKeys(
     layer: { id: string; attributes?: string[] },
     baseAttributes: Record<string, string>,

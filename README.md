@@ -12,6 +12,15 @@ A Vue-based game engine for creating UI-heavy games like visual novels, dating s
 - **Extensible** - Register custom actions, conditions, placeholders, and components.
 - **Moddable** - Layered data system makes mods, addons, and content packs easy to develop and distribute.
 
+## Run Everywhere
+
+One project, every platform — the same game ships to all targets with the included build scripts:
+
+- **Desktop** – Windows and Linux apps (Electron)
+- **Browser** – static web build; self-host or upload to portals like itch.io and Newgrounds
+- **Android** – signed APKs (Capacitor); one config entry per game
+- **Mobile browser** – phone-friendly play with no install
+
 ## Features
 
 | Category | Highlights |

@@ -101,6 +101,10 @@ export class Editor {
   public schemaKeyFilters: Ref<Record<string, string>> = ref({});
   // --- End Schema Key Filter ---
 
+  // --- Shared ID Filter (Dbookmarks search box <-> Dsearch "ID contains") ---
+  public idFilter: Ref<string> = ref('');
+  // --- End Shared ID Filter ---
+
   // --- Active Bookmark (scrollspy) ---
   public activeBookmarkId: Ref<string | null> = ref(null);
   public activeItemUids: Ref<Set<string>> = ref(new Set());
@@ -1211,7 +1215,11 @@ export class Editor {
 
     try {
 
-      if (this.secondaryTab === 'encounters') {
+      // Subtab ids are only unique within their main tab — a plugin's tabs register as
+      // mainTab=<plugin id>, secondaryTab=<tab id>, so a plugin tab named 'config',
+      // 'encounters' or 'manifest' would otherwise trigger these dungeon/game saves and
+      // write the plugin's form data over the real file.
+      if (this.mainTab === 'dungeons' && this.secondaryTab === 'encounters') {
 
         let defaultIcons = await this.global.readJson(this.getModPath("dev/encounters_default")) as DevEncountersDefaultObject[];
         if (defaultIcons) {
@@ -1241,12 +1249,12 @@ export class Editor {
       console.log(`[Editor] Saving active object to: ${this.filePath}`);
       await this.writeActiveObjectWithExternals();
       this.hasUnsavedChanges.value = false;
-      if (this.secondaryTab === 'config') {
+      if (this.mainTab === 'dungeons' && this.secondaryTab === 'config') {
         //console.log("saving config");
         await this.saveConfig(selected_game, selected_mod, selected_dungeon);
       }
 
-      if (this.secondaryTab === 'manifest') {
+      if (this.mainTab === 'general' && this.secondaryTab === 'manifest') {
         await this.saveManifest(selected_game, selected_mod);
       }
 
@@ -2132,12 +2140,36 @@ export class Editor {
   }
 
   /**
+   * Dungeon id list for `fromFile: "_dungeons"` fields: dungeon folder names from _core plus the
+   * selected mod, deduped. Folder name is the dungeon id.
+   */
+  private async loadDungeonIdList(): Promise<any[]> {
+    const seen = new Map<string, { id: string }>();
+    const mods = this.selectedMod && this.selectedMod !== '_core' ? ['_core', this.selectedMod] : ['_core'];
+    for (const mod of mods) {
+      try {
+        const folders = await this.global.listFolders(`games_files/${this.selectedGame}/${mod}/dungeons`);
+        for (const folder of folders) seen.set(folder, { id: folder });
+      } catch {
+        // a mod without a dungeons folder is fine
+      }
+    }
+    return [...seen.values()];
+  }
+
+  /**
    * Loads and merges data from multiple sources for fromFile properties in precedence order:
    * 1. Plugin data (lowest precedence)
    * 2. _core file (medium precedence, if mod is selected and not _core)
    * 3. Current mod file (highest precedence)
    */
   public async loadAndMergeFromFileData(fileName: string, basePath: string): Promise<any[]> {
+    // '_'-prefixed names are special non-data-file sources, not JSON files. Handled here so every
+    // fromFile path resolves them — engine-level schema fields, plugin-injected custom trait
+    // definitions, and the pool-filter form all funnel through this method.
+    if (fileName === '_dungeons') {
+      return await this.loadDungeonIdList();
+    }
     let mergedData: any[] = [];
 
     // 1. Start with plugin data (lowest precedence)

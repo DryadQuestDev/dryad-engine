@@ -100,6 +100,19 @@ game.deleteCharacter("alice");  // Using ID string
 game.deleteCharacter(npc);      // Using Character instance
 ```
 
+### resetCharacter(character)
+
+Rebuild a character from its template under the same ID — a narratively fresh entity in the same role. Party membership is kept; statuses, resources, the private inventory and learned skills are discarded. Triggers `character_delete` then `character_create`. Returns the new character.
+
+When no character with that ID is live, the ID is treated as a template ID and the character is created — so content can guarantee a pristine character without knowing whether one exists yet (`auto_create: false` templates, or characters deleted earlier in the run). Throws when there is neither a live character nor a template.
+
+```js
+game.resetCharacter("orc");     // Using ID string
+game.resetCharacter(npc);       // Using Character instance
+```
+
+A live character resets from its own `templateId`, so a custom ID works too — `orc_boss_2` built from the `orc` template resets to `orc`. That only holds while it is live: once deleted there is no record of its template, so recreate it with `createCharacter(id, template)`.
+
 ### createStatus(template)
 
 Create a status from a template object or registered template ID.
@@ -154,6 +167,7 @@ Group names are resolved from locale entries. For the tags above, define locale 
 | `statuses` | `Map<string, Status>` | Applied status effects (use `getStatuses()` to iterate) |
 | `actions` | `Record<string, any>` | Custom actions registered on this character |
 | `skinLayerStyles` | `Map<string, string[]>` | CSS classes applied to skin layers |
+| `skinLayerClips` | `Map<string, string>` | Runtime clip-path polygon per layer (see setSkinLayerClip); not persisted |
 | `renderedLayers` | `CharacterSkinLayerObject[]` | Rendered skin layers for display |
 
 ---
@@ -414,6 +428,18 @@ Remove a CSS style class from a skin layer.
 
 ```js
 character.removeSkinLayerStyle("face", "blushing");
+```
+
+### setSkinLayerClip(layerId, polygon) / clearSkinLayerClip(layerId)
+
+Clip a skin layer to a polygon at render time (keep-inside `clip-path`; the polygon is in the layer's **image** coordinates, the same contract as skin-layer keep masks). Typically driven from a `character_render` listener — the reactive map re-renders the doll immediately, no `reevaluate()` needed. Use it to trim one layer against another without baking masks into the skin-layer data (e.g. hair tucked under a hat).
+
+```js
+game.on("character_render", (char) => {
+  const clip = getHatClipForHair(char);      // "polygon(...)" or null
+  if (clip) char.setSkinLayerClip("hair_front", clip);
+  else char.clearSkinLayerClip("hair_front");
+});
 ```
 
 ---
@@ -755,6 +781,8 @@ Skin layer data for rendering.
 | `z_index` | `number?` | Stacking order |
 | `attributes` | `string[]?` | Attributes controlling this layer |
 | `images` | `Record<string, any>?` | Images for attribute combinations |
-| `masks` | `Record<string, any>?` | Mask definitions |
+| `masks` | `Record<string, any>?` | Mask polygons per attribute combo (`"polygon(x% y%, …)"` strings, same keys as `images`) |
+| `mask_mode` | `'hide' \| 'keep'?` | `hide` (default): layers below are hidden *inside* the polygon. `keep`: targeted layers are clipped *to* the polygon (CSS clip-path semantics — e.g. hair trimmed to fit under a hat). Keep-mode polygon coordinates are in the target layer's *image* space; the engine remaps them into the letterboxed doll element automatically |
+| `mask_targets` | `string[]?` | Layer ids the mask applies to. Empty = every layer below |
 | `styles` | `string[]?` | Default CSS classes |
 | `tags` | `string[]?` | Tags for filtering |

@@ -21,7 +21,7 @@ const isTextSelectable = ref(false);
 const isDialogueCollapsed = ref(false);
 const showAnimatedContinueIndicator = ref(false);
 const showFlashContent = ref(false);
-const dialogueDisplayRef = ref<InstanceType<typeof DialogueDisplay> | null>(null);
+const flashFooterRef = ref<HTMLElement | null>(null);
 
 function toggleDialogueCollapse() {
   isDialogueCollapsed.value = !isDialogueCollapsed.value;
@@ -51,6 +51,13 @@ function handleKeyPress(event: KeyboardEvent) {
     }
 
     if (isSceneBlocked.value) {
+      return;
+    }
+
+    // The event box is hidden (e.g. a battle is running with a parked scene) — the
+    // scene is invisible, so keyboard advance must not execute its live choice
+    // (which may be the very {battle} action that parked it).
+    if (game.coreSystem.getState('hide_events')) {
       return;
     }
 
@@ -252,7 +259,7 @@ const typingAnimation = useTypingAnimation({
       await nextTick();
 
       // Animate flash content in
-      const flashEl = dialogueDisplayRef.value?.flashContentElement ?? null;
+      const flashEl = flashFooterRef.value;
       if (flashEl) {
         gsap.fromTo(flashEl,
           {
@@ -343,7 +350,16 @@ const isTextDungeon = computed(() => {
 </script>
 
 <template>
-  <div :id="COMPONENT_ID" class="overlay" :class="game.dungeonSystem.currentDungeon.value?.dungeon_type">
+  <!-- hide_events hides the whole event presentation layer — dialogue, choices, toolbar.
+       A battle keeps its parked triggering scene current, and that scene must not render
+       (or accept clicks) while the battle screen owns the view. -->
+  <!-- Enter-only fade: the overlay fades in when the event layer reappears (e.g. a
+       mid-battle cutaway scene starting). No leave transition — systems that need a
+       fade-out animate it themselves before flipping hide_events (the content is torn
+       down synchronously on exit, so a leave transition would show the wrong text). -->
+  <Transition name="overlay-fade">
+  <div v-if="!game.coreSystem.getState('hide_events')" :id="COMPONENT_ID" class="overlay"
+    :class="[game.dungeonSystem.currentDungeon.value?.dungeon_type, { 'overlay-closing': game.dungeonSystem.isSceneClosing.value }]">
 
     <div class="overlay-content" :class="game.dungeonSystem.choiceType.value + '-type'">
 
@@ -401,24 +417,23 @@ const isTextDungeon = computed(() => {
               <CustomComponentContainer :slot="'scene-content-top'"
                 :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
               <!-- events scenes-->
-              <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" ref="dialogueDisplayRef"
-                :display-content="displayContent" :full-content="fullDialogueHtml" :flash-html="flashHtml"
-                :show-flash="showFlashContent" :selectable="isTextSelectable" :character-name="characterName"
+              <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" :display-content="displayContent"
+                :full-content="fullDialogueHtml" :selectable="isTextSelectable" :character-name="characterName"
                 :show-inline-name="talkingCharacterHasNoArt" :content-style="dialogueContentStyle"
                 :name-style="characterNameStyle" />
               <!-- encounters-->
               <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
                 <TextEncounter />
               </div>
-              <!-- flash messages (encounter only; scene flash is handled by DialogueDisplay) -->
-              <div
-                v-if="!game.dungeonSystem.currentSceneId.value && showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
-                class="flash-content" v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>') }"></div>
 
               <!-- Scene choices for text dungeons -->
               <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
               <CustomComponentContainer :slot="'scene-content-bottom'"
                 :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
+
+              <!-- flash footer (scene + encounter): sits below the content, never adds to the scroll -->
+              <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0" ref="flashFooterRef"
+                class="flash-content flash-footer" v-script="{ html: flashHtml }"></div>
             </div>
 
           </div>
@@ -435,39 +450,46 @@ const isTextDungeon = computed(() => {
         </div>
 
         <div class="content-wrapper">
-          <CustomComponentContainer :slot="'scene-content-top'"
-            :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
-          <!-- events scenes-->
-          <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" ref="dialogueDisplayRef"
-            :display-content="displayContent" :full-content="fullDialogueHtml" :flash-html="flashHtml"
-            :show-flash="showFlashContent" :selectable="isTextSelectable" :character-name="characterName"
-            :show-inline-name="false" :content-style="dialogueContentStyle" :name-style="characterNameStyle" />
-          <!-- encounters-->
-          <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
-            <!-- Map/Screen dungeon: original layout -->
-            <div class="encounter-content-layout">
-              <!-- Direction arrows for room navigation -->
-              <div class="direction-arrows" v-if="game.dungeonSystem.currentDungeon.value?.dungeon_type !== 'screen'">
-                <template v-for="neighbor in game.dungeonSystem.currentRoom.value?.neighborsWithDirection"
-                  :key="neighbor.angle">
-                  <div class="direction-arrow" :style="{ '--rotation': neighbor.angle + 'deg' }"
-                    @click.stop="navigateToNeighbor(neighbor)">
-                  </div>
-                </template>
+          <div class="content-scroll">
+            <CustomComponentContainer :slot="'scene-content-top'"
+              :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
+            <!-- events scenes-->
+            <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" :display-content="displayContent"
+              :full-content="fullDialogueHtml" :selectable="isTextSelectable" :character-name="characterName"
+              :show-inline-name="false" :content-style="dialogueContentStyle" :name-style="characterNameStyle" />
+            <!-- encounters-->
+            <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
+              <!-- Keyed off activeEncounter (the selected one, else the room description) — the same
+                   encounter whose text and `!` choices are on screen. Sits above the layout row, not
+                   inside it, since that row is a flex line (arrows beside text). -->
+              <div v-if="game.dungeonSystem.activeEncounter.value?.discoverSpec" class="encounter-discover-cue">
+                {{ game.dungeonSystem.activeEncounter.value?.getDiscoverCue() }}
               </div>
+              <!-- Map/Screen dungeon: original layout -->
+              <div class="encounter-content-layout">
+                <!-- Direction arrows for room navigation -->
+                <div class="direction-arrows" v-if="game.dungeonSystem.currentDungeon.value?.dungeon_type !== 'screen'">
+                  <template v-for="neighbor in game.dungeonSystem.currentRoom.value?.neighborsWithDirection"
+                    :key="neighbor.angle">
+                    <div class="direction-arrow" :style="{ '--rotation': neighbor.angle + 'deg' }"
+                      @click.stop="navigateToNeighbor(neighbor)">
+                    </div>
+                  </template>
+                </div>
 
-              <div class="encounter-text" v-script="{ html: encounterContent, resolver: false }"></div>
+                <div class="encounter-text" v-script="{ html: encounterContent, resolver: false }"></div>
+              </div>
             </div>
-          </div>
-          <!-- flash messages (encounter only; scene flash is handled by DialogueDisplay) -->
-          <div
-            v-if="!game.dungeonSystem.currentSceneId.value && showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0"
-            class="flash-content" v-script="{ html: game.dungeonSystem.cachedFlashArray.value.join('<br>') }">
+
+            <ChoiceList v-if="!game.dungeonSystem.toolbarMinimized.value && game.coreSystem.isTextUIContent.value" />
+            <CustomComponentContainer :slot="'scene-content-bottom'"
+              :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
           </div>
 
-          <ChoiceList v-if="!game.dungeonSystem.toolbarMinimized.value && game.coreSystem.isTextUIContent.value" />
-          <CustomComponentContainer :slot="'scene-content-bottom'"
-            :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
+          <!-- flash footer (scene + encounter): pinned outside .content-scroll so it never triggers the box scrollbar -->
+          <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0" ref="flashFooterRef"
+            class="flash-content flash-footer" v-script="{ html: flashHtml }">
+          </div>
         </div>
       </div>
     </div>
@@ -482,11 +504,28 @@ const isTextDungeon = computed(() => {
     <CustomComponentContainer :slot="COMPONENT_ID"
       :context="{ dungeon: game.dungeonSystem.currentDungeon.value, choices: game.dungeonSystem.relevantChoices.value }" />
   </div>
+  </Transition>
 
 
 </template>
 
 <style scoped>
+.overlay-fade-enter-active {
+  transition: opacity 0.3s ease;
+}
+
+.overlay-fade-enter-from {
+  opacity: 0;
+}
+
+/* Graceful scene exit (dungeonSystem.isSceneClosing): the dialogue fades out while
+   actors play their exit animations; input is ignored until the teardown lands. */
+.overlay.overlay-closing {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
 .overlay {
   position: absolute;
   bottom: 0;
@@ -538,7 +577,9 @@ const isTextDungeon = computed(() => {
   position: relative;
   max-height: 40dvh;
   min-height: 0;
-  overflow-y: auto;
+  /* Clip here; the inner .content-scroll owns the scrollbar so the pinned
+     flash footer stays out of the scrollable region. */
+  overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -563,7 +604,7 @@ const isTextDungeon = computed(() => {
   border-radius: 0;
   height: 100%;
   max-height: none;
-  overflow-y: visible;
+  overflow: visible;
   background: #2d2d2d4f;
 }
 
@@ -571,7 +612,27 @@ const isTextDungeon = computed(() => {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
+}
 
+/* Scrollable text region of the event box (regular/screen layout). The flash
+   footer is a sibling below this, so flash never contributes to the scrollbar. */
+.content-scroll {
+  display: flex;
+  flex-direction: column;
+  /*flex: 1 1 auto;*/
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Encounters were vertically centred via .content-wrapper; keep that now that
+   the content lives inside .content-scroll. */
+.encounter-type .content-scroll {
+  justify-content: safe center;
+}
+
+.flash-footer {
+  flex: 0 0 auto;
 }
 
 .scene-type .content-wrapper {
@@ -689,6 +750,13 @@ const isTextDungeon = computed(() => {
 
 .encounter-text {
   flex: 1;
+}
+
+.encounter-discover-cue {
+  font-weight: bold;
+  text-align: center;
+  color: #7ddc8a;
+  margin-bottom: 0.4em;
 }
 
 

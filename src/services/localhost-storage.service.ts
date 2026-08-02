@@ -259,7 +259,8 @@ export class LocalhostStorageService implements StorageService {
     }
 
     async getGamesList(): Promise<ManifestObject[]> {
-        let gameFolders = await this.listFolders('games_files');
+        // Sorted so the game list order is deterministic across platforms
+        let gameFolders = (await this.listFolders('games_files')).sort();
         let games: ManifestObject[] = [];
         for (let gameFolder of gameFolders) {
             let gameManifest = await this.readJson(`games_files/${gameFolder}/_core/manifest.json`);

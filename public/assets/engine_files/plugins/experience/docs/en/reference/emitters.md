@@ -3,8 +3,22 @@
 | Emitter | Args | Description |
 |---|---|---|
 | `character_level_up` | `(character, newLevel)` | Fired each time a character levels up. If a character gains multiple levels at once, fires once per level. |
+| `reward_assemble` | `({ source, battleId, threat })` | Fired once per battle when its defeat reward is granted (after loot and threat XP). `source` is `'battle'` for a fight victory, `'scene'` for a scripted `{win: ...}` defeat; `threat` is the effective (level-scaled) threat. The hook for game-specific reward economics. |
 
 ## Examples
+
+### Grant a game resource on fight victories
+
+Games hook their own economics into the reward and record it so the panel displays it:
+
+```js
+game.on('reward_assemble', ({ source, battleId, threat }) => {
+    if (source !== 'battle') return;
+    const refund = Math.round(threat * 2);
+    game.getCharacter('mc').addResource('pheromones', refund);
+    game.getService('reward').recordResource('pheromones', refund);
+});
+```
 
 ### Increase base stats on level up
 

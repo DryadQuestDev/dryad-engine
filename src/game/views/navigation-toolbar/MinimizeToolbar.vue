@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import Tooltip from 'primevue/tooltip';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
 
 const tooltip = computed(() => {
-  return dungeonSystem.toolbarMinimized.value ? "Expand" : "Minimize";
+  return global.getString(dungeonSystem.toolbarMinimized.value ? 'toolbar.expand' : 'toolbar.minimize');
 });
 
 const handleClick = () => {

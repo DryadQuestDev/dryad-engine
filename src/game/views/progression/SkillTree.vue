@@ -288,7 +288,7 @@ watch(() => props.character, () => {
     <!-- Main Canvas Wrapper with Background -->
     <div v-if="activeTree" ref="canvasWrapperRef" class="skill-tree-canvas-wrapper">
       <!-- Background Asset (outside canvas) -->
-      <BackgroundAsset v-if="backgroundAsset" :asset="backgroundAsset" class="skill-tree-background" />
+      <BackgroundAsset v-if="backgroundAsset" :asset="backgroundAsset" :grade="false" class="skill-tree-background" />
 
       <!-- SVG Canvas (only for skill slots) -->
       <svg :width="canvasWidth" :height="canvasHeight" :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`"

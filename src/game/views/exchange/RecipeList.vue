@@ -133,7 +133,7 @@ const selectedRecipeId = computed(() => {
       pointerEvents: 'none',
       willChange: 'transform'
     }">
-      <RecipeCard :recipe="hoveredRecipe" />
+      <RecipeCard :recipe="hoveredRecipe" :inventory="inventory" :party-inventory="targetInventory" />
     </div>
   </Teleport>
 </template>

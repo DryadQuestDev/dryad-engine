@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import Tooltip from 'primevue/tooltip';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
 
 const isInactive = () => {
@@ -11,11 +13,12 @@ const isInactive = () => {
 
 const handleClick = () => {
   dungeonSystem.selectedEncounterId.value = null;
+  dungeonSystem.centerToActiveLocation(true);
 };
 </script>
 
 <template>
-  <div class="toolbar-item back" :class="{ 'inactive': isInactive() }" v-tooltip.top="'Back'" @click="handleClick" />
+  <div class="toolbar-item back" :class="{ 'inactive': isInactive() }" v-tooltip.top="global.getString('toolbar.room_description')" @click="handleClick" />
 </template>
 
 <style scoped>

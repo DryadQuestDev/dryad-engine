@@ -1,3 +1,4 @@
+import { computed } from 'vue';
 import { Game } from '../game';
 import { Global } from '../../global/global';
 import { gameLogger } from '../utils/logger';
@@ -7,6 +8,7 @@ import { CharacterSceneSlotObject } from '../../schemas/characterSceneSlotSchema
 import { Status, StatusInstance } from '../core/character/status';
 // Import Vue components for registration
 import ExplorationComponent from '../views/states/exploration/Exploration.vue';
+import EventItemCard from '../views/events-container/EventItemCard.vue';
 import BattleComponent from '../views/states/battle/Battle.vue';
 import QuestsTab from '../views/progression/QuestsTab.vue';
 import CharacterTab from '../views/progression/CharacterTab.vue';
@@ -29,6 +31,7 @@ import OverlayNavigation from '../views/overlays/OverlayNavigation.vue';
 import OverlayExchange from '../views/overlays/OverlayExchange.vue';
 import BackComponent from '../views/navigation-toolbar/Back.vue';
 import EncounterNavComponent from '../views/navigation-toolbar/EncounterNav.vue';
+import DungeonNameComponent from '../views/navigation-toolbar/DungeonName.vue';
 import ToggleCirclesComponent from '../views/navigation-toolbar/ToggleCircles.vue';
 import ZoomControlsComponent from '../views/navigation-toolbar/ZoomControls.vue';
 import CenterRoomComponent from '../views/navigation-toolbar/CenterRoom.vue';
@@ -58,8 +61,17 @@ export const CORE_EMITTER_SIGNATURES = {
     "dungeon_enter": (dungeonId: string, roomId: string): boolean | void => { },
     "room_enter_before": (roomId: string, dungeonId: string): boolean | void => { },
     "room_enter_after": (roomId: string, dungeonId: string): boolean | void => { },
+    "encounter_selected": (encounterId: string, dungeonId: string): boolean | void => { }, // an encounter was selected — clicked on the map / screen, or cycled to with the toolbar. Props never fire. Return false to block the selection.
+    "encounter_discovered": (encounterId: string, dungeonId: string): boolean | void => { }, // a hidden `@x{discover: "perception#6"}` encounter was revealed; fires once, on the room entry that reveals it.
+    "encounter_collected": (encounterId: string, itemSpec: string, dungeonId: string): boolean | void => { }, // a collectable encounter was collected. Regrow needs no listener — time plugins call game.tickCollectables instead.
     "scene_play_before": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
+    // fires when a committed scene is about to run its paragraph actions (after gates/redirects,
+    // before the actions/assets) — the place to stage default actors so they precede the scene's assets.
+    "scene_play": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
     "scene_play_after": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
+    // fires when a scene is about to exit (last-paragraph click, {exit} action, playScene(null)).
+    // Return false to cancel the exit — e.g. a battle system playing a close animation first.
+    "scene_exit_before": (skipEvents: boolean): boolean | void => { },
     "event_end": (): boolean | void => { },
 
     "character_create": (character: Character): boolean | void => { },
@@ -224,6 +236,7 @@ export class InitSystem {
         this.game.registerState('active_character', null);
         this.game.registerState('active_inventory', null);
         this.game.registerState('active_item', null);
+        this.game.registerState('viewed_item', null); // uid shown by the item_view action, cleared on event_end
         this.game.registerState('popup_state', []);
         this.game.registerState('overlay_state', 'overlay-navigation');
         this.game.registerState('previous_overlay_state', null);
@@ -238,6 +251,8 @@ export class InitSystem {
         this.game.registerState('hide', 40);
 
         this.game.registerState('hide_events', false);
+        // Hides the map (map dungeons) / background image (screen dungeons) — see isHideMap in Exploration.vue.
+        this.game.registerState('hide_map', false);
     }
 
     // ============================================
@@ -280,6 +295,13 @@ export class InitSystem {
             slot: 'game_state',
             component: ExplorationComponent
         });
+
+        // Item card under the dialogue text, driven by the item_view action.
+        this.game.coreSystem.addComponent({
+            id: 'event_item_card',
+            slot: 'scene-content-bottom',
+            component: EventItemCard
+        });
         /*
         this.game.coreSystem.addComponent({
             id: 'battle_debug',
@@ -315,13 +337,15 @@ export class InitSystem {
             slot: 'progression-tabs',
             title: 'Quests',
             component: QuestsTab,
+            order: 0
         });
 
         this.game.coreSystem.addComponent({
             id: 'character',
             slot: 'progression-tabs',
             title: 'Characters',
-            component: CharacterTab
+            component: CharacterTab,
+            order: 10
         });
 
         this.game.coreSystem.addComponent({
@@ -329,6 +353,7 @@ export class InitSystem {
             slot: 'progression-tabs',
             title: 'Gallery',
             component: GalleryTab,
+            order: 20
         });
 
         this.game.coreSystem.addComponent({
@@ -336,6 +361,7 @@ export class InitSystem {
             slot: 'progression-tabs',
             title: 'Encyclopedia',
             component: EncyclopediaTab,
+            order: 30
         });
     }
 
@@ -456,6 +482,9 @@ export class InitSystem {
     /**
      * Register navigation toolbar components
      */
+    // The bar reads: encounter controls (left) — dungeon name (center) — map controls (right).
+    // The name takes the space between the groups, so plugin buttons should pick an order
+    // below 20 to join the left group and above 20 to join the right one.
     private registerToolbarComponents(): void {
         this.game.coreSystem.addComponent({
             id: 'toolbar-back',
@@ -472,38 +501,45 @@ export class InitSystem {
         });
 
         this.game.coreSystem.addComponent({
+            id: 'toolbar-logs',
+            slot: 'navigation-toolbar',
+            component: LogsButtonComponent,
+            order: 3
+        });
+
+        this.game.coreSystem.addComponent({
+            id: 'toolbar-dungeon-name',
+            slot: 'navigation-toolbar',
+            component: DungeonNameComponent,
+            order: 20
+        });
+
+        this.game.coreSystem.addComponent({
             id: 'toolbar-toggle-circles',
             slot: 'navigation-toolbar',
             component: ToggleCirclesComponent,
-            order: 3
+            order: 30
         });
 
         this.game.coreSystem.addComponent({
             id: 'toolbar-zoom-controls',
             slot: 'navigation-toolbar',
             component: ZoomControlsComponent,
-            order: 4
+            order: 31
         });
 
         this.game.coreSystem.addComponent({
             id: 'toolbar-center-room',
             slot: 'navigation-toolbar',
             component: CenterRoomComponent,
-            order: 5
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'toolbar-logs',
-            slot: 'navigation-toolbar',
-            component: LogsButtonComponent,
-            order: 6
+            order: 32
         });
 
         this.game.coreSystem.addComponent({
             id: 'toolbar-minimize',
             slot: 'navigation-toolbar',
             component: MinimizeToolbarComponent,
-            order: 7
+            order: 33
         });
     }
 
@@ -560,6 +596,19 @@ export class InitSystem {
         // Returns boolean: whether a room has been visited
         // Usage: _room_visited(dungeon1.room5) = true (explicit dungeon)
         //        _room_visited(room5) = true (uses current dungeon)
+        // How many of an item the party carries (any inventory id as optional 2nd segment).
+        // Usage: _item_count(pickaxe) > 0   or   _item_count(chest_troglodyte.gold) >= 100
+        this.game.registerCondition("_item_count", (param: string) => {
+            let inventoryId = PARTY_INVENTORY_ID;
+            let itemId = param;
+            if (param.includes('.')) {
+                const parts = param.split('.');
+                inventoryId = parts[0];
+                itemId = parts[1];
+            }
+            return this.game.itemSystem.getInventory(inventoryId)?.getItemQuantity(itemId) ?? 0;
+        });
+
         this.game.registerCondition("_room_visited", (param: string) => {
             let dungeonId: string;
             let roomId: string;
@@ -599,13 +648,20 @@ export class InitSystem {
 
         // Returns boolean: whether a character has an item equipped
         // Usage: _item_on(alice, sword) = true
-        this.game.registerCondition("_item_on", (characterId: string, itemId: string) => {
+        //        _item_on(alice) = true   — no item id: checks the ACTIVE item (the one whose
+        //        custom choice opened the current scene), matching by uid.
+        this.game.registerCondition("_item_on", (characterId: string, itemId?: string) => {
             let character = this.game.getCharacter(characterId);
             if (!character) {
                 gameLogger.error(`character not found for condition _item_on: ${characterId}`);
                 return false;
             }
             let equippedItems = character.getEquippedItems();
+            if (!itemId) {
+                const activeUid = this.game.getState('active_item');
+                if (!activeUid) return false;
+                return equippedItems.some(item => item.uid === activeUid);
+            }
             return equippedItems.some(item => item.id === itemId);
         });
 
@@ -636,8 +692,15 @@ export class InitSystem {
                     case 'trait':
                         return character.getTrait(key);
 
-                    case 'attribute':
+                    case 'attribute': {
+                        const cs = this.game.characterSystem;
+                        if (!cs.attributesMap.has(key) && cs.skinLayersMap.has(key)) {
+                            // Skin-layer visibility fallback: real boolean, not a "true" string —
+                            // logicSystem parses the RHS true/false into a boolean and compares with ==.
+                            return character.skinLayers.has(key);
+                        }
                         return character.getAttribute(key);
+                    }
 
                     case 'stat': {
                         return character.getStat(key);
@@ -652,8 +715,11 @@ export class InitSystem {
                         return styles.length === 1 ? styles[0] : styles;
                     }
 
+                    case 'status':
+                        return character.hasStatus(key) ? 1 : 0;
+
                     default:
-                        gameLogger.error(`[_char] Unknown type "${type}". Valid types: trait, attribute, stat, resource, skinStyle`);
+                        gameLogger.error(`[_char] Unknown type "${type}". Valid types: trait, attribute, stat, resource, skinStyle, status`);
                         return undefined;
                 }
             } catch (error) {
@@ -726,8 +792,14 @@ export class InitSystem {
         });
 
         // Usage: |item(itemUid, inventoryId)|
-        this.game.registerPlaceholder("item", (itemUid: string, inventoryId: string) => {
-            let inventory = this.game.itemSystem.getInventory(inventoryId);
+        //        |item| — no args: the ACTIVE item (the one whose custom choice opened the scene)
+        this.game.registerPlaceholder("item", (itemUid?: string, inventoryId?: string) => {
+            if (!itemUid) {
+                itemUid = this.game.getState('active_item');
+                inventoryId = inventoryId || this.game.getState('active_inventory') || PARTY_INVENTORY_ID;
+                if (!itemUid) return "";
+            }
+            let inventory = this.game.itemSystem.getInventory(inventoryId!);
             let item = inventory?.getItemByUid(itemUid);
             return item?.getName() || "";
         });
@@ -814,7 +886,6 @@ export class InitSystem {
         this.game.registerAction("notification", {
             action: (text: string) => {
                 Global.getInstance().addNotification(text);
-                gameLogger.info(`[notification] Displayed notification: "${text}"`);
             }
         });
 
@@ -836,6 +907,18 @@ export class InitSystem {
                 for (const id of data.split(',').map(s => s.trim()).filter(Boolean)) {
                     this.game.narrativeSystem.discoverRecord(id);
                 }
+            }
+        });
+
+        // Authoring marker for a branch that isn't written yet: renders the choice greyed out and
+        // unclickable with a "[wip]" prefix, so planned options stay visible without being reachable.
+        // Prefixes `name` rather than setting `nameComputed` so the label still goes through
+        // resolveLabel (placeholders, if{} logic, text styles) via performChoiceModifier's fallback.
+        // No `action` — the choice can never be picked.
+        this.game.registerAction("wip", {
+            choiceModifier: (choice: Choice) => {
+                choice.name = `[wip] ${choice.name}`;
+                choice.isAvailable = computed(() => false);
             }
         });
         /*
@@ -972,7 +1055,6 @@ export class InitSystem {
                         else this.game.openPopup(token);
                     }
                 }
-                gameLogger.info(`[popup] Popup stack: [${this.game.getOpenPopups().join(', ')}]`);
             },
             eventDelayed: true
         });
@@ -985,21 +1067,35 @@ export class InitSystem {
         this.game.registerAction("music", {
             action: (music: string) => {
                 this.game.setMusic(music);
-                gameLogger.info(`[music] Playing music: "${music}"`);
             }
         });
 
         this.game.registerAction("sound", {
-            action: (sound: string) => {
-                this.game.playSounds(sound);
-                gameLogger.info(`[sound] Playing sound effect: "${sound}"`);
+            action: (sound: string | false) => {
+                // {sound: false} stops everything currently playing, mirroring {asset: false}
+                if (!sound) {
+                    this.game.stopSounds();
+                    return;
+                }
+
+                const play: string[] = [];
+                for (const spec of this.game.logicSystem.getParts(sound)) {
+                    // ! prefix stops that sound, looping or not
+                    if (spec.startsWith('!')) {
+                        this.game.stopSounds(spec.substring(1).trim());
+                        continue;
+                    }
+                    play.push(spec);
+                }
+
+                if (play.length) {
+                    this.game.playSounds(play);
+                }
             }
         });
 
         this.game.registerAction("asset", {
             action: (data: string | (Partial<AssetObject> & { id: string })) => {
-                const processedAssets: string[] = [];
-
                 if (!data) {
                     this.game.dungeonSystem.assets.value = [];
                     gameLogger.info('[asset] Cleared all assets');
@@ -1015,7 +1111,24 @@ export class InitSystem {
                         if (spec.startsWith('!')) {
                             const assetId = spec.substring(1).trim();
                             this.game.dungeonSystem.removeAssets(assetId);
-                            processedAssets.push(`removed ${assetId}`);
+                            continue;
+                        }
+
+                        // "false", "clear" and "reset" are fake asset ids. false removes
+                        // EVERY asset (incl. the dungeon/room defaults); clear sweeps away
+                        // every non-default asset (keeps the backdrop); reset hard-clears
+                        // the stage and re-stages the defaults fresh. All compose with
+                        // other specs, e.g. {asset: "false, forest, pic1"}.
+                        if (spec === 'false') {
+                            this.game.dungeonSystem.clearAssets();
+                            continue;
+                        }
+                        if (spec === 'clear') {
+                            this.game.dungeonSystem.clearTransientAssets();
+                            continue;
+                        }
+                        if (spec === 'reset') {
+                            this.game.dungeonSystem.resetToDefaultAssets();
                             continue;
                         }
 
@@ -1042,11 +1155,10 @@ export class InitSystem {
                                 this.game.trigger('asset_render', existingAsset);
                                 // add to discovered assets for the gallery system
                                 this.game.coreSystem.addAssetToGallery(existingAsset);
-                                processedAssets.push(`updated ${assetId}`);
+                                gameLogger.info(`[asset] Updated asset: "${assetId}"`);
                             } else {
                                 // Create new asset with merged properties
                                 this.game.dungeonSystem.addAssets({ id: assetId, ...inlineProps });
-                                processedAssets.push(`added ${assetId}`);
                             }
                         } else {
                             // No inline properties
@@ -1056,28 +1168,28 @@ export class InitSystem {
                             } else {
                                 // Add new asset from template
                                 this.game.dungeonSystem.addAssets(assetId);
-                                processedAssets.push(`added ${assetId}`);
                             }
                         }
                     }
                 } else {
                     // Object format - add or update
                     this.game.dungeonSystem.addAssets(data);
-                    processedAssets.push(data.id);
-                }
-
-                if (processedAssets.length > 0) {
-                    gameLogger.info(`[asset] Processed asset(s): ${processedAssets.join(', ')}`);
                 }
             }
         });
 
 
+        this.game.registerAction("grade", {
+            // Neither eventDelayed nor onGameLoad: the grade should change as the paragraph renders
+            // (like music/asset), and the saved value is what restores it on load.
+            action: (data: string | boolean | Record<string, any>) => {
+                this.game.setGrade(data);
+            }
+        });
+
         this.game.registerAction("flag", {
             action: (data: string | Record<string, any>) => {
                 this.game.dungeonSystem.processFlagAction(data);
-                const flagInfo = typeof data === 'string' ? data : JSON.stringify(data);
-                gameLogger.info(`[flag] Flag operation(s): ${flagInfo}`);
             }
         });
 
@@ -1085,7 +1197,6 @@ export class InitSystem {
             eventDelayed: true,
             action: () => {
                 this.game.dungeonSystem.exitScene();
-                gameLogger.info('[exit] Exited current scene');
             }
         });
 
@@ -1093,7 +1204,6 @@ export class InitSystem {
             eventDelayed: true,
             action: (id: string) => {
                 this.game.dungeonSystem.enter(id);
-                gameLogger.info(`[enter] Entered room: "${id}"`);
             }
         });
 
@@ -1104,14 +1214,12 @@ export class InitSystem {
                 //console.log("sceneId", sceneId);
                 //console.log("dungeonId", dungeonId);
                 this.game.dungeonSystem.playScene(sceneId, dungeonId);
-                gameLogger.info(`[scene] Playing scene: "${sceneId}" in dungeon: "${dungeonId}"`);
             }
         });
 
         this.game.registerAction("redirect", {
             action: (value: string) => {
                 this.game.logicSystem.resolveActions({ scene: value });
-                gameLogger.info(`[redirect] Redirected to scene: "${value}"`);
             }
         });
 
@@ -1151,8 +1259,6 @@ export class InitSystem {
 
         this.game.registerAction("actor", {
             action: (data: string | (Partial<CharacterSceneSlotObject> & { char: string })) => {
-                const processedActors: string[] = [];
-
                 // if data is empty, remove all actors with exit animations
                 if (!data) {
                     const charIds = this.game.dungeonSystem.sceneSlots.value
@@ -1168,6 +1274,21 @@ export class InitSystem {
                 if (typeof data === 'string') {
                     const actorSpecs = this.game.logicSystem.getParts(data);
                     for (const spec of actorSpecs) {
+                        // "false" and "clear" are fake actor ids that remove every staged
+                        // actor: false cuts instantly (no exit animation), clear removes
+                        // them with their exit animations. Both compose with other specs,
+                        // e.g. {actor: "false, alice->right"}.
+                        if (spec === 'false') {
+                            this.game.dungeonSystem.clearActors();
+                            continue;
+                        }
+                        if (spec === 'clear') {
+                            for (const s of [...this.game.dungeonSystem.sceneSlots.value]) {
+                                if (!s.isRemoving) this.game.dungeonSystem.removeActorFromScene(s.char!);
+                            }
+                            continue;
+                        }
+
                         // Check for arrow syntax: "charId->slotId" or "!charId"
                         const arrowMatch = spec.match(/^([^->]+)->(.+)$/);
 
@@ -1183,9 +1304,7 @@ export class InitSystem {
                                 const propsString = bracketMatch ? bracketMatch[2] : undefined;
                                 const inlineProps = propsString ? this.game.dungeonSystem.parseInlineProperties(propsString) : undefined;
 
-                                if (this.game.dungeonSystem.removeActorFromScene(charId, inlineProps)) {
-                                    processedActors.push(charId);
-                                }
+                                this.game.dungeonSystem.removeActorFromScene(charId, inlineProps);
                             } else {
                                 // Check for inline properties
                                 const bracketMatch = slotPart.match(/^([^\(]+)(?:\(([^\)]+)\))?$/);
@@ -1199,15 +1318,11 @@ export class InitSystem {
 
                                     if (existingSlot) {
                                         // Character exists -> move to new slot
-                                        if (this.game.dungeonSystem.moveActorToSlot(charId, slotId, inlineProps)) {
-                                            processedActors.push(charId);
-                                        }
+                                        this.game.dungeonSystem.moveActorToSlot(charId, slotId, inlineProps);
                                     } else {
                                         // Character doesn't exist -> add new actor
                                         const slot = this.game.dungeonSystem.parseActorString(spec);
-                                        if (this.game.dungeonSystem.addActorToScene(slot)) {
-                                            processedActors.push(charId);
-                                        }
+                                        this.game.dungeonSystem.addActorToScene(slot);
                                     }
                                 }
                             }
@@ -1225,9 +1340,7 @@ export class InitSystem {
                                     const propsString = bracketMatch[2];
                                     const inlineProps = propsString ? this.game.dungeonSystem.parseInlineProperties(propsString) : undefined;
 
-                                    if (this.game.dungeonSystem.removeActorFromScene(cleanCharId, inlineProps)) {
-                                        processedActors.push(cleanCharId);
-                                    }
+                                    this.game.dungeonSystem.removeActorFromScene(cleanCharId, inlineProps);
                                 }
                             } else {
                                 // Property update only: "charId(props)"
@@ -1235,9 +1348,7 @@ export class InitSystem {
                                 if (bracketMatch && bracketMatch[2]) {
                                     const charId = bracketMatch[1].trim();
                                     const props = this.game.dungeonSystem.parseInlineProperties(bracketMatch[2]);
-                                    if (this.game.dungeonSystem.updateActorProperties(charId, props)) {
-                                        processedActors.push(charId);
-                                    }
+                                    this.game.dungeonSystem.updateActorProperties(charId, props);
                                 } else {
                                     gameLogger.warn(`[actor] Invalid format: "${spec}". Expected "char->slot(props)", "char(props)", or "!char"`);
                                 }
@@ -1253,20 +1364,12 @@ export class InitSystem {
                     if (existingSlot) {
                         // Character exists -> update properties
                         const { char, ...updates } = data;
-                        if (this.game.dungeonSystem.updateActorProperties(charId, updates)) {
-                            processedActors.push(charId);
-                        }
+                        this.game.dungeonSystem.updateActorProperties(charId, updates);
                     } else {
                         // Character doesn't exist -> add new actor
                         const slot = this.game.dungeonSystem.createSlotFromData(data);
-                        if (this.game.dungeonSystem.addActorToScene(slot)) {
-                            processedActors.push(charId);
-                        }
+                        this.game.dungeonSystem.addActorToScene(slot);
                     }
-                }
-
-                if (processedActors.length > 0) {
-                    gameLogger.info(`[actor] Processed actor(s): ${processedActors.join(', ')}`);
                 }
             }
         });
@@ -1275,7 +1378,6 @@ export class InitSystem {
             action: (questPath: string) => {
                 // Support multiple quest logs separated by commas
                 const questPaths = questPath.split(",").map(p => p.trim());
-                const addedQuests: string[] = [];
 
                 // Track quest states per unique quest (Map<questKey, questState>)
                 const questStates = new Map<string, {
@@ -1328,7 +1430,6 @@ export class InitSystem {
                     }
 
                     const result = this.game.dungeonSystem.addQuestLog(dungeonId, questId, goalId, logId);
-                    addedQuests.push(cleanPath);
 
                     // Track quest state changes per unique quest
                     if (result && !result.wasQuestCompleted) {
@@ -1372,10 +1473,6 @@ export class InitSystem {
                         this.game.dungeonSystem.addFlash(message);
                     }
                 }
-
-                if (addedQuests.length > 0) {
-                    gameLogger.info(`[quest] Added quest log(s): ${addedQuests.join(', ')}`);
-                }
             }
         });
     }
@@ -1400,7 +1497,6 @@ export class InitSystem {
                         continue;
                     }
                     this.game.characterSystem.removeFromParty(character);
-                    gameLogger.info(`[party] Removed character "${id}" from party`);
                     this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.left', { character: character.getName() }));
                 } else {
                     if (this.game.characterSystem.isCharacterInParty(character)) {
@@ -1408,7 +1504,6 @@ export class InitSystem {
                         continue;
                     }
                     this.game.characterSystem.addToParty(character);
-                    gameLogger.info(`[party] Added character "${id}" to party`);
                     this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.joined', { character: character.getName() }));
                 }
             }
@@ -1423,11 +1518,10 @@ export class InitSystem {
             let character
             if (data.template) {
                 character = this.game.characterSystem.createCharacter(data.id, data.template);
-                gameLogger.info(`[create_character] Created character "${data.id}" from template "${data.template}"${data.party ? ' and added to party' : ''}`);
             } else {
                 character = this.game.characterSystem.createCharacter(data.id, data);
-                gameLogger.info(`[create_character] Created character "${data.id}"${data.party ? ' and added to party' : ''}`);
             }
+            gameLogger.info(`[create_character] Created character "${data.id}"${data.template ? ` from template "${data.template}"` : ''}`);
 
             this.game.characterSystem.addCharacter(character, data.party);
         });
@@ -1436,9 +1530,10 @@ export class InitSystem {
             if (!data.id) {
                 throw new Error("Character id is required when updating a character.");
             }
-            let character = this.game.characterSystem.characters.value.get(data.id);
+            let character = this.game.characterSystem.getCharacter(data.id);
             if (!character) {
-                throw new Error(`Character with id "${data.id}" not found.`);
+                gameLogger.error(`[update_character] Character "${data.id}" not found`);
+                return;
             }
             character.update(data);
 
@@ -1460,9 +1555,48 @@ export class InitSystem {
             if (!data.id) {
                 throw new Error("Character id is required when deleting a character.");
             }
-            this.game.characterSystem.partyIds.value.delete(data.id);
-            this.game.characterSystem.characters.value.delete(data.id);
+            // Log-and-return rather than letting deleteCharacter() throw: resolveActions has no
+            // try/catch, so a throw here kills the rest of the action bag — and from a room hook
+            // it aborts enterRoom() before the room_enter_after trigger (no turn tick, no event).
+            if (!this.game.characterSystem.getCharacter(data.id)) {
+                gameLogger.error(`[delete_character] Character "${data.id}" not found`);
+                return;
+            }
+            this.game.characterSystem.deleteCharacter(data.id);
             gameLogger.info(`[delete_character] Deleted character "${data.id}"`);
+        });
+
+        // Accepts {reset_character: "orc"} / "orc, goblin" as well as {reset_character: {id: "orc"}}.
+        this.game.registerAction("reset_character", (data: string | { id?: string }) => {
+            const ids = typeof data === 'string'
+                ? this.game.logicSystem.getParts(data, true).filter(id => id)
+                : [data?.id];
+            if (!ids.length || !ids[0]) {
+                throw new Error("Character id is required when resetting a character.");
+            }
+
+            for (const id of ids) {
+                // Every state check lives here, not in resetCharacter: resolveActions has no try/catch,
+                // so a throw from a room hook aborts enterRoom() before the room_enter_after trigger.
+                const character = this.game.characterSystem.getCharacter(id!);
+                if (!character) {
+                    // Nothing live — resetCharacter falls back to id-as-template-id.
+                    if (!this.game.characterSystem.templatesMap.has(id!)) {
+                        gameLogger.error(`[reset_character] No live character or template found for "${id}"`);
+                        continue;
+                    }
+                    this.game.characterSystem.resetCharacter(id!);
+                    gameLogger.warn(`[reset_character] "${id}" was not live, created from template`);
+                    continue;
+                }
+                const templateId = character.templateId;
+                if (!templateId || !this.game.characterSystem.templatesMap.has(templateId)) {
+                    gameLogger.error(`[reset_character] Character "${id}" has no known template ("${templateId}")`);
+                    continue;
+                }
+                this.game.characterSystem.resetCharacter(character);
+                gameLogger.info(`[reset_character] Reset character "${id}" from template "${templateId}"`);
+            }
         });
 
         this.game.registerAction("status", {
@@ -1475,12 +1609,14 @@ export class InitSystem {
                         continue;
                     }
                     const characterName = character.getName?.() || character.getTrait?.('name') || group.characterId;
+                    // Flashes are party-only: the player has no stake in a status landing on an NPC or an off-screen character.
+                    const announce = this.game.isCharacterInParty(character);
                     for (const item of group.items) {
                         if (item.remove) {
                             const existing = character.getStatus(item.name);
                             const statusName = existing?.name || existing?.id || item.name;
                             character.removeStatus(item.name);
-                            this.game.addFlash(Global.getInstance().getString('status.removed', {
+                            if (announce) this.game.addFlash(Global.getInstance().getString('status.removed', {
                                 character: characterName,
                                 status: statusName,
                             }));
@@ -1491,8 +1627,8 @@ export class InitSystem {
                                 const statusName = status?.name || status?.id || item.name;
                                 const lineId = status?.polarity === 'positive' ? 'status.added.positive'
                                     : status?.polarity === 'negative' ? 'status.added.negative'
-                                    : 'status.added.neutral';
-                                this.game.addFlash(Global.getInstance().getString(lineId, {
+                                        : 'status.added.neutral';
+                                if (announce) this.game.addFlash(Global.getInstance().getString(lineId, {
                                     character: characterName,
                                     status: statusName,
                                 }));
@@ -1509,8 +1645,6 @@ export class InitSystem {
         this.game.registerAction("char", {
             action: (data: string | Record<string, any>) => {
                 this.game.characterSystem.processCharAction(data);
-                const charInfo = typeof data === 'string' ? data : JSON.stringify(data);
-                gameLogger.info(`[char] Modified character: ${charInfo}`);
             }
         });
 
@@ -1528,8 +1662,6 @@ export class InitSystem {
             this.game.registerAction(actionId, {
                 action: (data: string | Record<string, any>) => {
                     this.game.characterSystem.processCharAction(data, type);
-                    const charInfo = typeof data === 'string' ? data : JSON.stringify(data);
-                    gameLogger.info(`[${actionId}] Modified character: ${charInfo}`);
                 }
             });
         }
@@ -1547,7 +1679,6 @@ export class InitSystem {
                 }
                 if (adds.length) this.game.characterSystem.processAddSkinLayerAction(adds.join(', '));
                 if (removes.length) this.game.characterSystem.processRemoveSkinLayerAction(removes.join(', '));
-                gameLogger.info(`[skin_layer] ${data}`);
             }
         });
 
@@ -1564,7 +1695,30 @@ export class InitSystem {
                 }
                 if (adds.length) this.game.characterSystem.processAddItemSlotAction(adds.join(', '));
                 if (removes.length) this.game.characterSystem.processRemoveItemSlotAction(removes.join(', '));
-                gameLogger.info(`[item_slot] ${data}`);
+            }
+        });
+
+        // Grant / remove innate (core-status) abilities per target.
+        // Format: "charId->abilityId & abilityId, otherChar->!abilityId" (`!` removes)
+        this.game.registerAction("ability", {
+            action: (data: string) => {
+                const groups = this.game.logicSystem.parseTargetedSpec(data);
+                for (const group of groups) {
+                    const character = this.game.getCharacter(group.characterId);
+                    if (!character) {
+                        gameLogger.warn(`[ability] character not found: "${group.characterId}"`);
+                        continue;
+                    }
+                    for (const item of group.items) {
+                        try {
+                            if (item.remove) character.removeAbility(item.name);
+                            else character.addAbility(item.name);
+                        } catch (e) {
+                            gameLogger.warn(`[ability] failed "${item.name}" for "${group.characterId}": ${e}`);
+                        }
+                    }
+                }
+                gameLogger.info(`[ability] ${data}`);
             }
         });
 
@@ -1574,7 +1728,6 @@ export class InitSystem {
         this.game.registerAction("skill", {
             action: (data: string) => {
                 const skillSpecs = data.split(",").map(s => s.trim());
-                const learnedSkills: string[] = [];
 
                 for (const spec of skillSpecs) {
                     // Parse level suffix: "path#level"
@@ -1618,11 +1771,6 @@ export class InitSystem {
                     }
 
                     character.learnSkill(treeId, slotId, level);
-                    learnedSkills.push(`${characterId}.${treeId}.${slotId}${level > 1 ? '#' + level : ''}`);
-                }
-
-                if (learnedSkills.length > 0) {
-                    gameLogger.info(`[skill] Learned skill(s): ${learnedSkills.join(', ')}`);
                 }
             }
         });
@@ -1646,7 +1794,6 @@ export class InitSystem {
             }
 
             character.equipItem(itemUid, data.slotId, data.slotIndex);
-            gameLogger.info(`[equip_item] Equipped item "${itemUid}" to character "${character.id}"`);
         });
 
         this.game.registerAction("unequip_item", (data: {
@@ -1661,7 +1808,6 @@ export class InitSystem {
 
             const itemUid = data.itemUid || this.game.getState('active_item');
             character.unequipItem(itemUid);
-            gameLogger.info(`[unequip_item] Unequipped item "${itemUid}" from character "${character.id}"`);
         });
 
         this.game.registerAction("equip", (data: string) => {
@@ -1697,8 +1843,6 @@ export class InitSystem {
                         }
                         if (cleared === 0) {
                             gameLogger.warn(`[equip] nothing to clear for "${spec}"`);
-                        } else {
-                            gameLogger.info(`[equip] cleared ${cleared} slot(s) for "${spec}"`);
                         }
                         continue;
                     }
@@ -1745,16 +1889,16 @@ export class InitSystem {
                                 }
                                 if (removed === 0) {
                                     gameLogger.warn(`[equip] "${itemId}" is not equipped on "${charId}"${slotType ? ` in slot "${slotType}"` : ''}`);
-                                } else {
-                                    gameLogger.info(`[equip] unequipped "${itemId}" from "${charId}"`);
                                 }
                                 continue;
                             }
 
                             let item: Item | null = inventory.items.find(i => i.id === itemId && !i.isEquipped) ?? null;
+                            let created = false;
                             if (!item) {
                                 try {
                                     item = this.game.createItem(itemId);
+                                    created = true;
                                 } catch {
                                     gameLogger.warn(`[equip] item id not found / not resolvable: "${itemId}"`);
                                     continue;
@@ -1774,7 +1918,10 @@ export class InitSystem {
                                 }
                                 character.equipItem(item);
                             }
-                            gameLogger.info(`[equip] equipped "${itemId}" -> "${charId}"${slotType ? '.' + slotType : ''}`);
+                            if (created) {
+                                const message = Global.getInstance().getString('item.added', { item: item.getName(), quantity: '' });
+                                this.game.dungeonSystem.addFlash(message);
+                            }
                         } catch (e) {
                             gameLogger.warn(`[equip] failed payload "${payload}" in spec "${spec}": ${e}`);
                         }
@@ -1783,6 +1930,37 @@ export class InitSystem {
                     gameLogger.warn(`[equip] failed spec "${spec}": ${e}`);
                 }
             }
+        });
+
+        // Learn the recipe named by the item's `learn_recipe` field, consuming the item. If the recipe
+        // is already known, learns nothing and just notifies. Value is optional { itemUid, characterId };
+        // both fall back to the active-item / used-character state (so a bare `{learn_recipe_item: true}`
+        // works from an item choice or a scene action).
+        this.game.registerAction("learn_recipe_item", (data: {
+            itemUid?: string;
+            characterId?: string;
+        } = {}) => {
+            const itemUid = data.itemUid || this.game.getState('active_item') || "";
+            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+            const character = this.game.getCharacter(characterId);
+            const inventory = character?.getPartyInventory();
+            const item = inventory?.getItemByUid(itemUid) || this.game.itemSystem.getItemByUid(itemUid);
+            if (!item || !item.learn_recipe) {
+                gameLogger.warn(`[learn_recipe_item] item "${itemUid}" not found or has no learn_recipe`);
+                return;
+            }
+
+            const recipeId = item.learn_recipe;
+            const recipeName = this.game.itemSystem.itemRecipesMap.get(recipeId)?.name || recipeId;
+
+            if (this.game.itemSystem.learnedRecipes.value.has(recipeId)) {
+                this.game.showNotification(Global.getInstance().getString('recipe.already_known', { recipe: recipeName }));
+                return;
+            }
+
+            this.game.itemSystem.addLearnedRecipe(recipeId);
+            inventory?.removeItem(item);
+            this.game.showNotification(Global.getInstance().getString('recipe.learned', { recipe: recipeName }));
         });
 
         this.game.registerAction("consume_item", (data: {
@@ -1802,7 +1980,7 @@ export class InitSystem {
             }
 
             const item = inventory.getItemByUid(itemUid);
-            if (!item || !item.is_consumable) {
+            if (!item || !item.isConsumable()) {
                 throw new Error(`Item with uid "${itemUid}" not found or not consumable`);
             }
 
@@ -1819,32 +1997,16 @@ export class InitSystem {
             }
             if (!this.game.trigger('item_consume_before', item, character)) return;
 
-            // 1) Apply status (visible, with consume_duration)
-            const statusObj = item.statusObject;
-            if (statusObj && Object.keys(statusObj).length > 0) {
-                let status = new Status();
-                status.id = item.consume_status_id || ("consume_" + item.id);
-                status.setValues(statusObj);
-                // Inherit image and name from item if not set by statusObject
-                if (!status.image) {
-                    status.image = item.getTrait('image') || '';
+            // 1) Apply consume statuses — real status templates, so each carries its own
+            // duration/max_stacks/polarity/group_id. addStatus handles stacking + group replacement.
+            for (const entry of item.apply_statuses_on_consume) {
+                if (!entry?.status) continue;
+                try {
+                    const status = this.game.createStatus(entry.status);
+                    character.addStatus(status, { stacks: entry.stacks ?? 1 });
+                } catch (e) {
+                    gameLogger.error(`[consume_item] cannot apply status "${entry.status}" from item "${item.id}": ${e}`);
                 }
-                if (!status.name) {
-                    status.name = item.getTrait('name') || item.id;
-                }
-                if (!status.description) {
-                    status.description = item.getTrait('description') || '';
-                }
-                status.isHidden = false;
-                status.maxStacks = item.consume_max_stacks;  // default -1 (unlimited)
-                if (item.consume_polarity) status.polarity = item.consume_polarity;
-                const itemRarity = item.attributes['rarity'] || '';
-                if (itemRarity) status.rarity = itemRarity;
-                const dur = item.consume_duration;
-                if (dur !== undefined && dur !== -1) {
-                    status.duration = dur;
-                }
-                character.addStatus(status);  // handles stacking automatically
             }
 
             // 2) Apply consume_percentage (% of max resource)
@@ -1892,70 +2054,80 @@ export class InitSystem {
         });
 
         this.game.registerAction("add_item", (data: string | string[]) => {
-            // Convert single string to array, splitting by commas if needed
-            let items: string[];
-            if (Array.isArray(data)) {
-                items = data;
-            } else {
-                // Split by comma for comma-separated items
-                items = data.split(',').map(s => s.trim()).filter(s => s.length > 0);
-            }
-
-            const addedItems: string[] = [];
-            for (const itemSpec of items) {
-                // Parse format: "item_id", "item_id#quantity", "item_id->inventory_id", or "item_id#quantity->inventory_id"
-                const parts = itemSpec.split('->');
-                const itemPart = parts[0].trim();
-                const targetInventoryId = parts[1]?.trim() || PARTY_INVENTORY_ID;
-
-                // Parse item_id and quantity
-                const itemDetails = itemPart.split('#');
-                const itemId = itemDetails[0].trim();
-                const quantity = itemDetails[1] ? parseInt(itemDetails[1], 10) : 1;
-
-                if (!itemId) {
-                    throw new Error(`Invalid item specification: "${itemSpec}"`);
-                }
-
-                if (isNaN(quantity) || quantity <= 0) {
-                    throw new Error(`Invalid quantity in item specification: "${itemSpec}"`);
-                }
-
-                // Get target inventory
-                const inventory = this.game.itemSystem.inventories.value.get(targetInventoryId);
-                if (!inventory) {
-                    throw new Error(`Inventory with id "${targetInventoryId}" not found.`);
-                }
-
-                // Create item from template
-                const item = this.game.itemSystem.createItem(itemId);
-                if (!item) {
-                    throw new Error(`Item template with id "${itemId}" not found.`);
-                }
-
-                // Add item to inventory (skip validation to allow overflow)
-                inventory.addItem(item, quantity, true);
-                let quantityText = quantity > 1 ? `(x${quantity})` : "";
-
-                // show flash notification only for party inventory
-                if (targetInventoryId === PARTY_INVENTORY_ID) {
-                    const message = Global.getInstance().getString('item.added', { item: item.getName(), quantity: quantityText });
-                    this.game.dungeonSystem.addFlash(message);
-                }
-
-                addedItems.push(`${itemId}${quantity > 1 ? ' x' + quantity : ''}${targetInventoryId !== PARTY_INVENTORY_ID ? ' -> ' + targetInventoryId : ''}`);
-            }
-
-            if (addedItems.length > 0) {
-                gameLogger.info(`[add_item] Added item(s): ${addedItems.join(', ')}`);
-            }
+            this.game.itemSystem.addItemsBySpec(data);
         })
+
+        this.game.registerAction("transfer_item", (data: string | string[]) => {
+            this.game.itemSystem.transferItemsBySpec(data);
+        })
+
+        // Show an item card under the dialogue text (EventItemCard on scene-content-bottom).
+        // true/1 = the active item (the one whose custom choice opened the scene);
+        // "item_id" = first matching stack in the party inventory; false = hide.
+        // Cleared automatically on event_end.
+        this.game.registerAction("item_view", (value: boolean | number | string) => {
+            if (value === false) {
+                this.game.coreSystem.setState('viewed_item', null);
+                return;
+            }
+            let uid: string | null = null;
+            if (typeof value === 'string') {
+                const inventory = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
+                uid = inventory?.items.find(i => i.id === value)?.uid ?? null;
+                if (!uid) gameLogger.warn(`[item_view] item "${value}" not found in party inventory`);
+            } else {
+                uid = this.game.getState('active_item');
+                if (!uid) gameLogger.warn(`[item_view] no active item to show`);
+            }
+            this.game.coreSystem.setState('viewed_item', uid);
+        });
+
+        // Collect a collectable encounter: grant its item(s) and latch the encounter
+        // hidden (with its regrow countdown stamped). The synthesized Collect choice
+        // passes { spec, encounter }; author-written {collect: "id#qty"} passes a
+        // string and falls back to the active encounter.
+        this.game.registerAction("collect", {
+            action: (value: string | { spec: string; encounter: string }) => {
+                const spec = typeof value === 'string' ? value : value?.spec;
+                if (!spec) {
+                    gameLogger.error('[collect] missing item spec', value);
+                    return;
+                }
+                this.game.itemSystem.addItemsBySpec(spec);
+
+                // The flash lives in the scene-text flow, which is exactly what's NOT on
+                // screen when a map node vanishes — so pickups also get a notification,
+                // item name in its rarity color.
+                for (const part of spec.split(',').map(s => s.trim()).filter(Boolean)) {
+                    const [itemId, rawQty] = part.split('#').map(s => s.trim());
+                    const quantity = parseInt(rawQty, 10) || 1;
+                    this.game.showNotification(Global.getInstance().getString('item.collected', {
+                        item: this.game.itemSystem.getItemNameHtml(itemId),
+                        quantity: quantity > 1 ? ` (x${quantity})` : '',
+                    }));
+                }
+
+                const encounterId = typeof value === 'object' && value.encounter
+                    ? value.encounter
+                    : this.game.dungeonSystem.activeEncounter.value?.id;
+                const encounter = encounterId
+                    ? this.game.dungeonSystem.currentDungeon.value?.encounters.get(encounterId)
+                    : null;
+                if (encounter?.collectSpec) {
+                    this.game.dungeonSystem.markEncounterCollected(encounter);
+                    const dungeonId = this.game.dungeonSystem.currentDungeonId.value ?? '';
+                    this.game.trigger('encounter_collected', encounter.id, spec, dungeonId);
+                    gameLogger.info(`[collect] "${encounter.id}" collected (${spec})`);
+                } else {
+                    gameLogger.warn(`[collect] granted "${spec}" but found no collectable encounter to latch`);
+                }
+            }
+        });
 
         this.game.registerAction("loot",
             {
                 action: (inventoryId: string) => {
                     this.game.itemSystem.openExchange(inventoryId, 'loot');
-                    gameLogger.info(`[loot] Opened loot exchange with inventory "${inventoryId}"`);
                 },
                 eventDelayed: true
             }
@@ -1965,19 +2137,15 @@ export class InitSystem {
             {
                 action: (inventoryId: string) => {
                     this.game.itemSystem.openExchange(inventoryId, 'trade');
-                    gameLogger.info(`[trade] Opened trade exchange with inventory "${inventoryId}"`);
                 },
                 eventDelayed: true
             }
         );
 
         this.game.registerAction("learn_recipe", (recipeId: string) => {
-            let parts = recipeId.split(",").map(p => p.trim());
-            for (const part of parts) {
+            for (const part of recipeId.split(",").map(p => p.trim())) {
                 this.game.itemSystem.addLearnedRecipe(part);
-                console.log("recipe learned:", part);
             }
-            gameLogger.info(`[learn_recipe] Learned recipe(s): ${parts.join(', ')}`);
         });
     }
 

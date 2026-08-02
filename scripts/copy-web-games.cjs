@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 // Copies games/mods listed in web-game-list.json into a web build's assets dir.
-// Usage: node scripts/copy-web-games.cjs --dest=dist-web/assets [--premium]
+// Usage: node scripts/copy-web-games.cjs --dest=dist-web/assets [--premium] [--games=id1,id2]
+//        node scripts/copy-web-games.cjs --dest=... --android-build=<build id>
 // --premium additionally copies each game's premium_mods (for /play_premium).
+// --games restricts the copy to the listed game ids (e.g. the itch.io bundle).
+// --android-build reads the games/mods of one entry in android-build-list.json
+//   (mods are explicit there; --premium/premium_mods do not apply).
 
 const fs = require('fs');
 const path = require('path');
@@ -9,14 +13,30 @@ const path = require('path');
 const args = process.argv.slice(2);
 const destArg = args.find(a => a.startsWith('--dest='));
 const premium = args.includes('--premium');
+const gamesArg = args.find(a => a.startsWith('--games='));
+const onlyGames = gamesArg ? gamesArg.slice('--games='.length).split(',').filter(Boolean) : null;
+const androidBuildArg = args.find(a => a.startsWith('--android-build='));
 
 if (!destArg) {
-  console.error('Usage: node scripts/copy-web-games.cjs --dest=<assets dir> [--premium]');
+  console.error('Usage: node scripts/copy-web-games.cjs --dest=<assets dir> [--premium] [--games=id1,id2] [--android-build=<id>]');
   process.exit(1);
 }
 const destRoot = destArg.slice('--dest='.length);
 
-const games = JSON.parse(fs.readFileSync('web-game-list.json', 'utf-8'));
+let games;
+if (androidBuildArg) {
+  const buildId = androidBuildArg.slice('--android-build='.length);
+  const builds = JSON.parse(fs.readFileSync('android-build-list.json', 'utf-8'));
+  const build = builds.find(b => b.id === buildId);
+  if (!build) {
+    console.error(`Android build "${buildId}" not found in android-build-list.json`);
+    process.exit(1);
+  }
+  games = build.games;
+} else {
+  games = JSON.parse(fs.readFileSync('web-game-list.json', 'utf-8'));
+  if (onlyGames) games = games.filter(g => onlyGames.includes(g.id));
+}
 
 for (const game of games) {
   const mods = [...(game.mods || []), ...(premium ? game.premium_mods || [] : [])];

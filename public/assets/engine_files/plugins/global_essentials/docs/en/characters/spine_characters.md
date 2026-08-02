@@ -13,6 +13,8 @@ In the engine editor, open a character template and fill in the **Spine** sectio
 
 You can declare more than one entry — one per view (default, `back`, etc.). Each entry has its own `art_dx`, `art_dy`, `art_scale` so each rig can be framed independently.
 
+Static (non-spine) characters use the analogous **Static Art** section — per-view `static_art` entries with the same `art_dx`/`art_dy`/`art_scale` fields, so the front scene doll and the back battle doll are framed independently. Both are tuned visually in the **Art Manager** popup (pick the view, drag the doll, scroll to scale).
+
 When a character has a spine configured for the current view, the engine renders the spine animation instead of static image layers (unless a static layer for the same view is also active — see "Static Action Overlays" below).
 
 ---
@@ -22,7 +24,7 @@ When a character has a spine configured for the current view, the engine renders
 Spine animations and skins are picked the same way static images are picked for layered characters — via **skin layers** that watch one or more **character attributes** and resolve to a value per attribute combination. The only difference is what the value is: a static layer maps each combo to an image file, while a spine layer maps each combo to an animation name (in `spine_animations`) or a skin name (in `spine_skins`). 
 For more information on character attributes and skins read ->characters.characters_overview
 
-A spine-type skin layer can drive an **animation**, a **skin**, or both — they're two facets of the same layer. The editor generates the per-attribute fields for you; just fill in the dropdowns and string fields.
+A spine-type skin layer can drive an **animation**, a **skin**, or both — they're two facets of the same layer. The editor generates the per-attribute fields for you; just fill in the dropdowns and string fields. Multi-attribute combo keys follow each attribute's `order` field, same as static layers.
 
 Note: if your character animation is not playing, make sure you've filled in both attributes and skin_layers properties for that character template in the editor.
 

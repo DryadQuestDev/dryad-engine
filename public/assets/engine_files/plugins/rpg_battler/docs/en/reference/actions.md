@@ -22,6 +22,21 @@ Or pass a full configuration object:
 
 The action is `delayed`, meaning it executes after the current DryadScript sequence completes.
 
+### `win`
+
+Mark a battle definition defeated from a scene — the same flag a fight victory sets, firing
+`battle_defeated` once and opening `_defeated(battleId)` gates:
+
+```js
+{ win: "forest_ambush" }
+```
+
+Use it on the closing paragraph of a branch that defeats the enemy without fighting (a seduction,
+a trick, a scripted kill). The action is `delayed`: it fires on the continue-click after the
+paragraph is read, so `battle_defeated` listeners (e.g. a defeat-rewards popup) can present their
+UI over the finished paragraph and gate the scene until dismissed. Already-defeated battles are a
+no-op.
+
 ## Config Fields
 
 | Field | Type | Default | Description |

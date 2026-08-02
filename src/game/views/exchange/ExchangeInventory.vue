@@ -9,6 +9,8 @@ import RecipeList from './RecipeList.vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import gsap from 'gsap';
 import { inspectMode } from './useExchangeInspect';
+import { Global } from '../../../global/global';
+import { Game } from '../../game';
 
 // Hover state for item cards (desktop hover + inspect-mode pin)
 const hoveredItemUid = ref<string | null>(null);
@@ -67,6 +69,24 @@ const gridSlots = computed(() => {
 
 const isFixedGrid = computed(() => {
   return props.inventory && props.inventory.maxSize > 0;
+});
+
+// Resolve a locale key: the game's own locale first (so devs can define/override button names like
+// "apply_button.enchant"), then the engine's built-in locale. Returns null if neither defines it.
+function resolveLocale(key: string): string | null {
+  const game = Game.getInstance();
+  if (game.coreSystem.localeMap?.has(key)) return game.getLine(key);
+  const g = Global.getInstance();
+  if (g.localeMap.has(key)) return g.getString(key);
+  return null;
+}
+
+// Apply-button label, keyed by the inventory's interaction type (e.g. 'craft' → "apply_button.craft").
+// Falls back to the generic "apply_button" for plain loot or an undefined interaction type.
+const applyLabel = computed(() => {
+  const kind = props.inventory?.getApplyButton();
+  const specific = kind ? `apply_button.${kind}` : null;
+  return (specific && resolveLocale(specific)) || resolveLocale('apply_button') || 'Apply';
 });
 
 // Get inventory statistics
@@ -249,7 +269,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
 
     <!-- Action Buttons -->
     <div v-if="inventory?.getApplyButton()" class="action-buttons">
-      <button class="apply-button" :class="inventory.getApplyButton()" @click="emit('apply')"></button>
+      <button class="apply-button" :class="inventory.getApplyButton()" @click="emit('apply')">{{ applyLabel }}</button>
     </div>
 
   </div>
@@ -416,19 +436,13 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   transition: background 0.2s;
 }
 
-.apply-button::before {
-  content: "Apply";
-}
-
 .apply-button:hover {
   background: #35a372;
 }
 
-/* Custom button text overrides - examples:
-   .craft::before { content: "Craft"; }
-   .cook::before { content: "Cook"; background: #ff6b6b; }
-   .enchant::before { content: "Enchant"; background: #9b59b6; }
-*/
+/* The button label comes from the locale (applyLabel → "apply_button" / "apply_button.<interactive>").
+   The inventory's `interactive` value is still added as a class here for per-interaction styling, e.g.:
+   .apply-button.enchant { background: #9b59b6; } */
 
 .loot-all-button {
   padding: 8px 16px;

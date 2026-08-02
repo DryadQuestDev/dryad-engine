@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Character } from '../../core/character/character';
 import { computed, ref, watch, onBeforeUnmount } from 'vue';
-import { CHARACTER_VIEWPORT_ASPECT_RATIO } from '../../utils/characterReference';
+import { CHARACTER_VIEWPORT_ASPECT_RATIO, parseAspectRatio } from '../../utils/characterReference';
+import { Game } from '../../game';
 
 const props = defineProps<{
   character: Character;
@@ -16,6 +17,15 @@ const props = defineProps<{
 const getLayerClasses = (layerId: string) => {
   const styles = props.character.skinLayerStyles.get(layerId);
   return styles ? styles.join(' ') : '';
+};
+
+// Keep-mask layers (hats + clip carriers) render DQ9-style: no fade, clip the same frame.
+// Every timing here has an artifact (fade+delayed clip = hair pokes through the hat,
+// fade+instant clip = bald window, no-fade = hat pops in ahead of a fading doll);
+// popping is the accepted least-bad.
+const isKeepLayer = (layerId: string) => {
+  const def = Game.getInstance().characterSystem.skinLayersMap.get(layerId) as any;
+  return def?.mask_mode === 'keep';
 };
 
 // Build image layers - either directly from skinLayers or via event system
@@ -37,6 +47,49 @@ const imageLayers = computed(() => {
 const activeMasks = ref<Set<string>>(new Set());
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// Natural sizes per image URL, captured on load — keep-mode masks need them to remap
+// their polygons from image space into element space (see remapKeepPolygon).
+const naturalSizes = ref<Map<string, { w: number; h: number }>>(new Map());
+
+const onImageLoad = (event: Event) => {
+  const img = event.target as HTMLImageElement;
+  // key by the raw attribute value — it matches layer.image; img.src is the resolved absolute URL
+  const key = img?.getAttribute('src');
+  if (key && img.naturalWidth && !naturalSizes.value.has(key)) {
+    naturalSizes.value.set(key, { w: img.naturalWidth, h: img.naturalHeight });
+  }
+};
+
+/**
+ * Keep-mode mask polygons are authored in the TARGET layer's IMAGE coordinates (that is what
+ * the editor's mask tool shows, and what ported clip-path data means). The rendered <img> is
+ * object-fit: contain inside the doll's fixed-aspect element, so the drawn picture is letter-
+ * boxed and element-relative clip-path %s would land shifted. Remap each point image% → element%.
+ */
+const remapKeepPolygon = (polygon: string, imageUrl: string): string | null => {
+  // natural-size mode renders the img at its own aspect — no letterboxing, no remap needed.
+  if (props.naturalSize) return polygon;
+
+  const size = naturalSizes.value.get(imageUrl);
+  if (!size) return null; // not loaded yet — skip the clip for a frame rather than misclip
+
+  const elementRatio = parseAspectRatio(CHARACTER_VIEWPORT_ASPECT_RATIO);
+  const imageRatio = size.w / size.h;
+  // object-fit: contain — the displayed picture fills fraction fx × fy of the element.
+  const fx = Math.min(imageRatio / elementRatio, 1);
+  const fy = Math.min(elementRatio / imageRatio, 1);
+
+  const match = polygon.match(/polygon\(([^)]+)\)/);
+  if (!match) return null;
+  const points = match[1].split(',').map(p => {
+    const [x, y] = p.trim().split(/\s+/).map(parseFloat);
+    const ex = (1 - fx) * 50 + x * fx;
+    const ey = (1 - fy) * 50 + y * fy;
+    return `${ex.toFixed(2)}% ${ey.toFixed(2)}%`;
+  });
+  return `polygon(${points.join(', ')})`;
+};
+
 // Watch for layer changes and manage mask activation with delay
 watch(imageLayers, (newLayers, oldLayers) => {
   const newImages = new Set(newLayers.map(l => l.image));
@@ -45,6 +98,11 @@ watch(imageLayers, (newLayers, oldLayers) => {
   // Find newly added layers with masks
   for (const layer of newLayers) {
     if (layer.mask && !oldImages.has(layer.image)) {
+      if (isKeepLayer(layer.layerId)) {
+        // Keep-mask layers enter without a fade (see .no-fade) — clip immediately.
+        activeMasks.value.add(layer.image);
+        continue;
+      }
       // New layer with mask - delay activation by 0.5s (match transition duration)
       const timer = setTimeout(() => {
         activeMasks.value.add(layer.image);
@@ -127,16 +185,45 @@ const getLayerStyle = (index: number) => {
     style.transform = 'scaleX(-1)';
   }
 
-  // Find if any layer above has a mask that should clip this layer
-  // Only apply if the mask is "active" (after delay)
   const layers = imageLayers.value;
+  const skinLayersMap = Game.getInstance().characterSystem.skinLayersMap;
+  const layerId = layers[index]?.layerId;
+
+  // Runtime self-clip (e.g. hair trimmed under a hat, set from a character_render listener).
+  // Image-space polygon, same contract as keep masks, so it goes through remapKeepPolygon.
+  const runtimeClip = props.character.skinLayerClips?.get(layerId);
+  if (runtimeClip) {
+    const remapped = remapKeepPolygon(runtimeClip, layers[index].image);
+    if (remapped) {
+      style.clipPath = remapped;
+      style['-webkit-clip-path'] = remapped;
+      return style;
+    }
+  }
+
+  // Otherwise, apply any active keep/hide mask from a layer above.
   for (let i = index + 1; i < layers.length; i++) {
     const above = layers[i];
-    if (above.mask && activeMasks.value.has(above.image)) {
-      // Use CSS mask-image with mask-composite: exclude for inverted masking
+    if (!above.mask || !activeMasks.value.has(above.image)) continue;
+
+    const aboveDef = skinLayersMap.get(above.layerId) as any;
+    // mask_targets narrows which layers the mask touches; empty = every layer below.
+    const targets: string[] = aboveDef?.mask_targets || [];
+    if (targets.length && !targets.includes(layerId)) continue;
+
+    if (aboveDef?.mask_mode === 'keep') {
+      // clip-path semantics: only what is INSIDE the polygon survives
+      // (e.g. hair trimmed to the region a hat allows).
+      const remapped = remapKeepPolygon(above.mask, layers[index].image);
+      if (remapped) {
+        style.clipPath = remapped;
+        style['-webkit-clip-path'] = remapped;
+      }
+    } else {
+      // Default: cut a hole — CSS mask-image with mask-composite: exclude.
       Object.assign(style, getInvertedMaskStyle(above.mask));
-      break;
     }
+    break;
   }
 
   return style;
@@ -147,7 +234,8 @@ const getLayerStyle = (index: number) => {
   <div class="character-doll" :class="{ 'natural-size': naturalSize }">
     <TransitionGroup :name="instantLayers ? '' : 'layer-fade'" :appear="!instantLayers && (enableAppear || false)">
       <img class="character-doll-image" v-for="(layer, index) of imageLayers" :key="layer.image" :src="layer.image"
-        :style="getLayerStyle(index)" :class="getLayerClasses(layer.layerId)" draggable="false" v-persist />
+        :style="getLayerStyle(index)" :class="[getLayerClasses(layer.layerId), { 'no-fade': isKeepLayer(layer.layerId) }]"
+        draggable="false" v-persist @load="onImageLoad" />
     </TransitionGroup>
   </div>
 </template>
@@ -179,6 +267,17 @@ const getLayerStyle = (index: number) => {
 .layer-fade-enter-from,
 .layer-fade-leave-to {
   opacity: 0;
+}
+
+/* Keep-mask layers (hats, clip carriers) enter/leave instantly — transition: none makes
+   Vue's transition timeout 0, the enter-from override kills the one transparent frame. */
+.no-fade.layer-fade-enter-active,
+.no-fade.layer-fade-leave-active {
+  transition: none;
+}
+
+.no-fade.layer-fade-enter-from {
+  opacity: 1;
 }
 
 /* Natural size mode for gallery — image's natural aspect drives wrapper width */

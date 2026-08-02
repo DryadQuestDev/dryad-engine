@@ -8,9 +8,12 @@ const game = Game.getInstance();
 
 const COMPONENT_ID = 'events-container';
 
-const hideActors = computed(() =>
-  game.dungeonSystem.assets.value.some(a => a.hide_actors)
-);
+// Shared with the engine's removal path (an actor that can't be seen skips its exit
+// animation), so the visibility rule can't drift. Assets already fading out don't hide:
+// the moment a hide_actors CG starts its exit — e.g. cleared by staging an actor — the
+// actor layer becomes visible again, so the newly staged doll's enter animation plays
+// visibly (crossfading over the fading CG) instead of running behind display:none.
+const hideActors = computed(() => game.dungeonSystem.areActorsHidden());
 
 </script>
 

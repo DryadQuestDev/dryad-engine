@@ -1,22 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue';
 import type { StyleValue } from 'vue';
 
 defineProps<{
   displayContent: string;
   fullContent: string;
-  flashHtml: string;
-  showFlash: boolean;
   selectable: boolean;
   characterName: string;
   showInlineName: boolean;
   contentStyle?: StyleValue;
   nameStyle?: StyleValue;
 }>();
-
-const flashContentElement = ref<HTMLElement | null>(null);
-
-defineExpose({ flashContentElement });
 </script>
 
 <template>
@@ -24,7 +17,6 @@ defineExpose({ flashContentElement });
     <div class="dialogue-content event-content dialogue-ghost" :style="contentStyle" aria-hidden="true">
       <span v-if="showInlineName" class="inline-character-name" :style="nameStyle">{{ characterName }}: </span>
       <span v-script="{ html: fullContent, resolver: false }" style="display:inline"></span>
-      <div v-if="flashHtml" class="flash-content" v-script="{ html: flashHtml }"></div>
     </div>
 
     <div class="dialogue-live is-overlay">
@@ -32,8 +24,6 @@ defineExpose({ flashContentElement });
         <span v-if="showInlineName" class="inline-character-name" :style="nameStyle">{{ characterName }}: </span>
         <span v-script="{ html: displayContent, resolver: false, disabled: true }" style="display:inline"></span>
       </div>
-      <div v-if="showFlash && flashHtml" ref="flashContentElement" class="flash-content"
-        v-script="{ html: flashHtml }"></div>
     </div>
   </div>
 </template>
@@ -78,11 +68,5 @@ defineExpose({ flashContentElement });
 
 .inline-character-name {
   font-weight: bold;
-}
-
-.flash-content {
-  padding: 0px 10px 10px 10px;
-  font-style: italic;
-  color: antiquewhite;
 }
 </style>

@@ -28,7 +28,16 @@ function advance() {
   game.openPopup('tutorial_hint');
 }
 
+// Dev-only escape hatch, set in the plugin's Config tab. isDevMode() is false for players,
+// so this can never gate real play — and it leaves `tutorial_seen` untouched, unlike
+// dismissing a hint, so playtests don't burn the one-time popups.
+function disabledInDev() {
+  return game.isDevMode() &&
+    !!game.getData('plugins_data/tutorial_popup/config')?.disable_in_dev_mode;
+}
+
 export function showHint(recordId) {
+  if (disabledInDev()) return;
   if (game.getGameSetting('show_tutorial') === false) return;
   if (!recordId || isShown(recordId)) return;
   if (!game.getRecord(recordId)) {

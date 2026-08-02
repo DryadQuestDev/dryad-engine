@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { Global } from '../../global/global';
 import { Game } from '../game';
-import { SceneAsset } from '../systems/dungeonSystem';
+import { SceneAsset, GRADE_FILTER_ID } from '../systems/dungeonSystem';
 import gsap from 'gsap';
 import { PowerGlitch } from 'powerglitch';
 import SpineAsset from './SpineAsset.vue';
 import type { SpineStats } from '../utils/spineRenderer';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   asset: SceneAsset;
-}>();
+  /**
+   * Whether the scene colour grade applies. True for world art (scene backgrounds, battle
+   * backdrops); pass false when the asset is chrome rather than world — gallery previews, the
+   * landing screen, skill-tree backdrops, editor previews.
+   */
+  grade?: boolean;
+}>(), { grade: true });
 
 const emit = defineEmits<{
   'spine-loaded': [stats: SpineStats | null];
@@ -52,30 +58,82 @@ const blur = computed(() => props.asset.blur ?? 0);
 const zindex = computed(() => props.asset.z ?? 0);
 const fitMode = computed(() => props.asset.fit_mode ?? 'fill');
 
+// Re-staging a visible asset ({asset: "bg_mountain(scale = 2)"}) mutates the same object in place, so
+// the props change under a component that never remounts — which is why it used to snap. These refs
+// hold what is actually painted and glide toward the props; same shape as CharacterSlot's playMove,
+// which tweens refs rather than element styles so it can't collide with the GSAP-owned wrapper.
+const shownX = ref(xpos.value);
+const shownY = ref(ypos.value);
+const shownXScale = ref(xscale.value);
+const shownYScale = ref(yscale.value);
+const shownRotation = ref(rotation.value);
+const shownAlpha = ref(alpha.value);
+const shownBlur = ref(blur.value);
+
+const tweenDuration = computed(() => props.asset.tween ?? 0.5);
+const tweenEase = computed(() => props.asset.tween_ease ?? 'power2.out');
+
+let propTween: gsap.core.Timeline | null = null;
+
+// Fires only on change, so a freshly staged asset paints its values directly and its enter
+// transition owns how it appears — nothing glides up from a default.
+watch(
+  [xpos, ypos, xscale, yscale, rotation, alpha, blur],
+  ([nx, ny, nxs, nys, nrot, nalpha, nblur]) => {
+    propTween?.kill();
+    propTween = null;
+
+    const duration = tweenDuration.value;
+    if (duration <= 0) {
+      shownX.value = nx; shownY.value = ny;
+      shownXScale.value = nxs; shownYScale.value = nys;
+      shownRotation.value = nrot; shownAlpha.value = nalpha; shownBlur.value = nblur;
+      return;
+    }
+
+    // One timeline, everything at position 0, so a combined move-and-zoom stays in lockstep instead
+    // of drifting apart on separate tweens.
+    const ease = tweenEase.value;
+    propTween = gsap.timeline();
+    propTween.to(shownX, { value: nx, duration, ease }, 0)
+      .to(shownY, { value: ny, duration, ease }, 0)
+      .to(shownXScale, { value: nxs, duration, ease }, 0)
+      .to(shownYScale, { value: nys, duration, ease }, 0)
+      .to(shownRotation, { value: nrot, duration, ease }, 0)
+      .to(shownAlpha, { value: nalpha, duration, ease }, 0)
+      .to(shownBlur, { value: nblur, duration, ease }, 0);
+  },
+  { flush: 'post' }
+);
+
+onUnmounted(() => propTween?.kill());
+
 // Calculate CSS transform
 const cssTransform = computed(() => {
   const transforms = [];
 
   // Translation for positioning
-  transforms.push(`translate(${xpos.value}%, ${ypos.value}%)`);
+  transforms.push(`translate(${shownX.value}%, ${shownY.value}%)`);
 
   // Scale
-  transforms.push(`scale(${xscale.value}, ${yscale.value})`);
+  transforms.push(`scale(${shownXScale.value}, ${shownYScale.value})`);
 
   // Rotation
-  if (rotation.value !== 0) {
-    transforms.push(`rotate(${rotation.value}deg)`);
+  if (shownRotation.value !== 0) {
+    transforms.push(`rotate(${shownRotation.value}deg)`);
   }
 
   return transforms.join(' ');
 });
 
-// CSS filter for blur
+// CSS filter: the asset's own blur, plus the scene colour grade when one is up. Blur is rebuilt from
+// a tweened number rather than transitioned in CSS — a CSS transition here would try to interpolate
+// the grade's url(#…) term, which isn't interpolable.
 const cssFilter = computed(() => {
-  if (blur.value > 0) {
-    return `blur(${blur.value}px)`;
-  }
-  return 'none';
+  const parts: string[] = [];
+  if (shownBlur.value > 0) parts.push(`blur(${shownBlur.value}px)`);
+  if (props.grade && game.dungeonSystem.gradeActive.value) parts.push(`url(#${GRADE_FILTER_ID})`);
+  return parts.length > 0 ? parts.join(' ') : 'none';
 });
 
 // Object-fit CSS property
@@ -1134,7 +1192,7 @@ watch([idleAnimation, idleDuration, idleIntensity],
   object-fit: v-bind("objectFit");
   transform: v-bind("cssTransform");
   transform-origin: center;
-  opacity: v-bind("alpha");
+  opacity: v-bind("shownAlpha");
   filter: v-bind("cssFilter");
 }
 

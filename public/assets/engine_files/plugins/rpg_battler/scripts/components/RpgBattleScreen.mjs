@@ -5,6 +5,7 @@ const { computed, ref, onMounted, nextTick, defineComponent } = vue;
 const { CharacterSlot, BackgroundAsset, CharacterViewerPopup, CustomComponentContainer } = components;
 
 import { currentRpgBattle, getSpeedMult, getBattleDisplayName } from '../rpg-battle-state.mjs';
+import { battleSceneGate, isBattleScenePauseActive } from '../rpg-battle-scenes.mjs';
 import { endRpgBattle } from '../main.mjs';
 import { executeAction, advanceToNextTurn, tickActiveCharacter, canUseAbility, processDeaths, refireChannels, consumeStun, flashAbilityName, consumeBattleConsumable } from '../rpg-battle-flow.mjs';
 import { isCharAlive, getStatusStacks, expandSplashTargets, resolveAbility, getAliveEnemies, getAliveAllies } from '../rpg-battle-effects.mjs';
@@ -287,6 +288,10 @@ export const RpgBattleScreen = defineComponent({
       await runBounces(casterId, abilityId, targetType, targetId ?? casterId, landPos);
       // Action + its animations are fully done — distinct from battle_action_end (pre-animation).
       game.trigger('battle_action_complete', game.getCharacter(casterId), abilityId, results);
+      // Scenes queued by this action's events (hits, defeats, summon barks) play now,
+      // after the animations — holds the flow until the player clicks through. Runs
+      // even when the action just finished the battle, so a final-blow scene displays.
+      await battleSceneGate();
       return true;
     }
 
@@ -329,6 +334,8 @@ export const RpgBattleScreen = defineComponent({
     function onSelectAbility(abilityId, hidePanel) {
       const b = battle.value;
       if (!b || b.battlePhase !== 'choosing_ability') return;
+      // The scene dialogue overlay doesn't cover the whole screen — block battle input under it.
+      if (isBattleScenePauseActive()) return;
 
       const char = activeChar.value;
       if (!char) return;
@@ -366,6 +373,7 @@ export const RpgBattleScreen = defineComponent({
     }
 
     function onEnemyTargetClick(charId) {
+      if (isBattleScenePauseActive()) return;
       if (!isEnemyTargetable(charId)) {
         // Determine reason for invalid target
         const abId = selectedAbilityId.value;
@@ -387,6 +395,7 @@ export const RpgBattleScreen = defineComponent({
     function selectTarget(charId) {
       const b = battle.value;
       if (!b || b.battlePhase !== 'choosing_target') return;
+      if (isBattleScenePauseActive()) return;
 
       const abilityId = b.selectedAbilityId;
       if (!abilityId) return;
@@ -415,6 +424,9 @@ export const RpgBattleScreen = defineComponent({
     function onEndTurn(hidePanel) {
       const b = battle.value;
       if (!b || isBattleFinished(b)) return;
+      // Block only the player's end-turn button under a scene — internal calls
+      // (handlePostResolve, death paths) pass null and must keep the flow moving.
+      if (hidePanel && isBattleScenePauseActive()) return;
       const go = () => driveTurns();
       if (hidePanel) hidePanel(go); else go();
     }
@@ -434,6 +446,8 @@ export const RpgBattleScreen = defineComponent({
         const wasZoomed = zoomedIn.value && !!b.activeCharId;
         const charId = advanceToNextTurn();
         if (!charId || isBattleFinished(b)) break;
+        // Turn-start scenes (battle_turn_start barks) play before the zoom/panel.
+        await battleSceneGate();
         const isPlayer = b.activeSide === 'player';
 
         if (isPlayer) { forceZoomOut.value = false; await waitZoom(); }
@@ -442,6 +456,8 @@ export const RpgBattleScreen = defineComponent({
         const { canAct, dotResults } = tickActiveCharacter(charId);
         if (dotResults.length > 0) await animateEffects(dotResults);
         processDeaths();
+        // Scenes queued by DoT ticks/deaths play before the turn proceeds.
+        await battleSceneGate();
         if (isBattleFinished(b)) break;
 
         if (!canAct) {
@@ -453,6 +469,8 @@ export const RpgBattleScreen = defineComponent({
         const channelResults = refireChannels(charId);
         if (channelResults.length > 0) await animateEffects(channelResults);
         processDeaths();
+        // Scenes queued by channel hits/deaths play before control is handed over.
+        await battleSceneGate();
         if (isBattleFinished(b)) break;
 
         // A channel's self-stagger can cross the stun threshold mid-autocast (and a thorns reflect could
@@ -693,10 +711,12 @@ export const RpgBattleScreen = defineComponent({
         :characters="viewerCharacters" :initialIndex="viewerInitialIndex"
         @close="closeViewer" />
 
-      <!-- Battle result overlay -->
+      <!-- Battle result overlay. The rpg-battle-result slot lets other plugins/scripts render
+           result content into it (e.g. a rewards panel on victory). -->
       <div v-if="isBattleOver" class="rpg-battle-result-overlay">
         <div class="rpg-battle-result" :class="battle.result">
           <div class="rpg-battle-result-text">{{ battle.result === 'victory' ? game.getLine('ui_victory') : game.getLine('ui_defeat') }}</div>
+          <CustomComponentContainer :slot="'rpg-battle-result'" :context="{ result: battle.result }" />
           <button class="rpg-btn" @click="closeBattle">Continue</button>
         </div>
       </div>
