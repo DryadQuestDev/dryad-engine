@@ -3,7 +3,7 @@
   "name": "Essentials",
   "description": "A global plugin that adds default traits for items and characters, default ability definitions as well as default fallback images for encounters. Don't turn off this plugin unless you know what you are doing.",
   "author": "Nekon",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "order": -9999999,
   "tabs": [],
   "data": {
@@ -17,12 +17,14 @@
       {
         "id": "face_shift_x",
         "type": "number",
+        "description": "Horizontal position of the face crop, as a percentage (0-100) of the character doll. 50 = centered. Set visually with the face picker rather than by hand.",
         "uid": "YnfDAXnxU4BU"
       },
       {
         "id": "face_shift_y",
         "uid": "w5xp86mJnrqE",
-        "type": "number"
+        "type": "number",
+        "description": "Vertical position of the face crop, as a percentage (0-100) of the character doll. 50 = centered. Set visually with the face picker rather than by hand."
       },
       {
         "type": "image",
@@ -39,6 +41,7 @@
       {
         "id": "name",
         "type": "string",
+        "description": "Display name of the character shown in dialogue, the party panel and the character sheet.",
         "uid": "UGeygoK22kTg",
         "order": -1
       },
@@ -47,6 +50,25 @@
         "type": "color",
         "uid": "aR1kfGQ93TUx",
         "description": "Color of character's dialogue"
+      },
+      {
+        "id": "dismissable",
+        "type": "boolean",
+        "uid": "geDismissable",
+        "description": "If true, this character&#x27;s sheet shows a dismiss button (engine-level): confirm, unequip everything, delete the character."
+      },
+      {
+        "id": "renameable",
+        "type": "boolean",
+        "uid": "geRenameable",
+        "description": "If true, this character&#x27;s sheet shows the inline rename control."
+      },
+      {
+        "id": "scene_view",
+        "type": "chooseOne",
+        "fromFile": "character_views",
+        "uid": "jR7fJaZCozgX",
+        "description": "View this character is staged with in scenes. Leave empty for the default view - a view the character has no art for falls back to it too. Swapping it mid-scene fades the character across."
       }
     ],
     "character_views": [
@@ -117,20 +139,34 @@
         "type": "number",
         "description": "Visual level indicator shown on the item card.",
         "uid": "GEitItemLevel1"
-      }
-    ],
-    "item_properties": [
+      },
+      {
+        "id": "book",
+        "type": "string",
+        "description": "Readable book: full scene reference dungeon_id.room_id.scene_id (e.g. global.books.eilfiel) whose paragraphs are the pages. Adds a Read choice opening the paged reader (Next/Previous/Read again/Close); finishing the last page discovers the item.",
+        "uid": "GEitBook1"
+      },
+      {
+        "id": "painting",
+        "type": "string",
+        "description": "Viewable painting: id of a registered scene asset shown full-screen with the item description as the scene text (empty/equal = the item id). Adds a View choice; viewing discovers the item.",
+        "uid": "GEitPainting1"
+      },
+      {
+        "id": "use_scene",
+        "type": "string",
+        "description": "Usable item: scene reference this item opens (dungeon_id.room_id.scene_id, room_id.scene_id, a full #id or an &anchor). Adds a Use choice that plays the scene with this item as the active one, so the scene can read |item| and end with {remove_item: true}.",
+        "uid": "JQKijeR7vvvF"
+      },
       {
         "id": "durability",
-        "name": "Durability",
-        "is_resource": true,
-        "description": "Item's durability",
-        "uid": "QNDtd9wRq0eS"
-      }
-    ],
-    "item_attributes": [
+        "type": "number",
+        "description": "Remaining durability of this item instance. Author the starting value on the template; scripts wear it down by mutating the instance trait. Shown as a badge on the item slot when present.",
+        "uid": "GEitDurability1"
+      },
       {
         "id": "rarity",
+        "type": "chooseOne",
         "values": [
           "common",
           "uncommon",
@@ -139,7 +175,8 @@
           "legendary",
           "quest"
         ],
-        "description": "Item rarity tier",
+        "is_persistent": true,
+        "description": "Item rarity tier. Value order is the smith cost ladder (common 1, uncommon 2, ...); quest rarity is excluded from generated loot and cannot be dropped.",
         "uid": "rLfghb4Ukzjm"
       }
     ],
@@ -178,7 +215,7 @@
         "order": -97
       },
       {
-        "id": "cooldown",
+        "id": "cd",
         "role": "meta",
         "type": "number",
         "order": -96,
@@ -287,7 +324,69 @@
         "id": "group.stats",
         "val": "Stats",
         "uid": "GeDfGrpStats"
+      },
+      {
+        "id": "dismiss",
+        "val": "Dismiss",
+        "uid": "geDismissLbl"
+      },
+      {
+        "id": "dismiss_confirm",
+        "val": "Are you sure you want to dismiss |name|? They will be gone for good.",
+        "uid": "geDismissCnf"
+      },
+      {
+        "id": "key_used",
+        "val": "<b>|item|</b> turns in the lock!"
+      },
+      {
+        "id": "key_missing_door",
+        "val": "The path is locked and requires a key."
+      },
+      {
+        "id": "key_missing_chest",
+        "val": "The lock cannot be opened without a key."
+      },
+      {
+        "id": "achievements",
+        "val": "Achievements"
+      },
+      {
+        "id": "achievements_earned",
+        "val": "earned"
+      },
+      {
+        "id": "achievements_points",
+        "val": "points"
+      },
+      {
+        "id": "achievement_earned",
+        "val": "Achievement earned"
+      },
+      {
+        "id": "achievement_hidden",
+        "val": "Hidden until earned."
+      },
+      {
+        "id": "achievements_empty",
+        "val": "No achievements defined."
+      }
+    ],
+    "inventory_traits": [
+      {
+        "id": "key",
+        "type": "chooseOne",
+        "fromFile": "item_templates",
+        "description": "Lock: opening this inventory (chest) needs this item in the party bag. The key is auto-used with a notification; without it the exchange refuses to open. Stays unlocked for the save.",
+        "uid": "GEinvKey1"
+      },
+      {
+        "id": "key_consume",
+        "type": "boolean",
+        "description": "The key is spent by the unlock (single-use keys). Off = the key stays in the bag.",
+        "uid": "GEinvKeyConsume1"
       }
     ]
-  }
+  },
+  "scripts": []
 }

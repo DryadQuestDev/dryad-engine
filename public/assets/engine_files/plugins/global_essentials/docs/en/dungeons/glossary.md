@@ -214,6 +214,7 @@ Fields on a `collectable` encounter:
 | Field | Meaning |
 |---|---|
 | `collect_item` | The item granted |
+| `collect_pool` | Gather table name (e.g. `gather`) – the item is drawn at dungeon creation instead of authored. Overrides `collect_item` |
 | `collect_quantity` | How many one Collect grants (default 1) |
 | `regrow` | Turns until it comes back after collecting. Empty/0 = one-time |
 | `collect_clue` | Glow on the map until collected |
@@ -225,6 +226,13 @@ Clicking **Collect** adds the item(s) to the party inventory (with the usual "ad
 ```text
 @berry_bush{discover: "perception#6"}
 A tangle of dark leaves – and under them, heavy clusters of fruit.
+```
+
+Inside a collectable's `@` line, `|title|` and `|description|` substitute the granted item's name (in its rarity color) and description – the way to keep prose valid on `collect_pool` spots, whose item differs per save:
+
+```text
+@herb_patch
+|title|. |description| It grows in the shade of the north wall.
 ```
 
 You can also write your own choice with a custom label instead of the synthesized Collect – give any `!` choice a `{collect: "item_id#qty"}` param.
@@ -460,6 +468,20 @@ Greetings, traveler.
 ```
 
 When the engine resolves `|$greeting|`, it automatically detects all variants (`$greeting`, `$greeting~2`, `$greeting~3`) and **randomly picks one**. No special syntax needed from the caller – just write `|$greeting|` and the engine handles the rest.
+
+A template (and each of its variants) accepts `if` / `ifOr` params. Variants whose condition fails are skipped before the random pick; when none pass, the reference renders as an empty string. Chain complementary templates to swap a description by state:
+
+```
+$guard_awake{if: "guard_drugged = 0"}
+The **guard** paces the gate.
+
+$guard_asleep{if: "guard_drugged = 1"}
+The **guard** snores against the gatepost.
+
+@guard
+!talk<Talk>
+|$guard_awake||$guard_asleep|
+```
 
 This is useful for adding variety to repeated text (encounter descriptions, NPC reactions, flavor text) without any scripting.
 

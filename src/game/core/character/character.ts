@@ -28,6 +28,9 @@ export type FinalAbility = {
 
 export type FinalAbilities = Record<string, FinalAbility>;
 
+/** Character trait (global essentials plugin) naming the view a staged scene actor renders with. */
+const SCENE_VIEW_TRAIT = 'scene_view';
+
 export type ImageLayerMeta = {
   image: string;
   layerId: string;
@@ -382,6 +385,8 @@ export class Character {
   public abilities: Set<string> = new Set();
   public statIds: Set<string> = new Set();
   public abilityModifiers: Record<string, any> = {};
+  /** Modifiers whose `requires_status` is currently unmet — rendered greyed out, never applied. */
+  public inactiveAbilityModifiers: Record<string, any> = {};
 
   @Skip()
   public finalAbilities: ComputedRef<FinalAbilities> = computed(() => {
@@ -627,6 +632,29 @@ export class Character {
     return Array.from(views).sort();
   }
 
+  /** Whether this character has any art authored for a view — a spine entry or skin layers tagged with it. */
+  public hasArtForView(view: string): boolean {
+    const key = this.normalizeView(view);
+    return this.isSpineForView(key) || this.getImageLayersForView(key).length > 0;
+  }
+
+  /**
+   * View this character shows while staged in a scene, from the `scene_view` trait
+   * (chooseOne over Characters > Views). A view the character has no art for falls
+   * back to the default rather than rendering an empty doll — the trait can ride in
+   * on a status shared by bodies that never got that art. Returns '' for the default.
+   */
+  public getSceneView(): string {
+    const game = Game.getInstance();
+    // Guarded rather than a plain getTrait: the trait ships with the global essentials
+    // plugin, and getTrait throws for unknown ids — a game running without that plugin
+    // would break every staged actor.
+    if (!game.characterSystem.traitsMap.has(SCENE_VIEW_TRAIT)) return '';
+
+    const view = this.normalizeView(this.getTrait(SCENE_VIEW_TRAIT));
+    return (view && this.hasArtForView(view)) ? view : '';
+  }
+
   /**
    * Get image layers filtered by requested views.
    * - No views: returns layers with no `view` field + layers with `is_base: true`
@@ -815,6 +843,10 @@ export class Character {
 
     // Ability Modifiers: merge by ability_id
     const collectedModifiers: Record<string, any[]> = {};
+    // Modifiers held back by an unmet requires_status. Kept (rather than discarded) so the UI can
+    // show them greyed out — "you own this upgrade, it just isn't answering right now" — instead of
+    // the improvement vanishing from the ability card with no explanation.
+    const collectedInactive: Record<string, any[]> = {};
 
     // Collect all modifiers grouped by ability_id
     for (const status of this.statuses.values()) {
@@ -822,12 +854,13 @@ export class Character {
         for (const modifier of status.abilityModifiers) {
           const abilityId = modifier.ability_id;
           if (!abilityId) continue;
-          // Skip if requires_status is set but the character doesn't have it
-          if (modifier.requires_status && !this.statuses.has(modifier.requires_status)) continue;
-          if (!collectedModifiers[abilityId]) {
-            collectedModifiers[abilityId] = [];
+          // Held back if requires_status is set but the character doesn't have it
+          const gated = modifier.requires_status && !this.statuses.has(modifier.requires_status);
+          const bucket = gated ? collectedInactive : collectedModifiers;
+          if (!bucket[abilityId]) {
+            bucket[abilityId] = [];
           }
-          collectedModifiers[abilityId].push(modifier);
+          bucket[abilityId].push(modifier);
         }
       }
     }
@@ -837,6 +870,10 @@ export class Character {
     for (const abilityId in collectedModifiers) {
       mergedAbilityModifiers[abilityId] = this.mergeAbilityModifiers(collectedModifiers[abilityId]);
     }
+    const mergedInactiveModifiers: Record<string, any> = {};
+    for (const abilityId in collectedInactive) {
+      mergedInactiveModifiers[abilityId] = this.mergeAbilityModifiers(collectedInactive[abilityId]);
+    }
 
     this.traits = newProperties;
     this.attributes = newAttributes;
@@ -844,11 +881,12 @@ export class Character {
     // Sort abilities by cooldown ascending so iteration order is consistent
     const abilityTemplates = Game.getInstance().characterSystem.abilityTemplatesMap;
     const sortedAbilities = [...newAbilities].sort((a, b) =>
-      ((abilityTemplates.get(a)?.meta as any)?.cooldown || 0) - ((abilityTemplates.get(b)?.meta as any)?.cooldown || 0)
+      ((abilityTemplates.get(a)?.meta as any)?.cd || 0) - ((abilityTemplates.get(b)?.meta as any)?.cd || 0)
     );
     this.abilities = new Set(sortedAbilities);
     this.statIds = newStatIds;
     this.abilityModifiers = mergedAbilityModifiers;
+    this.inactiveAbilityModifiers = mergedInactiveModifiers;
 
     // Spine: unified map ('' = default, 'back' = back view, etc.)
     this.spineViews = newSpineViews;
@@ -898,6 +936,18 @@ export class Character {
     const game = Game.getInstance();
     const result: FinalAbilities = {};
 
+    // Icon fallback for granted abilities: an ability handed out by a status (an equipped item's
+    // hidden `item_<uid>` status, a blessing) shows that source's image when it defines none of
+    // its own, so a potion's throw-ability looks like the potion rather than like nothing.
+    const grantedIcons: Record<string, { icon: string; source: string }> = {};
+    for (const status of this.statuses.values()) {
+      const icon = status.displayImage;
+      if (!icon) continue;
+      for (const granted of status.abilities) {
+        if (!grantedIcons[granted]) grantedIcons[granted] = { icon, source: status.iconSource || status.id };
+      }
+    }
+
     // Iterate over all abilities this character has
     for (const abilityId of this.abilities) {
       // Get base template
@@ -928,6 +978,13 @@ export class Character {
         if (list.length && !list.some((id: string) => this.statuses.has(id))) continue;
       }
 
+      if (!merged.meta.icon && grantedIcons[abilityId]) {
+        // Abilities are recomputed, never saved, so the resolved path is safe to hold here; the
+        // source id travels with it so a status this ability applies can record the id instead.
+        merged.meta.icon = grantedIcons[abilityId].icon;
+        merged.meta.icon_source = grantedIcons[abilityId].source;
+      }
+
       result[abilityId] = merged;
     }
 
@@ -935,7 +992,7 @@ export class Character {
     const sorted = Object.entries(result).sort(([, a], [, b]) => {
       const orderDiff = (a.meta.order ?? 0) - (b.meta.order ?? 0);
       if (orderDiff !== 0) return orderDiff;
-      return (a.meta.cooldown ?? 0) - (b.meta.cooldown ?? 0);
+      return (a.meta.cd ?? 0) - (b.meta.cd ?? 0);
     });
     const sortedResult: FinalAbilities = {};
     for (const [id, ab] of sorted) sortedResult[id] = ab;
@@ -949,7 +1006,16 @@ export class Character {
     for (let value of this.skinLayers) {
       let skinLayerObject = Game.getInstance().characterSystem.skinLayersMap.get(value);
       if (!skinLayerObject) {
-        throw new Error(`Skin Layer ${value} does not exist`);
+        // Bad data must not crash rendering — log with enough context to find the source
+        // (the statuses granting the layer) and skip it.
+        const sources = Array.from(this.statuses.values())
+          .filter(s => s.skinLayers?.has(value))
+          .map(s => s.id);
+        gameLogger.error(
+          `Skin layer "${value}" does not exist (character "${this.id}"` +
+          (sources.length ? `, granted by status ${sources.map(s => `"${s}"`).join(', ')}` : ', from the template') +
+          `) — layer skipped. Check character_skin_layers or remove the reference.`);
+        continue;
       }
       // Skip view-tagged layers — they only render when explicitly requested.
       // _default and empty are equivalent (both = base layer).
@@ -1148,6 +1214,11 @@ export class Character {
 
 
   public addStatus(status: Status, applyArgs?: { stacks?: number; duration?: number; source?: string }) {
+    // Veto hook, ahead of everything else so a refused application also skips the group-supersede
+    // below — otherwise cancelling would still have stripped the status it was meant to replace.
+    // Unlike status_added this also fires for reapplies, since a reapply is still an application.
+    if (!Game.getInstance().trigger('status_apply_before', this, status, applyArgs)) return;
+
     // Mutual-exclusion group: a status with a group_id supersedes any OTHER status in the same group
     // (e.g. big_blessing replaces small_blessing). Same-id reapply is left to the merge path below.
     // This is the single choke point for every application (status action, consumable, battle effect).
@@ -1168,6 +1239,10 @@ export class Character {
       const stacks = applyArgs?.stacks ?? status.currentStacks;
       const duration = applyArgs?.duration ?? status.duration;
       const source = applyArgs?.source;
+      // Adopt the incoming look so a borrowed icon tracks whatever applied it most recently rather
+      // than freezing on the first application (eating a second dish reskins the shared buff).
+      if (status.image && status.image !== existingStatus.image) existingStatus.image = status.image;
+      if (status.iconSource && status.iconSource !== existingStatus.iconSource) existingStatus.iconSource = status.iconSource;
       existingStatus.applyInstance({ stacks, duration, source });
       this.reevaluate();
       this.adjustAllResources(oldReplenishableValues, true);
@@ -1475,7 +1550,13 @@ export class Character {
 
 
 
-  private applyPrecision(value: number, stat: EntityStatObject): number {
+  /**
+   * Round a value to the stat's authored `precision` (default 0 = whole numbers). getStat already
+   * applies this to the composed total; it is public so anything rendering an individual
+   * CONTRIBUTION (a stat card's per-status breakdown) rounds the same way. Without it a stat
+   * computer returning a float leaks binary-float noise into the UI — `+614.4000000000001`.
+   */
+  public applyPrecision(value: number, stat: EntityStatObject): number {
     const precision = stat.precision ?? 0;
     const factor = Math.pow(10, precision);
     return Math.round(value * factor) / factor;
@@ -1525,6 +1606,27 @@ export class Character {
    */
   public getStat(name: string): number {
     return this.getStatRef(name).value;
+  }
+
+  /**
+   * Base value of a stat: the sum of its `stats` contributions across the character's statuses
+   * (× each status's stack count), WITHOUT running any stat computers.
+   *
+   * Use this INSIDE a `registerStatComputer` callback instead of getStat. getStat invokes every
+   * computer for the requested stat, so calling getStat from within a computer re-enters that same
+   * computer and recurses infinitely (stack overflow). getBaseStat is computer-free and safe, and
+   * for a stat that no computer contributes to (e.g. a primary attribute) it equals getStat — while
+   * still including item/buff contributions, since an equipped item's stats live on its own status.
+   * @param name - The stat name
+   * @returns Summed base value across statuses (0 if nothing contributes)
+   */
+  public getBaseStat(name: string): number {
+    let total = 0;
+    for (const status of this.statuses.values()) {
+      const value = status.stats?.[name];
+      if (typeof value === 'number') total += value * (status.currentStacks || 1);
+    }
+    return total;
   }
 
   /**
@@ -1817,7 +1919,35 @@ export class Character {
         params: params
       });
       choice.isAvailable = computed(() => !Game.getInstance().itemSystem.learnedRecipes.value.has(recipeId));
+      choice.unavailableNotificationId = "recipe_already_learned";
       choices.push(choice);
+    }
+
+    // read choice (book trait — opens the paged reader)
+    if ((item.traits as any)?.book && !item.isEquipped) {
+      choices.push(Game.getInstance().logicSystem.createCustomChoice({
+        id: "read_book",
+        name: Global.getInstance().getString("read_book"),
+        params: { read_book: { itemUid: item.uid } },
+      }));
+    }
+
+    // view choice (painting trait — opens the painting scene)
+    if ((item.traits as any)?.painting && !item.isEquipped) {
+      choices.push(Game.getInstance().logicSystem.createCustomChoice({
+        id: "view_painting",
+        name: Global.getInstance().getString("view_painting"),
+        params: { view_painting: { itemUid: item.uid } },
+      }));
+    }
+
+    // use choice (use_scene trait — plays the scene the trait names, with the item as active)
+    if ((item.traits as any)?.use_scene && !item.isEquipped) {
+      choices.push(Game.getInstance().logicSystem.createCustomChoice({
+        id: "use_scene",
+        name: Global.getInstance().getString("use_scene"),
+        params: { use_scene: { itemUid: item.uid } },
+      }));
     }
 
     // to equip item choices
@@ -1880,10 +2010,25 @@ export class Character {
       choices.push(choice);
     }
 
-    // if items cannot be used, disable all choices
+    // drop choice — permanently discard the item. Gated on the engine's own rule (isDroppable:
+    // equipped gear, quest items) plus the game's item_drop_render veto for its own protected kinds
+    // — the same pair the reward panel's trash button checks. The drop_item action then confirms
+    // and fires the cancellable item_drop_before emitter.
+    if (item.isDroppable() && Game.getInstance().trigger('item_drop_render', item, this)) {
+      let choice = Game.getInstance().logicSystem.createCustomChoice({
+        id: "drop_item",
+        name: Global.getInstance().getString("drop_item"),
+        params: { drop_item: { itemUid: item.uid, characterId: this.id } },
+      });
+      choices.push(choice);
+    }
+
+    // if items cannot be used, disable all choices — the global block also wins the
+    // click message, so a grayed Learn says "cannot be used now", not "already learned"
     if (!Game.getInstance().itemSystem.canUseItems()) {
       for (let choice of choices) {
         choice.isAvailable = computed(() => false);
+        choice.unavailableNotificationId = undefined;
       }
     }
 

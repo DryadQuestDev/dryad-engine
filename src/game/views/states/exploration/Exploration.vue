@@ -465,7 +465,7 @@ const isMapInteractive = computed(() => {
                   filter: encounter.scaleShadow, // Assuming scaleShadow is a complete CSS filter string
                   transform: 'rotate(' + (encounter.rotation ?? 0) + 'deg)'
                 }" :class="{
-
+                  'item_icon': encounter.usesItemIcon,
                   'interactable': isMapInteractive && encounter.isHere(game.dungeonSystem.currentRoom.value) && !encounter.isProp(),
                   'clue': isMapInteractive && encounter.isClue(),
                   'active': isMapInteractive && encounter === game.dungeonSystem.selectedEncounter.value && !encounter.isProp()

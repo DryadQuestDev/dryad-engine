@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import { PARTY_INVENTORY_ID, TradeContext } from '../../systems/itemSystem';
@@ -10,6 +10,7 @@ import ItemCard from '../progression/ItemCard.vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { gameLogger } from '../../utils/logger';
 import { inspectMode, toggleInspectMode } from '../exchange/useExchangeInspect';
+import { resetExchangeFilter } from '../exchange/useExchangeFilter';
 import { useMobile } from '../../../global/composables/useMobile';
 
 const { isMobile } = useMobile();
@@ -17,6 +18,11 @@ const { isMobile } = useMobile();
 const game = Game.getInstance();
 const global = Global.getInstance();
 const COMPONENT_ID = 'overlay-exchange';
+
+// The category filter is shared by both panels and lives in a module ref, so it outlives
+// this overlay. Clear it on open — landing in a merchant already filtered to a category
+// you picked two towns ago reads as an empty shop.
+onMounted(resetExchangeFilter);
 
 function getCurrencyName(price: Record<string, number>): string {
     const id = Object.keys(price)[0];
@@ -223,6 +229,7 @@ function moveItem(item: Item, source: Inventory, target: Inventory, quantity: nu
       for (const [currencyId, amount] of Object.entries(totalPrice)) {
         const currencyItem = game.itemSystem.createItem(currencyId);
         source.addItem(currencyItem, amount, true); // true = skipValidation
+        game.trigger('currency_change', source, currencyId, amount);
       }
 
       return true;
@@ -334,6 +341,7 @@ function handleLootAll() {
         for (const [currencyId, amount] of Object.entries(totalPrice)) {
           const currencyItem = game.itemSystem.createItem(currencyId);
           exchangeInventory.value.addItem(currencyItem, amount);
+          game.trigger('currency_change', exchangeInventory.value, currencyId, amount);
         }
       }
     }

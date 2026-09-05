@@ -99,15 +99,19 @@ const statGroups = computed((): StatGroup[] => {
   padding: 1rem;
   border-radius: 4px;
   background: rgba(26, 26, 26, 0.5);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-content: flex-start;
+  /* Masonry: sections flow into equal-width columns and balance by height, so a short
+     group tucks under another instead of a wrapped section stretching full width. */
+  columns: 250px;
+  column-gap: 1rem;
 }
 
 .stats-section {
-  flex: 1 1 250px;
-  min-width: 250px;
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}
+
+.stats-section:last-child {
+  margin-bottom: 0;
 }
 
 .stats-section h3 {

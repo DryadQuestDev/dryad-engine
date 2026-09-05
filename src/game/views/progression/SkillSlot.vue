@@ -121,7 +121,9 @@ const skillImage = computed(() => {
 const slotClasses = computed(() => ({
   'skill-slot': true,
   'learned': learnedLevel.value > 0,
-  'locked': !isLearnable.value,
+  // Already-owned skills are never "locked" — a node granted by story (params `active: false`, so it
+  // can never be bought) would otherwise stay greyed out forever after being awarded.
+  'locked': !isLearnable.value && learnedLevel.value === 0,
   'unaffordable': isLearnable.value && !canAfford.value,
   'maxed': learnedLevel.value >= (props.skill.max_upgrade_level || 1)
 }));
@@ -181,11 +183,6 @@ const slotClasses = computed(() => ({
 
 .skill-slot.learned {
   filter: brightness(1.2);
-}
-
-.skill-slot.maxed path {
-  stroke: gold !important;
-  stroke-width: 2;
 }
 
 .level-indicator {

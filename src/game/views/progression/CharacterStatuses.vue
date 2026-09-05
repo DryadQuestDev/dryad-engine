@@ -82,7 +82,7 @@ const hasContent = computed(() => equippedItems.value.length > 0 || visibleStatu
       <div v-for="item in equippedItems" :key="'item_' + item.uid" class="item-brick"
         :class="[
           { 'has-image': getItemImage(item) },
-          ...item.getAttributeClasses()
+          ...item.getRarityClasses()
         ]"
         v-popover="{ component: ItemCardComp, props: { item }, placement: 'left-start' }">
         <img v-if="getItemImage(item)" :src="getItemImage(item)!" :alt="getItemName(item)"

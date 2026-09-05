@@ -65,7 +65,7 @@ function toggleProgression() {
 
 .ui-container:deep() {
   pointer-events: auto;
-  background: rgba(0, 0, 0, 0.5);
+  /*background: rgba(0, 0, 0, 0.5);*/
   width: fit-content;
   color: white;
 }

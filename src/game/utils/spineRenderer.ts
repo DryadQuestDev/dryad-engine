@@ -315,7 +315,14 @@ class SpineRendererService {
       this.slots.set(id, slot);
       return spine;
     } catch (error) {
-      console.error(`[SpineRenderer] Failed to register "${id}":`, error);
+      // Name the data, not just the slot: the character id sits before '::' in the slot id and
+      // the paths come from a `spine` entry on that character's template or one of its statuses.
+      const characterId = id.split('::')[0];
+      console.error(
+        `[SpineRenderer] Failed to register "${id}" — could not load spine assets for ` +
+        `character "${characterId}" (skeleton: ${options.skeletonUrl}, atlas: ${options.atlasUrl}). ` +
+        `The paths come from a 'spine' entry on the character's template or one of its statuses — ` +
+        `fix the path or remove that entry. Rendering continues without this spine.`, error);
       return null;
     }
   }

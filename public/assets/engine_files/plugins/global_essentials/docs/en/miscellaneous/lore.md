@@ -61,6 +61,8 @@ Drop a reference into any text that goes through the text transformation pipelin
 
 `[[!id]]` discovery only fires for branches that survive `if{}` conditional evaluation – `[[!id]]` inside a discarded branch will not unlock the record.
 
+Ids may contain letters, digits, underscores and hyphens – both `[[my_record]]` and `[[my-record]]` resolve. A token whose id matches no record logs an error and falls back to rendering the label.
+
 ### Items and Statuses
 
 The same `[[...]]` syntax also drives popovers for **items** and **character statuses**, using a kind prefix:

@@ -16,7 +16,7 @@ function testStore() {
 function test() {
   console.warn("testing...");
   let item = game.itemSystem.getInventory('_party_inventory')?.getFirstItemById('ancient_tome') || null;
-  item?.properties['durability'].addCurrentValue(-20);
+  if (item && typeof item.traits.durability === 'number') item.traits.durability -= 20;
   console.warn(item);
 
   game.getProperty('lewds')?.addCurrentValue(1);

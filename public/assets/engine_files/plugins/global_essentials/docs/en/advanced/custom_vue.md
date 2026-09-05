@@ -194,10 +194,19 @@ Equivalent to `v-popover="{ ..., placement: 'bottom' }"`. The default placement 
 | `props` | `object` | `{}` | props passed to `component` via `v-bind` |
 | `width` | `number \| string` | `'300px'` | popover width; numbers become `${n}px` |
 | `placement` | `Placement` | `'top'` | any Floating UI placement (`top`, `bottom-start`, `left-end`, etc.) |
+| `interactive` | `boolean` | `false` | force the hover card to catch the pointer (see below) |
+| `closable` | `boolean` | `false` | render a × button in the card's corner |
+| `dismissOnClick` | `boolean` | `false` | clicking the target closes the card instead of pinning it |
+| `disableClick` | `boolean` | `false` | clicking the target leaves the card alone — no pin, no dismiss |
+| `key` | `string` | auto | popup-store key; share one across elements that show the same card |
 
-**Hover handoff:**
+**Hover, pin and peek:**
 
-The popover sits at `offset: 0` against the target side, and a 100 ms close-debounce covers the cursor's transition between target and popover. Hovering the popover keeps it open; leaving the popover closes it after 100 ms.
+Hovering the target opens the card. Clicking the target pins it; clicking the target again — or anywhere outside it — unpins it. Pinned cards stay put while you carry on working elsewhere.
+
+A *hover* card is a peek by default: it is pointer-transparent, so it never blocks whatever it overlaps, and it closes when the cursor leaves the target. A *pinned* card always catches the pointer — that is where you scroll long content, follow `[[lore-links]]` and press buttons the card renders.
+
+Players can make hover cards catch the pointer too, with the **Interactive Tooltips** setting — or by pressing **T** in-game, which flips the same setting. `interactive: true` forces that on regardless of the setting — worth it only where the card can never be pinned instead, i.e. a target that spends its own click on something else (`dismissOnClick` / `disableClick`).
 
 **Example — character status with rich popover content:**
 

@@ -1,0 +1,95 @@
+/* Multi-wave battle UI. Both pieces render only when a battle actually has more than one
+   wave, so ordinary fights are untouched.
+
+   Split by priority: the tracker is passive reference (peripheral, low contrast, never
+   competes with the battlefield), while the wave CHANGE is the moment that needs to land —
+   a cleared field reads as a win, so the banner interrupts with motion and color. */
+
+/* ── Tracker: top of the sidebar's encounter-state column ── */
+.rpg-wave-tracker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: rgba(20, 20, 24, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rpg-wave-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(235, 235, 240, 0.65);
+}
+
+.rpg-wave-pips {
+  display: flex;
+  gap: 6px;
+}
+
+.rpg-wave-pip {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid rgba(235, 235, 240, 0.35);
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Cleared waves stay filled — the row doubles as a progress bar. */
+.rpg-wave-pip.cleared {
+  background: rgba(235, 235, 240, 0.5);
+  border-color: rgba(235, 235, 240, 0.5);
+}
+
+/* The wave being fought: brightest element in the row, so the eye lands here first. */
+.rpg-wave-pip.current {
+  background: #facc15;
+  border-color: #facc15;
+  box-shadow: 0 0 6px rgba(250, 204, 21, 0.7);
+}
+
+/* ── System log entries ── */
+/* Null-actor entries (wave arrivals, starvation ticks, scripted damage) have nobody to
+   announce, so they drop the "X is acting!" header and portrait and read as narration. */
+.rpg-log-actor.rpg-log-system {
+  background: transparent;
+}
+
+.rpg-log-actor.rpg-log-system .rpg-log-line {
+  justify-content: center;
+  font-style: italic;
+  color: rgba(235, 235, 240, 0.7);
+}
+
+/* ── Banner: the "not over yet" beat ── */
+.rpg-wave-banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 34cqh;
+  z-index: 20;
+  pointer-events: none;
+  text-align: center;
+  font-size: 7cqh;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #facc15;
+  text-shadow: 0 0 18px rgba(0, 0, 0, 0.9), 0 2px 6px rgba(0, 0, 0, 0.8);
+  animation: rpg-wave-banner 1.1s ease-out forwards;
+}
+
+@keyframes rpg-wave-banner {
+  0% { opacity: 0; transform: scale(1.35); letter-spacing: 0.3em; }
+  22% { opacity: 1; transform: scale(1); letter-spacing: 0.12em; }
+  72% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rpg-wave-banner { animation: none; opacity: 1; }
+}

@@ -10,6 +10,15 @@ const props = defineProps<{ entry: PopupEntry; depth: number }>();
 const global = Global.getInstance();
 const fontSize = computed(() => `${global.userSettings.value.font_size}px`);
 
+// Peek by default: a hover card that catches the pointer blocks the slots it overlaps, which is
+// what makes sweeping across an item grid awkward. A pinned card is always interactive — that is
+// how the content stays reachable (WCAG 1.4.13 "hoverable") while hover is only a peek.
+const isInteractive = computed(() =>
+    props.entry.mode === 'pinned'
+    || props.entry.interactive === true
+    || global.userSettings.value.interactive_tooltips === true
+);
+
 const anchor = ref<HTMLElement | null>(props.entry.anchorEl);
 const popupEl = ref<HTMLElement | null>(null);
 
@@ -59,8 +68,8 @@ const widthStyle = computed(() => {
 </script>
 
 <template>
-    <div ref="popupEl" class="popup dark-scrollbar"
-        v-bind="{ 'data-depth': entry.displayDepth ?? depth, 'data-popup-key': entry.key }"
+    <div ref="popupEl" class="popup dark-scrollbar" :class="{ interactive: isInteractive }"
+        v-bind="{ 'data-depth': entry.displayDepth ?? depth, 'data-popup-key': entry.key, 'data-closable': entry.closable ? '' : undefined }"
         :style="[floatingStyles, { zIndex: 10000 + (entry.displayDepth ?? depth), width: widthStyle }]"
         @mouseenter="onPopupEnter" @mouseleave="onPopupLeave">
         <button v-if="entry.closable" class="popup-close-overlay" @click="onClose" aria-label="Close">×</button>
@@ -71,7 +80,7 @@ const widthStyle = computed(() => {
 <style scoped>
 .popup {
     position: fixed;
-    pointer-events: auto;
+    pointer-events: none;
     width: 360px;
     background: rgba(15, 15, 18, 0.97);
     border: 1px solid #444;
@@ -82,6 +91,10 @@ const widthStyle = computed(() => {
     line-height: 1.5;
     overflow-y: auto;
     overscroll-behavior: contain;
+}
+
+.popup.interactive {
+    pointer-events: auto;
 }
 
 .popup-close-overlay {
@@ -190,9 +203,9 @@ const widthStyle = computed(() => {
 
 /* The .popup-close-overlay button sits absolute at top:4px right:6px and is
    ~28px wide. The cost block in .item-card's header is right-anchored with
-   margin-left: auto and lands directly under the X. Push it inward when
-   rendered inside a popup so the two don't visually collide. */
-.popup .item-card .item-cost {
+   margin-left: auto and lands directly under the X, so it needs clearance —
+   but only on popups that actually render the button (data-closable). */
+.popup[data-closable] .item-card .item-cost {
     margin-right: 28px;
 }
 </style>

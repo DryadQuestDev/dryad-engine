@@ -58,6 +58,21 @@ game.on("save_load_before", (saveData) => {
 });
 ```
 
+### save_migrated
+
+Triggered inside the save-migration pass (`registerSaveMigration`), after every declared section has synced and every `item_migrate` has fired, before equip statuses are re-bound and resource pools put back. Fires only when the pass runs: an old save, or any load in dev mode.
+
+**Use cases:**
+- Repair states, stores and flags the generic pass can't express
+- Re-stamp per-instance character state after a template resync
+
+```js
+game.on("save_migrated", () => {
+  const flags = game.getState("story_flags");
+  if (flags.chapter >= 3 && !flags.met_smith) flags.met_smith = true;
+});
+```
+
 ### html_mount
 
 Triggered when the game HTML mounts to the DOM. Note: though available for possible edge cases, it's strongly recommended you use slot-based component system instead of relying on this event as most of the html content is rerendered during the game cycle.
@@ -107,7 +122,24 @@ game.on("dungeon_create", (dungeon) => {
 });
 ```
 
-### dungeon_enter
+### dungeon_enter_before
+
+Triggered before a cross-dungeon entry, before any dungeon state changes. Return `false` to abort the entry. Room-to-room movement inside the current dungeon fires `room_enter_before` instead.
+
+**Parameters:**
+- `dungeonId` - The ID of the dungeon being entered
+- `roomId` - The ID of the room being entered
+
+```js
+game.on("dungeon_enter_before", (dungeonId, roomId) => {
+  if (dungeonId === "deep_mine" && !game.getFlag("lantern_lit")) {
+    game.showNotification("Too dark to go down.");
+    return false;
+  }
+});
+```
+
+### dungeon_enter_after
 
 Triggered when entering a dungeon.
 
@@ -120,7 +152,7 @@ Triggered when entering a dungeon.
 - Track exploration progress
 
 ```js
-game.on("dungeon_enter", (dungeonId, roomId) => {
+game.on("dungeon_enter_after", (dungeonId, roomId) => {
   let visits = game.getFlag(dungeonId + ".visits") || 0;
   game.setFlag(dungeonId + ".visits", visits + 1);
   game.showNotification("Entered " + dungeonId);
@@ -398,6 +430,48 @@ game.on("asset_render", (asset) => {
 });
 ```
 
+### asset_resolve
+
+Triggered while an image asset's `layers` stack is built, on every render path — the staged
+scene, the gallery, the fullscreen overlay, the editor preview. The listener receives a
+throwaway copy, so filtering `layers` never touches the template.
+
+Must be **pure**: it runs inside a computed, so writing reactive state from a listener risks a
+render loop, and the copy is never staged or saved.
+
+**Use cases:**
+- Pick one of several mutually exclusive plates from a character's attributes
+- Withhold an overlay plate until the scene asks for it
+- Put css classes on a single plate (a per-layer recolor)
+- Ask for `fade` so an overlay plate blooms in rather than landing on one frame
+
+```js
+game.on("asset_resolve", (asset) => {
+  if (!asset.tags?.includes("composed") || !asset.layers) return;
+
+  const hero = game.getCharacter("riko");
+  const skin = hero?.getAttribute("skin") || "pale";
+
+  asset.layers = asset.layers
+    // body_pale / body_tan / … are alternatives: keep the matching one
+    .filter((file) => {
+      const body = file.match(/body_(\w+)\./);
+      if (body) return body[1] === skin;
+      if (file.includes("fx.")) return !!asset.fx;   // {asset: "id(fx = true)"}
+      return true;
+    })
+    .map((file) => {
+      // reuse the doll's own tint classes so the still can't drift from the character
+      if (file.includes("hair.")) {
+        return { file, classes: hero?.skinLayerStyles?.get("hair_front")?.join(" ") || "" };
+      }
+      // an overlay with nothing taking its place — safe to crossfade
+      if (file.includes("fx.")) return { file, fade: true };
+      return file;
+    });
+});
+```
+
 ---
 
 ## Item Events
@@ -414,6 +488,52 @@ Triggered when an item is created.
 ```js
 game.on("item_create", (item) => {
   console.log("Created:", item.getName());
+});
+```
+
+### item_migrate
+
+Triggered for every inventory item the save-migration pass visits, right after its template-owned fields were reset, with a copy of its template. Saved items are deserialized, so `item_create` never fires for them on load.
+
+**Use cases:**
+- Put back what an `item_create` listener derived per instance (level scaling, a runtime-added choice)
+
+```js
+game.on("item_migrate", (item, template) => {
+  if (item.traits.engraved && !item.choices.includes("read_engraving")) item.choices.push("read_engraving");
+});
+```
+
+### item_drop_render
+
+Triggered to decide whether a **discard affordance renders** for an item — the item card's Drop choice and the experience plugin's reward-panel trash button both ask. Return `false` to hide it.
+
+This is the game's veto for its own protected kinds. The engine's own rules (equipped gear, `quest` rarity, `quest` category) live in `item.isDroppable()`, which each of those UIs checks alongside the emitter — so a game only writes what the engine can't know.
+
+Pure predicate: it runs on every render, so listeners must only return — never show a notification, mutate, or play a scene from here.
+
+**Use cases:**
+- Protect key items from being thrown away
+- Hide the button on gear a quest still needs
+
+```js
+game.on("item_drop_render", (item) => {
+  if (item.category === "keys") return false;
+});
+```
+
+### item_drop_before
+
+Triggered before an item is discarded via the `drop_item` action, after the player confirms in the popup. Return `false` to cancel — the engine just closes the popup silently, so a listener that blocks a drop owns the explanation (a notification, a scene, or nothing).
+
+To simply protect a kind of item, use `item_drop_render` instead — the button never appears, so this never fires. Reach for `item_drop_before` when the drop itself is the event you care about: a condition that only resolves at confirm time, or a side effect on the way out.
+
+```js
+game.on("item_drop_before", (item, char) => {
+  if (item.hasTag("bound") && !game.getFlag("curse_lifted")) {
+    game.execute({ scene: "cursed_item_refuses" });
+    return false;
+  }
 });
 ```
 
@@ -591,6 +711,64 @@ game.on("trade_init", (traderInventory, item) => {
 
 ---
 
+### inventory_transfer_after
+
+Triggered after items moved between inventories — the post-mutation counterpart of `inventory_transfer`, which fires *before* the move and can veto it.
+
+**Parameters:**
+- `inventory` - Source inventory
+- `targetInventory` - Destination inventory
+- `item` - The live target-side stack (may be a pre-existing stack the transfer merged into, not the instance that left the source)
+- `quantity` - How many moved
+- `isTrade` - True when the move is part of a trade
+
+**Use cases:**
+- Count items bought or sold
+- React to loot actually landing in the party bag
+
+```js
+game.on("inventory_transfer_after", (inv, target, item, quantity, isTrade) => {
+  if (isTrade) console.log("traded " + quantity + " " + item.id);
+});
+```
+
+### currency_change
+
+Triggered after a trade moved currency in or out of an inventory. Fires once per currency id, and only for genuine currency templates — `deductCurrency` doubles as a generic item remover, and those calls stay silent.
+
+**Parameters:**
+- `inventory` - The inventory whose stacks changed
+- `currencyId` - Currency template id
+- `delta` - Negative when paid, positive when received
+
+**Use cases:**
+- Track gold spent at traders
+- Economy statistics
+
+```js
+game.on("currency_change", (inventory, currencyId, delta) => {
+  if (delta < 0) game.progressAccolade("merchants_friend", -delta);
+});
+```
+
+### inventory_craft
+
+Triggered after a recipe was crafted — inputs consumed, outputs already added.
+
+**Parameters:**
+- `inventory` - The crafting inventory
+- `recipe` - The recipe that was crafted
+
+**Use cases:**
+- Crafting counts and achievements
+- Unlock follow-up recipes
+
+```js
+game.on("inventory_craft", (inventory, recipe) => {
+  console.log("crafted " + recipe.id);
+});
+```
+
 ## Progression Events
 
 ### recipe_learned
@@ -605,6 +783,29 @@ Triggered when a recipe is learned.
 ```js
 game.on("recipe_learned", (id) => {
   game.showNotification("Learned recipe: " + id);
+});
+```
+
+### item_discovered
+
+Triggered once per save when an item is discovered — its recipe learned from the scroll, the book
+read to its last page, the painting viewed. Drives the check mark on item cards.
+
+```js
+game.on("item_discovered", (itemId) => {
+  if (game.getDiscoveredItems().size === 38) game.showNotification("Collection complete!");
+});
+```
+
+### key_used
+
+Triggered when a key item was auto-used on a locked room or inventory. `targetId` is
+`"dungeonId.roomId"` for rooms, the inventory id for chests. Informational — the unlock already
+happened.
+
+```js
+game.on("key_used", (keyItemId, targetId) => {
+  game.setFlag("used_" + keyItemId, 1);
 });
 ```
 
@@ -638,3 +839,105 @@ game.on("skill_unlearned", (tree, skill) => {
 });
 ```
 
+
+### quest_updated
+
+Triggered after a quest log line landed. Deduped — replaying a log the quest already has does not fire it.
+
+**Parameters:**
+- `questId` - The quest's id
+- `goalId` - The goal the log belongs to
+- `result` - `{ isNewQuest, wasQuestCompleted, isQuestCompletedNow, questTitle }`
+- `dungeonId` - The dungeon the quest belongs to
+
+**Use cases:**
+- Quest completion counts
+- Chain a follow-up quest
+
+```js
+game.on("quest_updated", (questId, goalId, result, dungeonId) => {
+  if (result.isQuestCompletedNow && !result.wasQuestCompleted) {
+    game.progressAccolade("first_errand");
+  }
+});
+```
+
+## Status Events
+
+### status_apply_before
+
+Triggered before a status is applied, including reapplies of a status the character already holds. Return `false` to prevent it. When `args` is present, mutate it to change the stacks or duration that land.
+
+**Use cases:**
+- Immunity to a status or a whole status group
+- Halve or cap incoming stacks (resistances)
+- Refuse a debuff while a ward is up, and spend the ward
+
+```js
+game.on("status_apply_before", (char, status, args) => {
+  if (status.id === "burn" && char.getStat("fire_immune")) return false;
+  if (args?.stacks) args.stacks = Math.ceil(args.stacks / 2);
+});
+```
+
+### status_added
+
+Triggered after a NEW status is added. Reapplies of a status the character already holds do not fire this — use `status_apply_before` to observe those.
+
+**Use cases:**
+- Notify on gaining a debuff
+- Start visual effects tied to a status
+
+```js
+game.on("status_added", (char, status) => {
+  game.showNotification(char.getName() + " gains " + status.name);
+});
+```
+
+### status_removed
+
+Triggered after a status is removed.
+
+**Use cases:**
+- Stop visual effects
+- Trigger on-expire payoffs
+
+```js
+game.on("status_removed", (char, status) => {
+  console.log(char.getName() + " lost " + status.id);
+});
+```
+
+### status_expired
+
+Triggered per expired instance when the status duration drops to 0 or below.
+
+**Use cases:**
+- Detonate a timed status
+- Log per-instance expiry for multi-stack statuses
+
+```js
+game.on("status_expired", (char, status, instance) => {
+  console.log(status.id + " expired with " + instance.stacks + " stacks");
+});
+```
+
+## Achievement Events
+
+### accolade_completed
+
+Triggered when an achievement's progress reaches its target — once per achievement. The engine has already scored the points and queued the notification; this is where a game hands out anything the achievement should actually pay.
+
+**Parameters:**
+- `accoladeId` - The completed achievement's id
+- `points` - Its reward points (its own, or its tier's default)
+
+**Use cases:**
+- Grant currency or an item on completion
+- Play a fanfare for platinum-tier unlocks
+
+```js
+game.on("accolade_completed", (accoladeId, points) => {
+  game.getCharacter("mc").addResource("gold", points * 10);
+});
+```

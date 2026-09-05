@@ -20,9 +20,9 @@ const emit = defineEmits<{
   mouseleave: [];
 }>();
 
-// Get CSS classes from item attributes
+// Get rarity CSS classes for the slot frame
 const attributeClasses = computed(() => {
-  return props.item.getAttributeClasses();
+  return props.item.getRarityClasses();
 });
 
 // Compute affordability based on context

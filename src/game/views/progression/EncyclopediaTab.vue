@@ -579,6 +579,16 @@ function onLinkNavigate(recordId: string) {
     line-height: 1.7;
 }
 
+/* Content is injected by v-script, so scoped rules need :deep() to reach it.
+   The global reset zeroes p margins, which ran the article together as one block. */
+.record-body :deep(p) {
+    margin: 0 0 14px;
+}
+
+.record-body :deep(p:last-child) {
+    margin-bottom: 0;
+}
+
 .record-child-sep {
     border: none;
     border-top: 1px solid #3a3a3a;

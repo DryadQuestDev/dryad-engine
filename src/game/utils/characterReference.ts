@@ -50,6 +50,15 @@ export const SPINE_REFERENCE_WIDTH = SPINE_REFERENCE_HEIGHT * parseAspectRatio(C
 export const OVERLAY_BASE_SCALE = 1;
 
 /**
+ * Seconds a character's art takes to cross over to a different VIEW. One number for three
+ * things that have to stay in lockstep or the swap reads as two events instead of one:
+ * CharacterDollStatic's layer fade (its `layer-fade` CSS and the mask-activation delay that
+ * waits for it), CharacterDollSpine's snapshot dissolve, and the per-view art transform
+ * CharacterSlot eases between frames.
+ */
+export const VIEW_CROSSFADE_SECONDS = 0.5;
+
+/**
  * Resolves the per-view spine size multiplier from the active manifest.
  * `viewId` of '', undefined, or '_default' all read the `_default` entry.
  * Returns 1 when unset.

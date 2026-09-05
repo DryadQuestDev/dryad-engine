@@ -38,15 +38,9 @@ Go to **Items > Item Traits** and define fields like:
 
 ---
 
-### Item Attributes
+### Fixed-option traits (rarity)
 
-**What they are:** Categories with fixed options (like Character Attributes).
-
-| Attribute | Options |
-|-----------|---------|
-| rarity | common, uncommon, rare, legendary |
-| type | weapon, armor, accessory, consumable |
-| element | fire, ice, lightning, none |
+Traits with a `chooseOne` type give a fixed option list — `rarity` (common, uncommon, rare, epic, legendary, quest) ships this way for every game, and you can define your own in the item_traits file.
 
 **When to use:** Filtering items in UI, driving visual styles, game logic branches.
 
@@ -103,7 +97,6 @@ tab plus one tab per category, with a name search box; items with no category ap
 | Field | Description |
 |-------|-------------|
 | traits | Item's custom data (name, damage, weight, etc.) |
-| attributes | Categories (rarity, type) |
 | slots | Which equipment slots this item fits |
 | tags | For filtering and game logic |
 | category | Inventory filter category (player UI only) |
@@ -123,8 +116,7 @@ A `traits.item_level` number renders as a level badge on the item card – a pur
 | `traits.name` | "Iron Sword" |
 | `traits.damage` | 25 |
 | `traits.weight` | 5 |
-| `attributes.rarity` | common |
-| `attributes.type` | weapon |
+| `traits.rarity` | common |
 | `status.stats.damage` | 25 |
 | `status.abilities` | power_strike |
 | `status.skin_layers` | weapon_sword |
@@ -140,7 +132,8 @@ A `traits.item_level` number renders as a level badge on the item card – a pur
 | maxSize | Maximum number of stacks (0 = unlimited) |
 | maxWeight | Maximum total weight (0 = unlimited) |
 | recipes | Which crafting recipes are available here (auto-makes this a `craft` station — see ->items.apply) |
-| interactive | Custom apply interaction (`craft`, `enchant`, …). Auto-set to `craft` when `recipes` are present; set by hand only for non-crafting interactions |
+| group_recipes | Recipe groups available here (the `recipe_groups` editor tab). Every recipe in the group is added on top of `recipes`, so one station can take a whole group plus a few extras |
+| interactive | Custom apply interaction (`craft`, `enchant`, …). Auto-set to `craft` when `recipes` or `group_recipes` bring in at least one recipe; set by hand only for non-crafting interactions |
 | items | Starting items in this inventory |
 | traits | Custom inventory data (definitions live in the `inventory_traits` editor tab; plugins can inject their own, e.g. the experience plugin's `dungeon` trait) |
 | auto_create | Instantiate this inventory at game start. An inventory opened via `loot:`/`trade:` must have a live instance – without one, opening throws "Inventory not found". Use it for GLOBAL inventories (shops, shared stashes). For dungeon chests prefer the experience plugin's `dungeon` inventory trait: the inventory is created on first entry of the bound dungeon (or any dungeon sharing its level group), so contents pick up the dungeon level and lock at entry (no save-scumming). Leave both OFF for battle-loot inventories: those are read as pure drop tables by the reward system (never instantiated) |
@@ -204,6 +197,34 @@ the status itself. To make ranked variants replace each other (small_blessing �
 them the same **`group_id`** on the status template — applying one removes any other in the group,
 regardless of how it was applied (status action, consumable, or battle effect).
 
+## Usable Items
+
+An item with a `use_scene` trait gets a **Use** choice in the inventory. The trait's value is a
+scene reference (`dungeon_id.room_id.scene_id`, `room_id.scene_id`, a full `#id`, or an `&anchor`),
+and picking Use plays that scene with the item as the *active item*.
+
+The engine does nothing else: no cost, no gating, no consumption. The scene owns all of it, which is
+what makes one trait enough for every kind of usable item — a key, a letter, a single-use charm.
+
+| Inside the scene | How |
+|------------------|-----|
+| Name the item | The `\|item\|` placeholder resolves to the active item's name |
+| Show its card | `{item_view: true}` |
+| Spend it | `{remove_item: true}` removes one of that exact stack (`{remove_item: 3}` for more) |
+
+```
+#lockpick_use
+1
+%
+|I| work the |item| into the lock until something inside it gives.
+{remove_item: true}
+```
+
+> `book` and `painting` are the two specialized cousins of this trait — they render their own
+> reader / viewer instead of playing an authored scene. Reach for `use_scene` for everything else.
+
+---
+
 ---
 
 ## Accessing Items in Code
@@ -237,6 +258,8 @@ Scene actions for items (used in dungeon content). See ->builtins.actions for fu
 | `equip` | Equip/unequip by real character + item-template ids (**recommended**). `char -> item & item`, `char -> !item` to unequip, `!char.slot_type` to clear a slot, `!char` to clear all. |
 | `equip_item` / `unequip_item` | **Internal/advanced** — act on the *active item* (uid). Keep for active-item flows (`{ equip_item: true }`, e.g. an equip/unequip cancel handler). Prefer `equip` otherwise. |
 | `add_item` | Add items to an inventory by id (`"sword, potion#5"`). |
+| `remove_item` | Remove items from an inventory. `true` (or a number) takes one/N of the *active item*; otherwise the `add_item` spec (`"potion#5"`). |
+| `use_scene` | Play the scene an item's `use_scene` trait names, with that item active. Powers the auto **Use** choice. |
 | `consume_item` | Consume the active/target item. |
 | `item_slot` | Add/remove equipment *slots* on a character (`"alice->extra_ring, bob->!ring_3"`). |
 | `loot` / `trade` | Open a loot / trade exchange. A `^pool` value opens a placement-unique pool-generated inventory (experience plugin's Rewards & Scaling guide). |

@@ -1,0 +1,29 @@
+/* Battles debug tab (DebugBattles.mjs) */
+.db-panel {
+  font: 12px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1e2430; background: #fbfcfd;
+  border: 1px solid #d7dce3; border-radius: 8px; padding: 12px 14px;
+  max-height: 100%; overflow: auto;
+}
+.db-controls { display: flex; align-items: center; gap: 18px; margin-bottom: 12px; color: #4a5462; flex-wrap: wrap; }
+.db-controls .db-search { font: inherit; color: #1e2430; background: #fff; border: 1px solid #c3cad3; border-radius: 5px; padding: 3px 6px; width: 170px; }
+.db-summary { margin-left: auto; font-size: 13px; }
+.db-active { color: #c77a00; font-weight: 600; }
+
+.db-table { border-collapse: collapse; width: auto; min-width: 480px; }
+.db-table th { text-align: left; padding: 6px 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7684; background: #eef1f5; border-bottom: 1px solid #d0d6de; }
+.db-table td { padding: 5px 12px; border-bottom: 1px solid #eef1f4; vertical-align: middle; white-space: nowrap; }
+.db-table tbody tr:hover { background: #f1f4f8; }
+.db-table td:nth-child(2) { color: #10151c; font-weight: 600; }
+.db-id { opacity: 0.45; font: 10px/1 ui-monospace, monospace; margin-left: 6px; font-weight: 400; }
+.db-enemies { color: #4a5462; white-space: normal; }
+
+.db-start {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 20px; padding: 0;
+  border: 1px solid #8bbf8b; border-radius: 4px; background: #e9f6e9; color: #2e8b3d;
+  font: 11px/1 sans-serif; cursor: pointer;
+}
+.db-start:hover:not(:disabled) { background: #d6efd6; border-color: #6fae6f; }
+.db-start:active:not(:disabled) { background: #c4e8c4; }
+.db-start:disabled { opacity: 0.4; cursor: not-allowed; }

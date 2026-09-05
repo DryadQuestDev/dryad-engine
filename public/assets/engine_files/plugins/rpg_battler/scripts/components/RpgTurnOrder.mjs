@@ -25,6 +25,7 @@ export const RpgTurnOrder = defineComponent({
             char,
             id,
             side: playerSet.has(id) ? 'player' : 'enemy',
+            support: !!b.charState[id]?.support,
             isActive: id === b.activeCharId,
           };
         }).filter(Boolean);
@@ -44,7 +45,7 @@ export const RpgTurnOrder = defineComponent({
           style="cursor: pointer" @click="onSelect(entry)">
           <CharacterFace :character="entry.char"
             :size="44" :borderRadius="6"
-            :borderColor="entry.side === 'player' ? 'rgba(66, 185, 131, 0.6)' : 'rgba(239, 68, 68, 0.6)'"
+            :borderColor="entry.support ? 'rgba(250, 204, 21, 0.7)' : entry.side === 'player' ? 'rgba(66, 185, 131, 0.6)' : 'rgba(239, 68, 68, 0.6)'"
             :static-face-force="true"
             />
         </div>

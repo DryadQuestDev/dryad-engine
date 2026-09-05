@@ -34,5 +34,12 @@ export const MenuOptions: SettingsObject[] = [
         default_value: 'fast',
         values: ['none', 'slow', 'medium', 'fast', 'very_fast'],
         localizeValues: true,
+    },
+    {
+        id: 'interactive_tooltips',
+        type: 'boolean',
+        label: 'Interactive Tooltips',
+        default_value: 'false',
+        tooltip: 'Lets the mouse enter a hover card to scroll it and follow its links. Otherwise click a slot to pin its card and use it. Press T to switch it on/off.',
     }
 ]

@@ -127,8 +127,6 @@ if (recipes.has("iron_sword_recipe")) {
 | `id` | `string` | Template ID |
 | `uid` | `string` | Unique instance identifier |
 | `traits` | `Record<string, any>` | Dynamic properties (name, damage, weight, etc.) |
-| `attributes` | `Record<string, string>` | String attributes (rarity, type) |
-| `properties` | `Record<string, Property>` | Property objects attached to item |
 | `statusObject` | `any` | Status effect data when equipped |
 | `actions` | `any` | Action handlers (item_equip_before, item_use) |
 | `choices` | `string[]` | Choice IDs available when using item |
@@ -200,9 +198,9 @@ if (item.maxStack() > 1) {
 ### CSS Classes
 
 ```js
-// Get attribute-based CSS classes
-const classes = item.getAttributeClasses();
-// ["rarity_legendary", "type_weapon"]
+// Get rarity CSS classes
+const classes = item.getRarityClasses();
+// ["rarity_legendary"]
 ```
 
 ---

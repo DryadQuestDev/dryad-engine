@@ -2,7 +2,7 @@
 
 Character Views is an advanced feature for rendering characters from different angles or perspectives. It is used by plugins and custom components that need alternative character visuals -- for example, showing a character's back during RPG battles or a side profile in a cutscene.
 
-**You do not need Character Views for standard use.** Scenes, character sheets, dialogue portraits, and galleries all use the default base rendering automatically. Only define views when building custom rendering systems (e.g., battle plugins) that require non-standard character art.
+**You do not need Character Views for standard use.** Character sheets, dialogue portraits and galleries always use the default base rendering, and so do scenes until you opt a character into a view (see [Staging a View in Scenes](#staging-a-view-in-scenes)). Define views when you have alternative art for a character, or when building custom rendering systems (e.g. battle plugins) that require non-standard character art.
 
 ## How It Works
 
@@ -33,6 +33,24 @@ Character templates and statuses support `spine_views` -- an array of Spine conf
 
 Each entry overrides the default Spine rendering when the matching view is requested. A character can have a static base doll and a Spine back-view, or vice versa.
 
+## Staging a View in Scenes
+
+Scene actors render with the view named by the character's **scene_view** trait (Characters > Traits, provided by the Essentials plugin). Leave it empty -- the default -- and the character stages with the default base rendering, exactly as before.
+
+Set it on a character template to stage that character with a view permanently, or on a status to turn her around for as long as the status is held:
+
+```javascript
+// Stage this character with her back view from now on
+character.setTrait('scene_view', 'back');
+
+// Back to the default view
+character.setTrait('scene_view', '');
+```
+
+A view the character has no art for falls back to the default view rather than blanking her, so a status shared by several characters can ask for `back` without breaking the ones that never got back art.
+
+Changing the trait while the character is on stage **crossfades** her: the outgoing view fades out while the incoming one fades in over the same half second, and the per-view art placement eases across with them. No re-staging needed -- the actor stays in its slot.
+
 ## Using Views in Components
 
 Pass the `view` prop to `CharacterDoll` or `CharacterSlot` to request a specific view:
@@ -61,4 +79,10 @@ const config = character.getSpineForView('back');
 
 // Get filtered image layers for a specific view
 const layers = character.getImageLayersForView('back');
+
+// Does this character have any art for a view? (spine entry or tagged skin layers)
+character.hasArtForView('back');
+
+// The view this character currently stages with in scenes ('' = default view)
+const view = character.getSceneView();
 ```

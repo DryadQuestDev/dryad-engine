@@ -64,8 +64,6 @@ const rows = battleConfig?.rows_size || 3;
 | `item_templates` | Item template definitions |
 | `item_inventories` | Inventory template definitions |
 | `item_traits` | Item trait definitions |
-| `item_attributes` | Item attribute definitions |
-| `item_properties` | Item property definitions |
 | `item_slots` | Equipment slot definitions |
 | `item_recipes` | Crafting recipe definitions |
 

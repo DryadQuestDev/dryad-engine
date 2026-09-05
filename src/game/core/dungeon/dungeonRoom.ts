@@ -51,6 +51,10 @@ export class DungeonRoom {
 
     public defaultAssets: string[] = [];
 
+    // Lock: entering needs this item (auto-used from the party bag; keyConsume spends it).
+    public key: string = "";
+    public keyConsume: boolean = false;
+
     public actions: any = {};
 
     public getDescriptionId() {

@@ -12,12 +12,25 @@ export type DungeonLine = {
 }
 
 export type ChoiceType = 'encounter' | 'text' | 'scene';
+
+// A shadow dungeon's definition — the persisted source it is materialized from.
+export interface ShadowDungeonDefinition {
+  /** Dungeon config (the `_config_` params); dungeon_type defaults to "text". */
+  config?: Record<string, any>;
+  /** Raw DryadScript document, or a pre-parsed line array for machine-generated content. */
+  content?: string | { id: string; val?: string; params?: Record<string, any> }[];
+  /** Room objects — the same shape rooms.json holds. */
+  rooms?: any[];
+  /** Encounter objects — the same shape encounters.json holds. */
+  encounters?: any[];
+}
 import { Dungeon } from "../core/dungeon/dungeon";
 import { Populate } from "../../utility/save-system";
 import { Observable, Subscription } from 'rxjs';
 import { of, from } from 'rxjs';
 import { concatMap, delay, tap } from 'rxjs/operators';
 import { SettingsObject } from "../../schemas/settingsSchema";
+import { PARTY_INVENTORY_ID } from "./itemSystem";
 import { DungeonRoom } from "../core/dungeon/dungeonRoom";
 import { Game } from "../game";
 import { DungeonFabric } from "../core/dungeon/dungeonFabric";
@@ -31,6 +44,7 @@ import { warmImages } from "../utils/assetPreloader";
 import { CharacterSceneSlotObject } from "../../schemas/characterSceneSlotSchema";
 import { DungeonRoomObject } from "../../schemas/dungeonRoomSchema";
 import { DungeonEncounterObject } from "../../schemas/dungeonEncounterSchema";
+import { parseText } from "../../utility/functions";
 import { DungeonConfigParsed } from "../../editor/editor";
 
 // Scene ids are dot-separated and choice ids end in `*N`, so both are full of
@@ -83,6 +97,27 @@ export type SceneSlot = CharacterSceneSlotObject & {
 
 export type SceneAsset = AssetObject & {
   isRemoving?: boolean; // Flag to trigger exit animation before removal
+  removalTimeoutId?: number; // Pending removal timer, cleared if the asset is re-staged
+}
+
+/** One image plate of a stacked asset, after asset_resolve has had its say. */
+export type ResolvedAssetLayer = {
+  file: string;
+  /** Space-separated css classes for this plate alone — a per-layer recolor, say. */
+  classes?: string;
+  /**
+   * Crossfade this plate as it comes and goes, instead of appearing on one frame.
+   *
+   * Only correct for a plate that ADDS to a finished picture and has no alternative taking
+   * its place — an overlay on transparency. A plate that is one of several mutually exclusive
+   * options must NOT set it: fading between two of them leaves both in the stack at once, and
+   * whatever they cover shows through the pair for the length of the fade. Those swap on a
+   * single frame by keeping their slot and changing source, which is the default.
+   *
+   * A fading plate belongs at the TOP of the stack. Removed from the middle, every plate above
+   * it shifts down a slot and re-decodes for nothing.
+   */
+  fade?: boolean;
 }
 
 // Day-for-night colour grade applied over the scene and the map art. The tint is kept as separate
@@ -274,6 +309,7 @@ export type SceneContext = {
   eventChoices: Choice | Choice[] | null;
   isChoices: number;
   sceneSlots: SceneSlot[];
+  panelActors: string[];
   assets: SceneAsset[];
   talkingCharacterId: string | null;
 }
@@ -293,7 +329,6 @@ export class DungeonSystem {
 
   // Dungeons whose art has already been warmed — re-entering one never shows the spinner.
   @Skip()
-  private preloadedDungeons: Set<string> = new Set();
 
   // Computed property to check if there are visible encounters in current room
   @Skip()
@@ -399,9 +434,64 @@ export class DungeonSystem {
    * default had been moved/updated during the scene.
    */
   public resetToDefaultAssets(): void {
-    this.assets.value = [];
+    this.clearAssets();
     const ids = this.getDefaultAssetIds();
     if (ids.size) this.addAssets([...ids]);
+  }
+
+  /**
+   * Cancel scheduled removal for an asset, reviving it.
+   * Mirrors cancelScheduledRemoval for scene slots.
+   */
+  private cancelScheduledAssetRemoval(asset: SceneAsset): void {
+    if (asset.isRemoving) {
+      delete asset.isRemoving;
+
+      // Cancel the scheduled removal timeout
+      if (asset.removalTimeoutId !== undefined) {
+        clearTimeout(asset.removalTimeoutId);
+        delete asset.removalTimeoutId;
+      }
+    }
+  }
+
+  /**
+   * Cancel every pending asset removal timer. Called before any wholesale replacement
+   * of the assets array — an orphan timer would otherwise fire against the new array
+   * and delete a freshly staged asset.
+   */
+  private cancelAllAssetRemovals(): void {
+    for (const asset of this.assets.value) {
+      this.cancelScheduledAssetRemoval(asset);
+    }
+  }
+
+  /**
+   * The image plates an asset renders, bottom first: `file_image` then everything in
+   * `layers`. Resolution happens HERE rather than at stage time for two reasons — a staged
+   * asset is serialized verbatim into the save (`assets` carries no `@Skip()`) and nothing
+   * re-derives it on load, and the gallery/editor previews never stage at all, so they would
+   * otherwise miss the game's say entirely.
+   *
+   * The asset_resolve listener gets a throwaway copy, so filtering `layers` can never
+   * corrupt the shared template — `addAssets` copies templates shallowly, so the array
+   * handed in is the template's own.
+   */
+  public resolveAssetLayers(asset: AssetObject): ResolvedAssetLayer[] {
+    const draft: AssetObject = { ...asset };
+    this.game.trigger('asset_resolve', draft);
+
+    const plates: ResolvedAssetLayer[] = [];
+    if (draft.file_image) plates.push({ file: draft.file_image });
+
+    for (const entry of (draft.layers ?? []) as (string | ResolvedAssetLayer)[]) {
+      if (typeof entry === 'string') {
+        if (entry) plates.push({ file: entry });
+      } else if (entry?.file) {
+        plates.push({ file: entry.file, classes: entry.classes, fade: entry.fade });
+      }
+    }
+    return plates;
   }
 
   // Method to handle asset adding logic
@@ -441,10 +531,13 @@ export class DungeonSystem {
           continue;
         }
 
-        // Check if asset already exists - skip if it does (prevents duplicates)
+        // Check if asset already exists - skip if it does (prevents duplicates).
+        // A mid-exit asset is still in the array, so re-staging it here must revive it:
+        // cancel the pending removal, otherwise the orphan timer deletes the backdrop
+        // moments after the content asked for it back.
         const existingAsset = this.assets.value.find(a => a.id === assetId);
         if (existingAsset) {
-          //gameLogger.info(`[addAsset] Asset "${assetId}" already exists in scene, skipping.`);
+          this.cancelScheduledAssetRemoval(existingAsset);
           continue;
         }
 
@@ -476,6 +569,9 @@ export class DungeonSystem {
       // Check if asset already exists
       const existingAsset = this.assets.value.find(a => a.id === data.id);
       if (existingAsset) {
+        // Revive first: updating a mid-exit asset must clear isRemoving and its timer,
+        // or the element stays stranded at opacity:0 and is then deleted.
+        this.cancelScheduledAssetRemoval(existingAsset);
         // Update existing asset with new properties
         Object.assign(existingAsset, data);
         // Allow final mutations after update
@@ -537,29 +633,44 @@ export class DungeonSystem {
         const exitDuration = asset.exit_duration ?? 0.5;
         const delay = exitDuration * 1000 + 100; // Add buffer for animation
 
-        setTimeout(() => {
+        // Store timeout ID so it can be cancelled if the asset is re-staged.
+        // Remove by object IDENTITY, never by asset id: if this asset was wiped or
+        // replaced meanwhile (scene reset, the same id re-staged by a following
+        // paragraph), the stale timer must not delete the newer asset.
+        asset.removalTimeoutId = setTimeout(() => {
           if (asset.isRemoving) {
-            this.assets.value = this.assets.value.filter(a => a.id !== assetId);
+            this.assets.value = this.assets.value.filter(a => a !== asset);
             gameLogger.info(`[removeAsset] Removed asset after exit animation: "${assetId}"`);
           }
-        }, delay);
+          delete asset.removalTimeoutId;
+        }, delay) as unknown as number;
       } else {
         // No exit animation, remove immediately
-        this.assets.value = this.assets.value.filter(a => a.id !== assetId);
+        this.assets.value = this.assets.value.filter(a => a !== asset);
         gameLogger.info(`[removeAsset] Removed asset: "${assetId}"`);
       }
     }
   }
 
+  // Hand back detached copies with the removal bookkeeping stripped, same as captureSceneContext.
+  // Callers snapshot this and restore it later (rpg_battler stashes prevAssets across a fight) —
+  // a copy still flagged isRemoving would mount straight into its exit animation and sit invisible.
   public getAssets(): SceneAsset[] {
-    return [...this.assets.value];
+    return this.assets.value.map(a => {
+      const copy = { ...a };
+      delete copy.isRemoving;
+      delete copy.removalTimeoutId;
+      return copy;
+    });
   }
 
   public setAssets(assets: SceneAsset[]): void {
+    this.cancelAllAssetRemovals();
     this.assets.value = [...assets];
   }
 
   public clearAssets(): void {
+    this.cancelAllAssetRemovals();
     this.assets.value = [];
   }
 
@@ -693,6 +804,9 @@ export class DungeonSystem {
   public currentSceneIdAnimated: Ref<string | null> = ref(null);
   public talkingCharacterId: Ref<string | null> = ref(null);
   public sceneSlots: Ref<SceneSlot[]> = ref([]);
+  // Characters listed in the scene's actor panel without being staged as art — someone present in
+  // the fiction who has no portrait on stage. Scene-scoped, so it clears with the actors.
+  public panelActors: Ref<string[]> = ref([]);
 
   // Flag to skip enter animations when loading a save
   @Skip()
@@ -1154,6 +1268,10 @@ export class DungeonSystem {
   public resetScene() {
     // A direct reset supersedes any in-flight graceful exit — never tear down twice.
     this.cancelPendingExit();
+    // The book reader is scene-hosted — leaving the scene closes the book.
+    if (this.game.coreSystem.getState('reading_book')) {
+      this.game.coreSystem.setState('reading_book', null);
+    }
     // Read before currentSceneId is cleared below. enterRoom calls resetScene on every step
     // of map movement, so ambience started outside a scene must survive an unscened reset.
     const hadScene = !!this.currentSceneId.value;
@@ -1170,6 +1288,10 @@ export class DungeonSystem {
     // Keep actors that are mid-exit: their identity-based removal timers splice them
     // out when the exit animation finishes (the actor layer stays mounted for them).
     this.sceneSlots.value = this.sceneSlots.value.filter(s => s.isRemoving);
+    this.panelActors.value = [];
+    // Assets go all at once, so kill their pending timers too: a timer surviving the wipe
+    // would fire against the next scene's array and delete a backdrop that re-used the id.
+    this.cancelAllAssetRemovals();
     this.assets.value = [];
 
     // A scene's sounds die with it. Outside a scene — ordinary room movement, which runs this
@@ -1195,6 +1317,25 @@ export class DungeonSystem {
   }
 
   /**
+   * The scene's cast as live Character objects — staged actors first, then the `panel_actor`
+   * entries that have no art on stage. Mid-exit actors are included on purpose: they are still
+   * on screen playing their exit. Ids are resolved rather than trusted (deleteCharacter drops a
+   * character without purging its slot), so a dead id is skipped instead of returned as a hole.
+   */
+  public getActors(): Character[] {
+    const seen = new Set<string>();
+    const actors: Character[] = [];
+    for (const id of [...this.sceneSlots.value.map(slot => slot.char), ...this.panelActors.value]) {
+      if (!id || seen.has(id)) continue;
+      const character = this.game.getCharacter(id);
+      if (!character) continue;
+      seen.add(id);
+      actors.push(character);
+    }
+    return actors;
+  }
+
+  /**
    * Instantly remove every staged actor — no exit animations, pending removal
    * timers canceled. Used by systems that need a clean stage (e.g. battle cutaway
    * scenes) before staging their own actors.
@@ -1203,6 +1344,9 @@ export class DungeonSystem {
    * the same character revives them in place, killing the exit early.
    */
   public clearActors(keepExiting: boolean = false): void {
+    // Panel-only entries have no art and no exit animation, so there is nothing for keepExiting
+    // to preserve — they go on either path.
+    this.panelActors.value = [];
     if (keepExiting) {
       this.sceneSlots.value = this.sceneSlots.value.filter(s => s.isRemoving);
       return;
@@ -1230,6 +1374,7 @@ export class DungeonSystem {
       eventChoices: this.eventChoices.value,
       isChoices: this.isChoices,
       sceneSlots: this.sceneSlots.value.map(({ isRemoving, removalTimeoutId, ...slot }) => ({ ...slot })),
+      panelActors: [...this.panelActors.value],
       assets: this.assets.value.map(({ isRemoving, ...asset }) => ({ ...asset })),
       talkingCharacterId: this.talkingCharacterId.value,
     };
@@ -1242,11 +1387,12 @@ export class DungeonSystem {
    * so no room event can fire in the gap.
    */
   public restoreSceneContext(ctx: SceneContext): void {
-    // pending removal timers on the outgoing slots would fire against the restored
-    // array — cancel them before swapping
+    // pending removal timers on the outgoing slots and assets would fire against the
+    // restored array — cancel them before swapping
     for (const slot of this.sceneSlots.value) {
       this.cancelScheduledRemoval(slot);
     }
+    this.cancelAllAssetRemovals();
     this.currentSceneId.value = ctx.sceneId;
     // matching animated id suppresses the scene-enter animation replay
     this.currentSceneIdAnimated.value = ctx.sceneId;
@@ -1259,6 +1405,7 @@ export class DungeonSystem {
     this.eventChoices.value = ctx.eventChoices;
     this.isChoices = ctx.isChoices;
     this.sceneSlots.value = ctx.sceneSlots.map(s => ({ ...s }));
+    this.panelActors.value = [...(ctx.panelActors || [])];
     this.assets.value = ctx.assets.map(a => ({ ...a }));
     this.talkingCharacterId.value = ctx.talkingCharacterId;
     this.isRootScene.value = !ctx.sceneId;
@@ -1746,7 +1893,60 @@ export class DungeonSystem {
   }
 
   // ignore types
+  // Shared room-unlock: latch check → auto-use the key → latch, or notify locked. Used by the
+  // enterRoom gate and by enterDungeon's pre-gate (which must refuse BEFORE any dungeon state
+  // mutates — see enterDungeon).
+  private tryUnlockRoom(dungeonId: string, roomId: string, key: string, keyConsume: boolean): boolean {
+    const dungeonData = this.dungeonDatas.value.get(dungeonId);
+    if (!dungeonData) {
+      return true;
+    }
+    if (dungeonData.unlockedRooms.has(roomId)) {
+      return true;
+    }
+    if (this.game.itemSystem.tryUseKey(key, keyConsume, `${dungeonId}.${roomId}`)) {
+      dungeonData.unlockedRooms.add(roomId);
+      return true;
+    }
+    this.game.showNotification(this.game.getLine('key_missing_door'));
+    return false;
+  }
+
+  // Paging choices for the book reader (reading_book state): Next / Previous / Read again / Close,
+  // DQ9-style. Page N exists while the content line `#<base>.1.1.N` does.
+  private createBookChoices(reading: { itemId: string; dungeonId: string; base: string; page: number }): Choice[] {
+    const global = Global.getInstance();
+    const lines = this.dungeonLines.get(reading.dungeonId);
+    const pageExists = (page: number) => !!lines?.get(`#${reading.base}.1.1.${page}`);
+    const choices: Choice[] = [];
+    if (pageExists(reading.page + 1)) {
+      choices.push(this.game.logicSystem.createCustomChoice({
+        id: 'book_next', name: global.getString('book.next'), params: { read_page: reading.page + 1 },
+      }));
+    }
+    if (reading.page > 1) {
+      choices.push(this.game.logicSystem.createCustomChoice({
+        id: 'book_back', name: global.getString('book.back'), params: { read_page: reading.page - 1 },
+      }));
+    }
+    if (!pageExists(reading.page + 1) && reading.page > 1) {
+      choices.push(this.game.logicSystem.createCustomChoice({
+        id: 'book_again', name: global.getString('book.again'), params: { read_page: 1 },
+      }));
+    }
+    choices.push(this.game.logicSystem.createCustomChoice({
+      id: 'book_close', name: global.getString('book.close'), params: { read_close: true },
+    }));
+    return choices;
+  }
+
   public createChoices(sceneIdInput?: string | null): Choice | Choice[] | null {
+    // Book reader mode: while reading, pages get ONLY the paging choices.
+    const readingBook = this.game.coreSystem.getState('reading_book') as { itemId: string; dungeonId: string; base: string; page: number } | null;
+    const sceneIdForBook = sceneIdInput || this.currentSceneId.value;
+    if (readingBook && sceneIdForBook && sceneIdForBook.startsWith(`#${readingBook.base}.`)) {
+      return this.createBookChoices(readingBook);
+    }
     //let isAnySceneActions = this.delayedActionObject && Object.keys(this.delayedActionObject).length > 0;
     let choices: Choice | Choice[] | null = null;
 
@@ -1808,6 +2008,11 @@ export class DungeonSystem {
           name: '',
           params: this.delayedActionObject
         });
+        // Fires once. A delayed action that navigates rebuilds these choices anyway, but one
+        // that parks the scene on a popup ({xp}, {choose_item}) leaves this choice live and
+        // re-runnable underneath it. Survives a mid-battle cutaway: restoreSceneContext puts
+        // back this very object, latch included.
+        choices.oneShot = true;
         return choices!;
       }
 
@@ -1973,8 +2178,58 @@ export class DungeonSystem {
   // ignore types
   public selectEncounter(encounter: DungeonEncounter) {
     if (!this.game.trigger('encounter_selected', encounter.id, this.currentDungeonId.value ?? '')) return;
+    // Re-selecting what is already on screen is a re-centre, not a new encounter: the map icon
+    // stays clickable while selected, and cycleToNextEncounter wraps onto the same id in a
+    // one-encounter room. Neither should re-fire the actions or wipe the flash they raised.
+    const isReselect = this.selectedEncounterId.value === encounter.id;
     this.selectedEncounterId.value = encounter.id;
+    if (!isReselect) {
+      // Flashes belong to the block of text they were raised under, so swapping the text out
+      // clears them — the same contract playScene keeps between scene paragraphs. Replaced,
+      // never emptied in place: addLog stores the array by reference.
+      this.cachedFlashArray.value = [];
+      this.runEncounterActions(encounter);
+    }
     this.centerToActiveEncounter(true);
+  }
+
+  /** Back to the room description. Its own actions already ran on room entry. */
+  public deselectEncounter() {
+    this.selectedEncounterId.value = null;
+    this.cachedFlashArray.value = [];
+  }
+
+  /**
+   * Fire the inline `{...}` actions authored in an encounter's text. Encounter text renders
+   * from a computed, so the actions cannot ride along with the resolve that renders it —
+   * they would fire again on every re-evaluation, re-applying statuses and stacking duplicate
+   * flash lines. Same split playScene uses for a scene paragraph: resolve for actions here,
+   * render with `noExecuteActions`.
+   *
+   * Deliberately the whole resolve rather than `resolveActions(actions)`: it keeps `{redirect}`
+   * inert in encounter text, which is what resolveTextActions' early return already gave us.
+   */
+  public runEncounterActions(encounter: DungeonEncounter | null | undefined) {
+    if (!encounter?.rawContent || !encounter.getVisibilityState()) {
+      return;
+    }
+    this.game.logicSystem.resolveString(encounter.rawContent);
+  }
+
+  /**
+   * Arriving in a room puts its description on screen with no click, so that is when the
+   * description's actions fire. A text dungeon lists every encounter in the room at once,
+   * so those are on screen too and fire alongside it; a map dungeon shows one at a time and
+   * waits for selectEncounter.
+   */
+  private runRoomEncounterActions(room: DungeonRoom) {
+    this.runEncounterActions(room.descriptionEncounter);
+    if (this.currentDungeon.value?.dungeon_type !== 'text') {
+      return;
+    }
+    for (const encounter of this.getVisibleEncountersInCurrentRoom()) {
+      this.runEncounterActions(encounter);
+    }
   }
 
   /**
@@ -2189,6 +2444,113 @@ export class DungeonSystem {
   @Populate(DungeonData, { mode: 'merge' })
   public dungeonDatas: Ref<Map<string, DungeonData>> = ref(new Map());
 
+  // ── Shadow dungeons ──
+  // Runtime-defined dungeons (addShadowDungeon): their DEFINITIONS live here and serialize with
+  // the save; the four runtime maps are (re)materialized from them — at define time, and from the
+  // raw save JSON in save_load_before, so a save made inside a shadow dungeon self-heals on load.
+  public shadowDungeons: Ref<Map<string, ShadowDungeonDefinition>> = ref(new Map());
+
+  /**
+   * Define (or replace) a shadow dungeon — a runtime-constructed dungeon indistinguishable from an
+   * authored one to the whole engine (enterable, scene-playable, cross-referenceable). The id MUST
+   * start with "_" so it can never collide with authored dungeons. `content` is raw DryadScript
+   * (parsed with the real content parser) or a pre-parsed line array; `config` becomes the
+   * dungeon's `_config_` (dungeon_type defaults to "text"); `rooms`/`encounters` take the same
+   * objects the JSON files hold. Re-defining replaces the content but keeps the dungeon's saved
+   * data (flags, visited rooms) — use a fresh id for a fresh state.
+   */
+  public addShadowDungeon(id: string, definition: ShadowDungeonDefinition = {}): void {
+    if (!id.startsWith('_')) {
+      throw new Error(`Shadow dungeon id "${id}" must start with "_" (authored ids never do).`);
+    }
+    if (this.dungeonLines.has(id) && !this.shadowDungeons.value.has(id)) {
+      throw new Error(`Dungeon id "${id}" already exists and is not a shadow dungeon.`);
+    }
+    this.shadowDungeons.value.set(id, definition);
+    this.materializeShadowDungeon(id, definition);
+  }
+
+  /** Remove a shadow dungeon (refused while the player is inside it). */
+  public removeShadowDungeon(id: string): boolean {
+    if (!this.shadowDungeons.value.has(id)) {
+      return false;
+    }
+    if (this.currentDungeonId.value === id) {
+      gameLogger.error(`[shadow] Cannot remove "${id}" — the player is inside it.`);
+      return false;
+    }
+    this.shadowDungeons.value.delete(id);
+    this.dungeonLines.delete(id);
+    this.dungeonRooms.delete(id);
+    this.dungeonEncounters.delete(id);
+    this.dungeonDatas.value.delete(id);
+    const registry = this.game.coreSystem.dataRegistry;
+    registry.delete(`dungeons/${id}/content_parsed`);
+    registry.delete(`dungeons/${id}/rooms`);
+    registry.delete(`dungeons/${id}/encounters`);
+    return true;
+  }
+
+  /**
+   * Rebuild the runtime maps from shadow definitions — the live registry by default, or the raw
+   * definitions object read straight out of a save file (save_load_before), so deserialization
+   * merges dungeon data onto real instances and the current dungeon can restore inside a shadow.
+   */
+  public rematerializeShadowDungeons(rawDefinitions?: Record<string, ShadowDungeonDefinition>): void {
+    const entries = rawDefinitions
+      ? Object.entries(rawDefinitions)
+      : [...this.shadowDungeons.value.entries()];
+    for (const [id, definition] of entries) {
+      try {
+        this.materializeShadowDungeon(id, definition);
+      } catch (e) {
+        gameLogger.error(`[shadow] Failed to materialize "${id}": ${e}`);
+      }
+    }
+  }
+
+  private materializeShadowDungeon(id: string, definition: ShadowDungeonDefinition): void {
+    const rawLines = typeof definition.content === 'string'
+      ? parseText(definition.content)
+      : (definition.content || []);
+    const linesMap = new Map<string, DungeonLine>();
+    for (const line of rawLines) {
+      if (line?.id) linesMap.set(line.id, line as DungeonLine);
+    }
+    // config: parsed _config_ (if the content carried one) under the explicit config, id enforced
+    const config = {
+      dungeon_type: 'text',
+      ...((linesMap.get('_config_')?.params as any) || {}),
+      ...(definition.config || {}),
+      id,
+    };
+    linesMap.set('_config_', { id: '_config_', params: config } as any);
+
+    const roomsMap = new Map<string, DungeonRoomObject>();
+    for (const room of definition.rooms || []) {
+      if (room?.id) roomsMap.set(room.id, room);
+    }
+    if (config.dungeon_type === 'screen' && roomsMap.size === 0) {
+      roomsMap.set('main', { id: 'main', uid: 'main' } as DungeonRoomObject);
+    }
+    const encountersMap = new Map<string, DungeonEncounterObject>();
+    for (const encounter of definition.encounters || []) {
+      if (encounter?.id) encountersMap.set(encounter.id, encounter);
+    }
+
+    if (!this.dungeonDatas.value.has(id)) {
+      this.dungeonDatas.value.set(id, new DungeonData());
+    }
+    this.dungeonLines.set(id, linesMap);
+    this.dungeonRooms.set(id, roomsMap);
+    this.dungeonEncounters.set(id, encountersMap);
+    const registry = this.game.coreSystem.dataRegistry;
+    registry.set(`dungeons/${id}/content_parsed`, linesMap);
+    registry.set(`dungeons/${id}/rooms`, roomsMap);
+    registry.set(`dungeons/${id}/encounters`, encountersMap);
+    gameLogger.info(`[shadow] Dungeon "${id}" materialized (${linesMap.size} lines, ${roomsMap.size} rooms, ${encountersMap.size} encounters).`);
+  }
+
   // ignore types
   public getDungeonId(dungeonId: string | null): string {
     if (dungeonId) {
@@ -2391,41 +2753,85 @@ export class DungeonSystem {
    * Fetch and decode the current dungeon's art (background, fog mask, encounter images) before
    * the map is shown, so it draws in one piece instead of popping in image by image. The map
    * hides itself and the toolbar shows a spinner while this runs. Text dungeons have no art to
-   * wait for, and a dungeon is only ever warmed once.
+   * wait for, and art still resident in the image cache is skipped without showing the spinner.
    */
   private async preloadDungeonAssets(): Promise<void> {
     const dungeon = this.currentDungeon.value;
-    if (!dungeon || dungeon.dungeon_type === 'text' || this.preloadedDungeons.has(dungeon.id)) {
+    if (!dungeon || dungeon.dungeon_type === 'text') {
       this.dungeonAssetsLoaded.value = true;
       return;
     }
-
-    this.dungeonAssetsLoaded.value = false;
 
     const images: (string | undefined)[] = [dungeon.image, dungeon.fog_image];
     for (const encounter of dungeon.encounters.values()) {
       images.push(encounter.image);
     }
 
-    await warmImages(images);
+    // Residency decides whether the player waits, not a set of already-warmed dungeon ids: that
+    // set never learned about eviction, so a revisit skipped the warm and the map drew itself
+    // back in piece by piece. Warm either way — for art that is still cached this is only a
+    // touch, and map art is the one thing that needs it: the background <img> carries no
+    // v-persist and the fog is an SVG <image>, so nothing re-references them and they would
+    // otherwise sink to the eviction end while doll and item art keeps getting promoted.
+    const core = this.game.coreSystem;
+    if (images.every((url) => !url || core.hasImage(url))) {
+      this.dungeonAssetsLoaded.value = true;
+      void warmImages(images);
+      return;
+    }
 
-    this.preloadedDungeons.add(dungeon.id);
+    this.dungeonAssetsLoaded.value = false;
+    await warmImages(images);
     // The player may have travelled on while the art was loading.
     if (this.currentDungeonId.value !== dungeon.id) return;
 
     this.dungeonAssetsLoaded.value = true;
-    this.centerToActiveLocation(true);
+    // Reveal, not movement — the room was already centered when the dungeon was entered, and
+    // enterDungeon is this method's only caller. The `.assets-loading` opacity drops on the same
+    // tick, so a glide here would be revealed mid-flight.
+    this.centerToActiveLocation();
+  }
+
+  // Encumbrance movement block: free navigation is blocked while the party bag is overweight, but
+  // ONLY when no scene is active (currentSceneId null). A scene-driven {enter} runs with a scene
+  // set, so it always proceeds — a scene that hands you an over-weight item and then moves you can
+  // never softlock. Generic no-op unless a game caps the party inventory (isOverweight is false at
+  // maxWeight <= 0). Notifies and returns true when it blocks.
+  private isMovementBlocked(): boolean {
+    if (this.currentSceneId.value != null) return false;
+    const party = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
+    if (!party?.isOverCapacity()) return false;
+    this.global.addNotificationId('over_encumbered_move');
+    return true;
   }
 
   // ignore types
   public enterDungeon(dungeonId: string, roomId: string) {
     //this.setGameState('Exploration');
 
+    if (this.isMovementBlocked()) return;
 
     if (this.currentDungeonId.value === dungeonId) {
       this.enterRoom(roomId);
       return;
     }
+
+    // Key pre-gate for cross-dungeon entry: the target room's lock must refuse HERE, before any
+    // dungeon state mutates — enterRoom's own gate would fire after the dungeon switch and leave
+    // a half-entered dungeon (no valid current room, bricked saves). Scene-driven entries bypass
+    // locks, same as enterRoom.
+    const targetRoomObject = this.dungeonRooms.get(dungeonId)?.get(roomId);
+    if (targetRoomObject?.key && this.currentSceneId.value == null) {
+      if (!this.tryUnlockRoom(dungeonId, roomId, targetRoomObject.key, !!targetRoomObject.key_consume)) {
+        return;
+      }
+    }
+
+    // Last point at which nothing has moved yet: the line below is the first mutation, and from
+    // there until currentRoomId is written inside enterRoom the state is half-entered. A listener
+    // that refuses here aborts with none of it touched — and one that only observes (an autosave)
+    // sees the player still outside.
+    if (!this.game.trigger('dungeon_enter_before', dungeonId, roomId)) return;
 
     this.currentDungeonId.value = dungeonId;
     // Directly load the dungeon. The watchEffect will see currentDungeon match activeDungeonId.
@@ -2436,7 +2842,10 @@ export class DungeonSystem {
     // enterRoom may play a first scene whose {music: X} action should win over this.
     this.game.setMusic(this.currentDungeon.value?.music || false);
 
-    this.enterRoom(roomId);
+    // Snap: reached only past the same-dungeon short-circuit above, so the map container is about
+    // to show a different dungeon while still holding the previous one's scroll offset (its v-if
+    // never flips between two map dungeons). The camera has to cut, not travel across it.
+    this.enterRoom(roomId, true);
 
     // Fire-and-forget: entering stays synchronous, the map just stays hidden until the art lands.
     this.preloadDungeonAssets();
@@ -2448,14 +2857,33 @@ export class DungeonSystem {
       this.game.logicSystem.resolveActions(this.currentDungeon.value.actions.dungeon_enter);
       console.log("dungeon_enter actions resolved");
     }
-    this.game.trigger('dungeon_enter', dungeonId, roomId);
+    this.game.trigger('dungeon_enter_after', dungeonId, roomId);
   }
 
+  /**
+   * @param snap Cut the camera to the room instead of gliding to it. Set by a cross-dungeon entry
+   * (enterDungeon), where the reused map container still holds the previous dungeon's scroll
+   * offset. It assumes the caller has just swapped the dungeon in reactively — see the scheduling
+   * note at the centering call below.
+   */
   // ignore types
-  public enterRoom(roomId: string): Boolean {
+  public enterRoom(roomId: string, snap = false): Boolean {
+
+    // Encumbrance block runs before any enter logic (room_enter_before never fires when blocked).
+    if (this.isMovementBlocked()) return false;
 
     let dungeon = this.currentDungeon.value!;
     let room = dungeon.getRoomById(roomId)!;
+
+    // Key lock: auto-use the key from the party bag, or refuse entry. Runs before any
+    // room_enter logic so listeners never see a refused entry. Scene-driven movement bypasses
+    // the lock (same contract as isMovementBlocked — a story {enter} can never softlock).
+    if (room.key && this.currentSceneId.value == null) {
+      if (!this.tryUnlockRoom(dungeon.id, roomId, room.key, room.keyConsume)) {
+        return false;
+      }
+    }
+
     if (room.actions?.room_enter_before) {
       this.game.logicSystem.resolveActions(room.actions.room_enter_before);
     }
@@ -2476,9 +2904,21 @@ export class DungeonSystem {
       }
     }
 
-    setTimeout(() => {
-      this.centerToActiveLocation(true);
-    }, 0);
+    if (snap) {
+      // nextTick, not setTimeout: it lands in the same checkpoint that patches #sub-wrapper to the
+      // new dungeon's size, so the map never paints a frame at the old scroll offset — and the
+      // scroll still clamps against the NEW content extent, not the outgoing dungeon's. This holds
+      // because the only snap caller reassigns currentDungeon two statements earlier, queueing a
+      // render job for nextTick to chain onto.
+      nextTick(() => this.centerToActiveLocation());
+    } else {
+      // Deferred on purpose: #sub-wrapper's width/height are inline styles patched on Vue's flush,
+      // so a synchronous scroll would clamp against the previous extent. A macrotask is fine here —
+      // a same-dungeon move animates anyway, so an intervening paint costs nothing.
+      setTimeout(() => {
+        this.centerToActiveLocation(true);
+      }, 0);
+    }
     this.selectedEncounterId.value = null;
 
     // Before room_enter_after, so a listener already sees anything this reveals.
@@ -2489,6 +2929,10 @@ export class DungeonSystem {
     }
     this.game.trigger('room_enter_after', roomId, dungeon.id);
     gameLogger.info(`Room ${roomId} entered`);
+
+    // After room_enter_after, so an `if{}` in the description reads the room's settled state.
+    // Before triggerEvent, whose scene takes the box over and wipes the flash line-up anyway.
+    this.runRoomEncounterActions(room);
 
     this.triggerEvent();
     return true; // room can be entered
@@ -2623,7 +3067,7 @@ export class DungeonSystem {
     if (smooth) {
       behavior = 'smooth';
     } else {
-      behavior = 'auto';
+      behavior = 'instant';
     }
     if (!this.currentRoom.value) {
       return;
@@ -2675,7 +3119,7 @@ export class DungeonSystem {
     if (smooth) {
       behavior = 'smooth';
     } else {
-      behavior = 'auto';
+      behavior = 'instant';
     }
 
     const zoomFactor = this.game.coreSystem.getState<number>('map_zoom_factor');
@@ -2929,6 +3373,12 @@ export class DungeonSystem {
     return nameLine?.val || dungeonId;
   }
 
+  /** A dungeon's parsed `_config_` params by id (id, dungeon_type, traits, actions, ...). Works for
+   *  any dungeon, not just the current one; undefined if the id is unknown. */
+  public getDungeonConfig(dungeonId: string): DungeonConfigParsed | undefined {
+    return this.dungeonLines.get(dungeonId)?.get('_config_')?.params as DungeonConfigParsed | undefined;
+  }
+
   public getQuestTitle(dungeonId: string, questId: string): string {
     const line = this.getQuestLine(dungeonId, questId, 'main', '');
     if (!line) {
@@ -3020,12 +3470,14 @@ export class DungeonSystem {
     this.quests.value = new Map(this.quests.value);
 
     // Return quest state info for caller to handle flash notifications
-    return {
+    const result = {
       isNewQuest,
       wasQuestCompleted,
       isQuestCompletedNow: this.isQuestCompleted(quest),
       questTitle: this.getQuestTitle(dungeonId, questId)
     };
+    this.game.trigger('quest_updated', quest.id, goalId, result, dungeonId);
+    return result;
   }
 
   // Quest System End
@@ -3094,7 +3546,7 @@ export class DungeonSystem {
 
   // ignore types
   public async replayScene(sceneId: string, dungeonId: string, unlocked: boolean): Promise<void> {
-    if (!unlocked) {
+    if (!unlocked && !this.game.getState('replay_mode_unlock_scenes')) {
       Global.getInstance().addNotificationId("error_replay_scene_locked");
       return;
     }

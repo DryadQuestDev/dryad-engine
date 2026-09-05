@@ -20,7 +20,8 @@ const result = battle.start({ battleId: 'forest_ambush' });
 const result = battle.start({
     enemies: [
         { character_id: 'goblin_warrior', amount: 2 },
-        { character_id: 'goblin_shaman', amount: 1, is_live_instance: false }
+        { character_id: 'goblin_shaman', amount: 1 },
+        { is_live_instance: true, live_character_ids: ['grix_the_turncoat', 'mara_the_turncoat'] }
     ],
     background: 'forest_bg'
 });
@@ -45,9 +46,16 @@ const result = battle.start({
 
 | Field | Type | Description |
 |---|---|---|
-| `character_id` | string | Character template ID (or live character ID if `is_live_instance`) |
-| `is_live_instance` | boolean | If true, fetch existing character instead of creating from template |
-| `amount` | number | Number to spawn (default: 1) |
+| `is_live_instance` | boolean | If true, bring an existing live character in as-is instead of spawning a copy from a template |
+| `character_id` | string | Character template ID. Template entries only |
+| `live_character_ids` | string[] | IDs of the live characters to bring in, one enemy each. Live entries only |
+| `amount` | number | Number to spawn (default: 1). Template entries only — a live entry's count is how many IDs it lists |
+
+A live enemy is the persistent character itself: it keeps its own stats, abilities and equipment,
+enters the fight at full health, and survives the teardown that deletes spawned enemies. Any
+scaling applied to it is snapshotted and put back when the battle ends. Live characters are made
+at runtime by game scripts (`game.createCharacter`), so the editor field is free text rather than
+a dropdown — an ID with no live character behind it is skipped with an error in the console.
 
 **Failure reasons:** `not_found`, `no_enemies`, `no_party`, `prevented` (emitter returned false), `already_active` (a battle is already running — `start()` never replaces a live battle).
 

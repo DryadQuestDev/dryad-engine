@@ -31,6 +31,13 @@ const props = defineProps({
   triggerClear: {
     type: Number,
     required: true,
+  },
+  // The main tab list shares its ID field with Dbookmarks via editor.idFilter (per-tab
+  // persisted). Embedded standalone instances (e.g. inside a popup sifting a different
+  // file's entities) must opt out, or their ID filter corrupts the host tab's.
+  syncSharedIdFilter: {
+    type: Boolean,
+    default: true,
   }
 });
 
@@ -48,12 +55,19 @@ const showIdField = ref(false);
 const numericSchemaKeys = ref<string[]>([]);
 const chooseOneSchemaFields = ref<{ path: string; options: any[] }[]>([]);
 const chooseManySchemaFields = ref<{ path: string; options: any[] }[]>([]);
-const stringArraySchemaFields = ref<{ path: string; uniqueValues?: Set<string | number> }[]>([]);
+const stringArraySchemaFields = ref<{ path: string }[]>([]);
 const combinedTagFieldsForTemplate = ref<{ path: string; options: { value: string | number; label: string }[]; isStringArray: boolean }[]>([]);
+// Filter checkboxes only show values present in at least one entry — schema option
+// lists (e.g. every status id via fromFile) stay intact for the form UI
+const visibleChooseOneFields = ref<{ path: string; options: { value: any; label: string }[] }[]>([]);
+const usedFilterValues = ref<Record<string, Set<string>>>({});
+// string[] options come from the data alone, so a checked value that vanishes can't be
+// recovered from its dot-mangled control name — remember the raw value while it's checked
+const stringArrayValueMemory: Record<string, Map<string, string>> = {};
 
-// Lazy-compute: track accordion state and stale tag data
+// Lazy-compute: track accordion state and stale data-derived options
 const openPanels = ref<string[]>([]);
-const tagDataStale = ref(true);
+const optionDataStale = ref(true);
 
 function onPanelsUpdate(val: any) {
     openPanels.value = Array.isArray(val) ? [...val] : [];
@@ -70,11 +84,11 @@ const formState = reactive({
 
 // --- Two-way sync with shared editor.idFilter (Dbookmarks search box) ---
 watch(() => editor.idFilter.value, (v) => {
-  if (formState.id !== v) formState.id = v;
+  if (props.syncSharedIdFilter && formState.id !== v) formState.id = v;
 }, { immediate: true });
 
 watch(() => formState.id, (v) => {
-  if (editor.idFilter.value !== v) editor.idFilter.value = v;
+  if (props.syncSharedIdFilter && editor.idFilter.value !== v) editor.idFilter.value = v;
 });
 
 // --- Helper Functions ---
@@ -159,42 +173,105 @@ function findStringArrayKeysRecursive(schema: any, currentPath: string = '', key
     return keys;
   }
 
-// Update unique values for string arrays (used in tags)
-function updateStringArrayUniqueValues(data: any[]): void {
-  stringArraySchemaFields.value.forEach(field => {
-          const uniqueValues = new Set<string>();
-    (data || []).forEach(item => {
-      const values = getProperty(item, field.path);
-              if (Array.isArray(values)) {
-                  values.forEach(val => {
-                      if (typeof val === 'string' && val.trim() !== '') {
-                          uniqueValues.add(val.trim());
-                      } 
-                  });
-              }
-          });
-          field.uniqueValues = uniqueValues;
-      });
-  }
+// Single pass over the tab's entries collecting the values actually used per filter path
+function updateUsedFilterValues(data: any[]): void {
+  const sets: Record<string, Set<string>> = {};
+  const scalarPaths = chooseOneSchemaFields.value.map(f => f.path);
+  const chooseManyPaths = chooseManySchemaFields.value.map(f => f.path);
+  const stringArrayPaths = stringArraySchemaFields.value.map(f => f.path);
+  [...scalarPaths, ...chooseManyPaths, ...stringArrayPaths].forEach(path => { sets[path] = new Set<string>(); });
 
-// Combine chooseMany and stringArray fields for the tag filter UI
+  (data || []).forEach(item => {
+    scalarPaths.forEach(path => {
+      const value = getProperty(item, path);
+      if (value !== undefined && value !== null && value !== '') sets[path].add(String(value));
+    });
+    chooseManyPaths.forEach(path => {
+      const values = getProperty(item, path);
+      if (Array.isArray(values)) {
+        values.forEach(val => {
+          if (val !== undefined && val !== null && val !== '') sets[path].add(String(val));
+        });
+      }
+    });
+    stringArrayPaths.forEach(path => {
+      const values = getProperty(item, path);
+      if (Array.isArray(values)) {
+        values.forEach(val => {
+          if (typeof val === 'string' && val.trim() !== '') sets[path].add(val.trim());
+        });
+      }
+    });
+  });
+  usedFilterValues.value = sets;
+}
+
+// An option the user has checked stays visible even once no entry uses it — editing away
+// the last usage must never leave a filter applied with no checkbox to switch it off
+function isSelectionChecked(path: string, value: any): boolean {
+  return formState.selected[path]?.[getControlName(value)] === true;
+}
+
+function isTagChecked(path: string, value: any): boolean {
+  return formState.tag[path]?.values?.[getControlName(value)] === true;
+}
+
+// Combine chooseMany and stringArray fields for the tag filter UI, keeping only
+// options used by at least one entry and dropping groups left empty
 function updateCombinedTagFieldsForTemplate(): void {
   const chooseManyMapped = chooseManySchemaFields.value.map(f => ({
           path: f.path,
     options: (f.options?.map(opt => ({
         value: opt.value !== undefined ? opt.value : opt,
         label: opt.label !== undefined ? opt.label : String(opt.value !== undefined ? opt.value : opt),
-    })) ?? []).sort((a, b) => a.label.localeCompare(b.label)),
+    })) ?? []).filter(opt => usedFilterValues.value[f.path]?.has(String(opt.value)) || isTagChecked(f.path, opt.value))
+      .sort((a, b) => a.label.localeCompare(b.label)),
     isStringArray: false,
   }));
 
-  const stringArrayMapped = stringArraySchemaFields.value.map(f => ({
-          path: f.path,
-          options: Array.from(f.uniqueValues ?? []).map(val => ({ value: val, label: String(val) })).sort((a, b) => a.label.localeCompare(b.label)),
-    isStringArray: true,
-  }));
+  const stringArrayMapped = stringArraySchemaFields.value.map(f => {
+    const used = Array.from(usedFilterValues.value[f.path] ?? []);
+    const memory = stringArrayValueMemory[f.path] ?? (stringArrayValueMemory[f.path] = new Map<string, string>());
+    used.forEach(val => memory.set(getControlName(val), val));
 
-  combinedTagFieldsForTemplate.value = [...chooseManyMapped, ...stringArrayMapped].sort((a,b) => a.path.localeCompare(b.path));
+    const values = new Set(used);
+    const checked = formState.tag[f.path]?.values ?? {};
+    for (const key in checked) {
+      if (checked[key] === true && memory.has(key)) values.add(memory.get(key)!);
+    }
+    memory.forEach((val, key) => { if (!values.has(val)) memory.delete(key); });
+
+    return {
+      path: f.path,
+      options: Array.from(values).map(val => ({ value: val, label: String(val) })).sort((a, b) => a.label.localeCompare(b.label)),
+      isStringArray: true,
+    };
+  });
+
+  combinedTagFieldsForTemplate.value = [...chooseManyMapped, ...stringArrayMapped]
+    .filter(f => f.options.length > 0)
+    .sort((a,b) => a.path.localeCompare(b.path));
+}
+
+function rebuildVisibleFilterOptions(): void {
+  visibleChooseOneFields.value = chooseOneSchemaFields.value
+    .map(f => ({
+      path: f.path,
+      options: f.options.filter((opt: any) =>
+        usedFilterValues.value[f.path]?.has(String(opt.value)) || isSelectionChecked(f.path, opt.value)),
+    }))
+    .filter(f => f.options.length > 0);
+  updateCombinedTagFieldsForTemplate();
+}
+
+function recomputeFilterOptions(): void {
+  updateUsedFilterValues(props.data || []);
+  rebuildVisibleFilterOptions();
+  optionDataStale.value = false;
+}
+
+function isFilterPanelOpen(): boolean {
+  return openPanels.value.includes('tags') || openPanels.value.includes('selections');
 }
 
 // Helper to get a safe string representation for keys/control names
@@ -235,7 +312,7 @@ const applySift = () => {
 
     // Selection Filters
      sifter.selected = [];
-    chooseOneSchemaFields.value.forEach(field => {
+    visibleChooseOneFields.value.forEach(field => {
         const selectionGroup = formState.selected[field.path];
         if (selectionGroup) {
             let selectedValues: (string | number)[] = [];
@@ -311,6 +388,7 @@ watch(() => props.schema, (newSchema) => {
         formState.range = {};
         formState.selected = {};
         formState.tag = {};
+        for (const path in stringArrayValueMemory) delete stringArrayValueMemory[path];
 
         // Initialize formState structure based on new schema keys
         numericSchemaKeys.value.forEach(path => {
@@ -322,24 +400,30 @@ watch(() => props.schema, (newSchema) => {
                 formState.selected[field.path][getControlName(opt.value)] = false;
             });
         });
-        // Initialize tags — defer expensive data scan, just mark stale
-        tagDataStale.value = true;
-        if (openPanels.value.includes('tags')) {
-            updateStringArrayUniqueValues(props.data || []);
-            tagDataStale.value = false;
-        }
-        updateCombinedTagFieldsForTemplate(); // Build from schema (stringArray options may be empty if stale)
-        combinedTagFieldsForTemplate.value.forEach(field => {
+        // Init tag groups from the RAW schema lists — the visible (filtered) lists may be
+        // empty while stale, and the template's v-models need the group objects to exist
+        chooseManySchemaFields.value.forEach(field => {
             formState.tag[field.path] = { logic: false, values: {} };
              field.options.forEach(opt => {
                 formState.tag[field.path].values[getControlName(opt.value)] = false;
             });
         });
+        stringArraySchemaFields.value.forEach(field => {
+            if (!formState.tag[field.path]) formState.tag[field.path] = { logic: false, values: {} };
+        });
+        // Defer the expensive entry scan until a filter panel is open
+        optionDataStale.value = true;
+        if (isFilterPanelOpen()) {
+            recomputeFilterOptions();
+        } else {
+            visibleChooseOneFields.value = [];
+            combinedTagFieldsForTemplate.value = [];
+        }
 
          clearFilters(); // Reset form values but keep structure
          // Re-apply the per-tab persisted ID filter (restored into editor.idFilter by Dform
          // before the async schema load completes) — schema change must not wipe it
-         formState.id = editor.idFilter.value;
+         if (props.syncSharedIdFilter) formState.id = editor.idFilter.value;
     } else {
         // Clear everything if schema is null
         showIdField.value = false;
@@ -348,8 +432,11 @@ watch(() => props.schema, (newSchema) => {
         chooseManySchemaFields.value = [];
         stringArraySchemaFields.value = [];
         combinedTagFieldsForTemplate.value = [];
+        visibleChooseOneFields.value = [];
+        usedFilterValues.value = {};
+        for (const path in stringArrayValueMemory) delete stringArrayValueMemory[path];
         clearFilters(); // Also clear values
-        formState.id = editor.idFilter.value; // Keep persisted ID filter through null-schema transitions
+        if (props.syncSharedIdFilter) formState.id = editor.idFilter.value; // Keep persisted ID filter through null-schema transitions
     }
 }, { immediate: true });
 
@@ -366,26 +453,26 @@ watch(() => props.data, (newData, oldData) => {
         sifterManager.setObj([]); // Ensure it's cleared if data becomes null
     }
 
-    // Update unique values needed for tag filters — only if tags panel is open
-    if (stringArraySchemaFields.value.length > 0) {
-        if (openPanels.value.includes('tags')) {
-            updateStringArrayUniqueValues(newData || []);
-            updateCombinedTagFieldsForTemplate();
-            tagDataStale.value = false;
+    // Recompute data-derived filter options — only while a filter panel is open; a closed
+    // panel just goes stale, and checked options survive the rebuild either way
+    const hasFilterFields = chooseOneSchemaFields.value.length > 0
+        || chooseManySchemaFields.value.length > 0
+        || stringArraySchemaFields.value.length > 0;
+    if (hasFilterFields) {
+        if (isFilterPanelOpen()) {
+            recomputeFilterOptions();
         } else {
-            tagDataStale.value = true;
+            optionDataStale.value = true;
         }
     }
     applySift(); // Re-apply filter when data source changes OR when it becomes null/empty
 }, { deep: true, immediate: true });
 
 
-// Watch accordion panels — recompute tag data when tags panel opens if stale
+// Watch accordion panels — recompute data-derived options when a filter panel opens if stale
 watch(openPanels, (panels) => {
-    if (panels.includes('tags') && tagDataStale.value) {
-        updateStringArrayUniqueValues(props.data || []);
-        updateCombinedTagFieldsForTemplate();
-        tagDataStale.value = false;
+    if ((panels.includes('tags') || panels.includes('selections')) && optionDataStale.value) {
+        recomputeFilterOptions();
     }
 });
 
@@ -466,6 +553,11 @@ watch(() => props.triggerClear, (newValue, oldValue) => {
   // Only trigger if the value actually changes (and is not the initial mount)
   if (newValue !== oldValue && oldValue !== undefined) {
     clearFilters();
+    // An explicit reset should also drop options that were only listed because they
+    // were checked — an individual uncheck leaves them until the next rebuild, so the
+    // checkbox never vanishes from under the cursor that just clicked it
+    if (isFilterPanelOpen()) recomputeFilterOptions();
+    else optionDataStale.value = true;
   }
 });
 
@@ -554,7 +646,7 @@ watch(() => props.triggerClear, (newValue, oldValue) => {
                 </span>
             </AccordionHeader>
             <AccordionContent>
-                 <div v-for="field in chooseOneSchemaFields" :key="field.path" class="selection-group"> <!-- Replaced mb-3 -->
+                 <div v-for="field in visibleChooseOneFields" :key="field.path" class="selection-group"> <!-- Replaced mb-3 -->
                     <p class="group-header">{{ field.path }}</p> <!-- Kept custom class, removed font-medium mb-2 -->
                     <div class="options-container"> <!-- Replaced flex flex-wrap gap-3 -->
                          <div v-for="option in field.options" :key="getControlName(option.value)" class="option-item"> <!-- Replaced flex align-items-center -->
@@ -564,17 +656,18 @@ watch(() => props.triggerClear, (newValue, oldValue) => {
                                 binary />
                             <label :for="`select-${field.path}-${getControlName(option.value)}`" class="option-label"> {{ option.label }} </label> <!-- Replaced ml-2 -->
                         </div>
-                         <!-- Add message if no options available -->
-                        <small v-if="!field.options || field.options.length === 0" class="no-options-text"> <!-- Replaced text-color-secondary -->
-                            No unique values found in current data for this selection field.
-                        </small>
                     </div>
                 </div>
+                <small v-if="visibleChooseOneFields.length === 0" class="no-options-text">
+                    No values present in the current data for any selection field.
+                </small>
             </AccordionContent>
         </AccordionPanel>
 
         <!-- Tag Filters -->
-        <AccordionPanel v-if="combinedTagFieldsForTemplate.length > 0" value="tags">
+        <!-- v-if on RAW lists: the filtered list is lazily computed on panel open, so
+             gating on it would hide the panel before it could ever be opened -->
+        <AccordionPanel v-if="chooseManySchemaFields.length > 0 || stringArraySchemaFields.length > 0" value="tags">
              <AccordionHeader>
                  <!-- Removed flex, align-items-center, gap-2, w-full -->
                 <span>
@@ -599,11 +692,11 @@ watch(() => props.triggerClear, (newValue, oldValue) => {
                                 binary />
                              <label :for="`tag-${field.path}-${getControlName(option.value)}`" class="option-label"> {{ option.label }} </label> <!-- Replaced ml-2 -->
                         </div>
-                         <small v-if="!field.options || field.options.length === 0" class="no-options-text"> <!-- Replaced text-color-secondary -->
-                            No unique values found in current data for this tag field.
-                        </small>
                     </div>
                 </div>
+                <small v-if="combinedTagFieldsForTemplate.length === 0" class="no-options-text">
+                    No values present in the current data for any tag field.
+                </small>
             </AccordionContent>
         </AccordionPanel>
     </Accordion>

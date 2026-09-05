@@ -45,8 +45,10 @@ const allEncounters = computed(() => {
   return encounters;
 });
 
+// Text only. This runs on every render of every listed encounter, so it must never execute
+// their inline actions — enterRoom fires those once for the whole room instead.
 function getEncounterContent(encounter: DungeonEncounter): string {
-  return game.logicSystem.resolveString(encounter.rawContent).output;
+  return game.logicSystem.resolveString(encounter.rawContent, true).output;
 }
 
 

@@ -1,14 +1,14 @@
 /// <reference path="../dtypes.d.ts" />
 
 const { game, vue, components } = window.engine;
-const { computed, ref, onMounted, nextTick, defineComponent } = vue;
+const { computed, ref, watch, onMounted, nextTick, defineComponent } = vue;
 const { CharacterSlot, BackgroundAsset, CharacterViewerPopup, CustomComponentContainer } = components;
 
 import { currentRpgBattle, getSpeedMult, getBattleDisplayName } from '../rpg-battle-state.mjs';
 import { battleSceneGate, isBattleScenePauseActive } from '../rpg-battle-scenes.mjs';
 import { endRpgBattle } from '../main.mjs';
 import { executeAction, advanceToNextTurn, tickActiveCharacter, canUseAbility, processDeaths, refireChannels, consumeStun, flashAbilityName, consumeBattleConsumable } from '../rpg-battle-flow.mjs';
-import { isCharAlive, getStatusStacks, expandSplashTargets, resolveAbility, getAliveEnemies, getAliveAllies } from '../rpg-battle-effects.mjs';
+import { isCharAlive, getStatusStacks, expandSplashTargets, resolveAbility, getAliveEnemies, getAliveAllies, consumeFreeAction, isSupport, isAIControlled } from '../rpg-battle-effects.mjs';
 import { decideAction, getValidTargets } from '../rpg-battle-ai.mjs';
 import { animateCast, animateEffects, setIdleState, prepSummon, animateSummonIn } from '../rpg-battle-anims.mjs';
 /** @param {RpgBattle} b */
@@ -16,15 +16,29 @@ function isBattleFinished(b) { return b.phase === 'finished'; }
 
 const BASE_ACTION_DELAY = 600;
 const BASE_CHAIN_DELAY = 500;
+const BASE_ROUND_START_DELAY = 1500;
 
 function getActionDelay() { return BASE_ACTION_DELAY * getSpeedMult(); }
 function getChainDelay() { return BASE_CHAIN_DELAY * getSpeedMult(); }
+
+/**
+ * How long a round's opening banner holds before its first combatant acts. The round has already
+ * rolled initiative and sorted, so this is the beat where the lineup is readable — and where an
+ * enemy who won initiative is watchable instead of landing a hit the player never saw coming.
+ * Scaled by the battle-speed setting like every other pause; 0 disables the beat.
+ */
+function getRoundStartDelay() {
+  const ms = game.getData('plugins_data/rpg_battler/battle_config')?.round_start_delay;
+  return (typeof ms === 'number' ? ms : BASE_ROUND_START_DELAY) * getSpeedMult();
+}
 
 import { RpgAbilityPanel } from './RpgAbilityPanel.mjs';
 import { RpgTurnOrder } from './RpgTurnOrder.mjs';
 import { RpgFloatingText } from './RpgFloatingText.mjs';
 import { RpgBattleLog } from './RpgBattleLog.mjs';
 import { RpgCharOverlay } from './RpgCharOverlay.mjs';
+import { RpgSupportFace } from './RpgSupportFace.mjs';
+import { RpgWaveTracker } from './RpgWaveTracker.mjs';
 
 /**
  * Build slot objects for an array of character IDs.
@@ -32,7 +46,7 @@ import { RpgCharOverlay } from './RpgCharOverlay.mjs';
 
 // @ts-ignore - Vue overload resolution false positive in .mjs
 export const RpgBattleScreen = defineComponent({
-  components: { CharacterSlot, BackgroundAsset, RpgAbilityPanel, RpgTurnOrder, RpgFloatingText, RpgBattleLog, RpgCharOverlay, CharacterViewerPopup, CustomComponentContainer },
+  components: { CharacterSlot, BackgroundAsset, RpgAbilityPanel, RpgTurnOrder, RpgFloatingText, RpgBattleLog, RpgCharOverlay, RpgSupportFace, RpgWaveTracker, CharacterViewerPopup, CustomComponentContainer },
   setup() {
     const battle = computed(() => currentRpgBattle.value);
     const forceZoomOut = ref(false);
@@ -49,7 +63,11 @@ export const RpgBattleScreen = defineComponent({
     });
 
     const isPlayerTurn = computed(() => battle.value?.activeSide === 'player');
-    const zoomedIn = computed(() => isPlayerTurn.value && !forceZoomOut.value);
+    // There is nobody to zoom TO until the first turn begins — activeCharId is null for the whole
+    // battle-start window. The party row is v-shown only for the zoomed-to character, so counting
+    // that as zoomed-in hides the entire player side (and pushes the camera in on the enemies)
+    // while the banner holds, which is the opposite of a beat meant for reading the field.
+    const zoomedIn = computed(() => isPlayerTurn.value && !!battle.value?.activeCharId && !forceZoomOut.value);
     const showZone = computed(() => game.coreSystem.getDebugSetting('events_zone'));
 
     const battlePhase = computed(() => battle.value?.battlePhase || 'enemy_turn');
@@ -81,31 +99,38 @@ export const RpgBattleScreen = defineComponent({
       return t === 'self_and_ally' || t === 'any';
     });
 
-    // Splash preview: highlight neighbors when hovering a target
+    // Splash preview (yellow neighbours). hoveredTargetId is pure mouse-over state, set UNCONDITIONALLY:
+    // battlePhase only flips to 'choosing_target' ~500ms after selecting an ability (the ZOOM_MS zoom), and a
+    // fast mouseenter lands before the flip — gate the hover on isTargeting and it gets swallowed, and
+    // mouseenter never re-fires for a mouse already inside the slot (the "no highlight until re-hover" bug).
+    // The watch recomputes the preview on hover change AND on the phase flip AND on ability change, so a
+    // remembered hover lights up the moment targeting actually begins. getAbility() (the reliable fresh merge —
+    // the getAbilities() ref is stale) runs only on those transitions, never per render: no churn.
     const hoveredTargetId = ref(null);
+    const splashTargetIds = ref([]);
 
-    const maxSplash = computed(() => {
-      const id = selectedAbilityId.value;
-      if (!id) return 0;
-      const char = activeChar.value;
-      if (!char) return 0;
-      const ab = char.getAbility(id);
-      if (!ab?.effects) return 0;
-      let max = 0;
-      for (const effectId in ab.effects) {
-        const s = ab.effects[effectId].splash;
-        if (s > max) max = s;
-      }
-      return max;
-    });
-
-    const splashTargetIds = computed(() => {
+    function computeSplashPreview() {
       const hovered = hoveredTargetId.value;
-      const splash = maxSplash.value;
-      if (!hovered || !splash || !battle.value?.activeCharId) return [];
-      const expanded = expandSplashTargets(battle.value.activeCharId, [hovered], splash);
-      return expanded.filter(id => id !== hovered);
+      const b = battle.value;
+      if (!hovered || !b?.activeCharId || !isTargeting.value) return [];
+      const hoveredIsEnemy = b.enemyParty.includes(hovered);
+      if (hoveredIsEnemy ? !targetsEnemies.value : !targetsAllies.value) return [];
+      const ab = activeChar.value?.getAbility(selectedAbilityId.value);
+      let count = 0;
+      if (ab?.effects) for (const eid in ab.effects) count += ab.effects[eid].splash_count || 0;
+      if (count <= 0) return [];
+      return expandSplashTargets(b.activeCharId, [hovered], count).filter(id => id !== hovered);
+    }
+    watch([hoveredTargetId, isTargeting, selectedAbilityId], () => {
+      splashTargetIds.value = computeSplashPreview();
     });
+
+    function onTargetHover(charId) {
+      hoveredTargetId.value = charId;
+    }
+    function onTargetLeave() {
+      hoveredTargetId.value = null;
+    }
 
     function isSplashTarget(charId) {
       return splashTargetIds.value.includes(charId);
@@ -153,8 +178,52 @@ export const RpgBattleScreen = defineComponent({
     const alivePlayers = computed(() => {
       const b = battle.value;
       if (!b) return [];
-      return b.playerParty.filter(id => !b.charState[id]?.defeated);
+      // Supports never get a battlefield slot — their acting face is RpgSupportFace.
+      return b.playerParty.filter(id => !b.charState[id]?.defeated && !b.charState[id]?.support);
     });
+
+    // The acting support combatant (if any) — suppresses the zoom-in and the camera dev
+    // buttons that a normal player turn would show.
+    const activeSupportChar = computed(() => {
+      const b = battle.value;
+      if (!b?.activeCharId || !b.charState[b.activeCharId]?.support) return null;
+      return game.getCharacter(b.activeCharId);
+    });
+
+    // ── Support portrait slide ──
+    // The card is driven by driveTurns rather than by activeCharId, so both legs of the
+    // slide can be awaited: the support glides in from off-screen left, acts, then glides
+    // back out before the next combatant takes over. The classless state IS the off-screen
+    // one, so a single flag runs the transition in both directions.
+    // Fixed, like the camera's ZOOM_MS — a presentation beat rather than action pacing, so
+    // it reads the same at every battle speed. The CSS duration is bound from this constant
+    // so the awaited time and the transition can't drift apart.
+    const supportSlideMs = 900;
+    const supportFaceChar = ref(null);
+    const supportFaceIn = ref(false);
+
+    function waitSupportSlide() {
+      // A small tail past the transition so the card has fully settled before the turn moves on.
+      return new Promise(resolve => setTimeout(resolve, supportSlideMs + 100));
+    }
+
+    async function showSupportFace(charId) {
+      supportFaceChar.value = game.getCharacter(charId);
+      supportFaceIn.value = false;
+      // Mount off-screen first — a transition only runs if the start state got a frame.
+      // Double rAF (what Vue's own Transition does): a single one can land in the same
+      // style recalc as the insert, and the card would just appear at rest.
+      await nextTick();
+      requestAnimationFrame(() => requestAnimationFrame(() => { supportFaceIn.value = true; }));
+      await waitSupportSlide();
+    }
+
+    async function hideSupportFace() {
+      if (!supportFaceChar.value) return;
+      supportFaceIn.value = false;
+      await waitSupportSlide();
+      supportFaceChar.value = null;
+    }
 
     // ── Slot generation ──
     // Overlay rendering is delegated to CharacterSlot via overlaySlot="rpg-battle-char-overlay".
@@ -233,8 +302,16 @@ export const RpgBattleScreen = defineComponent({
       // consume the stun and end the turn — it forfeits this turn's main action, not also the next.
       // A main action is short-circuited (not a bonus) → ends the turn with its stun left to skip the
       // next turn normally.
-      if (isBonusAction(abilityId) && !consumeStun(b.activeCharId)) {
-        b.charState[b.activeCharId].bonusUsed++;
+      // `free_action` refunds the turn the same way a bonus_action ability does, but it is granted
+      // per-effect and may have ridden a `chance` roll, so it is read from the resolution rather than
+      // from the ability's meta. Read once — it clears on read.
+      const freeAction = consumeFreeAction();
+      const isBonus = isBonusAction(abilityId);
+      if ((isBonus || freeAction) && !consumeStun(b.activeCharId)) {
+        // `free_action` means the cast costs no action of any kind: on a main action it refunds the
+        // turn and leaves the bonus untouched; on a bonus_action it also refunds the bonus slot, so
+        // the caster keeps both. Without it, a bonus_action spends its one-per-turn slot as usual.
+        if (isBonus && !freeAction) b.charState[b.activeCharId].bonusUsed++;
         b.battlePhase = 'choosing_ability';
       } else {
         onEndTurn(null);
@@ -252,7 +329,9 @@ export const RpgBattleScreen = defineComponent({
       if (!isCharAlive(b.activeCharId)) { onEndTurn(null); consume(); return; }
 
       const finish = () => {
-        if (delayed) forceZoomOut.value = false;
+        // Restoring the zoom for a slotless support would hide the whole party row
+        // (zoomedIn hides every slot but the active one, and a support has none).
+        if (delayed && !isSupport(casterId)) forceZoomOut.value = false;
         handlePostResolve(b, abilityId);
         consume();
         if (b.battlePhase === 'choosing_ability') abilityPanelRef.value?.show();
@@ -265,8 +344,61 @@ export const RpgBattleScreen = defineComponent({
       }
     }
 
-    // Resolve an ability on a target with full caster+effect animation, then run any bounces.
-    // Shared by player (auto + targeted) and AI paths so bounce behaves identically everywhere.
+    // ── Waves ──
+    // A wave spawns inside checkBattleEnd (via processDeaths) the moment the field clears, so
+    // the screen learns about it by watching waveIndex around every processDeaths call rather
+    // than by subscribing to the emitter — no listener to leak across battles.
+    const WAVE_BANNER_MS = 1100;
+    const waveBanner = ref(null);
+
+    // The round banner holds for the whole opening beat, so its fade is driven by that duration
+    // rather than a fixed keyframe length like the wave banner's.
+    const roundBanner = ref(null);
+    const roundBannerMs = ref(0);
+
+    /**
+     * Open a round: announce it and hold before anyone acts. advanceToNextTurn has already
+     * incremented the turn, re-rolled initiative and re-sorted, so the lineup behind the banner
+     * is the one about to play. Battle start is just round 1 — no separate opening case.
+     * @param {boolean} wasZoomed whether the previous actor's zoom still needs unwinding
+     */
+    async function announceRound(wasZoomed) {
+      const b = battle.value;
+      const ms = getRoundStartDelay();
+      if (!b || ms <= 0) return;
+      // Camera out for the announcement: a zoomed-in party row shows only the acting member,
+      // and the whole point of the beat is reading the field.
+      forceZoomOut.value = true;
+      if (wasZoomed) await waitZoom();
+      roundBannerMs.value = ms;
+      roundBanner.value = game.getLine('ui_turn_start', { turn: b.turn });
+      await new Promise(resolve => setTimeout(resolve, ms));
+      roundBanner.value = null;
+    }
+
+    async function processDeathsAndWaves() {
+      const b = battle.value;
+      const prevWave = b?.waveIndex ?? 0;
+      const prevEnemyCount = b?.enemyParty.length ?? 0;
+      processDeaths();
+      if (!b || b.waveIndex === prevWave) return;
+
+      // The field just emptied and refilled: announce it, then walk the newcomers in with
+      // the same entrance summons use. Without the banner a cleared field reads as a win
+      // that failed to fire.
+      const newIds = b.enemyParty.slice(prevEnemyCount);
+      await nextTick();
+      for (const id of newIds) prepSummon(id);
+      if (isPlayerTurn.value) { forceZoomOut.value = true; await waitZoom(); }
+      waveBanner.value = `${game.getLine('ui_wave')} ${b.waveIndex + 1}`;
+      await new Promise(resolve => setTimeout(resolve, WAVE_BANNER_MS));
+      for (const id of newIds) await animateSummonIn(id);
+      waveBanner.value = null;
+    }
+
+    // Resolve an ability on a target with full caster+effect animation, then run any flurry
+    // strikes and bounces. Shared by player (auto + targeted) and AI paths so both behave
+    // identically everywhere.
     // Returns true if the cast resolved, false if executeAction returned null (veto / guard).
     async function performAbility(casterId, abilityId, targetId, targetType) {
       const ability = game.getCharacter(casterId)?.getAbility(abilityId);
@@ -284,7 +416,8 @@ export const RpgBattleScreen = defineComponent({
       }
 
       await animateEffects(results);
-      processDeaths();
+      await processDeathsAndWaves();
+      await runFlurry(casterId, abilityId, targetType, targetId ?? casterId);
       await runBounces(casterId, abilityId, targetType, targetId ?? casterId, landPos);
       // Action + its animations are fully done — distinct from battle_action_end (pre-animation).
       game.trigger('battle_action_complete', game.getCharacter(casterId), abilityId, results);
@@ -293,6 +426,33 @@ export const RpgBattleScreen = defineComponent({
       // even when the action just finished the battle, so a final-blow scene displays.
       await battleSceneGate();
       return true;
+    }
+
+    // flurry aspect: TOTAL strike count on the SAME target — the primary cast counts, so only
+    // flurry-1 extra strikes run here (1 or less adds nothing), with a chain delay each.
+    // Fizzles when the target dies (or the battle ends) — remaining strikes are lost.
+    // Strikes share the bounce re-resolution rules (resolveAbility isBounce): no cost/cooldown
+    // re-pay, no battle_action_start/end re-fire. On an AoE/self target the whole target set
+    // simply re-resolves and the fizzle check falls to the caster.
+    async function runFlurry(casterId, abilityId, targetType, targetId) {
+      const ability = game.getCharacter(casterId)?.getAbility(abilityId);
+      if (!ability || !targetId) return;
+      let flurry = 0;
+      for (const eid in ability.effects) flurry += ability.effects[eid].flurry || 0;
+      const extra = flurry - 1;
+      if (extra <= 0) return;
+      for (let i = 0; i < extra; i++) {
+        const b = battle.value;
+        if (!b || isBattleFinished(b)) break;
+        if (!isCharAlive(targetId)) break;
+        await new Promise(resolve => setTimeout(resolve, getChainDelay()));
+        // Melee re-lunges per strike; ranged refires from the caster. Caster pose stays
+        // suppressed like on bounces — the wind-up already played on the primary cast.
+        await animateCast(casterId, targetId, targetType, ability, { casterPose: false });
+        const res = resolveAbility(casterId, abilityId, targetId, { isBounce: true });
+        await animateEffects(res);
+        await processDeathsAndWaves();
+      }
     }
 
     // bounce aspect: re-resolve the whole ability on N random same-side targets, with a chain
@@ -327,7 +487,7 @@ export const RpgBattleScreen = defineComponent({
         prevTarget = rt;
         const res = resolveAbility(casterId, abilityId, rt, { isBounce: true });
         await animateEffects(res);
-        processDeaths();
+        await processDeathsAndWaves();
       }
     }
 
@@ -443,19 +603,44 @@ export const RpgBattleScreen = defineComponent({
       turnBusy.value = true;
 
       while (b.phase === 'active' && !isBattleFinished(b)) {
-        const wasZoomed = zoomedIn.value && !!b.activeCharId;
+        // A script can tear the battle down mid-await (rpg_battle.end(), a scripted win):
+        // `b` still points at the old object, but everything reading the live state —
+        // advanceToNextTurn, getSide, isSupport — would find null.
+        if (currentRpgBattle.value !== b) break;
+        // Retire the previous support's card here rather than at the end of its own turn:
+        // this covers every way a turn can end, including the stunned/dead `continue`s and
+        // a manually played support handing control back through onEndTurn.
+        await hideSupportFace();
+        let wasZoomed = zoomedIn.value && !!b.activeCharId;
+        const prevTurn = b.turn;
         const charId = advanceToNextTurn();
         if (!charId || isBattleFinished(b)) break;
-        // Turn-start scenes (battle_turn_start barks) play before the zoom/panel.
+        // A wrap into a new round happened inside advanceToNextTurn — announce it first; the
+        // banner already unwinds the previous actor's zoom for us.
+        if (b.turn !== prevTurn) { await announceRound(wasZoomed); wasZoomed = false; }
+        // Turn-start scenes (battle_turn_start barks) play after the round banner, before the
+        // zoom/panel — the round is announced, then its story beat lands.
         await battleSceneGate();
         const isPlayer = b.activeSide === 'player';
+        const supportTurn = isSupport(charId);
+        // Only a MANUALLY played party member zooms in. A support has no back-sprite to
+        // zoom to (its floating portrait renders instead), and an AI-controlled member
+        // never passes through onSelectAbility's zoom-out for ally-targeted casts — either
+        // one zoomed in would hide the rest of the party row mid-action.
+        const spotlight = isPlayer && !supportTurn && !isAIControlled(charId);
 
-        if (isPlayer) { forceZoomOut.value = false; await waitZoom(); }
-        else if (wasZoomed) { await waitZoom(); }
+        if (spotlight) { forceZoomOut.value = false; await waitZoom(); }
+        else {
+          if (isPlayer) forceZoomOut.value = true;
+          if (wasZoomed) await waitZoom();
+        }
+
+        // Camera settles first, then the support glides in.
+        if (supportTurn) await showSupportFace(charId);
 
         const { canAct, dotResults } = tickActiveCharacter(charId);
         if (dotResults.length > 0) await animateEffects(dotResults);
-        processDeaths();
+        await processDeathsAndWaves();
         // Scenes queued by DoT ticks/deaths play before the turn proceeds.
         await battleSceneGate();
         if (isBattleFinished(b)) break;
@@ -468,7 +653,7 @@ export const RpgBattleScreen = defineComponent({
         // Channel autocast: re-fire active channels with flash + animation, awaited; the caster still acts after.
         const channelResults = refireChannels(charId);
         if (channelResults.length > 0) await animateEffects(channelResults);
-        processDeaths();
+        await processDeathsAndWaves();
         // Scenes queued by channel hits/deaths play before control is handed over.
         await battleSceneGate();
         if (isBattleFinished(b)) break;
@@ -482,7 +667,8 @@ export const RpgBattleScreen = defineComponent({
           continue;
         }
 
-        if (isPlayer) {
+        // battle_ai player chars (and all enemies) fall through to the AI action path.
+        if (isPlayer && !isAIControlled(charId)) {
           b.battlePhase = 'choosing_ability';
           abilityPanelRef.value?.show();
           turnBusy.value = false;
@@ -490,15 +676,19 @@ export const RpgBattleScreen = defineComponent({
         }
 
         b.battlePhase = 'enemy_turn';
-        await runEnemyAction(charId);
+        await runAIAction(charId);
         if (isBattleFinished(b)) break;
         await new Promise(resolve => setTimeout(resolve, getActionDelay()));
       }
 
+      // Battle over (or torn down) — drop the card outright; the result overlay is coming
+      // up and there is no next turn to slide out for.
+      supportFaceChar.value = null;
       turnBusy.value = false;
     }
 
-    async function runEnemyAction(charId) {
+    // Drives every AI-controlled actor: enemies, battle_ai party members, supports.
+    async function runAIAction(charId) {
       const b = battle.value;
       const action = decideAction(charId);
       if (!action) return;
@@ -507,10 +697,12 @@ export const RpgBattleScreen = defineComponent({
       const targetType = ability?.meta?.target || 'enemy';
       const ok = await performAbility(charId, action.abilityId, action.targetId, targetType);
       if (ok) consumeBattleConsumable(caster, action.abilityId);
-      if (ability?.meta?.bonus_action && !isBattleFinished(b) && isCharAlive(charId)) {
-        b.charState[charId].bonusUsed++;
+      const aiFreeAction = consumeFreeAction();
+      const aiIsBonus = !!ability?.meta?.bonus_action;
+      if ((aiIsBonus || aiFreeAction) && !isBattleFinished(b) && isCharAlive(charId)) {
+        if (aiIsBonus && !aiFreeAction) b.charState[charId].bonusUsed++;
         await new Promise(resolve => setTimeout(resolve, getChainDelay()));
-        await runEnemyAction(charId);
+        await runAIAction(charId);
       }
     }
 
@@ -519,11 +711,19 @@ export const RpgBattleScreen = defineComponent({
     // ── Actions ──
 
     function winBattle() {
-      endRpgBattle('victory');
+      // Dev force-win goes through the NORMAL victory finish (same as checkBattleEnd):
+      // result overlay + reward/progression panel render, Continue then tears down.
+      const b = battle.value;
+      if (!b || b.phase === 'finished') return;
+      b.result = 'victory';
+      b.phase = 'finished';
+      if (b.battleId) game.getService('rpg_battle').addDefeated(b.battleId);
+      game.setMusic('victory');
+      game.trigger('battle_finished', 'victory', b.battleId || null);
     }
 
     // Result-overlay Continue: ends with the battle's actual result so defeat
-    // reaches battle_end/battle_closed listeners (winBattle is the dev force-win only).
+    // reaches battle_end/battle_closed_before listeners (winBattle is the dev force-win only).
     function closeBattle() {
       endRpgBattle(battle.value?.result || 'victory');
     }
@@ -594,11 +794,13 @@ export const RpgBattleScreen = defineComponent({
     }
 
     return {
-      battle, activeChar, backgroundAsset, enemySlots, playerSlots, getBattleDisplayName, worldCam,
+      battle, activeChar, activeSupportChar, supportFaceChar, supportFaceIn, supportSlideMs, waveBanner,
+      roundBanner, roundBannerMs,
+      backgroundAsset, enemySlots, playerSlots, getBattleDisplayName, worldCam,
       zoomedIn, isPlayerTurn, forceZoomOut, showZone,
       battlePhase, selectedAbilityName, activeBattleState, isBattleOver,
       isTargeting, targetsEnemies, targetsAllies, targetIncludesSelf,
-      hoveredTargetId, isSplashTarget, maxSplash,
+      hoveredTargetId, isSplashTarget, onTargetHover, onTargetLeave,
       abilityPanelRef, viewerCharacters, viewerInitialIndex,
       isEnemyTargetable, onEnemyTargetClick,
       onSelectAbility, selectTarget, cancelTarget, onSlotClick, closeViewer,
@@ -637,8 +839,8 @@ export const RpgBattleScreen = defineComponent({
                   'rpg-targetable-hostile': isTargeting && targetsEnemies && isEnemyTargetable(es.charId),
                   'rpg-splash-highlight': isTargeting && isSplashTarget(es.charId),
                 }"
-                @mouseenter="isTargeting && targetsEnemies && maxSplash ? hoveredTargetId = es.charId : null"
-                @mouseleave="hoveredTargetId = null"
+                @mouseenter="onTargetHover(es.charId)"
+                @mouseleave="onTargetLeave()"
                 @click="isTargeting && targetsEnemies ? onEnemyTargetClick(es.charId) : onSlotClick(es.charId, 'enemy')" />
             </div>
             </div>
@@ -659,10 +861,16 @@ export const RpgBattleScreen = defineComponent({
                   'rpg-targetable-friendly': isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId),
                   'rpg-splash-highlight': isTargeting && isSplashTarget(ps.charId),
                 }"
-                @mouseenter="isTargeting && targetsAllies && maxSplash ? hoveredTargetId = ps.charId : null"
-                @mouseleave="hoveredTargetId = null"
+                @mouseenter="onTargetHover(ps.charId)"
+                @mouseleave="onTargetLeave()"
                 @click="isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId) ? selectTarget(ps.charId) : onSlotClick(ps.charId, 'player')" />
             </div>
+
+            <!-- Acting support: floating portrait above the party row instead of a slot;
+                 carries the data-rpg-char-id anchor, so projectiles launch from it. -->
+            <RpgSupportFace v-if="supportFaceChar" :character="supportFaceChar"
+              :class="{ 'is-in': supportFaceIn }"
+              :style="{ '--rpg-support-slide': supportSlideMs + 'ms' }" />
 
             <!-- Ability panel -->
             <RpgAbilityPanel ref="abilityPanelRef"
@@ -677,6 +885,12 @@ export const RpgBattleScreen = defineComponent({
               </div>
               <button class="rpg-btn rpg-btn-cancel" @click="cancelTarget">{{ game.getLine('ui_cancel') }}</button>
             </div>
+
+            <!-- Wave announcement: the field just emptied and refilled, which without a
+                 beat here reads as a victory that failed to fire. -->
+            <div v-if="waveBanner" class="rpg-wave-banner">{{ waveBanner }}</div>
+            <div v-if="roundBanner" class="rpg-round-banner"
+              :style="{ '--rpg-round-banner-ms': roundBannerMs + 'ms' }">{{ roundBanner }}</div>
 
             <!-- Floating combat text -->
             <RpgFloatingText />
@@ -693,14 +907,15 @@ export const RpgBattleScreen = defineComponent({
 
           <div v-if="game.isDevMode()" class="rpg-battle-controls">
             <button class="rpg-btn rpg-btn-win" @click="winBattle">{{ game.getLine('ui_win_battle') }}</button>
-            <button v-if="isPlayerTurn" class="rpg-btn rpg-btn-zoom" @click="toggleZoom">
+            <button v-if="isPlayerTurn && !activeSupportChar" class="rpg-btn rpg-btn-zoom" @click="toggleZoom">
               {{ forceZoomOut ? 'Zoom In' : 'Zoom Out' }}
             </button>
-            <button v-if="isPlayerTurn" class="rpg-btn" @click="cycleBattleState">
+            <button v-if="isPlayerTurn && !activeSupportChar" class="rpg-btn" @click="cycleBattleState">
               State: {{ activeBattleState }}
             </button>
           </div>
 
+          <RpgWaveTracker />
           <RpgTurnOrder :battle="battle" @select="(charId, side) => onSlotClick(charId, side)" />
           <CustomComponentContainer :slot="'rpg-sidebar-bottom'" :context="{ character: activeChar }" />
         </div>

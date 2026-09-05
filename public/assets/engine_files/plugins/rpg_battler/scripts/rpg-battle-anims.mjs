@@ -536,8 +536,13 @@ export async function animateEffects(results) {
     await new Promise(resolve => setTimeout(resolve, (hasTick ? TICK_FLICKER_MS : 300) * getSpeedMult()));
   }
 
-  // Play death animations sequentially
-  for (const charId of deathQueue) {
+  // Play death animations sequentially. `r.defeated` was stamped when the damage landed, but a
+  // later result in the same batch can heal the target back above 0 (lifesteal lands after the
+  // thorns/reflect it triggered). processDeaths() re-checks liveness the same way, so trusting the
+  // stale flag here let the two disagree: the body faded to opacity 0 and nothing ever resets it,
+  // leaving a live combatant permanently invisible. The Set also dedupes a target flagged twice.
+  for (const charId of new Set(deathQueue)) {
+    if ((game.getCharacter(charId)?.getResource('health') ?? 0) > 0) continue;
     await animateDeath(charId);
   }
 }

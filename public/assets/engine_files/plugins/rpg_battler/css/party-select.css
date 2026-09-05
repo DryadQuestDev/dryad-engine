@@ -1,0 +1,73 @@
+.rpg-party-select {
+  background: rgba(16, 15, 13, 0.92);
+  border: 1px solid rgba(232, 200, 122, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  padding: 1.6rem 2rem 1.8rem;
+  min-width: 480px;
+  max-width: min(940px, 90vw);
+}
+.rpg-party-select h2 {
+  margin: 0 0 0.2em;
+  color: #e8c87a;
+  font-size: 1.35em;
+}
+.rps-hint {
+  color: #9a8d7c;
+  font-size: 0.9em;
+  margin: 0 0 0.9em;
+}
+.rps-fight {
+  display: block;
+  background: linear-gradient(180deg, #3a4a34, #2a3626);
+  color: #e4dbc8;
+  border: 1px solid #8bd48b;
+  border-radius: 10px;
+  padding: 0.7em 3.2em;
+  font-size: 1.15em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  margin: 0 0 1.2rem;
+  transition: filter 0.15s;
+}
+.rps-fight:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+.rps-fight:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.rps-faces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.rps-face {
+  position: relative;
+  cursor: pointer;
+  border: 2px solid #3a352f;
+  border-radius: 10px;
+  padding: 4px;
+  opacity: 0.55;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+.rps-face.picked {
+  opacity: 1;
+  border-color: #8bd48b;
+}
+.rps-face.locked {
+  opacity: 1;
+  border-color: #e8c87a;
+  cursor: default;
+}
+.rps-lock, .rps-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 0.9em;
+  color: #e8c87a;
+  text-shadow: 0 1px 3px #000;
+}
+.rps-check { color: #8bd48b; }

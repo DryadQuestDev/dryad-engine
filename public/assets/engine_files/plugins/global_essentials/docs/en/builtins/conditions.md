@@ -14,6 +14,7 @@ All built-in conditions for choice visibility checks and conditional logic.
 | `_selected_character` | ID of currently selected character | `_selected_character = alice` |
 | `_item_on` | Whether character has item equipped (no item id = the active item) | `_item_on(alice, sword) = true`, `_item_on(mc) = true` |
 | `_item_count` | Quantity of an item in an inventory (party by default; unequipped stacks only) | `_item_count(pickaxe) > 0`, `_item_count(chest.gold) >= 100` |
+| `_chosen_item` | Whether the last `choose_item` pick was this template id | `_chosen_item(key_mansion) = true` |
 | `_char` | Get a character property value | `_char(alice.stat.strength) > 10` |
 | `_skill` | Get learned skill level (0 if not learned) | `_skill(alice.fire_magic.fireball) > 0` |
 

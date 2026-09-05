@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
 import StatusObjectDisplay from '../../progression/StatusObjectDisplay.vue';
+
+const showIds = computed(() => shouldShowEntityIds());
 
 const props = defineProps<{
     statusId: string;
@@ -67,6 +70,12 @@ const mergedStats = computed((): Record<string, number> => {
             const computed = computer(char);
             for (const k in computed) merged[k] = (merged[k] || 0) + computed[k];
         }
+        // Round to each stat's own precision, as getStat does for the composed total — a computer
+        // returning a float would otherwise print binary-float noise (+614.4000000000001).
+        for (const k in merged) {
+            const def = game.characterSystem.statsMap.get(k);
+            if (def) merged[k] = char.applyPrecision(merged[k], def);
+        }
     }
     return merged;
 });
@@ -88,6 +97,7 @@ const displayData = computed(() => {
             <span class="popup-title" :class="rarity ? ['item-name', 'rarity_' + rarity] : []">
                 {{ title }}
                 <span v-if="shownStacks > 1" class="popup-stack-count">x{{ shownStacks }}</span>
+                <span v-if="showIds" class="entity-id-badge">{{ statusId }}</span>
             </span>
         </div>
         <div class="popup-body">

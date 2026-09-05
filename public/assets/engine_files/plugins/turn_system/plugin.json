@@ -1,9 +1,9 @@
 {
   "id": "turn_system",
   "name": "Turn System",
-  "description": "Global map-turn clock. A saved turn counter advances on each room entry (and via the turn action/service), ticking limited status durations on all characters and firing turn_advanced. Adds a Wait button to the map toolbar.",
+  "description": "Global map-turn clock. A saved turn counter advances on each room entry (and via the turn action/service), ticking limited status durations and stack_bleeding statuses on all characters and firing turn_advanced. Adds a Wait button to the map toolbar.",
   "author": "Nekon",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "order": -1,
   "scripts": [
     "main.mjs"
@@ -34,6 +34,13 @@
       {
         "id": "turn_wait_tooltip",
         "val": "Wait a turn"
+      }
+    ],
+    "status_meta": [
+      {
+        "id": "stack_bleeding",
+        "type": "number",
+        "description": "Stacks lost per adventure turn (turn_system tick). 0/absent = no bleeding. The status is removed when it bleeds to 0 stacks."
       }
     ]
   }

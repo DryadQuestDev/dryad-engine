@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, markRaw, PropType } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, PropType } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { ARROWHEAD_SIZE } from '../../../global/global';
 import { getShapePath, getShapeEdgePoint, getArrowPath, ShapeType, getArrowheadPath } from '../../../utility/shapes';
 import BackgroundAsset from '../BackgroundAsset.vue';
 import SkillSlot from './SkillSlot.vue';
-import SkillTreeCard from '../popups/cards/SkillTreeCard.vue';
-import { popover as vPopover } from '../../directives/popoverDirective';
 import { isSkillVisible } from './useSkillParams';
 import type { SkillTreeObject } from '../../../schemas/skillTreeSchema';
 import type { SkillSlotObject } from '../../../schemas/skillSlotSchema';
@@ -33,18 +31,6 @@ const isPanning = ref(false);
 const panStart = ref({ x: 0, y: 0 });
 const scrollStart = ref({ left: 0, top: 0 });
 
-// Tree selector state
-const isTreeSelectorCollapsed = ref(false);
-
-const SkillTreeCardComp = markRaw(SkillTreeCard);
-function treePopoverBinding(tree: SkillTreeObject) {
-  if (!tree.description) return null;
-  return {
-    component: SkillTreeCardComp,
-    props: { treeId: tree.id, characterId: props.character.id },
-    placement: 'right-start' as const,
-  };
-}
 
 // Get all available skill trees for this character
 const availableTrees = computed(() => {
@@ -55,7 +41,9 @@ const availableTrees = computed(() => {
       trees.push(tree);
     }
   });
-  return trees;
+  // Sort is stable, so trees left on the default order keep the sequence the character was granted
+  // them in — which is all the ordering control there was before `order` existed.
+  return trees.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 });
 
 // Get active tree
@@ -144,8 +132,8 @@ const arrowConnections = computed(() => {
 });
 
 // Toggle tree selector collapse
-function toggleTreeSelector() {
-  isTreeSelectorCollapsed.value = !isTreeSelectorCollapsed.value;
+function selectTree(treeId: string) {
+  activeTreeId.value = treeId;
 }
 
 // Get background asset object
@@ -158,10 +146,23 @@ const backgroundAsset = computed((): AssetObject | null => {
 });
 
 // Get visible skills (filtered by 'if' condition and parent visibility)
+function isSkillLearned(skill: any): boolean {
+  return props.character.learnedSkills.some(
+    (s: any) => s.skillTreeId === activeTreeId.value && s.id === skill.id
+  );
+}
+
 const visibleSkills = computed(() => {
   if (!activeTree.value?.skills) return [];
 
   return activeTree.value.skills.filter((skill: any) => {
+    // A skill the character already owns always shows, whatever its conditions say — story-granted
+    // nodes are typically authored unreachable (`if`/`active` false) so they can never be bought,
+    // and hiding one after it was awarded would read as having lost it.
+    if (isSkillLearned(skill)) {
+      return true;
+    }
+
     // Check if skill is visible based on its 'if' condition
     if (!isSkillVisible(skill)) {
       return false;
@@ -270,20 +271,16 @@ watch(() => props.character, () => {
 
 <template>
   <div class="skill-tree-container">
-    <!-- Tree Selector (Top-Left, outside wrapper) -->
-    <div v-if="availableTrees.length > 0" class="tree-selector" :class="{ collapsed: isTreeSelectorCollapsed }">
-      <div class="tree-selector-header" @click="toggleTreeSelector">
-        <span class="tree-selector-title">Skill Trees</span>
-        <span class="tree-selector-toggle">{{ isTreeSelectorCollapsed ? '▶' : '▼' }}</span>
-      </div>
-      <div v-if="!isTreeSelectorCollapsed" class="tree-options">
-        <div v-for="tree in availableTrees" :key="tree.id"
-          :class="['tree-option', { active: tree.id === activeTreeId }]" @click="activeTreeId = tree.id"
-          v-popover="treePopoverBinding(tree)">
-          {{ tree.name || tree.id }}
-        </div>
+    <!-- Tree tabs, then the active tree's description, then the canvas -->
+    <div v-if="availableTrees.length > 0" class="tree-selector">
+      <div v-for="tree in availableTrees" :key="tree.id"
+        :class="['tree-option', { active: tree.id === activeTreeId }]" @click="selectTree(tree.id)">
+        {{ tree.name || tree.id }}
       </div>
     </div>
+
+    <div v-if="activeTree?.description" class="tree-description"
+      v-script="{ html: activeTree.description, context: { character } }"></div>
 
     <!-- Main Canvas Wrapper with Background -->
     <div v-if="activeTree" ref="canvasWrapperRef" class="skill-tree-canvas-wrapper">
@@ -348,70 +345,40 @@ watch(() => props.character, () => {
   height: 100%;
   /*background-color: #1a1a1a;*/
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Tree Selector */
 .tree-selector {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 100;
+  flex: 0 0 auto;
   background: rgba(20, 20, 30, 0.75);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  padding: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
   display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  min-width: 180px;
-  transition: all 0.3s ease;
-}
-
-.tree-selector.collapsed {
-  min-width: auto;
-}
-
-.tree-selector-header {
-  padding: 12px 14px;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px 8px 0 0;
-  user-select: none;
-  transition: all 0.2s ease;
-}
-
-.tree-selector-header:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.tree-selector-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.tree-selector-toggle {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.6);
-  transition: transform 0.2s ease;
-}
-
-.tree-options {
-  display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 4px;
-  padding: 8px;
+  padding: 6px;
+  user-select: none;
+}
+
+.tree-description {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(20, 20, 30, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tree-description :deep(p) {
+  margin: 0;
 }
 
 .tree-option {
-  padding: 10px 12px;
+  padding: 8px 14px;
+  white-space: nowrap;
   cursor: pointer;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
@@ -440,7 +407,6 @@ watch(() => props.character, () => {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.2);
   color: #fff;
-  transform: translateX(2px);
 }
 
 .tree-option:hover::before {
@@ -462,7 +428,8 @@ watch(() => props.character, () => {
 .skill-tree-canvas-wrapper {
   position: relative;
   width: 100%;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   cursor: grab;
   user-select: none;

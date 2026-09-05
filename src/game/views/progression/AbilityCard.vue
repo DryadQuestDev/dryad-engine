@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { shouldShowEntityIds } from '../../utils/idBadge';
+import { normalizeAbilityEffects } from '../../../utility/abilityEffects';
 import { Global } from '../../../global/global';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 
@@ -15,6 +17,8 @@ const props = defineProps<{
   isGranted?: boolean;
   isInactive?: boolean;
 }>();
+
+const showIds = computed(() => shouldShowEntityIds());
 
 const lineContext = computed(() => {
   if (!props.characterId) return undefined;
@@ -47,6 +51,42 @@ const abilityMeta = computed((): Record<string, any> | undefined => {
   return template?.meta;
 });
 
+const abilityEffects = computed((): Record<string, Record<string, any>> => {
+  if (props.characterId) {
+    const character = game.getCharacter(props.characterId);
+    const ability = character?.getAbility(props.abilityId);
+    if (ability) return ability.effects;
+  }
+  const template = game.characterSystem.abilityTemplatesMap.get(props.abilityId);
+  return template ? normalizeAbilityEffects(template.effects) : {};
+});
+
+// Definitions flagged `debug_info` have no player-facing meaning (AI weights, internal flags), so
+// they render nowhere in the normal card. This raw readout shows up only in dev mode with
+// "Show Hidden Stats" on.
+const debugFields = computed((): { label: string, value: string }[] => {
+  if (!game.coreSystem.getDebugSetting('show_hidden_stats')) return [];
+  const definitions = game.characterSystem.abilityDefinitionsMap;
+  if (!definitions) return [];
+
+  const format = (value: any) => (value !== null && typeof value === 'object') ? JSON.stringify(value) : String(value);
+  const fields: { label: string, value: string }[] = [];
+
+  const meta = abilityMeta.value || {};
+  for (const key in meta) {
+    if (!definitions.get(key)?.debug_info) continue;
+    fields.push({ label: key, value: format(meta[key]) });
+  }
+  const effects = abilityEffects.value;
+  for (const effectId in effects) {
+    for (const key in effects[effectId]) {
+      if (!definitions.get(key)?.debug_info) continue;
+      fields.push({ label: `${effectId}.${key}`, value: format(effects[effectId][key]) });
+    }
+  }
+  return fields;
+});
+
 const description = computed(() => {
   const delta = deltaData.value;
   if (delta) {
@@ -59,9 +99,9 @@ const description = computed(() => {
         for (const key in mods) displayEffects[effectId][key] = mods[key];
       }
     }
-    return game.buildAbilityEffectsDescription({ effects: displayEffects }, props.characterId) as { name?: string, lines: string[] }[];
+    return game.buildAbilityEffectsDescription({ effects: displayEffects }, props.characterId) as { id: string, order: number, name?: string, attach?: string, lines: string[] }[];
   }
-  return game.buildAbilityEffectsDescription(props.abilityId, props.characterId) as { name?: string, lines: string[] }[];
+  return game.buildAbilityEffectsDescription(props.abilityId, props.characterId) as { id: string, order: number, name?: string, attach?: string, lines: string[] }[];
 });
 
 const metaDescription = computed(() => {
@@ -85,17 +125,7 @@ type DeltaResult = { newEffects: Record<string, Record<string, any>>, modifiedEf
 function getBaseTemplate(): { baseMeta: Record<string, any>, baseEffects: Record<string, Record<string, any>> } | null {
   const template = game.characterSystem.abilityTemplatesMap.get(props.abilityId);
   if (!template) return null;
-  const baseEffects: Record<string, Record<string, any>> = {};
-  if (Array.isArray(template.effects)) {
-    for (const e of template.effects) {
-      const key = e.id || 'undefined';
-      baseEffects[key] = { ...(e.aspects || {}) };
-      if (e.name) baseEffects[key].__name = e.name;
-    }
-  } else if (template.effects) {
-    const effs = template.effects as any;
-    for (const id in effs) baseEffects[id] = { ...effs[id] };
-  }
+  const baseEffects = normalizeAbilityEffects(template.effects);
   return { baseMeta: (template.meta || {}) as Record<string, any>, baseEffects };
 }
 
@@ -139,6 +169,9 @@ function diffEffectsMerged(sourceEffects: Record<string, Record<string, any>>, b
       }
       if (Object.keys(diff).length > 0) {
         if (baseAspects.__name) diff.__name = baseAspects.__name;
+        // authored attach text is not a diffable aspect — carry it so the delta view still explains the effect
+        const attach = aspects.__description_attach ?? baseAspects.__description_attach;
+        if (attach) diff.__description_attach = attach;
         modifiedEffects[effectId] = diff;
       }
     }
@@ -176,6 +209,9 @@ function diffEffectsRaw(sourceEffects: Record<string, Record<string, any>>, base
       }
       if (Object.keys(diff).length > 0) {
         if (baseAspects.__name) diff.__name = baseAspects.__name;
+        // authored attach text is not a diffable aspect — carry it so the delta view still explains the effect
+        const attach = aspects.__description_attach ?? baseAspects.__description_attach;
+        if (attach) diff.__description_attach = attach;
         modifiedEffects[effectId] = diff;
       }
     }
@@ -257,11 +293,64 @@ const deltaData = computed((): DeltaResult | null => {
   return null;
 });
 
+// Upgrades the character owns whose `requires_status` is unmet right now. They are excluded from the
+// merged ability on purpose, so describe them straight off the held-back modifier — vanishing entirely
+// reads as "I lost it" rather than "it isn't active yet".
+const inactiveDesc = computed(() => {
+  if (!props.characterId || props.improvementData) return [];
+  const character = game.getCharacter(props.characterId);
+  const held = character?.inactiveAbilityModifiers?.[props.abilityId];
+  if (!held?.effects || !Object.keys(held.effects).length) return [];
+  // A held-back effect that reuses a BASE effect id is a delta onto the core numbers ("+1 bounce").
+  // Standalone its lines read as absolutes ("Bounces to 1 random targets"), so while gated only its
+  // titled companion group (the description_attach one) represents the upgrade.
+  const baseIds = new Set(
+    (game.characterSystem.abilityTemplatesMap.get(props.abilityId)?.effects || []).map((e: any) => e.id)
+  );
+  const effects: Record<string, Record<string, any>> = Object.fromEntries(
+    Object.entries(held.effects as Record<string, Record<string, any>>).filter(([id]) => !baseIds.has(id))
+  );
+  if (!Object.keys(effects).length) return [];
+  return game.buildAbilityEffectsDescription({ effects }, props.characterId) as { id: string, order: number, name?: string, attach?: string, lines: string[] }[];
+});
+
+// Effects the modifiers ADD (delta mode lists only base effects in `description`, so without this
+// every upgrade-added group would be missing from the card entirely).
 const deltaNewDesc = computed(() => {
   if (!deltaData.value || !Object.keys(deltaData.value.newEffects).length) return [];
   return game.buildAbilityEffectsDescription(
     { effects: deltaData.value.newEffects }, props.characterId
-  ) as { name?: string, lines: string[] }[];
+  ) as { id: string, order: number, name?: string, attach?: string, lines: string[] }[];
+});
+
+// EVERY effect group renders as one ordered list, whatever its source: the merged/base description,
+// delta-only additions, and gated upgrades. Keeping any of them in a separate block would pin it
+// above or below the rest regardless of `order` — which is exactly how a greyed group ended up
+// jumping ahead of an active one. `inactive`/`isNew` are per-group flags, never separate blocks.
+const effectGroups = computed(() => {
+  const groups = [
+    ...description.value.map(g => ({ ...g, inactive: false, isNew: false })),
+    ...deltaNewDesc.value.map(g => ({ ...g, inactive: false, isNew: true })),
+    ...inactiveDesc.value.map(g => ({ ...g, inactive: true, isNew: false })),
+  ];
+  groups.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id));
+
+  // Effects sharing a name render as ONE titled block. Some upgrades need several effects for
+  // mechanical reasons — a power-scaled status and a flat one cannot share a stacks value — but read
+  // as a single thing. Giving them the same NAME folds them; giving them the same ID would silently
+  // drop all but the last, since effects are keyed by id. Only same-state groups merge, so a gated
+  // upgrade never absorbs an active one's lines.
+  const merged: typeof groups = [];
+  for (const g of groups) {
+    const prev = merged[merged.length - 1];
+    if (prev && g.name && prev.name === g.name && prev.inactive === g.inactive && prev.isNew === g.isNew) {
+      prev.lines = [...prev.lines, ...g.lines];
+      if (g.attach) prev.attach = prev.attach ? `${prev.attach}<br>${g.attach}` : g.attach;
+      continue;
+    }
+    merged.push({ ...g });
+  }
+  return merged;
 });
 
 // Helper to get stat display name
@@ -289,7 +378,9 @@ function getStatIcon(statId: string): string | undefined {
     <div class="card-header">
       <img v-if="abilityMeta.icon" :src="abilityMeta.icon" class="ability-icon"
         @error="(e) => (e.target as HTMLImageElement).style.display = 'none'" />
-      <h3 class="ability-name">{{ abilityMeta.name || abilityId }}</h3>
+      <h3 class="ability-name">{{ abilityMeta.name || abilityId }}
+        <span v-if="showIds" class="entity-id-badge">{{ abilityId }}</span>
+      </h3>
       <div v-if="isGranted || improvementData || isEffectivelyInactive" class="ability-labels">
         <span v-if="isGranted" class="ability-label granted">{{ global.getString('ability_tag.granted') }}</span>
         <span v-if="improvementData" class="ability-label modified">{{ global.getString('ability_tag.modified')
@@ -301,9 +392,9 @@ function getStatIcon(statId: string): string | undefined {
     </div>
 
     <!-- Ability Meta Info (Cooldown & Costs) -->
-    <div class="ability-meta" v-if="abilityMeta.cooldown || hasCosts">
-      <span v-if="abilityMeta.cooldown" class="meta-item cooldown">
-        {{ abilityMeta.cooldown }} {{ abilityMeta.cooldown === 1 ? 'turn' : 'turns' }}
+    <div class="ability-meta" v-if="abilityMeta.cd || hasCosts">
+      <span v-if="abilityMeta.cd" class="meta-item cooldown">
+        {{ abilityMeta.cd }} {{ abilityMeta.cd === 1 ? 'turn' : 'turns' }}
       </span>
       <span v-for="(amount, statId) in abilityMeta.costs" :key="statId" class="meta-item cost"
         :style="getStatColor(String(statId)) ? { color: getStatColor(String(statId)) } : {}">
@@ -320,22 +411,25 @@ function getStatIcon(statId: string): string | undefined {
         class="ability-description"></div>
 
       <div class="ability-details"
-        v-if="metaDescription.length > 0 || description.length > 0 || deltaNewDesc.length > 0">
+        v-if="metaDescription.length > 0 || effectGroups.length > 0">
         <div v-for="(line, i) in metaDescription" :key="'m' + i" class="meta-desc-line"
           v-script="{ html: line, resolver: false, context: lineContext }"></div>
-        <div v-for="(effect, i) in description" :key="'e' + i" class="effect-item">
+        <div v-for="effect in effectGroups" :key="effect.id + (effect.inactive ? ':off' : '')" class="effect-item"
+          :class="{ 'inactive-effect': effect.inactive, 'new-effect': effect.isNew }">
           <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
-          <div v-for="(line, j) in effect.lines" :key="j" class="effect-line"
-            v-script="{ html: line, resolver: false, context: lineContext }">
-          </div>
-        </div>
-        <div v-for="(effect, i) in deltaNewDesc" :key="'dn' + i" class="effect-item new-effect">
-          <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
+          <div v-if="effect.attach" class="effect-line effect-attach"
+            v-script="{ html: effect.attach, context: lineContext }"></div>
           <div v-for="(line, j) in effect.lines" :key="j" class="effect-line"
             v-script="{ html: line, resolver: false, context: lineContext }">
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="debugFields.length > 0" class="debug-info">
+      <span v-for="field in debugFields" :key="field.label" class="debug-item">
+        {{ field.label }}: <b>{{ field.value }}</b>
+      </span>
     </div>
 
     <CustomComponentContainer slot="ability-card-footer" :context="{ abilityId, characterId }" />
@@ -490,12 +584,35 @@ function getStatIcon(statId: string): string | undefined {
 }
 
 /* New effects (from delta) — gold variant of .effect-item */
+.effect-item.inactive-effect {
+  opacity: 0.45;
+  filter: grayscale(1);
+  border-left-color: #6b6b6b;
+}
+
 .effect-item.new-effect {
   border-left-color: #f0c674;
 }
 
 .effect-item.new-effect .effect-name {
   color: #f0c674;
+}
+
+/* Dev-only readout of `debug_info` definitions (dev mode + Show Hidden Stats) */
+.debug-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(180, 142, 173, 0.4);
+  font-family: monospace;
+  font-size: 0.8em;
+  color: #b48ead;
+}
+
+.debug-item b {
+  color: #d8bfd8;
 }
 
 /* Label badges in header */

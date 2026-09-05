@@ -12,9 +12,10 @@ const { ref } = vue;
 //   resources list ({ stat id, amount }) rendered off the game's own character_stats definitions.
 //   Game-specific economics hook in via the `reward_assemble`
 //   emitter and record through the service.
-// - Loot is granted exactly once per battle, from rpg_battler's `battle_defeated` emitter — the
-//   moment a battle is first marked defeated (fight victory OR scripted defeat). No extra
-//   bookkeeping: rpg_defeated_battles is the only tracking state.
+// - Loot and xp are granted on EVERY win, from rpg_battler's `battle_finished` emitter — the
+//   moment victory is decided (a fought battle OR a scripted `{win:}`). A re-fought battle pays
+//   again on purpose. `battle_defeated` / rpg_defeated_battles remain the once-per-battle CLEAR
+//   TRACKER behind `_defeated` content gates; they no longer gate rewards.
 // - `pendingReward` only accumulates what to DISPLAY; the battle victory panel and the reward
 //   popup are pure views over it.
 
@@ -47,7 +48,14 @@ function dungeonGroup() {
     return dungeon?.traits?.level_group || dungeon?.id || '';
 }
 
-game.on('dungeon_enter', (/** @type {string} */ dungeonId) => {
+// Resolve a dungeon id to its level group (the `level_group` trait, else the id itself). Uses the
+// engine's by-id config lookup so it works for ANY dungeon, not just the current one. A key that
+// isn't a known dungeon id (e.g. a group name passed directly) falls through unchanged.
+function groupOfDungeon(/** @type {string} */ dungeonId) {
+    return game.getDungeonConfig(dungeonId)?.traits?.level_group || dungeonId;
+}
+
+game.on('dungeon_enter_after', (/** @type {string} */ dungeonId) => {
     if (!autoScalingOn()) return;
     const dungeon = game.getCurrentDungeon();
     const group = dungeon?.traits?.level_group || dungeonId;
@@ -72,27 +80,106 @@ game.on('dungeon_enter', (/** @type {string} */ dungeonId) => {
     }
 });
 
+// While set, every level read (spawn windows, scaling) answers this instead of the dungeon
+// snapshot. Only the drop simulator sets it, and always inside a try/finally.
+let simulatedLevel = /** @type {number | null} */ (null);
+export function setSimulatedLevel(/** @type {number | null} */ level) { simulatedLevel = level; }
+
 export function getDungeonLevel() {
+    if (simulatedLevel != null) return simulatedLevel;
     const levels = game.getState('dungeon_levels') || {};
     return levels[dungeonGroup()] || 1;
 }
 
+/**
+ * Enemy multiplier for a dungeon level, from the authored `enemy_scaling` pins.
+ * Picks the CLOSEST PIN AT OR BELOW the level, so pins are sparse steps rather than a per-level
+ * table: [{1,1},{3,2}] leaves levels 1-2 at 1 and returns 2 from level 3 upward. Returns 1 when no
+ * pins are authored or none sit at or below the level, so an unconfigured game is unscaled.
+ *
+ * Deliberately independent of `dungeonScale` (which is a linear per-level rate driving gear and
+ * rewards) — the two curves are tuned against each other, so they must be authored separately.
+ * @param {number} level
+ * @returns {number}
+ */
+export function enemyScale(level) {
+    const pins = getConfig()?.enemy_scaling;
+    if (!Array.isArray(pins) || !pins.length) return 1;
+    const lvl = Math.max(1, level || 1);
+    let best = null;
+    for (const pin of pins) {
+        if (typeof pin?.level !== 'number' || pin.level > lvl) continue;
+        if (!best || pin.level > best.level) best = pin;
+    }
+    return best?.coef ?? 1;
+}
+
 export function dungeonScale(/** @type {number} */ level) {
     if (!autoScalingOn()) return 1;
-    const per = getConfig()?.scale_per_level ?? 0.25;
+    const per = getConfig()?.power_scale_per_level ?? 0.25;
     return 1 + per * (Math.max(1, level) - 1);
 }
 
 /** Price growth per level for scaled equipment, independent of the power (stat) curve. Defaults to
- *  TWICE `scale_per_level` when unset, so gear value climbs faster than its power (old gear sells
+ *  TWICE `power_scale_per_level` when unset, so gear value climbs faster than its power (old gear sells
  *  for less relative to its replacements). Set the config field to weld it back to power (=power
  *  rate) or anything else. */
 export function priceScale(/** @type {number} */ level) {
     if (!autoScalingOn()) return 1;
     const config = getConfig();
-    const per = config?.price_scale_per_level ?? 2 * (config?.scale_per_level ?? 0.25);
+    const per = config?.price_scale_per_level ?? 2 * (config?.power_scale_per_level ?? 0.25);
     return 1 + per * (Math.max(1, level) - 1);
 }
+
+// ── Dungeon level authoring + over-leveled equip gate ──
+
+// Action: set (or overwrite) a dungeon/dungeon-group level. Accepts:
+//   number   → set the CURRENT dungeon's group to that level
+//   true     → set the current group to the MC's live level
+//   "key = 7"→ set an explicit key (the dungeon's level GROUP — which equals the dungeon id when it
+//              has no `level_group` trait)
+// Writes the level state ONLY: future battles rescale live (the win handler reads getDungeonLevel),
+// and already-generated inventories are left as-is. No-op while auto_scaling is off.
+game.registerAction('dungeon_level', {
+    action: (/** @type {number|boolean|string} */ value) => {
+        if (!autoScalingOn()) return;
+        const clamp = (/** @type {number} */ n) => Math.max(1, Math.round(n));
+        const levels = { ...(game.getState('dungeon_levels') || {}) };
+
+        if (value === true) {
+            const group = dungeonGroup();
+            if (!group) { console.error('[dungeon_level] true: not in a dungeon'); return; }
+            levels[group] = Math.max(1, getMc()?.getTrait('level') || 1);
+        } else if (typeof value === 'number') {
+            const group = dungeonGroup();
+            if (!group) { console.error('[dungeon_level] number: not in a dungeon'); return; }
+            levels[group] = clamp(value);
+        } else if (typeof value === 'string') {
+            const [dungeonId, rhs] = value.split('=').map(s => s.trim());
+            const level = Number(rhs);
+            if (!dungeonId || !Number.isFinite(level)) { console.error('[dungeon_level] expected "dungeon_id = level", got', value); return; }
+            levels[groupOfDungeon(dungeonId)] = clamp(level);  // id → its level group (state is keyed by group)
+        } else {
+            console.error('[dungeon_level] expects a number, true, or "key = level" string; got', value);
+            return;
+        }
+
+        game.setState('dungeon_levels', levels);
+    },
+});
+
+// Block equipping gear stamped above the equipping character's own level — loot locks at the dungeon
+// level, which the action above can push past the MC. -999 so the veto lands before any other
+// item_equip_before listener. Unstamped items (item_level 0) never block; unequip is untouched.
+game.on('item_equip_before', (/** @type {Item} */ item, /** @type {Character} */ character) => {
+    if (!autoScalingOn()) return;
+    const need = item?.getTrait?.('item_level') || 0;
+    const have = character?.getTrait?.('level') || 0;
+    if (need > have) {
+        game.showNotification(game.getLine('equip_over_level', { level: need, item: item.getName?.() ?? item.name }));
+        return false;
+    }
+}, -999);
 
 // ── Pending reward (display accumulator) ──
 
@@ -129,15 +216,28 @@ export function recordCharacterXp(/** @type {RewardCharacterEntry} */ entry) {
         if (merged) merged.after = stat.after;
         else existing.stats.push(stat);
     }
+    for (const it of entry.items || []) {
+        const merged = existing.items?.find(i => i.id === it.id);
+        if (merged) merged.quantity += it.quantity;
+        else (existing.items ||= []).push(it);
+    }
 }
 
 /** Record a resource gain for display (merged per stat id). The GAME decides which of its own
  *  resources a reward touches — the plugin only renders them off character_stats (name/color). */
-export function recordResource(/** @type {string} */ statId, /** @type {number} */ amount) {
+export function recordResource(/** @type {string} */ statId, /** @type {number} */ amount,
+                               /** @type {string} */ characterId) {
     if (!statId || !amount) return;
-    const existing = pendingReward.value.resources.find(r => r.id === statId);
+    // The recipient is required: a resource is always gained BY someone, and the panel draws the
+    // bar against that character's own cap. Guessing an owner would silently draw the wrong bar,
+    // so an omission is reported and the line degrades to plain text instead.
+    if (!characterId) {
+        console.error('[reward] recordResource requires a characterId:', statId, amount);
+    }
+    const owner = characterId || '';
+    const existing = pendingReward.value.resources.find(r => r.id === statId && r.characterId === owner);
     if (existing) existing.amount += amount;
-    else pendingReward.value.resources.push({ id: statId, amount });
+    else pendingReward.value.resources.push({ id: statId, amount, characterId: owner });
 }
 
 function recordItem(/** @type {{id: string, name: string, image: string}} */ entry, /** @type {number} */ quantity) {
@@ -151,7 +251,34 @@ function recordItem(/** @type {{id: string, name: string, image: string}} */ ent
             return;
         }
     }
-    pendingReward.value.items.push({ ...entry, quantity });
+    pendingReward.value.items.push({ ...entry, quantity, trashed: false });
+}
+
+// ── Trash marks ──
+// Loot lands in the party bag before the panel is ever built, so the panel's trash button cannot
+// refuse a pickup — it marks the line and the removal happens on continue. Both continue paths end
+// in clearPending (the battle overlay's Continue fires battle_closed_before; the popup's button calls it
+// directly), so that is where the marks are cashed in.
+
+/** Remove every trash-marked reward line from the party bag. Only the GRANTED quantity goes — a
+ *  stack the player was already carrying keeps the rest. */
+export function commitTrashedItems() {
+    const marked = pendingReward.value.items.filter(entry => entry.trashed);
+    if (!marked.length) return;
+    const partyInventory = game.getInventory('_party_inventory');
+    if (!partyInventory) return;
+    for (const entry of marked) {
+        let remaining = entry.quantity;
+        // Newest first: addItem appends, so the tail of the array is THIS battle's drop. Matters for
+        // equipment — an identical sword picked up at a lower dungeon level is a different instance
+        // with different scaled stats, and the one being left behind is the one just found.
+        // reduceItemQuantity drops emptied stacks out of the array, so iterate a copy of it.
+        for (const item of [...partyInventory.items].reverse()) {
+            if (remaining <= 0) break;
+            if (item.id !== entry.id || item.isEquipped) continue;
+            remaining -= partyInventory.reduceItemQuantity(item, remaining);
+        }
+    }
 }
 
 // ── Equipment instance scaling ──
@@ -160,7 +287,7 @@ function recordItem(/** @type {{id: string, name: string, image: string}} */ ent
 // equip-status stats and price to the current dungeon level and is stamped with the item_level
 // trait (the no-rescale guard and the item card's level badge).
 
-function equipmentCategories() {
+export function equipmentCategories() {
     return getConfig()?.loot_equipment_categories || [];
 }
 
@@ -196,39 +323,75 @@ function scaleAbilityModifiers(/** @type {any[]} */ modifierIds, /** @type {numb
     });
 }
 
-game.on('item_create', (/** @type {Item} */ item) => {
-    if (!autoScalingOn()) return;
-    if (!item || !equipmentCategories().includes(item.category)) return;
-    if (item.traits?.item_level) return; // already scaled (or hand-stamped)
-    const stats = item.statusObject?.stats;
-    const modifiers = item.statusObject?.ability_modifiers;
-    if (!(stats && Object.keys(stats).length) && !modifiers?.length) return;
+/** Whether the level curve applies to an item: scaling on, an equipment category, and a status
+ *  block with something to scale. `statusObject` is passed separately so a saved item can be judged
+ *  by its template's baseline rather than by whatever it currently carries. */
+function isScalableEquipment(/** @type {Item} */ item, /** @type {any} */ statusObject) {
+    if (!autoScalingOn() || !item || !equipmentCategories().includes(item.category)) return false;
+    const stats = statusObject?.stats;
+    return !!((stats && Object.keys(stats).length) || statusObject?.ability_modifiers?.length);
+}
 
-    const level = generationLevel ?? getDungeonLevel();
+/** Scaled copies of a baseline status object and price at `level`. Pure — same baseline, config and
+ *  level always give the same result — which is what lets a saved item be rebuilt at its stamped
+ *  level and come out identical to a fresh drop. Returns new objects, never mutates the inputs. */
+function scaleBaseline(/** @type {any} */ statusObject, /** @type {Record<string, number>} */ price, /** @type {number} */ level) {
     const scale = dungeonScale(level);       // power: stats + ability aspects
     const pScale = priceScale(level);        // value: price, own curve (2× power by default)
-    // createItem assigns traits/status/price by REFERENCE to the template object — replace with
-    // scaled copies instead of mutating, or every future instance inherits the scaling.
-    if (scale !== 1 || pScale !== 1) {
-        const scaledStats = /** @type {Record<string, number>} */ ({});
-        for (const statId in stats || {}) {
-            scaledStats[statId] = Math.round(stats[statId] * scale);
-        }
-        item.statusObject = {
-            ...item.statusObject,
+    if (scale === 1 && pScale === 1) return { statusObject, price };
+    const stats = statusObject?.stats || {};
+    const modifiers = statusObject?.ability_modifiers;
+    // Percentage-natured stats (reflect, dodge, crit) are already proportional — the authored
+    // no_scale_stats list keeps them fixed while flat stats (power, thorns, armor) ride the curve.
+    const noScale = getConfig()?.no_scale_stats || [];
+    const scaledStats = /** @type {Record<string, number>} */ ({});
+    for (const statId in stats) {
+        scaledStats[statId] = noScale.includes(statId) ? stats[statId] : Math.round(stats[statId] * scale);
+    }
+    const scaledPrice = /** @type {Record<string, number>} */ ({});
+    for (const currency in price || {}) {
+        scaledPrice[currency] = Math.round(price[currency] * pScale);
+    }
+    return {
+        statusObject: {
+            ...statusObject,
             stats: scaledStats,
             ...(modifiers?.length ? { ability_modifiers: scaleAbilityModifiers(modifiers, scale) } : {}),
-        };
-        const scaledPrice = /** @type {Record<string, number>} */ ({});
-        for (const currency in item.price || {}) {
-            scaledPrice[currency] = Math.round(item.price[currency] * pScale);
-        }
-        item.price = scaledPrice;
-    }
+        },
+        price: scaledPrice,
+    };
+}
+
+game.on('item_create', (/** @type {Item} */ item) => {
+    if (item?.traits?.item_level) return; // already scaled (or hand-stamped on the template)
+    if (!isScalableEquipment(item, item.statusObject)) return;
+
+    const level = generationLevel ?? getDungeonLevel();
+    // createItem assigns traits/status/price by REFERENCE to the template object — replace with
+    // scaled copies instead of mutating, or every future instance inherits the scaling.
+    const scaled = scaleBaseline(item.statusObject, item.price, level);
+    item.statusObject = scaled.statusObject;
+    item.price = scaled.price;
     item.traits = { ...item.traits, item_level: level };
 });
 
+// Saved items are deserialized, so the listener above never runs for them, and the engine's save
+// migration hands their status object and price back at the template's level-1 baseline. Rebuild
+// from the TEMPLATE at the stamped level — never from the live item, which is already scaled when
+// a game keeps the migration's `items` section off. A template that hand-stamps item_level was
+// authored as-is and stays that way, exactly as item_create leaves it.
+game.on('item_migrate', (/** @type {Item} */ item, /** @type {any} */ template) => {
+    const level = item?.traits?.item_level;
+    if (!level || template?.traits?.item_level) return;
+    if (!isScalableEquipment(item, template?.status)) return;
+
+    const scaled = scaleBaseline(template.status || {}, template.price || {}, level);
+    item.statusObject = scaled.statusObject;
+    item.price = scaled.price;
+});
+
 export function clearPending() {
+    commitTrashedItems();
     pendingReward.value = emptyReward();
 }
 
@@ -251,19 +414,32 @@ export function inSpawnWindow(/** @type {any} */ template, /** @type {number} */
     return (!min || level >= min) && (!max || level <= max);
 }
 
+/** A recipe scroll for something already learned is dead weight: its Learn choice is greyed out and
+ *  it only sells for scrap. Excluded from every generated loot source (battle rewards, chests, shop
+ *  stock) so recipes can sit in the general loot tables without the tail of a long game filling up
+ *  with duplicates. Hand-authored placements are untouched — this only filters generation. */
+export function isKnownRecipe(/** @type {any} */ template) {
+    const recipeId = template?.learn_recipe;
+    return !!recipeId && game.getLearnedRecipes().has(recipeId);
+}
+
 /** Spend a budget on items from `candidates` (mutates nothing; calls `grant` per pick).
- *  First pick is biased to the most expensive affordable item, then a floor-price fill keeps the
- *  remaining slots from draining the budget on trash (minPrice = remaining / slotsLeft, relaxed
- *  when nothing clears the floor). Returns the unspent budget. */
+ *  Each roll only shops with a random 40-100% of the budget; the reserve is returned unspent, so
+ *  the caller's gold payout absorbs it — the same battle sometimes drops one big item, sometimes
+ *  two mid ones, sometimes mostly gold. Slot 0 picks within the top price band (>= 75% of the
+ *  best affordable price) instead of pinning the exact maximum; later slots floor-fill
+ *  (minPrice = remaining / slotsLeft, relaxed when nothing clears the floor). Returns the
+ *  unspent budget, reserve included. */
 function rollLootBudget(/** @type {number} */ budget, /** @type {any[]} */ candidates, /** @type {number} */ maxItems, /** @type {(template: any) => void} */ grant) {
-    let remaining = budget;
+    let remaining = budget * (0.4 + 0.6 * Math.random());
+    let spent = 0;
     for (let slot = 0; slot < maxItems; slot++) {
         const affordable = candidates.filter(t => priceOf(t) <= remaining);
         if (!affordable.length) break;
         let pool;
         if (slot === 0) {
             const top = Math.max(...affordable.map(priceOf));
-            pool = affordable.filter(t => priceOf(t) === top);
+            pool = affordable.filter(t => priceOf(t) >= top * 0.75);
         } else {
             const floor = remaining / (maxItems - slot);
             const preferred = affordable.filter(t => priceOf(t) >= floor);
@@ -271,9 +447,10 @@ function rollLootBudget(/** @type {number} */ budget, /** @type {any[]} */ candi
         }
         const pick = pool[Math.floor(Math.random() * pool.length)];
         remaining -= priceOf(pick);
+        spent += priceOf(pick);
         grant(pick);
     }
-    return remaining;
+    return budget - spent;
 }
 
 /** Grant a battle's defeat loot into the party inventory:
@@ -282,21 +459,28 @@ function rollLootBudget(/** @type {number} */ budget, /** @type {any[]} */ candi
  *  2. Equipment group — budget = BASE threat × loot_equipment_coef. Deliberately NOT level-scaled:
  *     candidates are priced at their level-1 baseline and the created instances scale their own
  *     stats/price to the dungeon level (item_create listener above) — a scaled budget would
- *     double-dip.
- *  3. Income group — budget = EFFECTIVE threat × loot_income_coef, the only level-scaled budget
- *     (junk/currency values are static). Unspent remainder pays out 1:1 as the currency item.
+ *     double-dip. The unspent remainder (price-point quantization, low spend-target rolls) flows
+ *     into the income pot instead of evaporating — no battle pays less than its full budget.
+ *  3. Income group — budget = EFFECTIVE threat × loot_income_coef (the only level-scaled budget;
+ *     junk/currency values are static) + the equipment remainder. loot_gold_share of the pot is
+ *     paid straight out as the currency item; the rest rolls items, and THAT remainder pays out
+ *     1:1 as currency too.
  *  Both groups roll only whitelisted categories; currency, no_drop, test-tagged, and unpriced
  *  templates never drop. */
-function grantLoot(/** @type {string} */ battleId, /** @type {number} */ baseThreat, /** @type {number} */ scaledThreat) {
+/** @param {{inventory?: any, record?: boolean}} [opts] target override for the drop simulator */
+function grantLoot(/** @type {string} */ battleId, /** @type {number} */ baseThreat, /** @type {number} */ scaledThreat, opts = {}) {
     const debug = { equipBudget: 0, incomeBudget: 0, currencyPayout: 0 };
-    const partyInventory = game.getInventory('_party_inventory');
+    const partyInventory = opts.inventory || game.getInventory('_party_inventory');
     if (!partyInventory) return debug;
     const itemTemplates = game.getData('item_templates', true);
 
+    let phase = 'authored';   // set per section below; reported to opts.onGrant for the simulator
     const grant = (/** @type {any} */ template, /** @type {number} */ quantity = 1) => {
         const item = game.createItem(template.id);
         if (!item) return;
         partyInventory.addItem(item, quantity);
+        opts.onGrant?.(template, quantity, phase);
+        if (opts.record === false) return;   // dry run: no reward panel entry
         recordItem({ id: template.id, name: template.traits?.name || template.id, image: template.traits?.image || '' }, quantity);
     };
 
@@ -312,30 +496,70 @@ function grantLoot(/** @type {string} */ battleId, /** @type {number} */ baseThr
     const config = getConfig();
     const maxItems = config?.loot_max_items || 3;
     const level = getDungeonLevel();
+    // `quest` rarity means never-generated, matching what pool entries already exclude — otherwise a
+    // quest consumable in a whitelisted category (they usually are) becomes an ordinary enemy drop,
+    // and every game has to remember to pair the rarity with no_drop by hand on every such item.
     const eligible = [...(itemTemplates?.values() || [])].filter(t =>
         priceOf(t) > 0 && !t.is_currency && !t.traits?.no_drop && !t.tags?.includes('test')
-        && inSpawnWindow(t, level));
+        && t.traits?.rarity !== 'quest'
+        && inSpawnWindow(t, level) && !isKnownRecipe(t));
 
+    phase = 'equipment';
     const equipBudget = Math.round(baseThreat * (config?.loot_equipment_coef || 0));
     debug.equipBudget = equipBudget;
+    let equipRemainder = 0;
     if (equipBudget > 0) {
         const categories = equipmentCategories();
-        rollLootBudget(equipBudget, eligible.filter(t => categories.includes(t.category)), maxItems, grant);
+        equipRemainder = rollLootBudget(equipBudget, eligible.filter(t => categories.includes(t.category)), maxItems, grant);
     }
 
-    const incomeBudget = Math.round(scaledThreat * (config?.loot_income_coef || 0));
+    phase = 'income';
+    const incomeBudget = Math.round(scaledThreat * (config?.loot_income_coef || 0)) + equipRemainder;
     debug.incomeBudget = incomeBudget;
     if (incomeBudget > 0) {
+        const goldShare = Math.min(1, Math.max(0, config?.loot_gold_share || 0));
+        const goldReserve = incomeBudget * goldShare;
         const categories = config?.loot_income_categories || [];
-        const remaining = rollLootBudget(incomeBudget, eligible.filter(t => categories.includes(t.category)), maxItems, grant);
+        const remaining = rollLootBudget(incomeBudget - goldReserve, eligible.filter(t => categories.includes(t.category)), maxItems, grant);
         const currencyTemplate = config?.loot_currency_item ? itemTemplates?.get(config.loot_currency_item) : null;
-        const payout = Math.round(remaining);
+        const payout = Math.round(goldReserve + remaining);
+        phase = 'currency';
         if (currencyTemplate && payout > 0) {
             grant(currencyTemplate, payout);
             debug.currencyPayout = payout;
         }
     }
     return debug;
+}
+
+/**
+ * Roll battle loot exactly as a victory would, into a throwaway inventory.
+ * Reuses grantLoot itself, so the simulator can never drift from what the game actually grants.
+ * @param {{level: number, threat: number, rolls?: number, battleId?: string}} opts
+ * @returns {{level: number, threat: number, rolls: string[][], budgets: any}}
+ */
+export function simulateBattleLoot({ level, threat, rolls = 20, battleId = '__sim' }) {
+    const out = [];
+    let budgets = null;
+    setSimulatedLevel(level);
+    try {
+        for (let n = 0; n < rolls; n++) {
+            const invId = `__sim_loot_${n}`;
+            if (game.getInventory(invId)) game.itemSystem.removeInventory(invId);
+            const inv = game.createInventory(invId);
+            const source = {};
+            budgets = grantLoot(battleId, threat, threat * dungeonScale(level),
+                { inventory: inv, record: false, onGrant: (t, _q, phase) => { source[t.id] ??= phase; } });
+            out.push(inv.items.map(i => ({ id: i.id, quantity: i.quantity || 1,
+                                           price: Object.values(i.price || {})[0] || 0,
+                                           itemLevel: i.traits?.item_level,
+                                           source: source[i.id] || 'rolled' })));
+            game.itemSystem.removeInventory(invId);
+        }
+    } finally {
+        setSimulatedLevel(null);
+    }
+    return { level, threat, rolls: out, budgets };
 }
 
 // Games hook their own economics in here (e.g. refunding a resource on fight victories):
@@ -363,11 +587,16 @@ function grantThreatXp(/** @type {number} */ threat) {
 // Battle wiring — only when the battle plugin is installed (game.on THROWS for unregistered
 // emitters; these are rpg_battler's, which loads before this plugin — see plugin.json order).
 if (game.hasPlugin('rpg_battler')) {
-    // The single reward point: first-time defeat, from a fight victory (fires at the moment
-    // victory is detected, before the result overlay renders — the overlay displays the pending
-    // reward) or from the delayed `win` scene action (then the reward popup presents it and
-    // gates the scene until closed).
-    game.on('battle_defeated', (/** @type {string} */ battleId) => {
+    // The single reward point: EVERY win — a fight victory (fires the moment victory is detected,
+    // before the result overlay renders, so the overlay displays the pending reward) or the delayed
+    // `win` scene action (then the popup presents it and gates the scene until closed).
+    //
+    // Deliberately NOT `battle_defeated`: that is once-per-battle-definition because it is the
+    // clear TRACKER behind `_defeated` content gates. Hanging rewards off it meant a re-fought
+    // battle paid nothing at all — not even xp — and left any per-win resource a game recorded
+    // with no panel to show it.
+    game.on('battle_finished', (/** @type {string} */ result, /** @type {string|null} */ battleId) => {
+        if (result !== 'victory') return;
         const base = rpgBattle()?.getThreat?.(battleId) || 0;
         const level = getDungeonLevel();
         const threat = base * dungeonScale(level);
@@ -382,8 +611,11 @@ if (game.hasPlugin('rpg_battler')) {
             };
         }
         game.trigger('reward_assemble', { source: inBattle() ? 'battle' : 'scene', battleId, threat });
-        if (!inBattle()) openRewardPopup();
+        // A fought battle shows the panel in its own result overlay; a scripted win needs the
+        // popup. `battleId` is required, not a "did anything land" test: a win always pays at
+        // least threat xp, but a win with no battle to price cannot pay anything at all.
+        if (!inBattle() && battleId) openRewardPopup();
     });
     game.on('battle_start', () => clearPending());
-    game.on('battle_closed', () => clearPending());
+    game.on('battle_closed_before', () => clearPending());
 }

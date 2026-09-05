@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
 import { closeAll } from '../popupStore';
+
+const showIds = computed(() => shouldShowEntityIds());
 
 const props = defineProps<{
     recordId: string;
@@ -35,7 +38,9 @@ function onOpenInEncyclopedia() {
                 @click="onOpenInEncyclopedia" aria-label="Open in Encyclopedia">
                 <i class="pi pi-book"></i>
             </button>
-            <span class="popup-title">{{ record.title }}</span>
+            <span class="popup-title">{{ record.title }}
+                <span v-if="showIds" class="entity-id-badge">{{ recordId }}</span>
+            </span>
         </div>
         <div v-script="summarySource" class="popup-body"></div>
         <template v-for="child in discoveredChildren" :key="child.id">
@@ -52,6 +57,14 @@ function onOpenInEncyclopedia() {
 <style scoped>
 .popup-header {
     justify-content: flex-start;
+}
+
+.popup-body :deep(p) {
+    margin: 0 0 8px;
+}
+
+.popup-body :deep(p:last-child) {
+    margin-bottom: 0;
 }
 
 .record-child-sep {

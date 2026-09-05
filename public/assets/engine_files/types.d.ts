@@ -57,6 +57,19 @@ interface GameEvents {
    * });
    */
   save_load_before: (saveData: any) => boolean | void;
+  /**
+   * Triggered inside the save-migration pass (`registerSaveMigration`), after every declared section
+   * has synced and every `item_migrate` has fired, before the engine re-binds equip statuses and puts
+   * resource pools back. Fires only when the pass actually runs: an old save, or any load in dev mode.
+   * The place for whole-save repairs the generic pass can't express — states, stores, flags.
+   *
+   * @example
+   * game.on('save_migrated', () => {
+   *   const flags = game.getState('story_flags');
+   *   if (flags.chapter >= 3 && !flags.met_smith) flags.met_smith = true;
+   * });
+   */
+  save_migrated: () => boolean | void;
   /** Triggered when the game HTML mounts to the DOM */
   html_mount: () => boolean | void;
 
@@ -67,8 +80,10 @@ interface GameEvents {
   // Dungeon Events
   /** Triggered when a dungeon is created */
   dungeon_create: (dungeon: any) => boolean | void;
+  /** Triggered before a cross-dungeon entry, before any dungeon state mutates. Return false to abort the entry. Room-to-room movement fires room_enter_before instead. */
+  dungeon_enter_before: (dungeonId: string, roomId: string) => boolean | void;
   /** Triggered when entering a dungeon */
-  dungeon_enter: (dungeonId: string, roomId: string) => boolean | void;
+  dungeon_enter_after: (dungeonId: string, roomId: string) => boolean | void;
   /** Triggered before entering a room */
   room_enter_before: (roomId: string, dungeonId: string) => boolean | void;
   /** Triggered after entering a room */
@@ -79,6 +94,12 @@ interface GameEvents {
   encounter_discovered: (encounterId: string, dungeonId: string) => boolean | void;
   /** Triggered when a collectable encounter is collected. `itemSpec` is add_item grammar (e.g. `"berry#2"`) */
   encounter_collected: (encounterId: string, itemSpec: string, dungeonId: string) => boolean | void;
+  /** Triggered during dungeon creation (so also on save load) for every collectable encounter with a
+   *  `collect_pool`. A listener claims the request by setting `request.itemId` to an item template id;
+   *  listeners must skip requests that already carry one. An unanswered request degrades the encounter
+   *  to a plain one with a logged error. The experience plugin answers pool `"gather"` with a
+   *  tier-weighted, environment-filtered roll locked per spot in the `gather_spots` state. */
+  collectable_resolve: (request: { dungeonId: string, encounterId: string, pool: string, itemId: string | null }) => boolean | void;
   /** Triggered before a scene plays (gate — return false to block) */
   scene_play_before: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
   /** Triggered when a committed scene is about to run its paragraph actions (after gates/redirects,
@@ -110,12 +131,42 @@ interface GameEvents {
   character_render: (character: Character) => boolean | void;
 
   // Render Events
-  /** Triggered when an asset is rendered. Listeners can modify asset properties before display. */
+  /** Triggered when an asset is staged or updated. Listeners can modify asset properties before display. */
   asset_render: (asset: Asset) => boolean | void;
+  /**
+   * Triggered while an asset's image layers are built, on every render path — the staged
+   * scene, the gallery, the fullscreen overlay, the editor preview. Listeners get a throwaway
+   * copy and may filter/reorder `asset.layers`, or swap an entry for `{ file, classes }` to
+   * add css classes to one plate. Must be PURE: it runs inside a computed, so writing
+   * reactive state risks a render loop, and the copy is never staged or saved.
+   */
+  asset_resolve: (asset: Asset) => boolean | void;
 
   // Item Events
   /** Triggered when an item is created */
   item_create: (item: Item) => boolean | void;
+  /**
+   * Triggered for every inventory item the save-migration pass visits, right after its template-owned
+   * fields were reset (per the declared scopes), with a copy of its template. Saved items are
+   * deserialized, so `item_create` never fires for them on load — whatever a listener derived per
+   * INSTANCE at creation (level scaling, a runtime-added choice) is put back here.
+   *
+   * @example
+   * game.on('item_migrate', (item) => {
+   *   if (item.traits.engraved && !item.choices.includes('read_engraving')) item.choices.push('read_engraving');
+   * });
+   */
+  item_migrate: (item: Item, template: any) => boolean | void;
+  /** Triggered before an item is discarded via the `drop_item` action (return false to cancel) */
+  item_drop_before: (item: Item, character: Character) => boolean | void;
+  /**
+   * Triggered to decide whether a discard affordance renders for an item — the item card's Drop
+   * choice and the experience plugin's reward-panel trash button both ask. Return false to hide it.
+   * This is the GAME's veto for its own protected kinds; the engine's own rules (equipped gear,
+   * quest rarity) live in `item.isDroppable()`, which those UIs check alongside it.
+   * Pure predicate: it runs on every render, so listeners must only return, never act.
+   */
+  item_drop_render: (item: Item, character?: Character) => boolean | void;
   /** Triggered before an item is equipped (return false to cancel) */
   item_equip_before: (item: Item, character: Character) => boolean | void;
   /** Triggered after an item is equipped */
@@ -138,12 +189,28 @@ interface GameEvents {
   inventory_apply: (inventory: Inventory) => boolean | void;
   /** Triggered when items are transferred between inventories */
   inventory_transfer: (inventory: Inventory, targetInventory: Inventory, item: Item, quantity: number, isTrade: boolean) => boolean | void;
+  /** Triggered after items moved between inventories — post-mutation counterpart of inventory_transfer; `item` is the live target-side stack (possibly a pre-existing stack the transfer merged into). Informational. */
+  inventory_transfer_after: (inventory: Inventory, targetInventory: Inventory, item: Item, quantity: number, isTrade: boolean) => boolean | void;
+  /** Triggered after a trade moved currency in or out of an inventory (negative delta = paid, positive = received). Fires once per currency id, only for genuine is_currency templates. Informational. */
+  currency_change: (inventory: Inventory, currencyId: string, delta: number) => boolean | void;
+  /** Triggered after a recipe was crafted — inputs consumed, outputs added. Informational. */
+  inventory_craft: (inventory: Inventory, recipe: any) => boolean | void;
+  /** Triggered after a quest log line landed (deduped — repeats of the same log don't fire). Informational. */
+  quest_updated: (questId: string, goalId: string, result: { isNewQuest: boolean, wasQuestCompleted: boolean, isQuestCompletedNow: boolean, questTitle: string }, dungeonId: string) => boolean | void;
+  /** Triggered when an achievement's progress reaches its target. The engine scores the points and shows the notification; grant any in-game reward from a listener. Informational. */
+  accolade_completed: (accoladeId: string, points: number) => boolean | void;
 
   // Trade & Recipe Events
   /** Triggered when a trade is initiated */
   trade_init: (traderInventory: Inventory, item: Item) => boolean | void;
   /** Triggered when a recipe is learned */
   recipe_learned: (recipeId: string) => boolean | void;
+  /** Triggered once per save when an item is discovered (recipe learned from its scroll, book read
+   *  to the last page, painting viewed). Drives the item-card check mark. */
+  item_discovered: (itemId: string) => boolean | void;
+  /** Triggered when a key item was auto-used on a locked room or inventory. targetId is
+   *  "dungeonId.roomId" for rooms, the inventory id for chests. Informational — the unlock already happened. */
+  key_used: (keyItemId: string, targetId: string) => boolean | void;
 
   // Skill Events
   /** Triggered when a skill is learned */
@@ -255,6 +322,21 @@ interface Asset {
   type: 'image' | 'video' | 'spine';
   /** Path to image file (for image type) */
   file_image?: string;
+  /**
+   * Extra image plates stacked on top of `file_image`, in order (image type). Every plate
+   * shares the asset's fit mode, position, scale, opacity and blur, so author them
+   * pre-registered at the same canvas size. An `asset_resolve` listener may filter this list
+   * or replace an entry with an object to say more about one plate:
+   *
+   * - `classes` — css classes for that plate alone, e.g. a recolor.
+   * - `fade` — crossfade the plate as it comes and goes instead of appearing on one frame.
+   *   Only for a plate that ADDS to a finished picture, like an overlay on transparency. A
+   *   plate that is one of several mutually exclusive options must not set it: fading between
+   *   two of them leaves both in the stack, and whatever they cover shows through the pair for
+   *   the length of the fade. Alternatives swap on a single frame, which is the default. Keep
+   *   fading plates at the top of the stack.
+   */
+  layers?: (string | { file: string; classes?: string; fade?: boolean })[];
   /** Path to video file (for video type) */
   file_video?: string;
   /** Tags for categorizing and filtering */
@@ -420,14 +502,18 @@ interface SaveOptions {
 }
 
 /**
- * One save-migration section: `true` = the whole section, `false` = skip it,
- * `string[]` = the ids to skip (opt-out mode) or the only ids to sync (opt-in mode).
+ * One save-migration section: `true` = the whole section, `false` = skip it entirely,
+ * `{ only }` = the only ids to sync, `{ skip }` = ids to leave as the save has them.
+ * Both lists can appear together — allowed ids are `only` minus `skip`.
  */
-type MigrationScope = boolean | string[];
+type MigrationScope = boolean | { only?: string[]; skip?: string[] };
 
-/** Options for `game.runDefaultSaveMigration()`. Every section it can touch has its own key. */
+/** Options for `game.registerSaveMigration()`. Every section it can touch has its own key. */
 interface SaveMigrationOptions {
-  /** `opt-out` (default): sync everything, lists name what to skip. `opt-in`: sync nothing, lists name what to sync. */
+  /**
+   * What sections nobody mentions do — `opt-out` (default) syncs them, `opt-in` skips them.
+   * Only honored on the `_core` declaration: a mod can't flip the game's global default.
+   */
   mode?: 'opt-in' | 'opt-out';
   /** Stat ids. */
   stats?: MigrationScope;
@@ -439,8 +525,10 @@ interface SaveMigrationOptions {
   abilities?: MigrationScope;
   /** Skin layer ids. */
   skinLayers?: MigrationScope;
-  /** View ids (`_default` for the default view). Covers static art placement too. */
+  /** View ids (`_default` for the default view) — spine atlas/skeleton and their placement. */
   spine?: MigrationScope;
+  /** View ids (`_default` for the default view) — static (non-spine) art_dx / art_dy / art_scale placement. */
+  staticArt?: MigrationScope;
   /** Template item-slot ids. Backfills missing slots and repositions existing ones — never removes. */
   itemSlots?: MigrationScope;
   /** Skill tree ids. */
@@ -449,14 +537,14 @@ interface SaveMigrationOptions {
   learnedSkills?: MigrationScope;
   /** Status ids. */
   statuses?: MigrationScope;
-  /** Item trait ids. */
+  /** Item trait ids — reset every inventory item's traits to its template, purge stale ids. */
   itemTraits?: MigrationScope;
-  /** Item attribute ids. */
-  itemAttributes?: MigrationScope;
-  /** Item property ids. */
-  itemProperties?: MigrationScope;
-  /** Item template ids — refreshes the equip-status object and re-binds it on equipped items. */
-  itemStatuses?: MigrationScope;
+  /**
+   * Item template ids — rebuild every other template-owned field of each inventory item from its
+   * template: equip-status object, price, consume payloads, slots, category, tags, actions, choices.
+   * Identity, quantity, the equipped flag and trade prices are the instance's own and never move.
+   */
+  items?: MigrationScope;
 }
 
 interface Game {
@@ -533,6 +621,16 @@ interface Game {
   openMenu(menuState?: string): void;
 
   /**
+   * Close the engine menu. Needed before opening a popup from a `menu-before` / `menu-after`
+   * slot: the menu paints above the popup layer, so a popup opened from inside the menu stays
+   * invisible until the menu closes.
+   * @example
+   * game.closeMenu();
+   * game.openPopup('my_popup');
+   */
+  closeMenu(): void;
+
+  /**
    * Returns the current game's manifest — includes id, name, author, version, description, etc.
    * Read-only; to edit the manifest, use the engine editor.
    * @example
@@ -597,50 +695,76 @@ interface Game {
    * In dev mode the version check is skipped — the migration runs on every save load, so template edits
    * apply to dev saves without bumping the game version.
    *
-   * Call it from a `game_initiated` listener. Every section takes `true` (sync the whole section),
-   * `false` (skip it) or a list of ids, and `mode` decides what a list means:
-   * - `mode: 'opt-out'` (default) — sync everything; a list names the ids to **skip**.
-   * - `mode: 'opt-in'` — sync nothing; a list names the only ids to **sync**.
-   * An omitted section follows the mode (everything in opt-out, nothing in opt-in).
+   * Declare it once at script-load time (module top level, not inside a listener) — the engine merges every
+   * declaration and runs the pass itself, right before `game_initiated`. Every section takes `true` (sync the
+   * whole section), `false` (skip it), `{ only: [ids] }` or `{ skip: [ids] }`; when both lists appear the
+   * allowed ids are `only` minus `skip`. A section nobody mentions follows `mode` — synced in `opt-out`
+   * (the default), skipped in `opt-in`.
+   *
+   * The game registers as `_core`; mods and plugins register under their own id. The merge is restrictive, so
+   * a mod can only make the pass do less: a `false` or a `skip` from any source always wins, `only` lists from
+   * different sources union, `true` widens a section to every id, and `mode` is honored on `_core` alone.
+   * Registering the same source twice replaces its earlier declaration.
    *
    * What each section does:
    * - `stats`, `traits`, `attributes` — reset to the template value, purge ids that no longer exist.
    * - `abilities`, `skinLayers` — resync the core-status set to the template's (status- and item-granted
    *   entries live on their own statuses and re-accumulate on reevaluate).
-   * - `spine` — rebuild core-status spine and static-art views from the template, keyed by view id
-   *   (`_default` for the default view); per-view overrides from other statuses re-accumulate.
+   * - `spine`, `staticArt` — rebuild the core-status spine views and the static (non-spine) art_dx / art_dy /
+   *   art_scale views from the template, keyed by view id (`_default` for the default view); per-view overrides
+   *   from other statuses re-accumulate. A character can carry both — spine for one view, static art for another.
    * - `itemSlots` — backfill template slots the character is missing and reposition the ones that exist
    *   (x/y only; the slot's type and its equipped item are left alone). Never removes a slot.
    * - `skillTrees`, `learnedSkills` — backfill template trees, purge deleted ones, and rebuild learned-skill
    *   statuses from current definitions; levels are preserved, clamped to the new max.
    * - `statuses` — re-apply every held definition-backed status (stack counts preserved) so stat-grants
    *   pick up new definitions. Runtime statuses (item, plugin, hand-rolled) are always left alone.
-   * - `itemTraits`, `itemAttributes`, `itemProperties` — same reset/purge for every item in every inventory
-   *   (property *values* are preserved; only stale ids are purged and new template ids backfilled).
-   * - `itemStatuses` — refresh each item's equip-status object from its template and re-bind it on whoever
-   *   is wearing it. Keyed by item template id.
+   * - `itemTraits` — same reset/purge for every item in every inventory, keyed by trait id, so the
+   *   traits an instance owns (charges, wear) can be skipped while the rest catch up.
+   * - `items` — rebuild every other template-owned field of each inventory item from its template:
+   *   equip-status object, price, consume payloads, slots, category, tags, actions, choices. Keyed by
+   *   item template id. Identity, quantity, the equipped flag and trade prices never move.
+   *
+   * A saved item is a snapshot of its template at creation, and `item_create` does not fire on load, so
+   * anything derived per instance at creation is gone after the reset. The pass fires `item_migrate(item,
+   * template)` for every item it visits and `save_migrated` once at the end — plugins and games put their
+   * derivations back there (the experience plugin re-applies level scaling from the stamped `item_level`).
+   * Both fire before the engine re-binds every worn item's status from its status object and puts
+   * resource pools back.
    *
    * Resource pools are never touched — snapshot at the start, restored verbatim at the end, so a stats
    * sync or a status reapply can't clamp or refill them. Characters whose template no longer exists are
    * skipped entirely.
+   * @param source `_core` for the game itself, otherwise the mod or plugin id.
    * @example
    * // Full resync, keeping save-owned fields
-   * game.on('game_initiated', () => {
-   *   game.runDefaultSaveMigration({
-   *     traits: ['info', 'bio'],
-   *     attributes: ['life_stage'],
-   *   });
+   * game.registerSaveMigration('_core', {
+   *   traits: { skip: ['info', 'bio'] },
+   *   attributes: { skip: ['life_stage'] },
    * });
    * @example
    * // Surgical: re-push art calibration from the editor, touch nothing else
-   * game.on('game_initiated', () => {
-   *   game.runDefaultSaveMigration({
-   *     mode: 'opt-in',
-   *     traits: ['face_shift_x', 'face_shift_y', 'face_shift_scale'],
-   *     spine: true,
-   *     skinLayers: true,
-   *   });
+   * game.registerSaveMigration('_core', {
+   *   mode: 'opt-in',
+   *   traits: { only: ['face_shift_x', 'face_shift_y', 'face_shift_scale'] },
+   *   spine: true,
+   *   staticArt: true,
+   *   skinLayers: true,
    * });
+   * @example
+   * // A mod adding its own entities to the game's pass
+   * game.registerSaveMigration('my_mod', {
+   *   stats: { only: ['mod_corruption'] },
+   *   traits: { skip: ['mod_journal'] },   // player-written, never reset
+   * });
+   */
+  registerSaveMigration(source: string, options: SaveMigrationOptions): void;
+
+  /**
+   * Run a one-off migration pass from an explicit options object, ignoring every registered declaration.
+   * Same sections, same guards (new game, version match, dev mode) as `registerSaveMigration()`.
+   * Reach for it only when a pass has to run at a moment the engine's own — just before `game_initiated` —
+   * doesn't cover.
    */
   runDefaultSaveMigration(options?: SaveMigrationOptions): void;
 
@@ -684,7 +808,7 @@ interface Game {
    * The callback can return a boolean. In both cases (true or false), the event will be stopped propagating.
    * On returning false, the event itself (e.g user input) will be cancelled.
    * @example
-   * game.on("dungeon_enter", (dungeonId, roomId) => {
+   * game.on("dungeon_enter_after", (dungeonId, roomId) => {
    *   console.log(`Entered dungeon: ${dungeonId}, room: ${roomId}`);
    * });
    */
@@ -708,7 +832,7 @@ interface Game {
    * @param args - Arguments to pass to event callbacks
    * @returns false if any callback returned false (stopped propagation), true otherwise
    * @example
-   * game.trigger("dungeon_enter", "forest_dungeon", "entrance");
+   * game.trigger("dungeon_enter_after", "forest_dungeon", "entrance");
    */
   trigger<K extends keyof GameEvents>(type: K, ...args: Parameters<GameEvents[K]>): boolean;
   /**
@@ -874,6 +998,15 @@ interface Game {
   getState<T>(key: string): T;
 
   /**
+   * Whether a state key has been registered. Use it before `getState` for a state a MOD owns —
+   * `getState` throws on an unregistered key, so a base-game code path that reads a mod's state
+   * must ask first.
+   * @example
+   * const on = game.hasState('mod_flag') && game.getState<boolean>('mod_flag');
+   */
+  hasState(key: string): boolean;
+
+  /**
    * Set the value of a registered UI state.
    * @param key - State key
    * @param value - New value
@@ -1013,6 +1146,17 @@ interface Game {
    * game.playScene(null); // Exit current scene
    */
   playScene(sceneId: string | null, dungeonId?: string | null, options?: { root?: boolean }): void;
+
+  /**
+   * The characters in the current scene: the staged actors (mid-exit ones included — they are
+   * still on screen), followed by any `panel_actor` listed without art. Empty outside a scene.
+   * @example
+   * // hand back scene-only state when the scene closes
+   * game.on('scene_exit_before', () => {
+   *   for (const actor of game.getActors()) actor.setAttribute('face', 'normal');
+   * });
+   */
+  getActors(): Character[];
 
   /**
    * Instantly remove every staged actor — no exit animations, pending removals canceled.
@@ -1205,6 +1349,16 @@ interface Game {
   getDungeonName(dungeonId: string): string;
 
   /**
+   * Get a dungeon's parsed `_config_` data by id. Works for any dungeon, not just the current one
+   * (unlike getCurrentDungeon, which only reflects the dungeon you are in).
+   * @param dungeonId - The dungeon ID
+   * @returns The dungeon config (id, dungeon_type, traits, actions, ...) or undefined if unknown
+   * @example
+   * const group = game.getDungeonConfig('forest')?.traits?.level_group;
+   */
+  getDungeonConfig(dungeonId: string): { id: string; dungeon_type: string; traits: Record<string, any>; actions?: Record<string, any>; [key: string]: any } | undefined;
+
+  /**
    * Get the title of a quest.
    * @param dungeonId - The dungeon ID where the quest is defined
    * @param questId - The quest ID
@@ -1367,6 +1521,15 @@ interface Game {
   removeFromParty(character: Character | string): void;
 
   /**
+   * Reorder the party without join/leave side effects. `orderedIds` must contain exactly the
+   * current party members in their new order (same ids, different sequence) — anything else is
+   * rejected with an error log. Party order drives the HUD face list and default battle rosters.
+   * @example
+   * game.reorderParty(['mc', 'sprout_fire_abc', 'sprout_earth_def']);
+   */
+  reorderParty(orderedIds: string[]): void;
+
+  /**
    * Delete a character from the game entirely.
    * Also removes their private inventory and removes them from the party.   * Add a character to the game.
    * @param character - The character to add
@@ -1394,19 +1557,24 @@ interface Game {
   deleteCharacter(character: Character | string): void;
 
   /**
-   * Rebuild a character from its template under the same id — narratively a fresh entity in
+   * Rebuild a character from a template under the same id — narratively a fresh entity in
    * the same role. Party membership is kept; statuses, resources, the private inventory and
    * learned skills are discarded. Triggers character_delete then character_create.
    * When no character with that id is live, the id is treated as a template id and the
    * character is created, so content can guarantee a pristine character without knowing
    * whether one exists yet. Throws when there is neither a live character nor a template.
    * @param character - Character instance or character ID string
+   * @param templateId - optional template to rebuild from, overriding the character's own
+   *                     templateId (and the id-as-template-id fallback). Throws if unknown
    * @returns the rebuilt (or newly created) character
    * @example
    * // the narrative reuses the `orc` actor for a different orc
    * game.resetCharacter('orc');
+   *
+   * // same actor id, tougher creature — works whether or not `orc` is live
+   * game.resetCharacter('orc', 'orc_veteran');
    */
-  resetCharacter(character: Character | string): Character;
+  resetCharacter(character: Character | string, templateId?: string): Character;
 
   /**
    * Parse a generic `id<op>value` specification into a typed list of ops.
@@ -1480,6 +1648,115 @@ interface Game {
    * }
    */
   getLearnedRecipes(): Set<string>;
+
+  // ============================================
+  // Accolades (achievements)
+  // ============================================
+
+  /**
+   * Add to an accolade's progress (default +1). Accolades are defined in the editor's
+   * Accolades tab; completion is progress >= target, and crossing the target queues the
+   * unlock notification. Writes are ignored during gallery replay and while the
+   * `accolades_frozen` state is set (debug seeding).
+   * The GAME does all tracking itself — listen to emitters, keep your own stores for
+   * distinct counts, and call this API.
+   * @example game.progressAccolade('anal_slut');
+   */
+  progressAccolade(id: string, delta?: number): void;
+
+  /**
+   * Set an accolade's progress to an absolute value — only ever raises, never lowers.
+   * Use for set-size tracking ("outfits worn so far") and best-of values ("biggest hit").
+   * @example game.setAccoladeProgress('well_dressed', wornOutfits.length);
+   */
+  setAccoladeProgress(id: string, value: number): void;
+
+  /**
+   * Supply the target for an accolade authored with target 0/empty — computed from data at
+   * script load. Until a target exists the accolade cannot complete.
+   * @example game.setAccoladeTarget('well_dressed', outfitTemplateCount);
+   */
+  setAccoladeTarget(id: string, target: number): void;
+
+  /** Current progress of an accolade (0 if untouched). */
+  getAccoladeProgress(id: string): number;
+
+  /** Effective target — the runtime-set value if any, else the data row's; 0 = no target yet. */
+  getAccoladeTarget(id: string): number;
+
+  /** Whether an accolade is completed (progress >= target; disabled rows never complete). */
+  isAccoladeCompleted(id: string): boolean;
+
+  /** Reward points an achievement is worth: its own `points`, else its tier's default. */
+  getAccoladePoints(id: string): number;
+
+  /** Reward points earned so far — the sum over completed achievements. */
+  getEarnedPoints(): number;
+
+  /** Reward points on offer across the whole catalog. */
+  getTotalPoints(): number;
+
+  /** Ids of every accolade carrying the tag (empty array for unknown tags). */
+  getAccoladesByTag(tag: string): string[];
+
+  /**
+   * progressAccolade for every accolade carrying the tag — one call advances a whole tier
+   * family (tag "seed_ass" on Backdoor Open / Anal Slut / Bottomless).
+   * @example game.progressAccoladesByTag('seed_' + reservoir);
+   */
+  progressAccoladesByTag(tag: string, delta?: number): void;
+
+  /** setAccoladeProgress for every accolade carrying the tag. */
+  setAccoladeProgressByTag(tag: string, value: number): void;
+
+  /**
+   * Define (or replace) a SHADOW DUNGEON — a runtime-constructed dungeon the whole engine treats
+   * exactly like an authored one: enterable, scene-playable, cross-referenceable from content.
+   * The id MUST start with "_" (authored ids never do). Definitions persist in saves and are
+   * re-materialized on load, so saving inside a shadow dungeon is safe. Re-defining an id
+   * replaces its content but keeps its dungeon data (flags, visited rooms) — use a fresh id for
+   * a fresh state. Content may only reference pre-registered assets/battles/items.
+   * @param definition.config   Dungeon config (`_config_` params); dungeon_type defaults to "text".
+   * @param definition.content  Raw DryadScript document (parsed with the real content parser), or a
+   *                            pre-parsed line array for machine-generated content.
+   * @param definition.rooms    Room objects (rooms.json shape).
+   * @param definition.encounters Encounter objects (encounters.json shape).
+   * @example
+   * game.addShadowDungeon('_dream', {
+   *   config: { dungeon_type: 'text' },
+   *   rooms: [{ id: 'mist', uid: 'mist', x: 500, y: 500, doors: [] }],
+   *   content: `^mist\n\n@description\nA place that exists only tonight.\n\n#voice\n1\n%\nSomething speaks.\n{flag: "dream_heard = 1"}`,
+   * });
+   * game.playScene('_dream.mist.voice');
+   */
+  addShadowDungeon(id: string, definition?: { config?: Record<string, any>; content?: string | { id: string; val?: string; params?: Record<string, any> }[]; rooms?: any[]; encounters?: any[] }): void;
+
+  /**
+   * Remove a shadow dungeon (refused while the player is inside it).
+   * @returns true if it existed and was removed
+   */
+  removeShadowDungeon(id: string): boolean;
+
+  /**
+   * Mark an item template as discovered (recipe learned from its scroll, book finished, painting
+   * viewed). Idempotent; unknown ids log an error. Fires the item_discovered emitter and puts the
+   * check mark on the item's card.
+   * @example
+   * game.discoverItem('painting_ane');
+   */
+  discoverItem(itemId: string): void;
+
+  /**
+   * Whether an item template has been discovered.
+   * @example
+   * if (game.isItemDiscovered('book_eilfiel')) { ... }
+   */
+  isItemDiscovered(itemId: string): boolean;
+
+  /**
+   * All discovered item ids.
+   */
+  getDiscoveredItems(): Set<string>;
 
   /**
    * Create an inventory, optionally populated from a template.
@@ -2157,7 +2434,7 @@ interface Game {
    * - `character` — present when the tooltip is built with a `characterId`; use it to compute
    *   scaled values and append them in parens
    * - `ability` — the merged ability data (`{ meta, effects }`); useful to branch on
-   *   `meta.costs`, `meta.cooldown`, etc.
+   *   `meta.costs`, `meta.cd`, etc.
    *
    * Renderers return already-formatted HTML (with `<b>` etc.); the engine doesn't add wrapping.
    * @example
@@ -2554,7 +2831,7 @@ interface Character {
   addStatusStacks(statusId: string, amount?: number): boolean;
 
   /**
-   * Remove stacks from a status (oldest instances first) with proper resource adjustment.
+   * Remove stacks from a status (longest-remaining-duration instances first; permanent counts as longest) with proper resource adjustment.
    * Removes the status entirely if it drops to 0 stacks. Use this instead of reaching into
    * the Status object — status mutation is engine-level.
    * @param statusId - The status ID
@@ -2667,6 +2944,16 @@ interface Character {
    */
   getImageLayersForView(view?: string): any[];
 
+  /** Whether this character has art authored for a view — a spine entry or skin layers tagged with it. */
+  hasArtForView(view: string): boolean;
+
+  /**
+   * The view this character is staged with in scenes, from the `scene_view` trait
+   * (chooseOne over Characters > Views). A view the character has no art for falls
+   * back to the default. Returns '' for the default view.
+   */
+  getSceneView(): string;
+
   /**
    * Get the list of Spine skin names derived from the character's current attributes.
    * Convention-based: each attribute value becomes a Spine skin name.
@@ -2713,6 +3000,24 @@ interface Character {
    * const maxHealth = character.getStat('health');
    */
   getStat(name: string): number;
+
+  /**
+   * Base value of a stat: the sum of its `stats` contributions across the character's statuses,
+   * WITHOUT running any stat computers.
+   *
+   * Use this inside a `registerStatComputer` callback instead of getStat — getStat invokes every
+   * computer for the requested stat, so calling it from within a computer recurses infinitely.
+   * getBaseStat is computer-free and safe; for a stat no computer contributes to (e.g. a primary
+   * attribute) it equals getStat, and it still includes item/buff contributions (an equipped item's
+   * stats live on its own status).
+   * @param name - The stat name
+   * @returns Summed base value across statuses (0 if nothing contributes)
+   * @example
+   * game.registerStatComputer('attributes', (character) => ({
+   *   dodge: character.getBaseStat('agility'),   // NOT getStat — would recurse
+   * }));
+   */
+  getBaseStat(name: string): number;
 
   /**
    * Check if the character has a stat defined in any of their statuses
@@ -3202,7 +3507,7 @@ interface Property {
 
 /**
  * Item - A game item that can be stored in inventories, equipped, traded, or used.
- * Items have traits (dynamic properties), attributes (string values), and can be stacked.
+ * Items have traits (dynamic properties) and can be stacked.
  *
  * @example
  * // Get an item and check its properties
@@ -3230,17 +3535,11 @@ interface Item {
   /** Unique instance identifier for this specific item */
   uid: string;
 
-  /** Dynamic properties of the item (e.g., name, damage, weight) */
+  /** Dynamic properties of the item (e.g., name, damage, weight, rarity) */
   traits: Record<string, any>;
-
-  /** String attributes (e.g., rarity, type) */
-  attributes: Record<string, string>;
 
   /** Item category id (from item_categories) */
   category: string;
-
-  /** Property objects attached to this item */
-  properties: Record<string, Property>;
 
   /** Status effect data applied when item is equipped */
   statusObject: any;
@@ -3316,6 +3615,17 @@ interface Item {
   isTradable(): boolean;
 
   /**
+   * Whether this item may be thrown away at all — the engine's own rule, shared by every discard UI
+   * (the item card's Drop choice, the experience plugin's reward-panel trash button). Equipped gear
+   * is unequipped rather than discarded, and anything of quest rarity is never throwable. Check it
+   * alongside the `item_drop_render` emitter, which carries the game's own protected kinds, when
+   * adding a discard button of your own.
+   * @example
+   * const canDiscard = item.isDroppable() && game.trigger('item_drop_render', item, character);
+   */
+  isDroppable(): boolean;
+
+  /**
    * Get the price of the item.
    * @param currency - Optional specific currency to get price for
    * @returns Price for specific currency (number), or all prices (Record)
@@ -3364,7 +3674,7 @@ interface Item {
   maxStack(): number;
 
   // ============================================
-  // Trait & Attribute Methods
+  // Trait Methods
   // ============================================
 
   /**
@@ -3380,15 +3690,12 @@ interface Item {
   getTrait(key: string): any | null;
 
   /**
-   * Get CSS class names based on item attributes.
-   * Converts attributes like { rarity: "rare", type: "ring" }
-   * to classes like ["rarity_rare", "type_ring"].
+   * CSS class names for the item's rarity tier; empty when unset.
    * @returns Array of CSS class names
    * @example
-   * const classes = item.getAttributeClasses();
-   * // ["rarity_legendary", "type_weapon"]
+   * const classes = item.getRarityClasses(); // ["rarity_legendary"]
    */
-  getAttributeClasses(): string[];
+  getRarityClasses(): string[];
 
   // ============================================
   // Convenience Trait Accessors
@@ -3474,6 +3781,14 @@ interface Inventory {
    * 0 or undefined means unlimited weight capacity.
    */
   maxWeight: number;
+
+  /**
+   * When true, addItem may exceed BOTH the slot (maxSize) and weight (maxWeight) limits —
+   * isOverCapacity() still reports the overage (for movement gating / display), but pickup is not
+   * blocked. Undefined = the party inventory allows over-capacity, every other inventory hard-blocks;
+   * an explicit false forces even the party bag to hard-block.
+   */
+  allowOverCapacity?: boolean;
 
   /**
    * Action ID to execute when clicking 'apply' button in inventory UI.
@@ -3582,6 +3897,14 @@ interface Inventory {
    * @returns true if overweight
    */
   isOverweight(): boolean;
+
+  /**
+   * Over capacity by EITHER restriction — too many slots used (isOverflowing) or too heavy
+   * (isOverweight). The union used for encumbrance gating (movement block, over-encumbered banner,
+   * enc_sensitive). False when neither a size nor a weight cap is set.
+   * @returns true if over the slot or weight limit
+   */
+  isOverCapacity(): boolean;
 
   // ============================================
   // Item Management Methods
@@ -3878,6 +4201,12 @@ interface Status {
 
   /** Stats provided by this status (e.g., { health: 10, strength: 5 }) */
   stats: Record<string, number>;
+
+  /**
+   * Keys of the stat computers this status contributes through, from its `computed_stats` field.
+   * A character template's own `computed_stats` land here on its core status.
+   */
+  readonly computedStatsKeys: string[];
 
   /** Traits provided by this status */
   traits: Record<string, any>;
@@ -4305,15 +4634,34 @@ declare global {
          *   v-popover="{ html, width?, placement? }"
          *   v-popover="{ component, props?, width?, placement? }"
          *   Modifier sugar for placement: v-popover.top|.bottom|.left|.right
+         *
+         * Hover opens the card, a click pins it (click again or outside to unpin). A hover card is
+         * a peek by default — pointer-transparent, so it never blocks what it overlaps; a pinned
+         * card always catches the pointer, which is where scrolling, lore-links and buttons work.
+         * Players can opt every hover card into catching the pointer with the Interactive Tooltips
+         * setting, or the T key in-game; `interactive: true` forces it for one binding, which is
+         * only worth doing where the card can never be pinned instead (`dismissOnClick` /
+         * `disableClick` targets).
          */
         DPopover: any;
+
+        /**
+         * The engine's save/load list — the same one the menu renders. Lists every slot for the
+         * game with its date, playtime and `(game + mods)` versions; clicking a row loads it,
+         * and "Load from File" imports a downloaded save. Handy for a game-over screen that has
+         * to offer a way back without sending the player through the menu.
+         *
+         * Props: gameId (string|null — normally `game.getId()`), isFromGame (boolean — true adds
+         * the save-name field, "Save Locally" and "Save to File"; false leaves loading only).
+         */
+        Savelist: any;
 
         // === Characters ===
         /** Character face/portrait component. Props: character (Character), showName? (boolean), nameStyle? ("badge"|"overlay", default "badge"), size? (number, default 100), borderRadius? (string, default "50%"), borderColor? (string, default "rgb(174,174,174)"), overlaySlot? (string — extra component slot rendered inside the face shape) */
         CharacterFace: any;
         /** Full character doll with skin layers. Props: character (Character), view? (string — render a specific character view e.g. 'back', omit for default base rendering) */
         CharacterDoll: any;
-        /** Default character sheet layout with statuses, stats, and inventory sections. Props: character (Character) */
+        /** Default character sheet layout with statuses, stats, and abilities sections. Props: character (Character), viewerMode? (boolean) — read-only embed: hides the dismiss/rename controls */
         CharacterSheet: any;
         /** Displays character stats organized into groups. Props: character (Character), tags? (string[]) — filter by stat tags, noHeaders? (boolean) — hide group headers */
         CharacterStats: any;
@@ -4321,7 +4669,7 @@ declare global {
         CharacterStatuses: any;
         /** Renders a character in a scene slot with animation support. Props: character (Character), slot (SceneSlot), showItemSlots?, enableAppear?, view? (string — character view override e.g. 'back'), interactive? (boolean — enables pointer-events for click handling), overlaySlot? (string — slot name for overlay injection, same pattern as CharacterFace) */
         CharacterSlot: any;
-        /** Displays character doll with stats/statuses panel. Supports single or multiple characters with face switching. Props: characters (Character | Character[]), initialIndex? */
+        /** Displays character doll with stats/statuses panel. Supports single or multiple characters with face switching; the face list pages at 10, following the selection. Props: characters (Character | Character[]), initialIndex? */
         CharacterViewer: any;
         /** Fullscreen popup overlay wrapping CharacterViewer. Teleports to body, handles overlay click-to-close. Props: characters (Character | Character[]), initialIndex? (number). Emits: close */
         CharacterViewerPopup: any;
@@ -4331,11 +4679,11 @@ declare global {
         StatEntity: any;
 
         // === Items ===
-        /** Displays an inventory with item grid. Props: inventory_id (string) */
+        /** Displays an inventory with item grid. Props: inventory_id (string), character? (Character) — reference for the "equippable" filter, defaults to the selected character, maxHeight? (string, default '400px') — CSS max-height of the grid, 'none' fills the available height */
         InventoryComponent: any;
         /** Displays inventory header with count and weight stats. Props: inventory_id (string) */
         InventoryHeader: any;
-        /** Renders a grid of items with popup support. Props: items ((Item | null)[]) */
+        /** Renders a grid of items with popup support. Props: items ((Item | null)[]), disabled? (boolean), maxHeight? (string, default '400px') — CSS max-height of the scrolling grid, 'none' fills the available height */
         ItemGrid: any;
         /** Renders a single item slot with icon, quantity, durability. Props: item (Item). Emits: click, dragstart, hover */
         ItemSlot: any;
@@ -4359,6 +4707,8 @@ declare global {
         StatusObjectDisplay: any;
         /** A single status "brick" (icon/name + polarity border) with a StatusCard hover popup. Works applied or unapplied. Props: status (string id | Status | def object), characterId? (string) - live stacks/duration + computed stats, statusInstanceIndex? (number), disableClick? (boolean) - click does nothing to the card (no pin) */
         StatusBrick: any;
+        /** The full status detail card (title, description, stacks/duration, stat block) — what StatusBrick shows on hover, exposed for mounting as your own popover. Props: statusId (string), characterId? (string) - use that character's live instance, statusInstanceIndex? (number), titleChip? (string), stacksOverride? (number) */
+        StatusCard: any;
         /** Lists character abilities as selectable items. Shows ability icons and names, with AbilityCard detail view for selected ability. Props: character (Character), showDelta? (boolean, default false) - whether to show base➜merged transitions */
         AbilitiesViewer: any;
 

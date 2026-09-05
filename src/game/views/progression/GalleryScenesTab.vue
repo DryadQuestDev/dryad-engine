@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { Game } from '../../game';
 import type { ReplaySceneObject } from '../../systems/dungeonSystem';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
@@ -17,9 +17,16 @@ for (const dungeon of data.dungeons || []) {
   }
 }
 
+// `replay_mode_unlock_scenes` opens everything. It layers OVER `scene.unlocked` rather than
+// being written into it: getReplaySceneObject() returns a cached singleton that is never
+// invalidated, so baking the override in would leave scenes unlocked after the state is
+// cleared. Reactive, because this tab stays mounted while the menu that toggles it is open.
+const unlockAll = computed(() => !!game.getState('replay_mode_unlock_scenes'));
+const isSceneUnlocked = (scene: { unlocked: boolean }): boolean => unlockAll.value || scene.unlocked;
 
 // Check if dungeon is discovered (has any visited events)
 const isDungeonDiscovered = (dungeonId: string): boolean => {
+  if (unlockAll.value) return true;
   const dungeonData = game.dungeonSystem.dungeonDatas.value.get(dungeonId);
   if (!dungeonData) return false;
   return dungeonData.visitedEvents.size > 0;
@@ -32,7 +39,7 @@ const getDungeonDisplayName = (dungeon: { id: string; name: string }): string =>
 
 // Get display name for scene
 const getSceneDisplayName = (scene: { name: string; unlocked: boolean }): string => {
-  return scene.unlocked ? scene.name : '???';
+  return isSceneUnlocked(scene) ? scene.name : '???';
 };
 
 // Exit replay mode by loading the saved game
@@ -65,8 +72,8 @@ const exitReplayMode = () => {
         </div>
         <div class="scenes-list">
           <div v-for="scene in dungeon.scenes" :key="scene.id" class="scene-item"
-            @click="game.dungeonSystem.replayScene(scene.id, dungeon.id, scene.unlocked)"
-            :class="{ 'locked': !scene.unlocked }">
+            @click="game.dungeonSystem.replayScene(scene.id, dungeon.id, isSceneUnlocked(scene))"
+            :class="{ 'locked': !isSceneUnlocked(scene) }">
             {{ getSceneDisplayName(scene) }}
           </div>
         </div>

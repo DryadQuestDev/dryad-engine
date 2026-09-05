@@ -18,6 +18,23 @@ Per-character format: `"characterId->amount, characterId->amount"`.
 
 The action is delayed: the player reads the paragraph first, the continue-click grants the XP and opens the reward popup (with any level-up fanfare). Mid-battle grants skip the popup and surface in the battle victory panel instead.
 
+### `dungeon_level`
+
+Set (or overwrite) a dungeon/dungeon-group **dungeon level** (see the Rewards & Scaling guide). Only takes effect while `auto_scaling` is on. Writes the level state only – future battles rescale live; inventories already generated keep their stamped level.
+
+```js
+// Set the CURRENT dungeon's group to level 7
+{ dungeon_level: 7 }
+
+// (Re)set the current group to the MC's current level
+{ dungeon_level: true }
+
+// Set a specific dungeon by id – auto-resolved to its level group (level_group trait, else the id)
+{ dungeon_level: "cave_dungeon = 7" }
+```
+
+Loot stamped above a character's `level` cannot be equipped by them (a notification fires) until they reach that level. Traders are unaffected – pooled trade stock generates at the MC's level.
+
 ## Config Fields
 
 | Field | Type | Default | Description |
@@ -30,7 +47,15 @@ The action is delayed: the player reads the paragraph first, the continue-click 
 | `max_level` | number | 99 | Maximum character level |
 | `level_up_rewards` | schema[] | -- | Currency items awarded to the character's private inventory on each level up. See below. |
 
-The `auto_scaling` flag and the reward/loot keys (`scale_per_level`, `loot_*`, `threat_xp_coef`) are covered in the Rewards & Scaling guide.
+The `auto_scaling` flag and the reward/loot keys (`power_scale_per_level`, `loot_*`, `threat_xp_coef`) are covered in the Rewards & Scaling guide.
+
+### `smith`
+
+Open the Smith Station overlay (upgrade / break down unequipped leveled equipment for smith stones — see the Rewards & Scaling guide). Event-delayed: the overlay opens after the paragraph finishes.
+
+```text
+!use<Forge>{smith: true}
+```
 
 ### `level_up_rewards`
 

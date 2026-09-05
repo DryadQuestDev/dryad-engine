@@ -3,11 +3,13 @@
 const { game } = window.engine;
 
 import {
-    inBattle, effectiveThreat, getDungeonLevel, dungeonScale,
+    inBattle, effectiveThreat, getDungeonLevel, dungeonScale, enemyScale,
     pendingReward, recordCharacterXp, recordResource,
-    clearPending, openRewardPopup, getMc,
+    clearPending, openRewardPopup, getMc, setGenerationLevel, simulateBattleLoot,
 } from './reward.mjs';
-import './pools.mjs';
+import { simulatePool } from './pools.mjs';
+import './gather.mjs';
+import './smith.mjs';
 import './components/XpBar.mjs';
 import './components/RewardPanel.mjs';
 
@@ -104,7 +106,7 @@ game.on('character_resource_change', (/** @type {Character} */ character, /** @t
             recordCharacterXp({
                 id: character.id, name: character.getTrait('name') || character.id,
                 gained, levelFrom, levelTo: level,
-                xpFrom, xpTo: Math.max(0, Math.min(xp, threshold)), stats: [],
+                xpFrom, xpTo: Math.max(0, Math.min(xp, threshold)), stats: [], items: [],
             });
         }
         return;
@@ -112,6 +114,7 @@ game.on('character_resource_change', (/** @type {Character} */ character, /** @t
 
     // Level up loop — handle multi-level overflow
     const rewards = config?.level_up_rewards;
+    const grantedItems = {}; // item_id -> total granted across the levels gained this event
     while (xp >= threshold && level < maxLevel) {
         xp -= threshold;
         level++;
@@ -134,7 +137,10 @@ game.on('character_resource_change', (/** @type {Character} */ character, /** @t
             if (inventory) {
                 for (const reward of rewards) {
                     const item = game.createItem(reward.item_id);
-                    if (item) inventory.addItem(item, reward.amount || 1);
+                    if (item) {
+                        inventory.addItem(item, reward.amount || 1);
+                        grantedItems[reward.item_id] = (grantedItems[reward.item_id] || 0) + (reward.amount || 1);
+                    }
                 }
             }
         }
@@ -156,6 +162,7 @@ game.on('character_resource_change', (/** @type {Character} */ character, /** @t
             id: character.id, name: character.getTrait('name') || character.id,
             gained: Math.max(0, gained), levelFrom, levelTo: level,
             xpFrom, xpTo: xp, stats,
+            items: Object.entries(grantedItems).map(([id, quantity]) => ({ id, quantity })),
         });
     }
 
@@ -220,11 +227,22 @@ game.registerService('reward', {
     getDungeonLevel,
     /** @param {number} level @returns {number} reward multiplier for a dungeon level */
     dungeonScale,
+    /** @param {number} level @returns {number} enemy health/power multiplier for a dungeon level */
+    enemyScale,
+    /** Override the level equipment is created at (item_create). Pass a level, then null to clear.
+     *  Wrap a createItem call to preview/generate an item at a specific dungeon level. */
+    setGenerationLevel,
     /** Record a resource gain (by the GAME's own stat id) for the reward display. */
     recordResource,
     clearPending,
     /** Open the reward popup (guarded against double-open). */
     openRewardPopup,
+    /** Dry-run battle loot at a level. Same grantLoot the game uses; grants nothing.
+     *  @param {{level:number, threat:number, rolls?:number, battleId?:string}} o */
+    simulateBattleLoot,
+    /** Dry-run a pool draw at a level. Same drawPoolInto a container uses; grants nothing.
+     *  @param {string} poolId @param {number} level @param {number} [rolls] */
+    simulatePool,
 });
 
 // ── Conditions ──

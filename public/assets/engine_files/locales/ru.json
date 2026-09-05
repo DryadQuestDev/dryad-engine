@@ -1,4 +1,14 @@
 {
   "lang_name": "Русский",
-  "play": "Играть"
+  "play": "Играть",
+  "choose_item.title": "Выберите предмет",
+  "choose_item.empty": "Ничего подходящего.",
+  "choose_item.cancel": "Отмена",
+  "use_scene": "Использовать",
+  "read_book": "Читать",
+  "view_painting": "Рассмотреть",
+  "book.next": "Следующая страница",
+  "book.back": "Предыдущая страница",
+  "book.again": "Перечитать",
+  "book.close": "Закрыть книгу"
 }

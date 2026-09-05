@@ -71,7 +71,7 @@ Looping sounds keep playing until stopped with `{sound: "!sound_id"}` or `{sound
 |--------------|----------|
 | A scene | Ends with that scene |
 | `room_enter_before` / `room_enter_after` | Keeps playing across the map until stopped |
-| `dungeon_enter` / `dungeon_create` | Keeps playing across the map until stopped |
+| `dungeon_enter_after` / `dungeon_create` | Keeps playing across the map until stopped |
 
 Use scene loops for a sound tied to one moment, and room or dungeon loops for ambience that should follow the player around.
 

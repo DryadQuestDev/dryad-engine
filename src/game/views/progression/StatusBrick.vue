@@ -51,7 +51,9 @@ const name = computed((): string =>
 );
 
 const image = computed((): string | undefined =>
-  source.value?.image || statusDef.value?.image
+  // displayImage resolves a borrowed icon (item/ability id) on live instances; the plain fields
+  // cover a bare definition passed in as a prop.
+  (source.value as any)?.displayImage || source.value?.image || statusDef.value?.image
 );
 
 const polarity = computed((): string =>
@@ -113,7 +115,15 @@ const isStackable = computed((): boolean => !!liveInstance.value?.isStackable())
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Always square: art bricks used to take the icon's aspect and text bricks the label's width,
+     so a row of statuses came out ragged. The icon letterboxes inside instead (object-fit). */
   height: 50px;
+  width: 50px;
+  flex: 0 0 50px;
+  box-sizing: border-box;
+  /* No overflow:hidden here — the stack and duration badges are deliberately positioned outside
+     the box (top/right: -4px) and clipping the brick cuts them in half. The image is contained by
+     object-fit and the name clamps itself, so nothing else escapes. */
 }
 
 .status-brick:hover {
@@ -155,11 +165,19 @@ const isStackable = computed((): boolean => !!liveInstance.value?.isStackable())
   will-change: transform;
 }
 
+/* No art: the name has to live inside the square, so it wraps and clamps rather than
+   stretching the brick. The full name is one hover away on the status card. */
 .status-name {
-  font-size: 0.8rem;
+  font-size: 0.62rem;
+  line-height: 1.15;
   color: #ccc;
-  padding: 0.2rem 0.4rem;
-  white-space: nowrap;
+  padding: 0 2px;
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 
 .stack-count {

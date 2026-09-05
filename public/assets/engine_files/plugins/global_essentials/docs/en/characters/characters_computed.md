@@ -35,7 +35,7 @@ Computed stats let you create relationships that simple addition can't handle:
 Your computed stat function receives the character, but you can access **anything in the game**:
 
 **From the Character:**
-- `character.getStat(name)` - other stats
+- `character.getBaseStat(name)` - other stats. **Use this, not `getStat`, inside a computer.** `getStat` runs every computer for the stat it is asked for, so calling `getStat` from within a computer re-enters that same computer and recurses forever (stack overflow). `getBaseStat` is computer-free and still includes item/buff contributions; for a stat nothing computes it equals `getStat`.
 - `character.getTrait(key)` - character traits
 - `character.getAttribute(key)` - character attributes
 - `character.getEquippedItems()` - equipped items
@@ -88,7 +88,7 @@ Every point of Endurance gives +10 Stamina:
 
 ```typescript
 game.registerStatComputer("enduranceToStamina", (character) => {
-  const endurance = character.getStat("endurance") || 0;
+  const endurance = character.getBaseStat("endurance");   // getBaseStat, not getStat — no recursion
   return {
     stamina: endurance * 10
   };
@@ -137,7 +137,7 @@ Combine character stats with global properties:
 
 ```typescript
 game.registerStatComputer("combatPower", (character) => {
-  const strength = character.getStat("strength") || 0;
+  const strength = character.getBaseStat("strength");   // getBaseStat inside a computer
   const worldBonus = Number(game.getProperty("combat_bonus")?.currentValue) || 0;
 
   return {
@@ -154,7 +154,7 @@ game.registerStatComputer("combatPower", (character) => {
 
 ```typescript
 game.registerStatComputer("enduranceToStamina", (character) => {
-  const endurance = character.getStat("endurance") || 0;
+  const endurance = character.getBaseStat("endurance");   // getBaseStat, not getStat — no recursion
   return {
     stamina: endurance * 10
   };

@@ -722,6 +722,10 @@ export class Editor {
   schema: Ref<Schema | null> = ref(null);
   filePath: string = '';
   private isLoadingActiveObject = false;
+  // Claim token for loadActiveObject: overlapping loads (fast dungeon/tab
+  // switching) finish in arbitrary order, so only the call holding the latest
+  // generation may publish its results or clear the loading flag.
+  private loadGeneration = 0;
   private activeObjectDungeon: string | null = null;
   fileName: string = '';
   fileNameOriginal: string = '';
@@ -734,6 +738,12 @@ export class Editor {
   dungeonConfig: Ref<DungeonConfigObject | null> = ref(null);
   ignoreDefaultValues: boolean = false;
   public async loadActiveObject(): Promise<void> {
+    const gen = ++this.loadGeneration;
+    // Stale means a newer loadActiveObject started while this one was parked
+    // on an await. The stale call must stop publishing editor state — if it
+    // lands last it pairs the OLD dungeon's data/filePath with the NEW
+    // selection, which is what the id-vs-folder save block guards against.
+    const isStale = () => gen !== this.loadGeneration;
     this.isLoadingActiveObject = true;
     try {
     if (this.switchTimeout) {
@@ -763,15 +773,18 @@ export class Editor {
 
     // Special handling for plugins tab
     if (settings?.isPlugins && this.selectedGame && this.selectedMod) {
-      await this.loadPluginsTab();
+      await this.loadPluginsTab(isStale);
       return;
     }
 
+    // Snapshot the dungeon this load is FOR — `this.selectedDungeon` may point
+    // at a different dungeon by the time the awaits below resolve.
+    const dungeonAtLoad = this.selectedDungeon;
     if (settings?.requiresDungeon) {
-      if (!this.selectedDungeon) {
+      if (!dungeonAtLoad) {
         return;
       } else {
-        fileName = fileName.replace('[dungeon]', 'dungeons/' + this.selectedDungeon);
+        fileName = fileName.replace('[dungeon]', 'dungeons/' + dungeonAtLoad);
       }
     }
 
@@ -790,13 +803,14 @@ export class Editor {
     // so build_images watchers never recompute stale items against new-mod data
     this.activeObject.value = null;
     await nextTick();
+    if (isStale()) return;
 
     // load attributes
-    if (settings?.loadSkinAttributes) {
-      this.skinAttributes.value = await this.loadFullData('character_attributes');
-    } else {
-      this.skinAttributes.value = null;
-    }
+    const skinAttributes = settings?.loadSkinAttributes
+      ? await this.loadFullData('character_attributes')
+      : null;
+    if (isStale()) return;
+    this.skinAttributes.value = skinAttributes;
 
     //console.error("skinAttributes:", this.skinAttributes.value);
 
@@ -807,6 +821,7 @@ export class Editor {
     // try {
 
     let file = await this.global.readJson(filePath);
+    if (isStale()) return;
 
     // load plugin objects
     this.pluginObjects.value = this.pluginManager.getPluginDataList(fileName);
@@ -814,26 +829,27 @@ export class Editor {
     // console.warn("Plugin objects:", this.pluginObjects.value);
 
     // load dungeon config
-    await this.setDungeonConfig();
+    await this.setDungeonConfig(isStale);
+    if (isStale()) return;
     //console.warn("Dungeon config:", this.dungeonConfig.value);
 
 
     // load original game object
-    this.coreObject.value = null; // Reset before loading
+    let coreObject: any | null = null;
     if (this.selectedMod !== '_core' && this.selectedGame && fileName) { // Ensure selectedGame and fileName are valid
       try {
         const coreData = await this.global.readJson(`games_files/${this.selectedGame}/_core/${fileName}.json`);
         if (typeof coreData === 'object' && coreData !== null) {
-          this.coreObject.value = coreData;
+          coreObject = coreData;
         } else {
           console.warn(`[Editor] Core object loaded from games_files/${this.selectedGame}/_core/${fileName}.json is not an object, received:`, coreData);
-          this.coreObject.value = null;
         }
       } catch (e) {
         console.warn(`[Editor] Failed to load core object from games_files/${this.selectedGame}/_core/${fileName}.json:`, e);
-        this.coreObject.value = null;
       }
     }
+    if (isStale()) return;
+    this.coreObject.value = coreObject;
 
     // Process schema for fromFile properties before assigning
     let currentSchema = settings?.schema ?? null;
@@ -855,7 +871,7 @@ export class Editor {
 
     const basePath = `games_files/${this.selectedGame}/${this.selectedMod}`;
     currentSchema = await this.pluginManager.processSchema(currentSchema, basePath);
-
+    if (isStale()) return;
 
     this.schema.value = currentSchema;
     this.isArray.value = settings?.isArray ?? false;
@@ -881,10 +897,14 @@ export class Editor {
     // never re-fire when the async load finally lands.
     if (!this.isArray.value && file && typeof file === 'object' && !Array.isArray(file)) {
       await this.loadExternalFieldsInto(file);
+      if (isStale()) return;
     }
 
     this.activeObject.value = file;
-    this.activeObjectDungeon = this.mainTab === 'dungeons' ? this.selectedDungeon : null;
+    // Stamp the dungeon captured at load start, not the live selection — a
+    // stale load stamping the CURRENT selection is exactly what let the
+    // stale-save guard pass while activeObject held another dungeon's config.
+    this.activeObjectDungeon = this.mainTab === 'dungeons' ? dungeonAtLoad : null;
 
 
     // set Default values
@@ -935,7 +955,11 @@ export class Editor {
     //       this.activeObject.value = null;
     //   }
     } finally {
-      this.isLoadingActiveObject = false;
+      // Only the latest call may clear the flag — a stale call finishing
+      // early would re-enable saving while the real load is still in flight.
+      if (!isStale()) {
+        this.isLoadingActiveObject = false;
+      }
     }
   }
 
@@ -1213,6 +1237,16 @@ export class Editor {
       }
     }
 
+    // Snapshot everything this save writes. The awaits below give a dungeon or
+    // tab switch time to repoint filePath/activeObject/schema at the NEW
+    // selection, and a live read mid-write would save this object into the
+    // wrong dungeon's files.
+    const saveFilePath = this.filePath;
+    const saveObject = this.activeObject.value;
+    const saveExternals = this.getExternalFileFields();
+    const isDungeonConfigSave = this.mainTab === 'dungeons' && this.secondaryTab === 'config';
+    const isManifestSave = this.mainTab === 'general' && this.secondaryTab === 'manifest';
+
     try {
 
       // Subtab ids are only unique within their main tab — a plugin's tabs register as
@@ -1224,7 +1258,7 @@ export class Editor {
         let defaultIcons = await this.global.readJson(this.getModPath("dev/encounters_default")) as DevEncountersDefaultObject[];
         if (defaultIcons) {
 
-          for (let encounter of this.activeObject.value) {
+          for (let encounter of saveObject) {
             if (encounter.image) {
               continue;
             }
@@ -1246,21 +1280,21 @@ export class Editor {
       }
 
       console.log(`[Editor] Saving tab: ${this.secondaryTab}`);
-      console.log(`[Editor] Saving active object to: ${this.filePath}`);
-      await this.writeActiveObjectWithExternals();
+      console.log(`[Editor] Saving active object to: ${saveFilePath}`);
+      await this.writeActiveObjectWithExternals(saveFilePath, saveObject, saveExternals);
       this.hasUnsavedChanges.value = false;
-      if (this.mainTab === 'dungeons' && this.secondaryTab === 'config') {
+      if (isDungeonConfigSave) {
         //console.log("saving config");
-        await this.saveConfig(selected_game, selected_mod, selected_dungeon);
+        await this.saveConfig(selected_game, selected_mod, selected_dungeon, saveObject);
       }
 
-      if (this.mainTab === 'general' && this.secondaryTab === 'manifest') {
+      if (isManifestSave) {
         await this.saveManifest(selected_game, selected_mod);
       }
 
       if (!silent) this.global.addNotificationId("save_success");
     } catch (error) {
-      console.error(`[Editor] Failed to save file: ${this.filePath}`, error);
+      console.error(`[Editor] Failed to save file: ${saveFilePath}`, error);
       this.global.addNotificationId("save_error");
     }
   }
@@ -1278,24 +1312,25 @@ export class Editor {
     return result;
   }
 
-  private siblingPath(fileName: string): string {
-    return this.filePath.replace(/[^/]+\.json$/, fileName);
+  private siblingPath(fileName: string, filePath: string = this.filePath): string {
+    return filePath.replace(/[^/]+\.json$/, fileName);
   }
 
-  private async writeActiveObjectWithExternals(): Promise<void> {
-    const externals = this.getExternalFileFields();
-    const obj = this.activeObject.value;
+  // filePath/obj/externals are the caller's snapshot taken at save start —
+  // reading them live here would follow a mid-save dungeon/tab switch and
+  // write this object into the newly selected file.
+  private async writeActiveObjectWithExternals(filePath: string, obj: any, externals: Array<{ key: string; fileName: string }>): Promise<void> {
     if (externals.length === 0 || !obj || typeof obj !== 'object' || Array.isArray(obj)) {
-      await this.global.writeJson(this.filePath, obj);
+      await this.global.writeJson(filePath, obj);
       return;
     }
     const clone: Record<string, any> = JSON.parse(JSON.stringify(obj));
     for (const { key, fileName } of externals) {
       const value = typeof clone[key] === 'string' ? clone[key] : '';
-      await this.global.writeText(this.siblingPath(fileName), value);
+      await this.global.writeText(this.siblingPath(fileName, filePath), value);
       delete clone[key];
     }
-    await this.global.writeJson(this.filePath, clone);
+    await this.global.writeJson(filePath, clone);
   }
 
   private async loadExternalFieldsInto(target: Record<string, any>): Promise<void> {
@@ -1322,7 +1357,7 @@ export class Editor {
     this.manifestRevision.value++;
   }
 
-  public async setDungeonConfig(): Promise<void> {
+  public async setDungeonConfig(isStale: () => boolean = () => false): Promise<void> {
     if (this.mainTab !== 'dungeons') {
       this.dungeonConfig.value = null;
       return;
@@ -1331,7 +1366,12 @@ export class Editor {
     if (this.selectedMod !== '_core') {
       selectedMods.push(this.selectedMod!);
     }
-    this.dungeonConfig.value = await this.global.loadAndMergeSingleFile<DungeonConfigObject>(this.selectedGame!, `dungeons/${this.selectedDungeon}/config`, selectedMods);
+    const config = await this.global.loadAndMergeSingleFile<DungeonConfigObject>(this.selectedGame!, `dungeons/${this.selectedDungeon}/config`, selectedMods);
+    // A superseded loadActiveObject must not publish here either — this would
+    // overwrite the winning load's dungeonConfig and could even yank the
+    // subtab below based on the OLD dungeon's type.
+    if (isStale()) return;
+    this.dungeonConfig.value = config;
 
     // update the dungeon list for the changed config
     let index = this.dungeonsList.findIndex(dungeon => dungeon.id === this.dungeonConfig.value?.id);
@@ -1347,24 +1387,27 @@ export class Editor {
     }
   }
 
-  private async saveConfig(selected_game: string, selected_mod: string, selected_dungeon: string): Promise<void> {
+  // savedConfig is the snapshot captured at save start — the live
+  // activeObject may already belong to another dungeon (or be null mid-load)
+  // by the time the preceding writes' awaits resolve.
+  private async saveConfig(selected_game: string, selected_mod: string, selected_dungeon: string, savedConfig: any): Promise<void> {
 
     await this.setDungeonConfig();
     //console.log("dungeonConfig:", this.dungeonConfig.value);
 
 
     // parse and save the content
-    let content = this.activeObject.value.dungeon_content;
+    let content = savedConfig.dungeon_content;
 
     let parsedContent = parseText(stripHighlights(content));
     let path = `games_files/${selected_game}/${selected_mod}/dungeons/${selected_dungeon}/content_parsed.json`;
 
 
     // write the config
-    let parsedConfig: DungeonConfigParsed = JSON.parse(JSON.stringify(this.activeObject.value)) as DungeonConfigParsed;
+    let parsedConfig: DungeonConfigParsed = JSON.parse(JSON.stringify(savedConfig)) as DungeonConfigParsed;
     delete parsedConfig.dungeon_content;
-    if (this.activeObject.value.dungeon_type !== 'text' && this.activeObject.value.image) {
-      let { width, height } = await getImageDimensions(this.activeObject.value.image);
+    if (savedConfig.dungeon_type !== 'text' && savedConfig.image) {
+      let { width, height } = await getImageDimensions(savedConfig.image);
       parsedConfig.map_width = width;
       parsedConfig.map_height = height;
     }
@@ -1701,7 +1744,7 @@ export class Editor {
 
       // create config.json file AND content_parsed.json file
       await this.global.writeJson(configPath, data);
-      await this.saveConfig(gameId, modId, dungeonId);
+      await this.saveConfig(gameId, modId, dungeonId, data);
 
       this.global.addNotificationId("dungeon_created");
       this.addDungeon(data);
@@ -2140,6 +2183,20 @@ export class Editor {
   }
 
   /**
+   * Process a raw schema the way loadActiveObject does for the active tab: deep-clone,
+   * resolve fromFile options/objects, then apply plugin schema contributions. For editor
+   * surfaces (popups, sifters) that work with entities of a DIFFERENT file than the
+   * active tab — e.g. the ability picker sifting ability_templates from a character tab.
+   */
+  public async prepareSchema(rawSchema: Schema): Promise<Schema> {
+    const basePath = `games_files/${this.selectedGame}/${this.selectedMod}`;
+    let schema = JSON.parse(JSON.stringify(rawSchema)) as Schema;
+    schema = await this.processSchemaFromFileProperties(schema, basePath) as Schema;
+    schema = (await this.pluginManager.processSchema(schema, basePath)) ?? schema;
+    return schema;
+  }
+
+  /**
    * Dungeon id list for `fromFile: "_dungeons"` fields: dungeon folder names from _core plus the
    * selected mod, deduped. Folder name is the dungeon id.
    */
@@ -2348,7 +2405,7 @@ export class Editor {
   /**
    * Load plugins for the dev/plugins tab
    */
-  private async loadPluginsTab(): Promise<void> {
+  private async loadPluginsTab(isStale: () => boolean = () => false): Promise<void> {
     console.log("[Editor] Loading plugins from plugins folder for dev/plugins tab");
 
     if (!this.selectedGame || !this.selectedMod) {
@@ -2360,6 +2417,7 @@ export class Editor {
 
     try {
       const plugins = await this.pluginManager.loadPluginsForDevTab(this.selectedGame, this.selectedMod);
+      if (isStale()) return;
 
       // Set up the schema and file properties
       const settings = this.getAllTabs().find(tab => tab.id === this.mainTab)?.subtabs.find(subtab => subtab.id === this.secondaryTab);
@@ -2388,6 +2446,8 @@ export class Editor {
       console.log("[Editor] Loaded plugins:", plugins);
     } catch (error) {
       console.error("[Editor] Failed to load plugins:", error);
+      // A stale call's rejection must not clobber the winning load's object.
+      if (isStale()) return;
       this.activeObject.value = [];
     }
   }

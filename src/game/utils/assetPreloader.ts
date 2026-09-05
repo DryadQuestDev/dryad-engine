@@ -17,13 +17,18 @@ export interface PreloadCharacterAssetsOptions {
 // Runaway guard for pathological attribute products on a single layer.
 const MAX_KEYS_PER_LAYER = 64;
 
-const warmedUrls = new Set<string>();
-
 function warmImage(url: string): Promise<void> {
-    if (!url || warmedUrls.has(url)) return Promise.resolve();
-    warmedUrls.add(url);
-    const img = Game.getInstance().coreSystem.persistImage(url);
-    if (!img) return Promise.resolve();
+    if (!url) return Promise.resolve();
+    const core = Game.getInstance().coreSystem;
+    // The image cache is the only record of what is warm, deliberately. A local "already
+    // warmed" set never learns about eviction, so it keeps reporting success for images the
+    // cache dropped hours ago — and the pose swap this exists to smooth starts fetching again
+    // with nothing to explain why. A failed fetch stays cached as a broken element, so a
+    // missing file is still only requested once per residency.
+    const resident = core.hasImage(url);
+    // Always persist: on a hit this counts as a use and keeps the entry off the eviction end.
+    const img = core.persistImage(url);
+    if (!img || resident) return Promise.resolve();
     // decode() waits for fetch + decode; failures (missing file) resolve silently
     return img.decode().catch(() => { });
 }
@@ -41,21 +46,33 @@ function candidateKeys(
     baseAttributes: Record<string, string>,
     simulate?: Record<string, string[]>,
 ): string[] {
-    let keys = [layer.id];
-    if (!layer.attributes?.length) return keys;
+    if (!layer.attributes?.length) return [layer.id];
 
-    for (const attr of layer.attributes) {
+    const valueSets = layer.attributes.map((attr) => {
         const values = new Set<string>();
         // Current value first — matches buildLayerLookupKey (undefined stays literal)
         values.add(String(baseAttributes[attr]));
         for (const v of simulate?.[attr] || []) values.add(String(v));
+        return [...values];
+    });
 
-        const next: string[] = [];
-        for (const key of keys) {
-            for (const value of values) next.push(key + '_' + value);
+    // Enumerate combinations by index instead of growing the product, so the runaway guard can
+    // stop at a count of WHOLE keys. Capping a half-expanded product (what this used to do) cut
+    // keys short of their remaining attribute segments, and a partial key matches nothing in
+    // layer.images — a tripped guard warmed zero images rather than the 64 it meant to.
+    // Last attribute varies fastest, so combination 0 is the character's current look.
+    const total = valueSets.reduce((n, values) => n * values.length, 1);
+    const wanted = Math.min(total, MAX_KEYS_PER_LAYER);
+    const keys: string[] = [];
+    for (let i = 0; i < wanted; i++) {
+        const parts: string[] = new Array(valueSets.length);
+        let rest = i;
+        for (let a = valueSets.length - 1; a >= 0; a--) {
+            const values = valueSets[a];
+            parts[a] = values[rest % values.length];
+            rest = Math.floor(rest / values.length);
         }
-        keys = next;
-        if (keys.length > MAX_KEYS_PER_LAYER) return keys.slice(0, MAX_KEYS_PER_LAYER);
+        keys.push(layer.id + parts.map((part) => '_' + part).join(''));
     }
     return keys;
 }

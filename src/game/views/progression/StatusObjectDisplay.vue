@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { normalizeAbilityEffects } from '../../../utility/abilityEffects';
 import type { BaseStatusObject } from '../../../schemas/characterStatusSchema';
 import StatusStatsDisplay from './StatusStatsDisplay.vue';
 import AbilityCard from './AbilityCard.vue';
@@ -41,15 +42,7 @@ const hasVisibleStats = computed(() => Object.keys(visibleStats.value).length > 
 
 // Normalize a raw ability_modifier into the { meta, effects } shape for AbilityCard improvementData
 function normalizeModifier(modifier: any): { meta: Record<string, any>, effects: Record<string, Record<string, any>> } {
-  const effects: Record<string, Record<string, any>> = {};
-  if (modifier.effects) {
-    for (const effect of modifier.effects) {
-      const normalized: any = { ...(effect.aspects || {}) };
-      if (effect.name) normalized.__name = effect.name;
-      effects[effect.id] = normalized;
-    }
-  }
-  return { meta: modifier.meta || {}, effects };
+  return { meta: modifier.meta || {}, effects: normalizeAbilityEffects(modifier.effects) };
 }
 
 function checkInactive(template: any): boolean {
@@ -110,8 +103,8 @@ const abilityEntries = computed((): Array<{
 
   // Sort by cooldown ascending
   entries.sort((a, b) => {
-    const cdA = (game.characterSystem.abilityTemplatesMap.get(a.abilityId)?.meta as any)?.cooldown || 0;
-    const cdB = (game.characterSystem.abilityTemplatesMap.get(b.abilityId)?.meta as any)?.cooldown || 0;
+    const cdA = (game.characterSystem.abilityTemplatesMap.get(a.abilityId)?.meta as any)?.cd || 0;
+    const cdB = (game.characterSystem.abilityTemplatesMap.get(b.abilityId)?.meta as any)?.cd || 0;
     return cdA - cdB;
   });
 

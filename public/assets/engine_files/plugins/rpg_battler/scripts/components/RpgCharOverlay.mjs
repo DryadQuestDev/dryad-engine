@@ -34,7 +34,7 @@ export const RpgCharOverlay = defineComponent({
         if (!s.meta?.is_battle) continue;
         const def = statusDefs?.get(s.id);
         const polarity = s.polarity || def?.polarity || 'neutral';
-        const image = s.image || def?.image || null;
+        const image = s.displayImage || s.image || def?.image || null;
         if (s.multiStack) {
           const instances = s.getInstances();
           let stacks = 0, duration = 0;

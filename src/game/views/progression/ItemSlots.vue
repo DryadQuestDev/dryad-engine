@@ -40,7 +40,7 @@ const itemSlotsWithItems = computed(() => {
       top: slotData.slot.y + 'cqh'
     }">
       <ItemSlot v-if="slotData.item" :item="slotData.item" :character-id="character.id"
-        :disabled="props.disabled === true" popup-placement="left-start" :pinnable="true" class="equipped-item" />
+        :disabled="props.disabled === true" popup-placement="left-start" class="equipped-item" />
       <div v-else class="empty-slot">
         <img v-if="slotData.emptySlotImage" :src="slotData.emptySlotImage" alt="Empty slot" class="empty-slot-image" />
         <span v-else class="empty-slot-name">{{ slotData.emptySlotName }}</span>
@@ -74,7 +74,7 @@ const itemSlotsWithItems = computed(() => {
 /* .item-slot-cell is the layout/positioning wrapper around each ItemSlot.
    Renamed from the previous .item-slot-wrapper to avoid a class collision with
    ItemSlot.vue's own root (also .item-slot-wrapper, which handles rarity /
-   sticky styling). Two different responsibilities → two distinct class names. */
+   pinned styling). Two different responsibilities → two distinct class names. */
 .item-slot-cell {
   position: absolute;
   width: v-bind("(ITEM_SLOT_SIZE_PERCENT * 100) + 'cqh'");
@@ -96,12 +96,21 @@ const itemSlotsWithItems = computed(() => {
   align-items: flex-start;
 }
 
+/* Empty sockets read as recessed against the filled, rarity-tinted bricks. */
 .empty-slot {
   width: 100%;
   height: 100%;
-  background: rgba(42, 42, 42, 0.5);
-  border: 2px solid rgba(68, 68, 68, 0.8);
-  border-radius: 4px;
+  background-color: rgba(16, 18, 22, 0.55);
+  background-image:
+    var(--slot-noise),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.25));
+  background-size: 140px 140px, auto;
+  background-blend-mode: soft-light, normal;
+  border: 1px solid rgba(120, 128, 145, 0.28);
+  border-radius: 5px;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.7),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -34,7 +34,8 @@ These mechanics are detected by status id (no meta flag):
 | `regen` | Heals N HP per turn where N = current stacks |
 | `stun` | Character skips their turn; 1 stack consumed at turn start |
 | `taunt` | Forces enemies to target this character with single-target abilities |
-| `thorns` | Reflects 1 flat damage per stack on every incoming hit (not consumed; instances expire on their own duration) |
+| `thorns` | Reflects 1 flat damage per stack on every incoming hit, even one a shield absorbs (not consumed; instances expire on their own duration) |
+| `reflect` | Returns 1% per stack of the damage that reaches health back to the attacker (shields stop it; not consumed) |
 | `death_defiance` | Survives one lethal blow at 1 HP, consumes 1 stack |
 
 If a game wants a variant (e.g. "magic_shield" with different absorb behavior), implement it via a `battle_damage_apply` listener — the plugin doesn't try to be everything.
@@ -109,7 +110,8 @@ Only non-resource stats are valid sources. Seeded instances are permanent (no du
 | `stun` | negative | no | — | — | Skip turn (max 1 stack) |
 | `stagger` | negative | no | — | — | Accumulating; triggers a stun at threshold (see [Stagger](stagger.md)) |
 | `taunt` | positive | no | — | — | Force enemies to target this character (max 1 stack) |
-| `thorns` | positive | yes | — | — | Reflects 1 flat damage per stack on every incoming hit (not consumed) |
+| `thorns` | positive | yes | yes | `source: thorns` | Reflects 1 flat damage per stack on every incoming hit, shielded or not (not consumed) |
+| `reflect` | positive | yes | — | `source: reflect` | Returns 1% of damage reaching health per stack to the attacker (shields stop it; not consumed) |
 | `death_defiance` | positive | no | — | — | Survive lethal once (max 1 stack) |
 | `preparation` | positive | no | — | `source: preparation` | Gate for abilities requiring preparation |
 | `combo` | positive | no | — | — | Gate consumed by combo abilities |

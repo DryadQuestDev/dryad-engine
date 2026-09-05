@@ -125,6 +125,20 @@ const notifications: Ref<NotificationItem[]> = ref([]);
 const previousNotificationIds = new Set<number>();
 const notificationElements = new Map<number, HTMLElement>();
 
+// Peek ⇄ hoverable for hover cards, BG3-style, so the player can flip it mid-inventory instead of
+// walking to the settings screen. Text fields are exempt — the inventory search box sits directly
+// above the item grid, and 't' has to reach it.
+const handleTooltipKey = (event: KeyboardEvent) => {
+  if (event.key !== 't' && event.key !== 'T') return;
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
+  if (global.engineState.value !== 'game') return;
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+  const next = !global.userSettings.value.interactive_tooltips;
+  global.userSettings.value.interactive_tooltips = next;
+  global.addNotificationId(next ? 'interactive_tooltips.on' : 'interactive_tooltips.off');
+};
+
 const handleEscKey = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
     global.toggleMenu();
@@ -193,10 +207,12 @@ watch(() => global.notifications.value, async (newNotifications) => {
 
 onMounted(() => {
   window.addEventListener('keydown', handleEscKey);
+  window.addEventListener('keydown', handleTooltipKey);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleEscKey);
+  window.removeEventListener('keydown', handleTooltipKey);
 });
 </script>
 

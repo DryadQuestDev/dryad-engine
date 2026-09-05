@@ -4,6 +4,7 @@ export const SkillTreeSchema = {
     uid: { type: 'uid' },
     id: { type: 'string', required: true, tooltip: 'Skill tree ID used to reference this skill tree for a character.' },
     name: { type: 'string', tooltip: 'Display name of the skill tree.' },
+    order: { type: 'number', defaultValue: 0, tooltip: 'Tab order for this tree (lower numbers appear first). Trees sharing an order keep the sequence they were granted to the character in.' },
     width: { type: 'number', tooltip: 'Width of the skill tree container.' },
     height: { type: 'number', tooltip: 'Height of the skill tree container.' },
     description: { type: 'htmlarea', tooltip: 'Description of the skill tree.' },

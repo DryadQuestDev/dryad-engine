@@ -1,9 +1,9 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle, addFloatingText, requiredSelfStatuses } from './rpg-battle-state.mjs';
+import { currentRpgBattle, addFloatingText, requiredSelfStatuses, pushLog } from './rpg-battle-state.mjs';
 import {
   resolveAbility, processStatusEffects, getStatusStacks,
-  removeStatusStacks, getStatusDefinitions, isCharAlive,
+  removeStatusStacks, getStatusDefinitions, isCharAlive, isSupport,
   getSide, isAIControlled, checkStaggerThreshold, computeEffectiveThreshold, logEffect, endChannelsBy,
 } from './rpg-battle-effects.mjs';
 import { setIdleState } from './rpg-battle-anims.mjs';
@@ -28,6 +28,50 @@ export function initBattleTracking() {
 }
 
 /**
+ * Reconcile a combatant's cached ability roster (battle.charState[id].abilities) with its live
+ * getAbilities(): add tracking for any newly-gained ability (fresh cooldown/charges), prune any it
+ * no longer has. Existing entries keep their current cooldown/charge state.
+ *
+ * The roster is snapshotted at spawn, but statuses can grant/remove abilities mid-fight and
+ * canUseAbility requires a charState entry — so without this a status-granted ability would never
+ * become castable. Called at spawn (atBattleStart) and on every status add/remove/expire below, so
+ * ability-granting statuses work for every combatant, summons included.
+ * @param {string} charId
+ * @param {boolean} [atBattleStart] apply the battle-start cooldown compensation to new entries
+ */
+export function syncCombatantAbilities(charId, atBattleStart = false) {
+  const battle = currentRpgBattle.value;
+  const cs = battle?.charState[charId];
+  const char = game.getCharacter(charId);
+  if (!cs || !char) return;
+  const abilities = char.getAbilities();
+  for (const abId in abilities) {
+    if (cs.abilities[abId]) continue; // keep existing cooldown/charge state
+    const meta = abilities[abId].meta;
+    cs.abilities[abId] = {
+      // battle-start: +1 for the pre-action tick on the first turn. mid-battle grant: ready now.
+      cooldown: atBattleStart && meta.cd_on_battle_start && meta.cd ? meta.cd + 1 : 0,
+      charges: meta.charges || -1,
+    };
+  }
+  for (const abId in cs.abilities) {
+    if (!abilities[abId]) delete cs.abilities[abId];
+  }
+}
+
+// Only the ability ROSTER is cached in charState (stats are read live), so a status that grants or
+// removes an ability mid-battle must re-sync that combatant's roster. Combatant check = has
+// charState. Fires for every status change on any combatant (summons, MC, enemies).
+function resyncCombatantRoster(character) {
+  const battle = currentRpgBattle.value;
+  if (!battle || !character || !battle.charState[character.id]) return;
+  syncCombatantAbilities(character.id);
+}
+game.on('status_added', resyncCombatantRoster);
+game.on('status_removed', resyncCombatantRoster);
+game.on('status_expired', resyncCombatantRoster);
+
+/**
  * Init per-combatant battle tracking: ability cooldown/charge state, source-stat statuses
  * (e.g. wind_mantle), and initial idle pose. Used at battle start and for mid-battle summons.
  * @param {string} charId
@@ -43,7 +87,7 @@ function initCombatantTracking(charId) {
     const meta = abilities[abId].meta;
     cs.abilities[abId] = {
       // +1 compensates for the pre-action tick the character gets on their first turn
-      cooldown: meta.cd_on_battle_start ? meta.cd_on_battle_start + 1 : 0,
+      cooldown: meta.cd_on_battle_start && meta.cd ? meta.cd + 1 : 0,
       charges: meta.charges || -1,
     };
   }
@@ -73,24 +117,105 @@ function initCombatantTracking(charId) {
  * @param {'player' | 'enemy'} side
  * @returns {string | null}
  */
+/**
+ * Free summon slots on a side: max_total_units for the player (battle-lifetime, counting
+ * summons), max_enemy_units for enemies (so AI stops summoning into full ranks).
+ * @param {'player' | 'enemy'} side @returns {number}
+ */
+export function sideFreeSlots(side) {
+  const battle = currentRpgBattle.value;
+  if (!battle) return 0;
+  const config = game.getData('plugins_data/rpg_battler/battle_config');
+  if (side === 'enemy') {
+    // Enemy cap counts LIVING units ("at any moment") — summoner archetypes refill their
+    // ranks as minions fall. The rosters themselves are append-only, so filter by health.
+    const alive = battle.enemyParty.filter(id => (game.getCharacter(id)?.getResource('health') || 0) > 0).length;
+    return Math.max(0, (config?.max_enemy_units || 6) - alive);
+  }
+  // Player cap is battle-lifetime (max_total_units): dead sprouts still spent their slot.
+  // Supports never occupy slots, so they don't eat the summon budget.
+  return Math.max(0, (config?.max_total_units || 5) - battle.playerParty.filter(id => !isSupport(id)).length);
+}
+
+/**
+ * Whether a side is at its unit cap.
+ * @param {'player' | 'enemy'} side
+ */
+export function sideAtUnitCap(side) {
+  return sideFreeSlots(side) <= 0;
+}
+
 export function summonCombatant(character, side) {
   const battle = currentRpgBattle.value;
   if (!battle || !character) return null;
   const id = character.id;
   if (battle.charState[id]) return id;
 
-  if (!game.getCharacter(id)) game.addCharacter(character);
-
   const s = side === 'enemy' ? 'enemy' : 'player';
+
+  // A battle_support joiner (story reinforcement mid-battle) takes no slot, so it bypasses
+  // the unit cap and enters flagged like a battle-start support. Player side only: an
+  // immune, untargetable enemy would leave `enemiesAlive` true forever — no victory.
+  const supportJoin = s === 'player' && !!character.getTrait?.('battle_support');
+  if (s === 'enemy' && character.getTrait?.('battle_support')) {
+    console.warn(`rpg_battler: battle_support is player-side only — "${id}" joins as a normal enemy`);
+  }
+
+  // Unit caps: summons beyond a side's cap fizzle — both the summon aspect and the service
+  // path handle a null return, and canUseAbility greys summon abilities out at the cap.
+  if (!supportJoin && sideAtUnitCap(s)) return null;
+
+  // A character that already exists is a persistent one (a party member pulled into the
+  // fight); only ad-hoc spawns go on `summoned`, which endRpgBattle deletes at teardown.
+  const preexisting = !!game.getCharacter(id);
+  if (!preexisting) game.addCharacter(character);
+
   battle[s === 'enemy' ? 'enemyParty' : 'playerParty'].push(id);
-  battle.summoned.push(id);
-  battle.charState[id] = { side: s, battleIndex: 0, abilities: {}, defeated: false, bonusUsed: 0 };
+  if (!preexisting) battle.summoned.push(id);
+  battle.charState[id] = { side: s, battleIndex: 0, abilities: {}, defeated: false, bonusUsed: 0, support: supportJoin };
+  // A fresh spawn is created at full health; a preexisting reinforcement would otherwise walk in
+  // carrying wounds from earlier in the run. Match spawnEnemies and bring live enemy joiners in
+  // at full, before tracking init.
+  if (s === 'enemy' && preexisting) character.setResource('health', character.getStat('health'));
   initCombatantTracking(id);
 
   const insertAt = Math.min(Math.max(battle.actorTurn + 1, 0), battle.turnOrder.length);
   battle.turnOrder.splice(insertAt, 0, id);
   resortRemainingTurnOrder();
   return id;
+}
+
+/** Templates already warned about this session — a missing summon template is an authoring
+ *  error worth one line, not one per proc (statuses may ship pointing at templates that
+ *  arrive with a later dungeon). */
+const warnedSummonTemplates = new Set();
+
+/**
+ * Cap-safe template summon — the plugin owns the whole pipeline: the side's unit cap is checked
+ * BEFORE the character is created, so a refused summon never pays createCharacter's side effects
+ * (persistent private inventory, character_create actions/emitter). Callers just name a template;
+ * use summonCombatant directly only for a character that already exists (a live instance, a
+ * custom-built spawn).
+ * @param {string} templateId @param {'player' | 'enemy'} side
+ * @returns {string | null} combatant id, or null (cap reached / unknown template)
+ */
+export function summonFromTemplate(templateId, side) {
+  const battle = currentRpgBattle.value;
+  if (!battle || !templateId) return null;
+  const s = side === 'enemy' ? 'enemy' : 'player';
+  if (sideAtUnitCap(s)) return null;
+  let character;
+  try {
+    character = game.createCharacter(game.createUid(), templateId);
+  } catch (e) {
+    if (!warnedSummonTemplates.has(templateId)) {
+      warnedSummonTemplates.add(templateId);
+      console.warn(`rpg_battler: summon template "${templateId}" does not exist — summon fizzles.`);
+    }
+    return null;
+  }
+  if (!character) return null;
+  return summonCombatant(character, s);
 }
 
 // ── Ability usability ──
@@ -134,7 +259,18 @@ export function canUseAbility(characterId, abilityId) {
   if (!passesStaticGates(char, ability, state)) return false;
   if (getStatusStacks(characterId, 'stun') > 0) return false;
   if (ability.meta.bonus_action && battle.charState[characterId].bonusUsed >= 1) return false;
+  // Summon abilities are unusable at the caster side's unit cap — this is what stops the AI
+  // from casting into full ranks (getUsableAbilities routes through here) and greys the button.
+  if (abilityHasSummon(ability) && sideAtUnitCap(battle.charState[characterId].side)) return false;
   return true;
+}
+
+/** @param {any} ability */
+function abilityHasSummon(ability) {
+  for (const effectId in ability.effects || {}) {
+    if (ability.effects[effectId]?.summon) return true;
+  }
+  return false;
 }
 
 /**
@@ -220,9 +356,12 @@ export function tickActiveCharacter(charId) {
   // Snapshot effective stagger threshold BEFORE status drain (for bonus-loss bookkeeping)
   const prevStaggerThreshold = computeEffectiveThreshold(charId);
 
-  // 4. Drain battle-tagged status durations for this character
-  drainCharStatusDurations(charId);
+  // 4. Log this turn's DoT/HoT BEFORE draining, so anything a `status_expired` listener does (a burn
+  //     detonating, say) reads after the tick that set it off rather than before it.
   for (const r of dotResults) logEffect(battle, charId, r);
+
+  // 4.1. Drain battle-tagged status durations for this character
+  drainCharStatusDurations(charId);
 
   // 4.5. Bonus-loss bookkeeping: when a threshold-bonus status (Braced) expires,
   //      remove the stagger that was accumulated in the bonus zone.
@@ -244,6 +383,13 @@ export function tickActiveCharacter(charId) {
 
   // 5. Check if character died from DoT — defer to processDeaths for animations
   if (!isCharAlive(charId)) {
+    return { canAct: false, dotResults };
+  }
+
+  // 5.5. Passive obstacle (meta.prevents_action) — forfeits every action without consuming
+  //      anything, unlike stun which costs a stack per skipped action. Silent: no recover float.
+  const actor = game.getCharacter(charId);
+  if (actor?.getStatuses().some(st => st.meta?.prevents_action && st.currentStacks > 0)) {
     return { canAct: false, dotResults };
   }
 
@@ -281,10 +427,44 @@ export function refireChannels(charId) {
     const snap = st.meta?.channel_snapshot;
     if (!snap) continue;
     battle.log.push({ turn: battle.turn, actorId: charId, abilityId: snap.abilityId });
-    addFloatingText({ characterId: charId, text: snap.ability?.meta?.name || snap.abilityId, cssClass: 'ability-channel' });
+    addFloatingText({ characterId: charId, text: snap.ability?.meta?.name || snap.abilityId, cssClass: 'ability-channel', icon: snap.ability?.meta?.icon || null });
     results.push(...resolveAbility(charId, snap.abilityId, undefined, { isBounce: true, actionPower: snap.power, ability: snap.ability }));
   }
   return results;
+}
+
+/**
+ * Per-round initiative roll — the final turn-order tiebreak among combatants of equal speed.
+ * Without it the sort falls back to array order (JS sort is stable), so identical units would
+ * keep the same pecking order for the whole battle and every battle after it.
+ *
+ * Rolled ONCE per round, not per sort: `resortRemainingTurnOrder` runs after every single turn,
+ * and re-rolling there would make the upcoming turn order jitter while the player is reading it.
+ */
+function rollInitiative() {
+  const battle = currentRpgBattle.value;
+  if (!battle) return;
+  for (const id in battle.charState) battle.charState[id].initiative = Math.random();
+}
+
+/** This round's roll for a combatant, rolled on demand for anyone who joined mid-round. */
+function initiativeOf(characterId) {
+  const cs = currentRpgBattle.value?.charState[characterId];
+  if (!cs) return 0;
+  if (cs.initiative === undefined) cs.initiative = Math.random();
+  return cs.initiative;
+}
+
+/**
+ * Turn-order comparator: fastest first, then this round's initiative roll. A tie is a genuine
+ * coin flip regardless of side — the player used to win every cross-side tie, which made a
+ * speed match-up a guaranteed first strike instead of a gamble.
+ */
+function compareTurnOrder(a, b) {
+  const speedA = game.getCharacter(a)?.getStat('speed') || 0;
+  const speedB = game.getCharacter(b)?.getStat('speed') || 0;
+  if (speedB !== speedA) return speedB - speedA;
+  return initiativeOf(a) - initiativeOf(b);
 }
 
 /**
@@ -297,33 +477,19 @@ function resortRemainingTurnOrder() {
   const startIdx = battle.actorTurn + 1;
   if (startIdx >= battle.turnOrder.length) return;
   const remaining = battle.turnOrder.slice(startIdx);
-  const playerSet = new Set(battle.playerParty);
-  remaining.sort((a, b) => {
-    const speedA = game.getCharacter(a)?.getStat('speed') || 0;
-    const speedB = game.getCharacter(b)?.getStat('speed') || 0;
-    if (speedB !== speedA) return speedB - speedA;
-    if (playerSet.has(a) && !playerSet.has(b)) return -1;
-    if (!playerSet.has(a) && playerSet.has(b)) return 1;
-    return 0;
-  });
+  remaining.sort(compareTurnOrder);
   battle.turnOrder.splice(startIdx, remaining.length, ...remaining);
 }
 
 /**
- * Full re-sort of turn order by current speed. Called at round start.
+ * Full re-sort of turn order by current speed. Called at round start, which is also when
+ * equal-speed combatants get their new initiative roll.
  */
 export function resortFullTurnOrder() {
   const battle = currentRpgBattle.value;
   if (!battle) return;
-  const playerSet = new Set(battle.playerParty);
-  battle.turnOrder.sort((a, b) => {
-    const speedA = game.getCharacter(a)?.getStat('speed') || 0;
-    const speedB = game.getCharacter(b)?.getStat('speed') || 0;
-    if (speedB !== speedA) return speedB - speedA;
-    if (playerSet.has(a) && !playerSet.has(b)) return -1;
-    if (!playerSet.has(a) && playerSet.has(b)) return 1;
-    return 0;
-  });
+  rollInitiative();
+  battle.turnOrder.sort(compareTurnOrder);
 }
 
 /**
@@ -463,7 +629,7 @@ export function executeAction(abilityId, targetId) {
 export function flashAbilityName(casterId, abilityId) {
   if (!isAIControlled(casterId)) return;
   const ab = game.getCharacter(casterId)?.getAbility(abilityId);
-  addFloatingText({ characterId: casterId, text: ab?.meta?.name || abilityId, cssClass: 'ability-use' });
+  addFloatingText({ characterId: casterId, text: ab?.meta?.name || abilityId, cssClass: 'ability-use', icon: ab?.meta?.icon || null });
 }
 
 /**
@@ -473,10 +639,20 @@ export function processDeaths() {
   const battle = currentRpgBattle.value;
   if (!battle) return;
 
-  const allChars = [...battle.playerParty, ...battle.enemyParty];
-  for (const charId of allChars) {
-    if (!isCharAlive(charId) && !battle.charState[charId]?.defeated) {
-      handleDeath(charId);
+  // Fixpoint sweep: a defeat listener can kill OTHER combatants mid-sweep (a volatile passive
+  // detonating into its neighbors, a burn detonation on death) — including at indexes already
+  // visited. Re-sweep until a full pass finds no new deaths, so every chain victim gets its
+  // handleDeath (and battle_character_defeated) before the battle-end check. Bounded: each real
+  // death sets charState.defeated once; a death-defiance revive leaves the character alive.
+  let sweepAgain = true;
+  while (sweepAgain) {
+    sweepAgain = false;
+    const allChars = [...battle.playerParty, ...battle.enemyParty];
+    for (const charId of allChars) {
+      if (!isCharAlive(charId) && !battle.charState[charId]?.defeated) {
+        handleDeath(charId);
+        sweepAgain = true;
+      }
     }
   }
 
@@ -512,6 +688,88 @@ export function handleDeath(characterId) {
   game.trigger('battle_character_defeated', characterId, cs.side);
 }
 
+// ── Enemy spawning / scaling ──
+
+/**
+ * Spawn enemies from one wave's entry list.
+ *
+ * A live entry names persistent characters (`live_character_ids`) instead of a template — they are
+ * fetched, not created, and survive the teardown that deletes the spawned ones. They enter at full
+ * health: a live enemy carries its wounds out of the fight, so without this a retry after a defeat
+ * would face the corpses the player left behind.
+ * @param {RpgBattleEntry[]} entries
+ * @returns {{ ids: string[], spawned: string[] }} all enemy IDs, and the subset the battle created (non-live)
+ */
+export function spawnEnemies(entries) {
+  const ids = [];
+  const spawned = [];
+  for (const entry of entries) {
+    if (entry.is_live_instance) {
+      for (const liveId of entry.live_character_ids || []) {
+        const char = game.getCharacter(liveId);
+        if (!char) {
+          console.error(`[rpg_battler] live enemy "${liveId}" does not exist — skipped. `
+            + 'Live enemies are created by game scripts; check the id and that the script ran.');
+          continue;
+        }
+        char.setResource('health', char.getStat('health'));
+        ids.push(char.id);
+      }
+      continue;
+    }
+    for (let i = 0; i < (entry.amount || 1); i++) {
+      const uid = game.createUid();
+      const char = game.createCharacter(uid, entry.character_id);
+      game.addCharacter(char);
+      ids.push(char.id);
+      spawned.push(char.id);
+    }
+  }
+  return { ids, spawned };
+}
+
+// ── Waves ──
+
+/** Whether another wave is queued behind the one currently on the field. */
+export function hasPendingWave() {
+  const battle = currentRpgBattle.value;
+  if (!battle) return false;
+  return battle.waveIndex < (battle.waves?.length || 1) - 1;
+}
+
+/**
+ * Bring in the next wave: spawn it, scale it, track it, and slot it into the turn order among
+ * the not-yet-acted so it can act this round by speed. The player side carries over untouched —
+ * health, statuses and cooldowns all persist, which is the point of a wave.
+ * Assets for every wave are preloaded at battle start, so nothing fetches here.
+ * @returns {string[]} the new enemy ids (empty if there was no wave to bring in)
+ */
+export function advanceWave() {
+  const battle = currentRpgBattle.value;
+  if (!battle || !hasPendingWave()) return [];
+
+  battle.waveIndex++;
+  const { ids, spawned } = spawnEnemies(battle.waves[battle.waveIndex]);
+  if (ids.length === 0) return [];
+
+  battle.enemyParty.push(...ids);
+  battle.spawnedEnemies.push(...spawned);
+  for (const id of ids) {
+    battle.charState[id] = { side: 'enemy', battleIndex: 0, abilities: {}, defeated: false, bonusUsed: 0 };
+  }
+
+  for (const id of ids) initCombatantTracking(id);
+
+  const insertAt = Math.min(Math.max(battle.actorTurn + 1, 0), battle.turnOrder.length);
+  battle.turnOrder.splice(insertAt, 0, ...ids);
+  resortRemainingTurnOrder();
+
+  pushLog(null, game.getLine('log_next_wave', { wave: battle.waveIndex + 1 }));
+  // Emitter: battle_wave_start — a wave other than the first has taken the field.
+  game.trigger('battle_wave_start', battle.waveIndex, ids);
+  return ids;
+}
+
 /**
  * Check if battle should end.
  * @returns {boolean}
@@ -520,8 +778,17 @@ export function checkBattleEnd() {
   const battle = currentRpgBattle.value;
   if (!battle || isFinished(battle)) return true;
 
-  const playersAlive = battle.playerParty.some(id => isCharAlive(id));
+  // Supports can't die — counting them here would make defeat unreachable.
+  const playersAlive = battle.playerParty.some(id => !isSupport(id) && isCharAlive(id));
   const enemiesAlive = battle.enemyParty.some(id => isCharAlive(id));
+
+  // A cleared field with a wave still queued is NOT a victory — bring the next one on.
+  // Defeat is checked first: a party wiped by the last enemy's dying blow loses, rather
+  // than being handed another wave to fail against.
+  if (!enemiesAlive && playersAlive && hasPendingWave()) {
+    advanceWave();
+    return false;
+  }
 
   if (!enemiesAlive) {
     battle.result = 'victory';
@@ -530,11 +797,13 @@ export function checkBattleEnd() {
     // (defeat rewards) run before the result overlay renders.
     if (battle.battleId) game.getService('rpg_battle').addDefeated(battle.battleId);
     game.setMusic('victory');
+    game.trigger('battle_finished', 'victory', battle.battleId || null);
     return true;
   }
   if (!playersAlive) {
     battle.result = 'defeat';
     battle.phase = 'finished';
+    game.trigger('battle_finished', 'defeat', battle.battleId || null);
     return true;
   }
   return false;

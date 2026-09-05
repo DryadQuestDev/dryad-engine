@@ -3,9 +3,9 @@
 import { currentRpgBattle, getBattleDisplayName, requiredSelfStatuses } from './rpg-battle-state.mjs';
 import {
   calculateRawDamage, applyDefenses, getStatusStacks, getStatusDefinitions,
-  getSide, getAliveEnemies, getAliveAllies, isCharAlive, expandSplashTargets,
+  getSide, getAliveEnemies, getAliveAllies, isCharAlive,
 } from './rpg-battle-effects.mjs';
-import { getUsableAbilities, canUseAbility } from './rpg-battle-flow.mjs';
+import { getUsableAbilities, canUseAbility, sideFreeSlots } from './rpg-battle-flow.mjs';
 
 const { game } = window.engine;
 
@@ -21,6 +21,8 @@ const WEIGHTS = {
   OVERKILL_PENALTY: -2,
   CHANNEL_REDUNDANT: -1000,
   STUN_VS_CHANNEL: 8,
+  SUMMON_BASE: 30,
+  SUMMON_OVERFLOW: -28,
 };
 
 /**
@@ -171,13 +173,42 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
   else if (targetType === 'all_allies') effectTargetIds = getAliveAllies(characterId);
   else effectTargetIds = [targetId];
 
+  // Splash spills to neighbours, summed ability-level across effects. Value it as fractional extra
+  // AoE so the AI still favours splash-heavy casts. Damage and status shares are scored together —
+  // an ability that only spills statuses is still worth aiming into a crowd.
+  const splashCount = Object.values(ability.effects).reduce((n, a) => n + (a.splash_count || 0), 0);
+  const splashPct = Object.values(ability.effects).reduce((n, a) => n + (a.splash_damage || 0), 0);
+  const splashStatusPct = Object.values(ability.effects).reduce((n, a) => n + (a.splash_statuses || 0), 0);
+  const splashShare = Math.max(splashPct, splashStatusPct);
+  if (splashCount > 0 && splashShare > 0) score += WEIGHTS.AOE_PER_TARGET * splashCount * (splashShare / 100);
+
+  // Flurry re-resolves the whole ability on the same target — its damage effectively multiplies.
+  // Bounce hops stay unscored (they land on OTHER targets the score isn't about), but a flurry's
+  // extra strikes hit the scored target, so ignoring them would undervalue multi-hit kits.
+  // flurry is the TOTAL strike count (primary included) — unauthored or ≤1 means a single hit.
+  const flurryHits = Math.max(1, Object.values(ability.effects).reduce((n, a) => n + (a.flurry || 0), 0));
+
   for (const effectId in ability.effects) {
     const aspects = ability.effects[effectId];
 
-    // Expand for splash scoring
-    const scoreTargets = aspects.splash
-      ? expandSplashTargets(characterId, effectTargetIds, aspects.splash, aspects.splash_only)
+    // Mirror resolve-time gating: an effect with require_status_target silently skips targets
+    // lacking the status, so score it only against targets it would actually touch. Without this
+    // the AI casts a gated payoff (Warden's Focus) at unmarked targets — a whiffed turn that
+    // still pays the cooldown.
+    const scoreTargets = aspects.require_status_target
+      ? effectTargetIds.filter(id => getStatusStacks(id, aspects.require_status_target) > 0)
       : effectTargetIds;
+
+    // Summoning: reinforcements carry no damage number to score, so weight them explicitly —
+    // full SUMMON_BASE when the whole clutch fits ("summoners summon"), collapsing by
+    // SUMMON_OVERFLOW per unit that would fizzle at the cap, so a partial clutch waits for the
+    // ranks to thin instead of wasting the cast. Zero slots never reaches scoring at all:
+    // canUseAbility greys the ability first.
+    if (aspects.summon) {
+      const amount = Math.max(1, Math.round(aspects.summon_amount ?? 1));
+      const overflow = Math.max(0, amount - sideFreeSlots(getSide(characterId)));
+      score += WEIGHTS.SUMMON_BASE + WEIGHTS.SUMMON_OVERFLOW * overflow;
+    }
 
     // AoE bonus
     if (scoreTargets.length > 1) {
@@ -192,7 +223,9 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
         if (!target || !isCharAlive(tId)) continue;
 
         const { raw } = calculateRawDamage(character, aspects, target);
-        const dmg = applyDefenses(raw, aspects.damage_type || 'physical', target);
+        // Per-hit defenses, then the flurry multiplier — armor pays per strike, and the
+        // execute/overkill reads below want the full multi-hit total.
+        const dmg = applyDefenses(raw, aspects.damage_type || 'physical', target) * flurryHits;
         totalDmg += dmg;
 
         const targetHp = target.getResource('health');

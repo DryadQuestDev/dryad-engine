@@ -26,6 +26,7 @@ type RewardCharacterEntry = {
   xpFrom: number;
   xpTo: number;
   stats: RewardStatChange[];
+  items: { id: string; quantity: number }[];
 };
 
 type PendingReward = {
@@ -47,13 +48,21 @@ type RewardService = {
   effectiveThreat(battleId: string): number;
   /** The current dungeon's level-group snapshot (MC level at first entry; default 1). */
   getDungeonLevel(): number;
-  /** Reward multiplier for a dungeon level: 1 + scale_per_level × (level − 1). */
+  /** Reward multiplier for a dungeon level: 1 + power_scale_per_level × (level − 1). */
   dungeonScale(level: number): number;
+  /** Enemy health/power multiplier for a dungeon level, from the authored `enemy_scaling` pins (closest pin at or below the level; 1 when none). */
+  enemyScale(level: number): number;
+  /** Override the level equipment is created at (item_create). Pass a level, then null to clear. */
+  setGenerationLevel(level: number | null): void;
   /** Record a resource gain (by the game's own stat id) for the reward display. */
-  recordResource(statId: string, amount: number): void;
+  recordResource(statId: string, amount: number, characterId: string): void;
   clearPending(): void;
   /** Open the reward popup (guarded against double-open). */
   openRewardPopup(): void;
+  /** Dry-roll a pool exactly as a container would (throwaway inventory, no side effects). One array of drop bricks per roll. */
+  simulatePool(poolId: string, level: number, rolls?: number): { id: string, quantity: number, price: number, itemLevel?: number, source: string }[][];
+  /** Dry-roll battle loot exactly as a victory would (reuses grantLoot; no side effects). */
+  simulateBattleLoot(opts: { level: number, threat: number, rolls?: number, battleId?: string }): { level: number, threat: number, rolls: { id: string, quantity: number, price: number, itemLevel?: number, source: string }[][], budgets: any };
 };
 
 // ── Service overloads (declaration merging) ──

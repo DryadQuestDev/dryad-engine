@@ -6,6 +6,8 @@ export const DungeonRoomSchema = {
   x: { type: 'number', tooltip: 'X coordinate of the room on the dungeon map.' },
   y: { type: 'number', tooltip: 'Y coordinate of the room on the dungeon map.' },
   doors: { type: 'string[]', tooltip: 'List of door IDs connecting this room to other rooms.' },
+  key: { type: 'chooseOne', fromFile: 'item_templates', tooltip: 'Lock: entering this room needs this item in the party bag. The key is auto-used with a notification; without it entry is refused with a locked message. Stays unlocked for the rest of the save.' },
+  key_consume: { type: 'boolean', tooltip: 'The key is spent by the unlock (single-use keys). Off = the key stays in the bag.' },
   default_assets: { type: 'chooseMany', fromFile: 'assets', tooltip: 'Assets (images/decorations) displayed by default when entering this room.' },
   fog: {
     type: 'schema', tooltip: 'Fog of war configuration for this room.', objects: {

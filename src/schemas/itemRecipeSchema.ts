@@ -17,6 +17,7 @@ export const ItemRecipeSchema = {
             quantity: { type: 'number', tooltip: 'Quantity of the result item.', defaultValue: 1 },
         }
     },
+    recipe_group: { type: 'chooseOne', fromFile: 'recipe_groups', tooltip: 'Group this recipe belongs to. A station that lists the group (inventory field `group_recipes`) can craft it, so a new recipe joins every such station by setting this one field.' },
     tags: { type: 'string[]', tooltip: 'Tags for the recipe.' },
 } as const satisfies Schema;
 

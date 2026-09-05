@@ -27,6 +27,61 @@ Assets support:
 | **Exit transitions** | Animated removal with same transition options |
 | **Idle animations** | Looping animations while displayed (float, pulse, sway, etc.) |
 | **Spine support** | Play animations, combine skins, control playback speed |
+| **Layers** | Stack several image plates into one asset (`image` type) |
+
+---
+
+## Layered Images
+
+An `image` asset can stack extra plates on top of `file_image` via its `layers` list. The whole
+stack shares one wrapper, so fit mode, position, scale, rotation, opacity, blur, the scene
+colour grade and every enter/exit/idle transition apply to the finished picture rather than to
+each plate — author the plates pre-registered at the same canvas size.
+
+| Field | Description |
+|-------|-------------|
+| `file_image` | The bottom plate. Always rendered. |
+| `layers` | Extra plates stacked on top, in order. |
+
+Listen to [`asset_resolve`](../builtins/game_emitters.md) to decide which plates a render
+actually uses: filter the list to drop the ones you don't want, or replace an entry with an
+object to say more about one plate. It fires on every render path, so the scene, the gallery and
+the editor preview all agree.
+
+| Entry field | Description |
+|-------------|-------------|
+| `file` | The image path. |
+| `classes` | Css classes for this plate alone, e.g. a recolor. |
+| `fade` | Crossfade the plate as it comes and goes, instead of appearing on one frame. |
+
+### Alternatives vs overlays
+
+Two kinds of plate behave differently, and `fade` is how you tell them apart.
+
+An **alternative** is one of several mutually exclusive options — one body plate per skin tone.
+It keeps its slot in the stack and swaps source on a single frame. Never set `fade` on one:
+crossfading leaves both options in the stack at once, and whatever they cover (the plate below,
+usually opaque) shows through the pair for the length of the fade.
+
+An **overlay** adds to a finished picture and has nothing taking its place — sweat, weather, a
+glow. Set `fade` and it blooms in and out. Keep overlays at the top of the stack; removed from
+the middle, every plate above one shifts a slot and re-decodes for nothing.
+
+```javascript
+// One illustration, one plate per skin tone, plus an overlay the scene turns on.
+// {asset: "cg_1"}  →  base + body_tan
+// {asset: "cg_1(fx = true)"}  →  base + body_tan + fx
+game.on("asset_resolve", (asset) => {
+  if (!asset.layers) return;
+  const skin = game.getCharacter("riko")?.getAttribute("skin");
+  asset.layers = asset.layers.filter((file) => {
+    const body = file.match(/body_(\w+)\./);
+    if (body) return body[1] === skin;
+    if (file.includes("fx.")) return !!asset.fx;
+    return true;
+  });
+});
+```
 
 ---
 
@@ -75,7 +130,8 @@ Set `default_assets` on room templates to automatically load assets when enterin
 
 | Event | When it fires | Parameters |
 |-------|---------------|------------|
-| `asset_render` | Before asset is rendered | `(asset)` |
+| `asset_render` | When an asset is staged or updated | `(asset)` |
+| `asset_resolve` | While an asset's image layers are built, on every render path | `(asset)` |
 
 Use `asset_render` to modify asset properties dynamically before display.
 

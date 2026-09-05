@@ -9,6 +9,7 @@ const props = defineProps<{
     item: Item;
     characterId?: string;
     disabled?: boolean;
+    noChoices?: boolean; // Hide the item choice buttons (equip/drop/use) — for viewer contexts like station lists.
 }>();
 
 const game = Game.getInstance();
@@ -18,7 +19,7 @@ const choices = computed(() => {
     return char?.getItemChoices(props.item) || [];
 });
 
-const hasChoices = computed(() => choices.value.length > 0 && !props.disabled);
+const hasChoices = computed(() => choices.value.length > 0 && !props.disabled && !props.noChoices);
 </script>
 
 <template>

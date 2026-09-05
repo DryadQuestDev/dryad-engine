@@ -75,6 +75,41 @@
   cursor: pointer;
 }
 
+.tutorial-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tutorial-page-btn {
+  width: 30px;
+  height: 30px;
+  font-size: 18px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.tutorial-page-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.tutorial-page-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.tutorial-page-count {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  min-width: 42px;
+  text-align: center;
+}
+
 .tutorial-ok {
   padding: 9px 22px;
   font-size: 14px;

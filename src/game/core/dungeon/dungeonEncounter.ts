@@ -53,6 +53,13 @@ export class DungeonEncounter {
     public collectClue?: boolean;
 
     /**
+     * This encounter has no authored sprite and falls back to the granted item's icon.
+     * Icons are full-size item art, so the map view tags them with `.item_icon` to size
+     * them down instead of drawing them at their natural width.
+     */
+    public usesItemIcon: boolean = false;
+
+    /**
      * Check if this encounter is a prop (non-interactive decoration).
      * Props are not selectable and don't have active outlines.
      */

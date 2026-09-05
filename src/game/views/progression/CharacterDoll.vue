@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, watch } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import CharacterDollStatic from './CharacterDollStatic.vue';
@@ -38,12 +38,14 @@ const hasActiveStaticLayer = computed(() => {
 const showSpine = computed(() => hasSpineForView.value && !hasActiveStaticLayer.value);
 const showStatic = computed(() => hasActiveStaticLayer.value || !hasSpineForView.value);
 
-// Discover view when rendered with a non-default view (skip gallery previews)
-onMounted(() => {
-  if (props.view && props.character.templateId && !props.character.id.startsWith('_gallery_preview')) {
-    Game.getInstance().coreSystem.discoverCharacterView(props.character.templateId, props.view);
+// Discover view when rendered with a non-default view (skip gallery previews). Watched rather
+// than run once on mount: a scene slot swaps its view on the same doll instance (scene_view
+// trait change), and that second view has been seen just as much as the first.
+watch(() => props.view, (view) => {
+  if (view && props.character.templateId && !props.character.id.startsWith('_gallery_preview')) {
+    Game.getInstance().coreSystem.discoverCharacterView(props.character.templateId, view);
   }
-});
+}, { immediate: true });
 </script>
 
 <template>

@@ -1,6 +1,6 @@
 {
   "name": "dryad-engine",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "main": "electron/main.cjs",
   "description": "Dryad Engine - A Vue 3 and Electron based application for making modern 2D text-based games",
   "author": {
@@ -111,13 +111,15 @@
         "AppImage"
       ],
       "category": "Utility",
-      "maintainer": "Nekon <dryadquest@gmail.com>"
+      "maintainer": "Nekon <dryadquest@gmail.com>",
+      "icon": "electron/icon.png"
     },
     "win": {
       "target": [
         "nsis",
         "portable"
-      ]
+      ],
+      "icon": "electron/icon.png"
     }
   }
 }

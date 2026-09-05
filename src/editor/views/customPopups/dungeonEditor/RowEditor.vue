@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import InputText from 'primevue/inputtext';
 import Textarea from 'primevue/textarea';
 import Button from 'primevue/button';
 import type { Row } from '../../../../utility/dungeonEditor/ast';
 import { inputMatchesSearch } from './searchState';
+import { flashElement, focusFieldAt, type RevealRequest } from './reveal';
 
 const props = defineProps<{
   row: Row;
@@ -12,7 +13,24 @@ const props = defineProps<{
   canMoveUp: boolean;
   canMoveDown: boolean;
   sceneExists?: boolean;
+  /** The row's `{params}` failed lint — outline the input. */
+  paramsError?: boolean;
+  /** Focus request aimed at this row; `null` otherwise. */
+  reveal?: RevealRequest | null;
 }>();
+
+const rootRef = ref<HTMLElement | null>(null);
+const paramsRef = ref<InstanceType<typeof InputText> | null>(null);
+const codeRef = ref<InstanceType<typeof Textarea> | null>(null);
+
+watch(() => props.reveal, (r) => {
+  if (!r) return;
+  nextTick(() => {
+    if (r.at.target === 'row-params') focusFieldAt(paramsRef.value, r.at.start, r.at.end);
+    else if (r.at.target === 'row-text') focusFieldAt(codeRef.value, r.at.start, r.at.end);
+    flashElement(rootRef.value);
+  });
+});
 
 const emit = defineEmits<{
   'update:row': [row: Row];
@@ -42,7 +60,7 @@ function updateField(key: string, value: any) {
 </script>
 
 <template>
-  <div class="row-editor" :class="`row--${row.kind}`">
+  <div ref="rootRef" class="row-editor" :class="`row--${row.kind}`">
     <div class="row-left" :class="{ 'row-drag-handle': row.kind === 'choice' }"
       v-tooltip.top="row.kind === 'choice' ? 'Drag to reorder' : ''">
       <span :class="sigilClass">{{ sigil }}</span>
@@ -68,11 +86,12 @@ function updateField(key: string, value: any) {
         />
         <span class="angle">&gt;</span>
         <InputText
+          ref="paramsRef"
           :model-value="row.paramsRaw ?? ''"
           @update:model-value="(v: any) => updateField('paramsRaw', v ? v : undefined)"
           placeholder="{params}"
           class="params-input"
-          :class="{ 'input-search-hit': inputMatchesSearch(row.paramsRaw) }"
+          :class="{ 'params-input--error': paramsError, 'input-search-hit': inputMatchesSearch(row.paramsRaw) }"
         />
       </template>
 
@@ -107,6 +126,7 @@ function updateField(key: string, value: any) {
       <!-- code block -->
       <template v-else-if="row.kind === 'code'">
         <Textarea
+          ref="codeRef"
           :model-value="row.text"
           @update:model-value="(v: any) => updateField('text', v ?? '')"
           class="flex-1 code-area"
@@ -211,6 +231,23 @@ function updateField(key: string, value: any) {
 input.params-input {
   color: #9c27b0 !important;
   font-weight: 600;
+}
+
+input.params-input--error,
+.params-input--error :deep(input) {
+  outline: 2px solid #d32f2f;
+  outline-offset: -1px;
+}
+
+.row-editor.flash {
+  animation: row-flash 1.2s ease-out;
+  border-radius: 4px;
+}
+
+@keyframes row-flash {
+  0% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.6); background: rgba(255, 82, 82, 0.25); }
+  30% { box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.4); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); background: transparent; }
 }
 
 .text-area :deep(textarea) {

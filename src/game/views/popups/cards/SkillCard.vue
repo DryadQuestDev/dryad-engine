@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
 import { Global } from '../../../../global/global';
 import StatusObjectDisplay from '../../progression/StatusObjectDisplay.vue';
 import { isSkillVisible, isSkillDisabledByParams } from '../../progression/useSkillParams';
+import { getShapePath, ShapeType } from '../../../../utility/shapes';
+
+const showIds = computed(() => shouldShowEntityIds());
 
 const props = defineProps<{
     treeId: string;
@@ -79,6 +83,11 @@ function canRefundSkill(slotId: string): boolean {
 
 const canRefund = computed(() => canRefundSkill(props.slotId));
 
+// The card's icon mirrors the tree node: same shape, same clip, same accent-colored border.
+const ICON_SIZE = 40;
+const iconShape = computed((): ShapeType => (skillSlotData.value?.shape as ShapeType) || 'circle');
+const iconClipId = computed(() => `skill-card-clip-${props.treeId}-${props.slotId}`);
+
 function getSkillName(skillId: string | undefined): string {
     if (!skillId) return '';
     const data = game.characterSystem.skillSlotsMap.get(skillId);
@@ -93,11 +102,13 @@ const formattedPrice = computed(() => {
         : character.value?.getPartyInventory();
     return Object.entries(s.price).map(([currencyId, amount]) => {
         const template = game.itemSystem.itemTemplatesMap.get(currencyId);
+        const available = inv?.getItemQuantity(currencyId) || 0;
         return {
             id: currencyId,
             image: (template?.traits as any)?.image || '',
             price: amount,
-            available: inv?.getItemQuantity(currencyId) || 0,
+            available,
+            affordable: available >= (amount as number),
         };
     });
 });
@@ -139,10 +150,28 @@ function refund() {
 </script>
 
 <template>
-    <div v-if="skill && skillSlotData" class="popup-inner skill-card">
+    <div v-if="skill && skillSlotData" class="popup-inner skill-card"
+        :class="{ learned: currentLevel > 0, maxed: currentLevel >= maxLevel }">
         <div class="popup-header">
-            <img v-if="skillSlotData.image" :src="skillSlotData.image" class="skill-icon" alt="Skill Icon" />
-            <span class="popup-title">{{ skillSlotData.name || skill.skill }}</span>
+            <svg v-if="skillSlotData.image" class="skill-icon" :width="ICON_SIZE + 2" :height="ICON_SIZE + 2"
+                :viewBox="`-1 -1 ${ICON_SIZE + 2} ${ICON_SIZE + 2}`">
+                <defs>
+                    <clipPath :id="iconClipId">
+                        <circle v-if="iconShape === 'circle'" :r="ICON_SIZE / 2" :cx="ICON_SIZE / 2"
+                            :cy="ICON_SIZE / 2" />
+                        <path v-else :d="getShapePath(iconShape, ICON_SIZE)" />
+                    </clipPath>
+                </defs>
+                <image :href="skillSlotData.image" x="0" y="0" :width="ICON_SIZE" :height="ICON_SIZE"
+                    preserveAspectRatio="xMidYMid slice" :clip-path="`url(#${iconClipId})`" />
+                <circle v-if="iconShape === 'circle'" :r="ICON_SIZE / 2" :cx="ICON_SIZE / 2" :cy="ICON_SIZE / 2"
+                    fill="none" stroke="var(--skill-accent)" stroke-width="2" />
+                <path v-else :d="getShapePath(iconShape, ICON_SIZE)" fill="none" stroke="var(--skill-accent)"
+                    stroke-width="2" />
+            </svg>
+            <span class="popup-title">{{ skillSlotData.name || skill.skill }}
+                <span v-if="showIds" class="entity-id-badge">{{ slotId }}</span>
+            </span>
         </div>
 
         <div v-if="skillSlotData.description"
@@ -153,12 +182,8 @@ function refund() {
             <span>Level: {{ currentLevel }} / {{ maxLevel }}</span>
         </div>
 
-        <StatusObjectDisplay v-if="skillSlotData.status" :data="skillSlotData.status"
-            :multiplier="currentLevel || undefined"
-            :isActive="currentLevel > 0" />
-
         <div v-if="currentLevel < maxLevel && formattedPrice.length > 0" class="skill-currency">
-            <div v-for="c in formattedPrice" :key="c.id" class="currency-item">
+            <div v-for="c in formattedPrice" :key="c.id" class="currency-item" :class="{ unaffordable: !c.affordable }">
                 <img v-if="c.image" :src="c.image" class="currency-icon" />
                 <span class="currency-price">{{ c.price }}</span>
                 <span class="currency-separator">/</span>
@@ -186,6 +211,10 @@ function refund() {
             @click="refund">
             {{ canRefund ? 'Refund' : 'Cannot Refund' }}
         </button>
+
+        <StatusObjectDisplay v-if="skillSlotData.status" :data="skillSlotData.status"
+            :multiplier="currentLevel || undefined"
+            :isActive="currentLevel > 0" />
     </div>
     <div v-else class="popup-inner popup-error">
         Unknown skill: {{ treeId }}/{{ slotId }}
@@ -193,13 +222,21 @@ function refund() {
 </template>
 
 <style scoped>
-.skill-card { color: inherit; }
+/* Same three states, and the same colors, as the node's SVG stroke in SkillSlot.vue — the card must
+   read as the node you just clicked, so both take their color from this one variable. */
+.skill-card {
+    color: inherit;
+    --skill-accent: #666666;
+}
+
+.skill-card.learned { --skill-accent: #4CAF50; }
+.skill-card.maxed { --skill-accent: #FFC107; }
+
+.skill-card.learned .popup-title,
+.skill-card.learned .skill-level { color: var(--skill-accent); }
 
 .skill-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 4px;
-    object-fit: cover;
+    flex: 0 0 auto;
 }
 
 .skill-level {
@@ -231,6 +268,10 @@ function refund() {
 .currency-separator { font-size: 1em; color: #666; margin: 0 2px; }
 .currency-available { font-size: 1em; font-weight: bold; color: #ccc; }
 
+.currency-item.unaffordable { border-color: rgba(231, 76, 60, 0.45); }
+.currency-item.unaffordable .currency-price,
+.currency-item.unaffordable .currency-available { color: #e74c3c; }
+
 .learn-button {
     width: 100%;
     padding: 10px;
@@ -241,7 +282,7 @@ function refund() {
     font-size: 1em;
     font-weight: bold;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease;
 }
 
 .learn-button:hover:not(.disabled) { background-color: #35a372; }
@@ -277,7 +318,7 @@ function refund() {
     font-size: 1em;
     font-weight: bold;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease;
     margin-top: 8px;
 }
 

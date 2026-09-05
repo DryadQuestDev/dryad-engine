@@ -7,6 +7,7 @@ import Debug from './Debug.vue';
 import BackgroundAsset from './BackgroundAsset.vue';
 import EventsContainer from './events-container/EventsContainer.vue';
 import UiContainer from './UiContainer.vue';
+import ActorList from './ui-container/ActorList.vue';
 import ProgressionContainer from './progression/ProgressionContainer.vue';
 import PopupContainer from './PopupContainer.vue';
 import LogsPopup from './LogsPopup.vue';
@@ -34,6 +35,13 @@ const currentGameStateComponent = computed(() => {
 // Debug panel visibility from localStorage (reactive)
 const showDebugPanel = useStorage('showDebugPanel', true);
 const debugPanelExpanded = useStorage('debug-panel-expanded', false);
+// Width set by the field in Debug.vue (which owns the 100px minimum); clamped again here in
+// case localStorage carries a stale or hand-edited value. Skipped while expanded (100%).
+const debugPanelWidth = useStorage('debug-panel-width', 350);
+const debugPanelStyle = computed(() => {
+  if (debugPanelExpanded.value) return undefined;
+  return { width: `${Math.max(100, Number(debugPanelWidth.value) || 350)}px` };
+});
 
 // Check if debug panel should be visible
 const shouldShowDebugPanel = computed(() => {
@@ -88,6 +96,10 @@ const shouldShowDebugPanel = computed(() => {
 
         <div class="overlay-wrapper" v-show="!game.coreSystem.getState('progression_state')">
           <OverlayContainer />
+          <!-- Scene UI, not global chrome: it belongs to the staged scene, so it rides this
+               wrapper's z-index and its v-show — the character sheet covers it like it covers the
+               dialogue box, instead of the rail floating on top of the sheet. -->
+          <ActorList />
         </div>
 
         <div class="ui-wrapper">
@@ -101,7 +113,8 @@ const shouldShowDebugPanel = computed(() => {
         <LogsPopup />
 
       </div>
-      <div v-if="shouldShowDebugPanel" :class="['game-body-panel', { expanded: debugPanelExpanded }]">
+      <div v-if="shouldShowDebugPanel" :class="['game-body-panel', { expanded: debugPanelExpanded }]"
+        :style="debugPanelStyle">
         <Debug />
       </div>
 

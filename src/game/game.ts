@@ -3,13 +3,14 @@ import { Global } from '../global/global';
 import copy from 'fast-copy';
 import { computed, ComputedRef } from 'vue';
 
-import { DungeonSystem, DungeonLine, SceneAsset, SceneContext, ScenePlayOptions, SceneGradeState } from './systems/dungeonSystem';
+import { DungeonSystem, DungeonLine, SceneAsset, SceneContext, ScenePlayOptions, SceneGradeState, ShadowDungeonDefinition } from './systems/dungeonSystem';
 import { DungeonData } from './core/dungeon/dungeonData';
 import { ActionObject, AspectRenderer, LogicSystem, PoolSettings, PoolDrawResult, CollectionSettings } from './systems/logicSystem';
 import { NarrativeSystem } from './systems/narrativeSystem';
 import { CharacterSystem, StatComputerFunction, type StatGroupResolverFunction } from './systems/characterSystem';
 import { ItemSystem } from './systems/itemSystem';
 import { CoreSystem, type EmitterMap, type CustomComponent, type SaveOptions, type SaveMigrationOptions } from './systems/coreSystem';
+import { AccoladeSystem } from './systems/accoladeSystem';
 import { gameLogger } from './utils/logger';
 import { preloadCharacterAssets, type PreloadCharacterAssetsOptions } from './utils/assetPreloader';
 import { Character } from './core/character/character';
@@ -19,6 +20,7 @@ import { Status } from './core/character/status';
 import { Choice } from './core/content/choice';
 import { PoolEntryObject } from '../schemas/poolEntrySchema';
 import { ManifestObject } from '../schemas/manifestSchema';
+import { closePopupsByKey } from './views/popups/popupStore';
 export class Game {
 
   // ============================================
@@ -64,6 +66,12 @@ export class Game {
   public narrativeSystem = new NarrativeSystem();
 
   /**
+   * Accolade system - achievements: per-entry progress, unlock notification, tab.
+   */
+  @Populate(AccoladeSystem, { mode: 'update' })
+  public accoladeSystem = new AccoladeSystem();
+
+  /**
    * Service registry - cross-script utility sharing for plugins and game scripts.
    */
   @Skip()
@@ -102,6 +110,15 @@ export class Game {
    */
   public openMenu(menuState?: string): void {
     Global.getInstance().openMenu(menuState);
+  }
+
+  /**
+   * Close the engine menu. Needed before opening a popup from a `menu-before` / `menu-after`
+   * slot: the menu paints above the popup layer, so a popup opened from inside it is invisible
+   * until the menu goes away.
+   */
+  public closeMenu(): void {
+    Global.getInstance().closeMenu();
   }
 
   /** Returns the current game's manifest (id, name, author, version, etc.). Read-only. */
@@ -155,16 +172,36 @@ export class Game {
   }
 
   /**
-   * Rebuild every character and item from current definitions when the loaded save's versions differ from the current
-   * (in dev mode it runs on every load, version bump or not).
+   * Declare how old saves should be restored. Call this once at script-load time (module top level, not
+   * inside a listener) — the engine merges every declaration and runs one pass on save load, right before
+   * `game_initiated`, whenever the save's `(game + mods)` versions differ from the current ones. In dev mode
+   * it runs on every load, version bump or not.
    *
-   * Each section — stats, traits, attributes, abilities, skinLayers, spine, itemSlots, skillTrees, learnedSkills,
-   * statuses, itemTraits, itemAttributes, itemProperties, itemStatuses — takes `true` (whole section), `false`
-   * (skip it) or a list of ids. `mode: 'opt-out'` (default) syncs everything and the lists name what to skip;
-   * `mode: 'opt-in'` syncs nothing and the lists name what to sync. Omitting a section follows the mode.
+   * Each section — stats, traits, attributes, abilities, skinLayers, spine, staticArt, itemSlots, skillTrees,
+   * learnedSkills, statuses, itemTraits, items — takes `true` (whole
+   * section), `false` (skip it), `{ only: [ids] }` or `{ skip: [ids] }`. Sections nobody mentions follow
+   * `mode`: `opt-out` (default) syncs them, `opt-in` skips them.
+   *
+   * The pass fires `item_migrate(item, template)` for every inventory item it visits and `save_migrated`
+   * once at the end, before equip statuses are re-bound and resource pools put back — plugins and games
+   * restore what they derive per instance there (level scaling, runtime-added choices).
+   *
+   * The game, each mod and each plugin register their own declaration and the merge is restrictive, so a mod
+   * can only make the pass do less: a `false` or a `skip` from any source always wins, `only` lists union,
+   * and `mode` is honored on the `_core` declaration alone. Re-registering a source replaces its declaration.
    *
    * Resource pools are never touched: snapshot at the start, restored verbatim at the end, so a stats sync or
    * status reapply can't clamp or refill them. Item slots are backfilled and repositioned — never removed.
+   * @param source `_core` for the game itself, otherwise the mod or plugin id.
+   */
+  public registerSaveMigration(source: string, options: SaveMigrationOptions): void {
+    this.coreSystem.registerSaveMigration(source, options);
+  }
+
+  /**
+   * Run a one-off migration pass from an explicit options object, ignoring what was registered.
+   * Same sections and guards as `registerSaveMigration()` — reach for it only when a pass has to run
+   * at a moment the engine's own (just before `game_initiated`) doesn't cover.
    */
   public runDefaultSaveMigration(options: SaveMigrationOptions = {}): void {
     this.coreSystem.runDefaultSaveMigration(options);
@@ -270,6 +307,15 @@ export class Game {
     return this.coreSystem.getState<T>(key);
   }
 
+  /**
+   * Whether a state key has been registered. Use before getState() for a state a mod owns —
+   * getState() throws on an unregistered key.
+   * @example if (game.hasState('mod_flag') && game.getState('mod_flag')) { ... }
+   */
+  public hasState(key: string): boolean {
+    return this.coreSystem.hasState(key);
+  }
+
   public setState<T>(key: string, value: T): void {
     this.coreSystem.setState(key, value);
   }
@@ -280,6 +326,9 @@ export class Game {
 
   /** Open one or more popups (by registered `popup`-slot component id). Pushed on top; ids already open are ignored. */
   public openPopup(...ids: string[]): void {
+    // Floating popover cards render above the modal layer (z 10000+ vs 500+), so drop them
+    // before a modal takes over — otherwise they float on top of it and its mask.
+    closePopupsByKey();
     const open = [...this.getOpenPopups()];
     for (const id of ids) if (id && !open.includes(id)) open.push(id);
     this.setState('popup_state', open);
@@ -419,6 +468,14 @@ export class Game {
   }
 
   /**
+   * The characters in the current scene: the staged actors (mid-exit ones included — they are
+   * still on screen), followed by any `panel_actor` listed without art. Empty outside a scene.
+   */
+  public getActors(): Character[] {
+    return this.dungeonSystem.getActors();
+  }
+
+  /**
    * Instantly remove every staged actor — no exit animations, pending removals canceled.
    * @param keepExiting - Leave mid-exit actors alone: they finish their exit animations,
    * and a following scene re-staging the same character revives them in place.
@@ -500,6 +557,18 @@ export class Game {
     return this.dungeonSystem.getDungeonName(dungeonId);
   }
 
+  public getDungeonConfig(dungeonId: string) {
+    return this.dungeonSystem.getDungeonConfig(dungeonId);
+  }
+
+  public addShadowDungeon(id: string, definition?: ShadowDungeonDefinition): void {
+    this.dungeonSystem.addShadowDungeon(id, definition);
+  }
+
+  public removeShadowDungeon(id: string): boolean {
+    return this.dungeonSystem.removeShadowDungeon(id);
+  }
+
   public getQuestTitle(dungeonId: string, questId: string): string {
     return this.dungeonSystem.getQuestTitle(dungeonId, questId);
   }
@@ -570,6 +639,14 @@ export class Game {
     this.characterSystem.removeFromParty(character);
   }
 
+  /**
+   * Reorder the party without join/leave side effects. `orderedIds` must contain exactly the
+   * current party members in their new order; anything else is rejected with an error log.
+   */
+  public reorderParty(orderedIds: string[]): void {
+    this.characterSystem.reorderParty(orderedIds);
+  }
+
   public deleteCharacter(character: Character | string): void {
     this.characterSystem.deleteCharacter(character);
   }
@@ -604,6 +681,100 @@ export class Game {
 
   public getLearnedRecipes(): Set<string> {
     return this.itemSystem.getLearnedRecipes();
+  }
+
+  public discoverItem(itemId: string): void {
+    this.itemSystem.discoverItem(itemId);
+  }
+
+  public isItemDiscovered(itemId: string): boolean {
+    return this.itemSystem.isItemDiscovered(itemId);
+  }
+
+  public getDiscoveredItems(): Set<string> {
+    return this.itemSystem.getDiscoveredItems();
+  }
+
+  // ============================================
+  // PUBLIC API: Accolades (achievements)
+  // ============================================
+
+  /**
+   * Add to an accolade's progress (default +1). Completion is progress >= target; crossing the
+   * target queues the unlock notification. Writes are ignored during gallery replay and while
+   * the `accolades_frozen` state is set.
+   * @example game.progressAccolade('anal_slut');
+   */
+  public progressAccolade(id: string, delta: number = 1): void {
+    this.accoladeSystem.progressAccolade(id, delta);
+  }
+
+  /**
+   * Set an accolade's progress to an absolute value — only ever raises, never lowers.
+   * Use for set-size style tracking ("outfits worn so far") and best-of values.
+   * @example game.setAccoladeProgress('well_dressed', wornOutfits.length);
+   */
+  public setAccoladeProgress(id: string, value: number): void {
+    this.accoladeSystem.setAccoladeProgress(id, value);
+  }
+
+  /**
+   * Supply the target for an accolade authored with target 0/empty — computed from data at
+   * script load (e.g. "wear every outfit" counts outfit templates). Until a target exists the
+   * accolade cannot complete.
+   * @example game.setAccoladeTarget('well_dressed', outfitCount);
+   */
+  public setAccoladeTarget(id: string, target: number): void {
+    this.accoladeSystem.setAccoladeTarget(id, target);
+  }
+
+  /** Current progress of an accolade (0 if untouched). */
+  public getAccoladeProgress(id: string): number {
+    return this.accoladeSystem.getAccoladeProgress(id);
+  }
+
+  /** Effective target of an accolade — the runtime-set value if any, else the data row's; 0 = no target yet. */
+  public getAccoladeTarget(id: string): number {
+    return this.accoladeSystem.getAccoladeTarget(id);
+  }
+
+  /** Whether an accolade is completed (progress >= target; disabled rows never complete). */
+  public isAccoladeCompleted(id: string): boolean {
+    return this.accoladeSystem.isAccoladeCompleted(id);
+  }
+
+  /** Reward points an achievement is worth: its own `points`, else its tier's default. */
+  public getAccoladePoints(id: string): number {
+    return this.accoladeSystem.getAccoladePoints(id);
+  }
+
+  /** Reward points earned so far — the sum over completed achievements. */
+  public getEarnedPoints(): number {
+    return this.accoladeSystem.getEarnedPoints();
+  }
+
+  /** Reward points on offer across the whole catalog. */
+  public getTotalPoints(): number {
+    return this.accoladeSystem.getTotalPoints();
+  }
+
+  /** Ids of every accolade carrying the tag (empty array for unknown tags). */
+  public getAccoladesByTag(tag: string): string[] {
+    return this.accoladeSystem.getAccoladesByTag(tag);
+  }
+
+  /**
+   * progressAccolade for every accolade carrying the tag — one call advances a whole tier
+   * family ("seed_ass" on Backdoor Open / Anal Slut / Bottomless).
+   * @example game.progressAccoladesByTag('seed_' + reservoir);
+   */
+  public progressAccoladesByTag(tag: string, delta: number = 1): void {
+    this.accoladeSystem.progressAccoladesByTag(tag, delta);
+  }
+
+  /** setAccoladeProgress for every accolade carrying the tag. */
+  public setAccoladeProgressByTag(tag: string, value: number): void {
+    this.accoladeSystem.setAccoladeProgressByTag(tag, value);
   }
 
   public createInventory(id: string, template?: any | string): Inventory {

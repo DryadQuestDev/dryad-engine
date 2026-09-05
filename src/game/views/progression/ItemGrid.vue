@@ -2,16 +2,16 @@
 import { Item } from '../../core/character/item';
 import ItemSlot from './ItemSlot.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
-import { useMobile } from '../../../global/composables/useMobile';
 
 const COMPONENT_ID = 'item-grid';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   items: (Item | null)[];  // Array of items to display (null = empty slot)
   disabled?: boolean;      // Disable item choices (still shows item card on hover)
-}>();
-
-const { isMobile } = useMobile();
+  maxHeight?: string;      // CSS max-height for the scrolling grid; 'none' lets it fill its container
+}>(), {
+  maxHeight: '400px',
+});
 
 function handleDragStart(event: DragEvent, item: Item) {
   if (event.dataTransfer) {
@@ -22,9 +22,9 @@ function handleDragStart(event: DragEvent, item: Item) {
 </script>
 
 <template>
-  <div :id="COMPONENT_ID" class="item-grid">
+  <div :id="COMPONENT_ID" class="item-grid" :style="{ maxHeight: props.maxHeight }">
     <template v-for="(item, index) in items" :key="item?.uid || `empty-${index}`">
-      <ItemSlot v-if="item" :item="item" :disabled="props.disabled === true" :pinnable="isMobile"
+      <ItemSlot v-if="item" :item="item" :disabled="props.disabled === true"
         @dragstart="handleDragStart" />
       <div v-else class="empty-slot"></div>
     </template>
@@ -43,7 +43,10 @@ function handleDragStart(event: DragEvent, item: Item) {
   width: 100%;
   height: 100%;
   overflow: auto;
-  max-height: 400px;
+  /* Promote the scroller to its own composited layer. Without it the slots' decoration
+     (noise + blended gradients + inset shadows) re-rasterizes on every scroll frame —
+     ~77ms per frame with 100 items, which is the whole of the scroll jank. */
+  will-change: scroll-position;
 }
 
 /* Empty slot styling */

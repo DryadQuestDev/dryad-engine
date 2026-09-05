@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
@@ -7,13 +7,70 @@ import RichContentEditor from './PlainEditor.vue';
 import { inputMatchesSearch } from './searchState';
 import type { Block, Row, TemplateBlock } from '../../../../utility/dungeonEditor/ast';
 import { newTemplate } from '../../../../utility/dungeonEditor/ast';
+import { isCommentLine } from '../../../../utility/dungeonEditor/comments';
+import type { LintIssue } from '../../../../utility/dungeonEditor/lint';
 import type { QuestGroup } from '../../../../utility/dungeonEditor/quest';
 import { tagBlockDeep as tagBlock } from './uid';
+import { flashElement, type RevealRequest } from './reveal';
 
 const props = defineProps<{
   group: QuestGroup;
   blocks: Block[];
+  /** Lint issues for every block in the group. */
+  issues?: LintIssue[];
+  /** Focus request aimed at a block in this group; `null` otherwise. */
+  reveal?: RevealRequest | null;
 }>();
+
+// Prose ranges per block, in the body textarea's model coordinates.
+const proseRangesByBlock = computed(() => {
+  const m = new Map<number, Array<[number, number]>>();
+  for (const issue of props.issues ?? []) {
+    const at = issue.at;
+    if (at?.target !== 'prose' || at.start === undefined) continue;
+    const list = m.get(issue.blockIndex) ?? [];
+    list.push([at.start, at.end ?? at.start + 1]);
+    m.set(issue.blockIndex, list);
+  }
+  return m;
+});
+
+function proseRanges(idx: number): Array<[number, number]> | undefined {
+  return proseRangesByBlock.value.get(idx);
+}
+
+// Stages whose `{params}` fail lint — the card has no raw params input, so
+// the progress Select carries the error mark.
+const paramsErrorBlocks = computed(() => {
+  const s = new Set<number>();
+  for (const issue of props.issues ?? []) {
+    if (issue.at?.target === 'header-params') s.add(issue.blockIndex);
+  }
+  return s;
+});
+
+function revealFor(idx: number): RevealRequest | null {
+  const r = props.reveal;
+  return r && r.blockIndex === idx && r.at.target === 'prose' ? r : null;
+}
+
+const rootRef = ref<HTMLElement | null>(null);
+
+// Prose reveals go to the body editor; anything else (header params, a code
+// row the card doesn't render) flashes the goal/stage and, for params,
+// focuses the progress Select so the dev lands on the failing field.
+watch(() => props.reveal, (r) => {
+  if (!r || r.at.target === 'prose') return;
+  nextTick(() => {
+    const el = rootRef.value?.querySelector<HTMLElement>(`[data-block-index="${r.blockIndex}"]`);
+    if (!el) return;
+    if (r.at.target === 'header-params') {
+      el.querySelector<HTMLElement>('.progress-select [role="combobox"]')?.focus({ preventScroll: true });
+    }
+    el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    flashElement(el);
+  });
+});
 
 const emit = defineEmits<{
   'update:block': [idx: number, block: Block];
@@ -40,24 +97,34 @@ function asTemplate(idx: number): TemplateBlock | null {
   return b as TemplateBlock;
 }
 
+// Same merge as BlockCard's prose group (text + empty + comment rows), so
+// lint offsets into the merged prose land on the same characters here.
+function isProseRow(r: Row): boolean {
+  return r.kind === 'text' || r.kind === 'empty' || r.kind === 'comment';
+}
+
 function bodyText(idx: number): string {
   const b = asTemplate(idx);
   if (!b) return '';
   return b.rows
-    .filter((r) => r.kind === 'text' || r.kind === 'empty')
-    .map((r) => (r.kind === 'text' ? r.text : ''))
+    .filter(isProseRow)
+    .map((r) => (r.kind === 'empty' ? '' : (r as { text: string }).text))
     .join('\n');
 }
 
 function setBody(idx: number, value: string) {
   const b = asTemplate(idx);
   if (!b) return;
-  const rows: Row[] = value === ''
-    ? []
-    : value.split('\n').map((line): Row => {
+  // Keep any non-prose rows (code, choices) where they are; the prose is
+  // rewritten as one run at the end, exactly like BlockCard.
+  const rows: Row[] = b.rows.filter((r) => !isProseRow(r));
+  if (value !== '') {
+    rows.push(...value.split('\n').map((line): Row => {
       if (line === '') return { kind: 'empty' };
+      if (isCommentLine(line)) return { kind: 'comment', text: line };
       return { kind: 'text', text: line };
-    });
+    }));
+  }
   emit('update:block', idx, { ...b, rows });
 }
 
@@ -286,7 +353,7 @@ function removeQuest() {
 </script>
 
 <template>
-  <div class="quest-card">
+  <div ref="rootRef" class="quest-card">
     <div class="quest-header">
       <span class="quest-sigil" v-tooltip.top="'Quest'">$</span>
       <span class="quest-label">Quest</span>
@@ -326,7 +393,8 @@ function removeQuest() {
         </div>
         <RichContentEditor v-if="goal.blockIdx >= 0" :model-value="bodyText(goal.blockIdx)"
           @update:model-value="(v: string) => setBody(goal.blockIdx, v)"
-          :placeholder="goal.locked ? 'quest title…' : 'goal description…'" class="content-area" />
+          :placeholder="goal.locked ? 'quest title…' : 'goal description…'" class="content-area"
+          :issue-ranges="proseRanges(goal.blockIdx)" :reveal="revealFor(goal.blockIdx)" />
         <div v-for="stageIdx in goal.stageIdxs" :key="(blocks[stageIdx] as any).__uid ?? stageIdx"
           class="quest-goal-stage" v-bind="{ 'data-block-index': stageIdx }">
           <div class="stage-header">
@@ -336,7 +404,9 @@ function removeQuest() {
               class="stage-id-input" :class="{ 'input-search-hit': inputMatchesSearch(lastSegment(stageIdx)) }" />
             <Select :model-value="progressFromParams((blocks[stageIdx] as any)?.paramsRaw)"
               @update:model-value="(v: number | null) => setStageProgress(stageIdx, v)" :options="PROGRESS_OPTIONS"
-              option-label="label" option-value="value" placeholder="-" class="progress-select" />
+              option-label="label" option-value="value" placeholder="-" class="progress-select"
+              :class="{ 'progress-select--error': paramsErrorBlocks.has(stageIdx) }"
+              v-tooltip.top="paramsErrorBlocks.has(stageIdx) ? 'Stage params fail lint — see the Raw view' : ''" />
             <span class="stage-full-id" :title="fullId(stageIdx)">{{ fullId(stageIdx) }}</span>
             <Button icon="pi pi-copy" severity="secondary" text rounded size="small" @click="copyFullId(stageIdx)"
               v-tooltip.top="'Copy full id'" aria-label="Copy stage id" />
@@ -350,7 +420,8 @@ function removeQuest() {
               aria-label="Remove goal stage" />
           </div>
           <RichContentEditor :model-value="bodyText(stageIdx)" @update:model-value="(v: string) => setBody(stageIdx, v)"
-            placeholder="stage body…" class="content-area" />
+            placeholder="stage body…" class="content-area"
+            :issue-ranges="proseRanges(stageIdx)" :reveal="revealFor(stageIdx)" />
         </div>
         <div class="add-toolbar add-toolbar--nested">
           <button type="button" class="add-btn add-btn--stage" @click="addStage(goal)">
@@ -489,6 +560,11 @@ function removeQuest() {
   min-width: 200px;
 }
 
+.progress-select--error {
+  outline: 2px solid #d32f2f;
+  outline-offset: -1px;
+}
+
 .stage-full-id {
   font-family: var(--font-family-mono, monospace);
   font-size: 0.78rem;
@@ -573,5 +649,17 @@ function removeQuest() {
 .add-btn--goal:hover {
   background: rgba(193, 121, 0, 0.14);
   border-color: #c17900;
+}
+
+/* Target of a lint jump (the popup flashes the `[data-block-index]` element). */
+.quest-goal.flash,
+.quest-goal-stage.flash {
+  animation: quest-flash 1.2s ease-out;
+}
+
+@keyframes quest-flash {
+  0% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0.6); }
+  30% { box-shadow: 0 0 0 4px rgba(255, 235, 59, 0.45); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0); }
 }
 </style>

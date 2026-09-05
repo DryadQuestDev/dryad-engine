@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import vTooltip from 'primevue/tooltip';
+import { Character } from '../../core/character/character';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import ItemGrid from './ItemGrid.vue';
@@ -9,9 +10,20 @@ import CustomComponentContainer from '../CustomComponentContainer.vue';
 const game = Game.getInstance();
 const COMPONENT_ID = 'inventory';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   inventory_id: string;
-}>();
+  /** Reference character for the "equippable" filter. Defaults to the selected character. */
+  character?: Character | null;
+  /** CSS max-height for the item grid; 'none' lets it fill the available height instead. */
+  maxHeight?: string;
+}>(), {
+  maxHeight: '400px',
+});
+
+/** Sentinel category id for the built-in quest filter — matches no game-defined category. */
+const QUEST_FILTER = '__quest';
+/** Rarity tier the built-in quest filter collects. */
+const QUEST_RARITY = 'quest';
 
 const selectedCategory = ref('all');
 const searchQuery = ref('');
@@ -28,6 +40,7 @@ const categories = computed(() =>
 const allLabel = computed(() => Global.getInstance().getString('inventory.filter.all'));
 const noItemsLabel = computed(() => Global.getInstance().getString('inventory.no_items'));
 const equippableLabel = computed(() => Global.getInstance().getString('inventory.filter.equippable'));
+const questLabel = computed(() => Global.getInstance().getString('inventory.filter.quest'));
 const searchPlaceholder = computed(() => Global.getInstance().getString('inventory.search'));
 
 const isFiltering = computed(() => selectedCategory.value !== 'all' || searchQuery.value.trim() !== '' || equippableOnly.value);
@@ -36,7 +49,9 @@ const filteredItems = computed(() => {
   const inv = inventory.value;
   if (!inv) return [];
   let items = inv.getUnequippedItems();
-  if (selectedCategory.value !== 'all') {
+  if (selectedCategory.value === QUEST_FILTER) {
+    items = items.filter(item => item.getRarity() === QUEST_RARITY);
+  } else if (selectedCategory.value !== 'all') {
     items = items.filter(item => item.category === selectedCategory.value);
   }
   const query = searchQuery.value.trim().toLowerCase();
@@ -44,7 +59,7 @@ const filteredItems = computed(() => {
     items = items.filter(item => (item.traits?.name || '').toLowerCase().includes(query));
   }
   if (equippableOnly.value) {
-    const char = game.characterSystem.selectedCharacter.value;
+    const char = props.character || game.characterSystem.selectedCharacter.value;
     items = char ? items.filter(item => char.getAvailableSlotsForItem(item).length > 0) : [];
   }
   return items;
@@ -74,6 +89,10 @@ const gridSlots = computed(() => {
           <img v-if="cat.icon" :src="cat.icon" :alt="cat.name" class="inventory-filter-icon" />
           <span v-else class="inventory-filter-chip">{{ cat.name }}</span>
         </div>
+        <div class="inventory-filter-tab" :class="{ active: selectedCategory === QUEST_FILTER }"
+          v-tooltip.top="questLabel" @click="selectedCategory = QUEST_FILTER">
+          <span class="inventory-filter-icon inventory-filter-icon-quest"></span>
+        </div>
         <div class="inventory-filter-tab inventory-filter-toggle" :class="{ active: equippableOnly }"
           v-tooltip.top="equippableLabel" @click="equippableOnly = !equippableOnly">
           E
@@ -87,7 +106,7 @@ const gridSlots = computed(() => {
 
     <div class="inventory-content">
       <div v-if="filteredItems.length === 0" class="inventory-empty">{{ noItemsLabel }}</div>
-      <ItemGrid v-else :items="gridSlots" />
+      <ItemGrid v-else :items="gridSlots" :max-height="props.maxHeight" />
     </div>
 
     <CustomComponentContainer :slot="COMPONENT_ID" :context="{ inventory }" />

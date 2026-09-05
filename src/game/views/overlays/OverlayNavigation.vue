@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { Global } from '../../../global/global';
 import { Game } from '../../game';
+import { PARTY_INVENTORY_ID } from '../../systems/itemSystem';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import ChoiceList from '../ChoiceList.vue';
 import Toolbar from '../Toolbar.vue';
@@ -41,6 +42,15 @@ function handleKeyPress(event: KeyboardEvent) {
     // Don't interfere with typing in input fields
     const target = event.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      return;
+    }
+
+    // A modal popup owns the keyboard. The scene underneath is unreachable by mouse —
+    // PopupContainer's full-screen overlay eats the click — so keyboard advance must not
+    // reach it either, or a popup that parks the scene (the reward popup, choose_item)
+    // re-runs its delayed action on every press. Returning before preventDefault leaves
+    // Space/Enter free to activate a focused control inside the popup.
+    if (game.getOpenPopups().length) {
       return;
     }
 
@@ -147,16 +157,19 @@ const encounterContent = computed(() => {
   const currentRoom = game.dungeonSystem.currentRoom.value;
   if (!currentRoom) return '';
 
+  // Both branches resolve for text only: the inline actions already fired from enterRoom /
+  // selectEncounter, and executing them here would re-fire them on every re-evaluation.
+
   // If there's a selected encounter that's visible, show it
   const selectedEncounter = game.dungeonSystem.selectedEncounter.value;
   if (selectedEncounter && selectedEncounter.getVisibilityState()) {
-    return game.logicSystem.resolveString(selectedEncounter.rawContent).output;
+    return game.logicSystem.resolveString(selectedEncounter.rawContent, true).output;
   }
 
   // Otherwise show room description
   const descriptionEncounter = currentRoom.descriptionEncounter;
   if (descriptionEncounter && descriptionEncounter.getVisibilityState()) {
-    return game.logicSystem.resolveString(descriptionEncounter.rawContent).output;
+    return game.logicSystem.resolveString(descriptionEncounter.rawContent, true).output;
   }
 
   return '';
@@ -256,27 +269,28 @@ const typingAnimation = useTypingAnimation({
     // Show flash content after animation completes
     if (game.dungeonSystem.cachedFlashArray.value.length > 0) {
       showFlashContent.value = true;
-      await nextTick();
-
-      // Animate flash content in
-      const flashEl = flashFooterRef.value;
-      if (flashEl) {
-        gsap.fromTo(flashEl,
-          {
-            opacity: 0,
-            y: -10
-          },
-          {
-            opacity: 1,
-            y: 0,
-            duration: 0.4,
-            ease: 'power2.out'
-          }
-        );
-      }
+      await animateFlashIn();
     }
   }
 });
+
+async function animateFlashIn() {
+  await nextTick();
+  const flashEl = flashFooterRef.value;
+  if (!flashEl) return;
+  gsap.fromTo(flashEl,
+    {
+      opacity: 0,
+      y: -10
+    },
+    {
+      opacity: 1,
+      y: 0,
+      duration: 0.4,
+      ease: 'power2.out'
+    }
+  );
+}
 
 // Watch for content changes and start animation for scenes
 watch(processedEventContent, (newContent) => {
@@ -301,11 +315,9 @@ watch(processedEventContent, (newContent) => {
       typingAnimation.startAnimation(newContent);
     }
   } else {
-    // For non-scenes, show content instantly
+    // For non-scenes, show content instantly (their flash is gated by showFlash, not by this latch)
     typingAnimation.reset();
     typingAnimation.displayedText.value = newContent;
-    // For non-scenes, show flash content immediately
-    showFlashContent.value = game.dungeonSystem.cachedFlashArray.value.length > 0;
   }
 }, { immediate: true });
 
@@ -325,6 +337,22 @@ const displayContent = computed(() => {
 const fullDialogueHtml = computed(() => processedEventContent.value + ' ➢');
 
 const flashHtml = computed(() => game.dungeonSystem.cachedFlashArray.value.join('<br>'));
+
+// A scene holds its flash back until the typing animation lands on the last character, so it
+// waits on the showFlashContent latch. An encounter — a room description, or a selected
+// encounter on the map — has no animation to wait for, so its flash shows as soon as it exists.
+const showFlash = computed(() => {
+  if (game.dungeonSystem.cachedFlashArray.value.length === 0) return false;
+  return game.dungeonSystem.choiceType.value === 'scene' ? showFlashContent.value : true;
+});
+
+// The encounter counterpart of the typing animation's onComplete fade-in. Keyed on the encounter
+// as well as the text: adjacent rooms can raise a byte-identical line (11c and 11d of the prologue
+// both only apply darkness), and watching the text alone would see no change and skip the fade.
+watch(() => `${game.dungeonSystem.activeEncounter.value?.id ?? ''} ${flashHtml.value}`, () => {
+  if (!flashHtml.value || game.dungeonSystem.choiceType.value === 'scene') return;
+  animateFlashIn();
+});
 /*
 const isRoomDescription = computed(() => {
   return !game.dungeonSystem.selectedEncounter.value;
@@ -346,6 +374,12 @@ function navigateToNeighbor(neighborRoom: any) {
 const isTextDungeon = computed(() => {
   return game.dungeonSystem.currentDungeon.value?.dungeon_type === 'text';
 });
+
+// Over-encumbered indicator: shown atop the room description while the party bag is overweight.
+// Both banner sites live inside the no-scene (description) branch, so this only needs the weight
+// check — a no-op unless a game caps the party inventory.
+const isOverEncumbered = computed(() => !!game.itemSystem.getInventory(PARTY_INVENTORY_ID)?.isOverCapacity());
+const overEncumberedLabel = computed(() => global.getString('over_encumbered_label'));
 
 </script>
 
@@ -423,6 +457,7 @@ const isTextDungeon = computed(() => {
                 :name-style="characterNameStyle" />
               <!-- encounters-->
               <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
+                <div v-if="isOverEncumbered" class="over-encumbered-banner">{{ overEncumberedLabel }}</div>
                 <TextEncounter />
               </div>
 
@@ -432,7 +467,7 @@ const isTextDungeon = computed(() => {
                 :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
 
               <!-- flash footer (scene + encounter): sits below the content, never adds to the scroll -->
-              <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0" ref="flashFooterRef"
+              <div v-if="showFlash" ref="flashFooterRef"
                 class="flash-content flash-footer" v-script="{ html: flashHtml }"></div>
             </div>
 
@@ -459,6 +494,7 @@ const isTextDungeon = computed(() => {
               :show-inline-name="false" :content-style="dialogueContentStyle" :name-style="characterNameStyle" />
             <!-- encounters-->
             <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
+              <div v-if="isOverEncumbered" class="over-encumbered-banner">{{ overEncumberedLabel }}</div>
               <!-- Keyed off activeEncounter (the selected one, else the room description) — the same
                    encounter whose text and `!` choices are on screen. Sits above the layout row, not
                    inside it, since that row is a flex line (arrows beside text). -->
@@ -487,7 +523,7 @@ const isTextDungeon = computed(() => {
           </div>
 
           <!-- flash footer (scene + encounter): pinned outside .content-scroll so it never triggers the box scrollbar -->
-          <div v-if="showFlashContent && game.dungeonSystem.cachedFlashArray.value.length > 0" ref="flashFooterRef"
+          <div v-if="showFlash" ref="flashFooterRef"
             class="flash-content flash-footer" v-script="{ html: flashHtml }">
           </div>
         </div>
@@ -510,6 +546,19 @@ const isTextDungeon = computed(() => {
 </template>
 
 <style scoped>
+/* Over-encumbered indicator: red banner atop the room description while the party bag is overweight. */
+.over-encumbered-banner {
+  margin-bottom: 8px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.85em;
+  text-align: center;
+  color: #ffd7d2;
+  background: rgba(200, 40, 40, 0.28);
+  border: 1px solid rgba(230, 70, 70, 0.6);
+}
+
 .overlay-fade-enter-active {
   transition: opacity 0.3s ease;
 }

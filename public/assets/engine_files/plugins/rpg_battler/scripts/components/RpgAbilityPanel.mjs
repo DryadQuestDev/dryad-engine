@@ -154,6 +154,10 @@ export const RpgAbilityPanel = defineComponent({
         component: AbilityCard,
         props: { abilityId, characterId: props.battle?.activeCharId },
         placement: 'right-start',
+        // Forced interactive: the click fires the ability (dismissOnClick), so this card can never
+        // be pinned instead — peek mode would leave a long ability card unscrollable. The panel is
+        // a vertical list and the card sits beside it, so it never covers its own rows.
+        interactive: true,
         dismissOnClick: true,
       };
     }

@@ -3,7 +3,7 @@
   "name": "Experience",
   "description": "XP and leveling system. Characters with a 'level' trait gain XP and level up automatically.",
   "author": "Nekon",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "order": 1,
   "scripts": [
     "main.mjs"
@@ -27,14 +27,14 @@
           "defaultValue": false,
           "tooltip": "Party-wide progression: a numeric xp action grants the whole party (off = the MC only), and a character joining the party is levelled up to the MC's level and XP, receiving every level-up bonus on the way (requires a level trait)."
         },
-        "scale_per_level": {
+        "power_scale_per_level": {
           "type": "number",
           "defaultValue": 0.25,
-          "tooltip": "Reward scaling per dungeon level: effective threat = base threat × (1 + scale_per_level × (dungeon_level − 1)). Also scales equipment stats and ability enhancements."
+          "tooltip": "Item + reward scaling per dungeon level (the power curve): effective threat = base threat \u00d7 (1 + power_scale_per_level \u00d7 (dungeon_level \u2212 1)). Also scales equipment stats and ability enhancements. (Enemy scaling is separate \u2014 see the enemy dungeon-scale curve.)"
         },
         "price_scale_per_level": {
           "type": "number",
-          "tooltip": "Price growth per level for scaled equipment, independent of the power curve. Empty = twice scale_per_level (gear value climbs faster than its power, so old gear sells for less relative to replacements). Set equal to scale_per_level to weld value to power."
+          "tooltip": "Price growth per level for scaled equipment, independent of the power curve. Empty = twice power_scale_per_level (gear value climbs faster than its power, so old gear sells for less relative to replacements). Set equal to power_scale_per_level to weld value to power."
         },
         "loot_equipment_coef": {
           "type": "number",
@@ -44,12 +44,37 @@
         "loot_income_coef": {
           "type": "number",
           "defaultValue": 0,
-          "tooltip": "Income loot budget = EFFECTIVE battle threat (level-scaled) x this, spent on junk-category items; the remainder pays out as the currency item. 0 disables the group."
+          "tooltip": "Income loot budget = EFFECTIVE battle threat (level-scaled) x this, plus the equipment group's unspent remainder; spent on income-category items, and whatever stays unspent pays out as the currency item. 0 disables the group (a pure equipment remainder still pays out)."
+        },
+        "loot_gold_share": {
+          "type": "number",
+          "defaultValue": 0,
+          "tooltip": "Fraction (0-1) of the income pot paid straight out as the currency item before item rolls — battles visibly pay gold instead of converting the whole budget into items."
         },
         "loot_max_items": {
           "type": "number",
           "defaultValue": 3,
           "tooltip": "Maximum items each loot group can roll per reward."
+        },
+        "gather_lower_tier_weight": {
+          "type": "number",
+          "defaultValue": 40,
+          "tooltip": "Gather spots (collect_pool: \"gather\"): weight in % kept by each ingredient tier below the dungeon level's own tier. Tiers open at level 1/4/7/10; e.g. at 40, a level-7 dungeon rolls tier 3 at weight 100, tier 2 at 40, tier 1 at 16."
+        },
+        "smith_break_divisor": {
+          "type": "number",
+          "defaultValue": 3,
+          "tooltip": "Smith station break-down yield = floor(item level / this) \u00d7 the item's rarity cost. Items below this level refund no stones and stay ordinary sellables."
+        },
+        "smith_sound_upgrade": {
+          "type": "chooseOne",
+          "fromFile": "sounds",
+          "tooltip": "Sound played when an item is reforged at the smith station. Empty = silent."
+        },
+        "smith_sound_break": {
+          "type": "chooseOne",
+          "fromFile": "sounds",
+          "tooltip": "Sound played when an item is broken down at the smith station. Empty = silent."
         },
         "loot_equipment_categories": {
           "type": "chooseMany",
@@ -145,6 +170,48 @@
               "tooltip": "Quantity per level up."
             }
           }
+        },
+        "enemy_scaling": {
+          "type": "schema[]",
+          "tooltip": "Enemy dungeon-scale curve: pins of {level, coef} that multiply every enemy's base health and power at battle start. A dungeon level uses the CLOSEST PIN AT OR BELOW it, so pins are sparse steps, not a per-level table \u2014 e.g. [{1,1},{3,2}] leaves levels 1-2 unscaled and doubles from level 3 on. No pin at or below the level means no scaling. Composes MULTIPLICATIVELY with the battle difficulty setting: final = base \u00d7 coef \u00d7 (1 + difficulty%). Separate from power_scale_per_level, which scales the player's gear and rewards, so the two curves can be tuned against each other.",
+          "objects": {
+            "level": {
+              "type": "number",
+              "required": true,
+              "tooltip": "Dungeon level this pin starts at. Applies until the next pin."
+            },
+            "coef": {
+              "type": "number",
+              "defaultValue": 1,
+              "tooltip": "Multiplier on the enemy's base health and power. 1 = unchanged, 2 = double."
+            }
+          }
+        },
+        "no_scale_stats": {
+          "type": "chooseMany",
+          "fromFile": "character_stats",
+          "tooltip": "Stats the item level curve never multiplies. Use for percentage-natured stats that are already proportional (reflect, dodge, crit chance) \u2014 scaling those compounds instead of keeping pace. Flat stats (power, thorns, armor, health) should stay scaled."
+        },
+        "gather_categories": {
+          "type": "chooseMany",
+          "fromFile": "item_categories",
+          "tooltip": "Item categories a gather spot may yield. Empty = reagents + ingredient. Items still need a herb/fungus tag and a matching environment."
+        }
+      }
+    },
+    {
+      "id": "environments",
+      "name": "Environments",
+      "isArray": true,
+      "schema": {
+        "id": {
+          "type": "string",
+          "required": true,
+          "tooltip": "Environment id referenced by dungeons and ingredients (e.g. 'cave', 'forest', 'mansion')."
+        },
+        "description": {
+          "type": "textarea",
+          "tooltip": "What counts as this environment. Authoring reference only \u2014 never shown in game."
         }
       }
     }
@@ -182,7 +249,7 @@
         "id": "level_up_status",
         "type": "chooseOne",
         "fromFile": "character_statuses",
-        "tooltip": "Status to apply on each level up. Stacks automatically – each level adds one stack. Use for stat growth per level.",
+        "tooltip": "Status to apply on each level up. Stacks automatically \u2013 each level adds one stack. Use for stat growth per level.",
         "uid": "xp_trait_level_up_status"
       }
     ],
@@ -204,6 +271,18 @@
         "val": "Continue"
       },
       {
+        "id": "reward_trash",
+        "val": "Leave behind"
+      },
+      {
+        "id": "reward_trash_undo",
+        "val": "Take it after all"
+      },
+      {
+        "id": "reward_trash_note",
+        "val": "|count| left behind."
+      },
+      {
         "id": "xp_label_level",
         "val": "Lv."
       },
@@ -214,6 +293,62 @@
       {
         "id": "xp_flash",
         "val": "<span class=\"special\">|name| has earned |amount| XP</span>"
+      },
+      {
+        "id": "equip_over_level",
+        "val": "You need to reach level |level| to equip |item|."
+      },
+      {
+        "id": "smith_title",
+        "val": "Smithy"
+      },
+      {
+        "id": "smith_tab_upgrade",
+        "val": "Upgrade"
+      },
+      {
+        "id": "smith_tab_break",
+        "val": "Break down"
+      },
+      {
+        "id": "smith_button_upgrade",
+        "val": "Forge"
+      },
+      {
+        "id": "smith_button_max",
+        "val": "Max"
+      },
+      {
+        "id": "smith_break_button",
+        "val": "Break"
+      },
+      {
+        "id": "smith_need_stones",
+        "val": "The forge is cold \u2013 bring smith stones."
+      },
+      {
+        "id": "smith_max_badge",
+        "val": "MAX"
+      },
+      {
+        "id": "smith_empty",
+        "val": "The smith works on what is in the bag \u2013 bring unequipped leveled gear."
+      },
+      {
+        "id": "smith_search",
+        "val": "Search\u2026"
+      },
+      {
+        "id": "smith_button_cancel",
+        "val": "Back"
+      },
+      {
+        "id": "smith_level_cap",
+        "val": "Max Lv |level|"
+      },
+      {
+        "id": "smith_break_warning",
+        "val": "|item| will be destroyed \u2013 there is no way to undo this. Break it down for |amount| smith stones?"
       }
     ],
     "dungeon_traits": [
@@ -222,6 +357,13 @@
         "type": "string",
         "description": "Dungeons sharing this group share one level snapshot, taken on first entry of any of them. Convention: name it after the group's main dungeon id.",
         "uid": "XPdtLevelGroup1"
+      },
+      {
+        "id": "environment",
+        "type": "chooseOne",
+        "fromFile": "plugins_data/experience/environments",
+        "description": "Environment of this dungeon for gather spots (defined in the Environments tab). Random collectables only draw ingredients whose environments trait lists it (or ingredients with none, which grow everywhere).",
+        "uid": "XPdtEnvironment1"
       }
     ],
     "item_traits": [
@@ -236,6 +378,19 @@
         "type": "number",
         "description": "Maximum level for generated drops and shop stock (dungeon level for loot, MC level for trade). Empty = no ceiling. Authored drop tables and inventories ignore it.",
         "uid": "XPitSpawnMax1"
+      },
+      {
+        "id": "environments",
+        "type": "chooseMany",
+        "fromFile": "plugins_data/experience/environments",
+        "description": "Environments this ingredient grows in (defined in the Environments tab), matched against the dungeon trait environment at gather spots. Empty = grows everywhere.",
+        "uid": "XPitEnvironments1"
+      },
+      {
+        "id": "stock_authored",
+        "type": "boolean",
+        "description": "Stamped at runtime on a hybrid trader's authored signature stock so restocks re-roll only the pooled items around it. Declared so the save migration keeps the stamp; never author it on a template.",
+        "uid": "XPitStockAuth1"
       }
     ],
     "inventory_traits": [
@@ -248,9 +403,9 @@
       },
       {
         "id": "pool",
-        "type": "chooseOne",
+        "type": "chooseMany",
         "fromFile": "pool_entries",
-        "description": "Pool entry drawn into this inventory on top of its authored items when it is instantiated (chance mode, one draw per entity).",
+        "description": "Pool entries drawn into this inventory on top of its authored items when it is instantiated (chance mode, one draw per entity). Each entry draws independently, so a container can combine a value tier with a place: [\"chest2\", \"place_nest\"] is a chest sitting in a nest.",
         "uid": "XPinvTrPool"
       },
       {
@@ -258,6 +413,18 @@
         "type": "boolean",
         "description": "Re-roll the pooled stock (authored items are kept) whenever the MC's level has changed since the last roll. For shops; leave off for chests so contents stay locked.",
         "uid": "XPinvTrRestock"
+      }
+    ],
+    "item_templates": [
+      {
+        "id": "smith_stone",
+        "uid": "XPitSmithStone",
+        "traits": {
+          "name": "Smith Stone",
+          "description": "<p>Spend these at a smith station to reforge a piece of equipment to a higher level. Finer rarities require more stones per level.</p>",
+          "max_stack": 999,
+          "rarity": "uncommon"
+        }
       }
     ]
   }

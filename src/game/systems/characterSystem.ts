@@ -1,4 +1,5 @@
 import { Game } from "../game";
+import { normalizeAbilityEffects, orderEffects } from "../../utility/abilityEffects";
 
 import { computed, reactive, ref } from "vue";
 import { Populate } from "../../utility/save-system";
@@ -123,23 +124,8 @@ export class CharacterSystem {
    * Numbers are summed, chooseMany arrays are concatenated and deduped, other fields use last-wins.
    */
   public mergeAbilityData(target: any, source: any): any {
-    // Normalize effects to Record format
-    const normalizeEffects = (effects: any): Record<string, any> => {
-      if (!effects) return {};
-      if (Array.isArray(effects)) {
-        const result: Record<string, any> = {};
-        for (const effect of effects) {
-          const normalized: any = { ...(effect.aspects || {}) };
-          if (effect.name) normalized.__name = effect.name;
-          result[effect.id] = normalized;
-        }
-        return result;
-      }
-      return effects;
-    };
-
-    const targetEffects = normalizeEffects(target.effects);
-    const sourceEffects = normalizeEffects(source.effects);
+    const targetEffects = normalizeAbilityEffects(target.effects);
+    const sourceEffects = normalizeAbilityEffects(source.effects);
 
     // Meta is last-wins, except list-valued keys, which union (deduped) — two modifiers
     // contributing to the same list key (e.g. require_status_self from two items) both survive.
@@ -197,6 +183,10 @@ export class CharacterSystem {
         result.effects[effectId] = mergedAspects;
       }
     }
+
+    // Key order drives both the ability card and combat resolution, so pin it here rather than
+    // letting it inherit whatever order the modifiers happened to be collected in.
+    result.effects = orderEffects(result.effects);
 
     return result;
   }
@@ -418,29 +408,36 @@ export class CharacterSystem {
   }
 
   /**
-   * Destroy a character and rebuild it from its template under the same id — narratively a
+   * Destroy a character and rebuild it from a template under the same id — narratively a
    * fresh entity in the same role. Party membership is preserved; statuses, resources, the
    * private inventory and learned skills are all discarded.
-   * When nothing is live the id is treated as a template id and the character is created, so
-   * content can guarantee a pristine character without knowing whether one exists yet.
+   * Without an override the character's own templateId is used; when nothing is live the id
+   * is treated as a template id and the character is created, so content can guarantee a
+   * pristine character without knowing whether one exists yet.
+   * Pass templateId to rebuild as a different creature under the same id.
    * The template is resolved BEFORE the delete so a bad templateId can never leave a hole.
    */
-  public resetCharacter(character: Character | string): Character {
+  public resetCharacter(character: Character | string, templateIdOverride?: string): Character {
     const existing = typeof character === 'string' ? this.getCharacter(character) : character;
+
+    if (templateIdOverride && !this.templatesMap.has(templateIdOverride)) {
+      throw new Error(`CharacterTemplate with id "${templateIdOverride}" not found.`);
+    }
 
     // Nothing live: fall back to id-as-template-id, the shape createDefaultEntities uses.
     // Covers auto_create:false templates and characters deleted earlier in the run.
     if (!existing) {
       const id = character as string;
-      if (!this.templatesMap.has(id)) {
+      const template = templateIdOverride || id;
+      if (!this.templatesMap.has(template)) {
         throw new Error(`No live character or template found for "${id}".`);
       }
-      const created = this.createCharacter(id, id);
+      const created = this.createCharacter(id, template);
       this.addCharacter(created, false);
       return created;
     }
 
-    const templateId = existing.templateId;
+    const templateId = templateIdOverride || existing.templateId;
     if (!templateId || !this.templatesMap.has(templateId)) {
       throw new Error(`Character "${existing.id}" has no known template ("${templateId}") to reset from.`);
     }
@@ -454,6 +451,24 @@ export class CharacterSystem {
     return fresh;
   }
 
+
+  /**
+   * Reorder the party. Order is the partyIds Set's insertion order, so the Set is rebuilt in
+   * the given sequence. Ids must be exactly the current party (same members, new order) —
+   * this is a pure reorder, never a way to add or remove members.
+   */
+  public reorderParty(orderedIds: string[]) {
+    const current = this.partyIds.value;
+    const unique = new Set(orderedIds);
+    // Length AND unique-size must both match — a duplicated id would otherwise pass the
+    // membership check and silently drop a member when the Set collapses it.
+    if (orderedIds.length !== current.size || unique.size !== current.size
+      || !orderedIds.every(id => current.has(id))) {
+      gameLogger.error('reorderParty: ids must match the current party exactly', orderedIds);
+      return;
+    }
+    this.partyIds.value = new Set(orderedIds);
+  }
 
   public removeFromParty(character: Character | string) {
     if (typeof character === 'string') {

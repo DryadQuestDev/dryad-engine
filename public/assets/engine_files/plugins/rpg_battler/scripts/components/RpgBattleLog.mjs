@@ -5,7 +5,7 @@ const { computed, watch, nextTick, ref, reactive, defineComponent } = vue;
 const { CharacterFace } = components;
 
 import { currentRpgBattle, getBattleDisplayName } from '../rpg-battle-state.mjs';
-import { getStatusDefinitions, getSide } from '../rpg-battle-effects.mjs';
+import { getStatusDefinitions, getSide, isSupport } from '../rpg-battle-effects.mjs';
 
 // @ts-ignore
 export const RpgBattleLog = defineComponent({
@@ -22,7 +22,10 @@ export const RpgBattleLog = defineComponent({
     let lineIdCounter = 0;
     const animatedLineIds = new Set();
 
-    function sideColor(side) {
+    // `support` is a presentation flag only — `side` stays player/enemy so face clicks
+    // still route the viewer to the right roster.
+    function sideColor(side, support) {
+      if (support) return 'rgba(250, 204, 21, 0.7)';
       return side === 'player' ? 'rgba(66, 185, 131, 0.6)' : 'rgba(239, 68, 68, 0.6)';
     }
 
@@ -90,12 +93,18 @@ export const RpgBattleLog = defineComponent({
       let actorGroup = currentTurn.actors.find(a => a.actorId === actorId);
       if (!actorGroup) {
         const side = actorId !== '_system' ? getSide(actorId) : 'enemy';
+        const support = actorId !== '_system' && isSupport(actorId);
         const char = game.getCharacter(actorId);
         actorGroup = reactive({
           actorId,
           character: char,
-          name: getBattleDisplayName(actorId),
+          // System entries (null actor: starvation ticks, scripted damage, wave arrivals) have
+          // no actor to announce — they render as bare narration lines, with no "X is acting!"
+          // header and no portrait.
+          system: actorId === '_system',
+          name: actorId === '_system' ? '' : getBattleDisplayName(actorId),
           side,
+          support,
           lines: [],
         });
         // Insert at top of this turn's actors (newest first)
@@ -158,6 +167,7 @@ export const RpgBattleLog = defineComponent({
         status_dot_heal: 'log_status_hot',
         cleanse: 'log_cleanse',
         thorns: 'log_thorns',
+        reflect: 'log_reflect',
       }[e.type];
 
       if (!lineId) return '';
@@ -189,11 +199,12 @@ export const RpgBattleLog = defineComponent({
       <template v-if="!minimized" v-for="turn in turns" :key="'t' + turn.turn">
         <div class="rpg-log-turn-sep">{{ turn.text }}</div>
 
-        <div v-for="actor in turn.actors" :key="actor.actorId" class="rpg-log-actor">
-          <div class="rpg-log-actor-header">
+        <div v-for="actor in turn.actors" :key="actor.actorId" class="rpg-log-actor"
+          :class="{ 'rpg-log-system': actor.system }">
+          <div v-if="!actor.system" class="rpg-log-actor-header">
             <CharacterFace v-if="actor.character"
               :character="actor.character" :size="40" :borderRadius="4"
-              :borderColor="sideColor(actor.side)"
+              :borderColor="sideColor(actor.side, actor.support)"
               :static-face-force="true"
               style="cursor: pointer; pointer-events: auto"
               @click="onFaceClick(actor.actorId, actor.side)" />

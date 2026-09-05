@@ -100,9 +100,9 @@ game.deleteCharacter("alice");  // Using ID string
 game.deleteCharacter(npc);      // Using Character instance
 ```
 
-### resetCharacter(character)
+### resetCharacter(character, templateId?)
 
-Rebuild a character from its template under the same ID — a narratively fresh entity in the same role. Party membership is kept; statuses, resources, the private inventory and learned skills are discarded. Triggers `character_delete` then `character_create`. Returns the new character.
+Rebuild a character from a template under the same ID — a narratively fresh entity in the same role. Party membership is kept; statuses, resources, the private inventory and learned skills are discarded. Triggers `character_delete` then `character_create`. Returns the new character.
 
 When no character with that ID is live, the ID is treated as a template ID and the character is created — so content can guarantee a pristine character without knowing whether one exists yet (`auto_create: false` templates, or characters deleted earlier in the run). Throws when there is neither a live character nor a template.
 
@@ -111,7 +111,13 @@ game.resetCharacter("orc");     // Using ID string
 game.resetCharacter(npc);       // Using Character instance
 ```
 
-A live character resets from its own `templateId`, so a custom ID works too — `orc_boss_2` built from the `orc` template resets to `orc`. That only holds while it is live: once deleted there is no record of its template, so recreate it with `createCharacter(id, template)`.
+A live character resets from its own `templateId`, so a custom ID works too — `orc_boss_2` built from the `orc` template resets to `orc`.
+
+Pass `templateId` to rebuild as a different creature under the same ID. It overrides both the live character's own `templateId` and the ID-as-template-ID fallback, so the same call works whether or not the character exists yet — handy for reusable actor IDs like `enemy_1`:
+
+```js
+game.resetCharacter("enemy_1", "orc_veteran");  // creates it, or rebuilds it as a veteran
+```
 
 ### createStatus(template)
 

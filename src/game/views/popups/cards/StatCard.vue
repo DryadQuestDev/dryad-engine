@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
 import { Global } from '../../../../global/global';
 import type { Status } from '../../../core/character/status';
 import type { Character } from '../../../core/character/character';
+import type { EntityStatObject } from '../../../../schemas/entityStatSchema';
+
+const showIds = computed(() => shouldShowEntityIds());
 
 const props = defineProps<{
     statId: string;
@@ -23,7 +27,10 @@ const statCharacter = computed(() => {
     return props.characterId ? game.getCharacter(props.characterId) : undefined;
 });
 
-function statusContribution(status: Status, character: Character, statId: string): number {
+// Rounded to the stat's own precision, the same way getStat rounds the composed total. A stat
+// computer is free to return a float (a x1.6 scale on a base of 384 is 230.39999999999998), and
+// without this the raw sum reaches the card as +614.4000000000001.
+function statusContribution(status: Status, character: Character, stat: EntityStatObject, statId: string): number {
     const stacks = status.currentStacks || 1;
     let v = (status.stats?.[statId] ?? 0) * stacks;
     for (const key of status.computedStatsKeys) {
@@ -31,7 +38,7 @@ function statusContribution(status: Status, character: Character, statId: string
         const computed = computer?.(character);
         v += (computed?.[statId] ?? 0) * stacks;
     }
-    return v;
+    return character.applyPrecision(v, stat);
 }
 
 function skillStatusName(statusId: string): string | undefined {
@@ -70,7 +77,7 @@ const breakdown = computed<Group[]>(() => {
     const duration: Row[] = [];
 
     for (const status of character.getStatuses()) {
-        const v = statusContribution(status, character, statId);
+        const v = statusContribution(status, character, statDef.value, statId);
         if (!v) continue;
 
         if (status === coreStatus) {
@@ -105,7 +112,9 @@ function formatSigned(n: number): string {
 <template>
     <div v-if="statDef" class="popup-inner">
         <div class="popup-header">
-            <span class="popup-title">{{ statDef.name || statId }}</span>
+            <span class="popup-title">{{ statDef.name || statId }}
+                <span v-if="showIds" class="entity-id-badge">{{ statId }}</span>
+            </span>
         </div>
         <div class="popup-body">
             <div v-if="statDef.ingame_description" v-script="{ html: statDef.ingame_description, context: { character: statCharacter } }" class="popup-description"></div>

@@ -194,6 +194,20 @@ if [ -d "production/${NAME}-linux" ]; then
         mv "$SOURCE_ASSETS"/* "$DEST_ASSETS"/
         shopt -u dotglob
     fi
+
+    # macOS support - the Linux build runs on macOS once darwin builds of
+    # Electron and sharp are present, so ship a launcher that fetches them.
+    if [ -d "build-extras" ]; then
+        echo "Adding macOS launcher and instructions..."
+        ELECTRON_VERSION=$(node -p "require('./node_modules/electron/package.json').version")
+        for MAC_FILE in README-macOS.txt start-macos.command; do
+            sed -e "s/__ELECTRON_VERSION__/${ELECTRON_VERSION}/g" \
+                -e "s/__VERSION__/${VERSION}/g" \
+                "build-extras/${MAC_FILE}" > "$DEST/${MAC_FILE}"
+        done
+        # zip preserves the mode, so the .command stays double-clickable
+        chmod +x "$DEST/start-macos.command"
+    fi
 fi
 
 # Step 8: Reorganize Windows build structure

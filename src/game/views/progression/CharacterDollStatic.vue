@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Character } from '../../core/character/character';
 import { computed, ref, watch, onBeforeUnmount } from 'vue';
-import { CHARACTER_VIEWPORT_ASPECT_RATIO, parseAspectRatio } from '../../utils/characterReference';
+import { CHARACTER_VIEWPORT_ASPECT_RATIO, VIEW_CROSSFADE_SECONDS, parseAspectRatio } from '../../utils/characterReference';
 import { Game } from '../../game';
 
 const props = defineProps<{
@@ -13,6 +13,12 @@ const props = defineProps<{
   view?: string; // Render specific views (e.g. ['back']). If set, skips viewless base layers.
   instantLayers?: boolean; // Disable fade transition on layer changes (for combat animations)
 }>();
+
+// One source of truth for the layer fade: the CSS transition below and the mask-activation
+// delay that waits for it both read it, and CharacterSlot eases the per-view art transform
+// over the same window so a view swap reads as a single crossfade.
+const layerFadeCss = `${VIEW_CROSSFADE_SECONDS}s`;
+const LAYER_FADE_MS = VIEW_CROSSFADE_SECONDS * 1000;
 
 const getLayerClasses = (layerId: string) => {
   const styles = props.character.skinLayerStyles.get(layerId);
@@ -103,11 +109,11 @@ watch(imageLayers, (newLayers, oldLayers) => {
         activeMasks.value.add(layer.image);
         continue;
       }
-      // New layer with mask - delay activation by 0.5s (match transition duration)
+      // New layer with mask - delay activation until the fade has finished
       const timer = setTimeout(() => {
         activeMasks.value.add(layer.image);
         pendingTimers.delete(layer.image);
-      }, 500);
+      }, LAYER_FADE_MS);
       pendingTimers.set(layer.image, timer);
     }
   }
@@ -258,10 +264,11 @@ const getLayerStyle = (index: number) => {
   user-select: none;
 }
 
-/* Fade transitions for adding/removing layers */
+/* Fade transitions for adding/removing layers. Leaving layers stay in the DOM fading out while
+   the incoming ones fade in, so a whole-view swap crossfades here rather than at the slot. */
 .layer-fade-enter-active,
 .layer-fade-leave-active {
-  transition: opacity 0.5s ease;
+  transition: opacity v-bind("layerFadeCss") ease;
 }
 
 .layer-fade-enter-from,
@@ -288,13 +295,16 @@ const getLayerStyle = (index: number) => {
   flex-shrink: 0;
 }
 
+/* `inset: auto` must come BEFORE top/left — it is the shorthand for all four sides, so
+   declaring it after would reset them and drop every non-first layer onto its STATIC position,
+   i.e. immediately to the right of the in-flow first layer instead of stacked on it. */
 .character-doll.natural-size .character-doll-image {
   position: absolute;
+  inset: auto;
   top: 0;
   left: 0;
   height: 100%;
   width: auto;
-  inset: auto;
   object-fit: unset;
 }
 

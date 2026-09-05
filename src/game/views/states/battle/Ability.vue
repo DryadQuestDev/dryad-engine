@@ -71,8 +71,8 @@ function useAbility() {
         <div class="ability-name">{{ abilityData.meta.name || abilityId }}</div>
         <div v-if="abilityData.meta.description" v-script="abilityData.meta.description" class="ability-description">
         </div>
-        <div class="ability-cooldown" v-if="abilityData.meta.cooldown">
-          Cooldown: {{ abilityData.meta.cooldown }} turns
+        <div class="ability-cooldown" v-if="abilityData.meta.cd">
+          Cooldown: {{ abilityData.meta.cd }} turns
         </div>
       </div>
     </div>

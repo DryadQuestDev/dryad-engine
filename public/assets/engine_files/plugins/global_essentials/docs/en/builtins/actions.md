@@ -42,6 +42,7 @@ All built-in actions for scenes and choices.
 | `choices` | Load choices from a scene | `"&choice_scene"` | |
 | `choices_over` | Load choices (override mode: hide default scene ~choices) | `"&choice_scene"` | |
 | `actor` | Add, move, or remove actors(!). `false` = remove all actors instantly; `clear` = remove all with exit animations | `"alice->center, bob->left"`, `"!alice"`, or `"false, alice->right"` | |
+| `panel_actor` | List a character in the scene's actor panel without staging art. `!id` removes; `false` clears. Staged actors are listed automatically | `"alice"`, `"alice, bob"`, `"!alice"`, `false` | |
 | `quest` | Add quest log entry | `"main_quest.goal1.log1"` | |
 
 ### asset property glide
@@ -212,6 +213,15 @@ normally (`|my|`, `if{}` logic, text styles).
 **Note:** a row whose choices are *all* `wip` leaves the player with nothing to pick. Keep at least
 one live choice, or an `exit`, in every row.
 
+### enc_sensitive
+
+Marks a travel/exit choice as encumbrance-sensitive: it greys out and becomes unclickable while the
+party inventory is over capacity (too heavy or too many slots). Authored as `!leave{enc_sensitive: true}`.
+A proactive affordance only — the engine also blocks *all* free room-to-room movement while
+over-capacity (map clicks, pathfinding, and `{enter}` actions when no scene is active), so a choice
+without this flag is still stopped, just without the grey-out. No-op unless the game caps the party
+inventory's `max_weight` / `max_size`. Drop items (the auto **Drop** item action) to recover.
+
 ### clue
 
 Marks a choice as a hint the player hasn't followed yet. It renders highlighted, and stops standing out the moment it is picked — permanently, since taken choices are remembered in the save.
@@ -232,10 +242,36 @@ A greyed-out choice never glows: `active` wins over `clue`, so a hint you cannot
 | Action | Description | Example | Delayed |
 |--------|-------------|---------|---------|
 | `party` | Add / remove characters from party. `!` prefix removes | `"alice, bob, !carol"` | |
-| `create_character` | Create a new character | `{ id: "npc1", template: "villager" }` | |
+| `create_character` | Create a new character. Logs an error and skips when the id already exists | `{ id: "npc1", template: "villager" }` | |
 | `update_character` | Update character properties | `{ id: "alice", party: true }` | |
 | `delete_character` | Delete a character | `{ id: "npc1" }` | |
-| `reset_character` | Rebuild a character from its template, same id — creates it if none is live. Keeps party membership. `,` separates ids | `"orc"`, `"orc, goblin"`, `{ id: "orc" }` | |
+| `reset_character` | Rebuild a character from its template, same id — creates it if none is live. Keeps party membership | `{ id: "orc" }`, `{ id: "orc", template: "orc_veteran" }` | |
+
+`create_character` and `reset_character` take the same shapes — a string, a comma-separated list of ids, an object, or an array of either. They differ only on an id that is already live: `create_character` logs an error and skips it, `reset_character` rebuilds it.
+
+```js
+{ create_character: "villager" }                  // id doubles as the template id
+{ reset_character: "orc, goblin" }                // `,` separates ids
+{ create_character: [
+    { id: "slime_2", template: "slime_small" },
+    { id: "slime_3", template: "slime_small" }
+]}
+{ reset_character: { id: "orc", template: "orc_veteran", party: false } }
+```
+
+| Key | Description |
+|-----|-------------|
+| `id` | Required. The character id |
+| `template` | Template to build from. On `reset_character` it overrides the live character's own template |
+| `party` | `true` joins the party, `false` leaves it. Omit on `reset_character` to keep the membership it had |
+
+Without a `template`, `reset_character` falls back to the live character's own `templateId`, then to the id — so `{ reset_character: "orc_boss_2" }` rebuilds from `orc` when that is the template it was built from.
+
+`create_character` also accepts the template body inline — any object without a `template` key is used as the template itself:
+
+```js
+{ create_character: { id: "custom_npc", traits: { name: "Stranger" }, stats: { health: 20 } } }
+```
 | `status` | Apply / remove status effects per target. `&` separates items; `!` prefix removes. Flash notification only for party members | `"alice->buff1 & buff2, bob->!debuff"` | |
 | `char` | Modify character property (`=` set, `>` add, `<` subtract) | `"alice.resource.health>10"` | |
 | | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle` | `"mc.attribute.belly=2"` | |
@@ -248,7 +284,13 @@ A greyed-out choice never glows: `active` wins over `clue`, so a hint you cannot
 | `skin_layer` | Add / remove skin layers per target. `&` separates layers; `!` prefix removes | `"alice->armor & helmet, bob->!cloak"` | |
 | `item_slot` | Add / remove equipment slots per target. `&` separates slots; `!` prefix removes | `"alice->ring & necklace, bob->!belt"` | |
 | `ability` | Grant / remove innate abilities per target. `&` separates abilities; `!` prefix removes | `"alice->fireball & ice_bolt, bob->!punch"` | |
-| `skill` | Learn a skill for character | `"alice.fire_magic.fireball"` | |
+| `skill` | Learn / upgrade a skill for a character. `#level` adds levels; comma-separate for several. Flash notification only for party members | `"alice.fire_magic.fireball"`, `"fire_magic.fireball#2"` | |
+
+### `skill` flashes
+
+Party-only, the same rule `status` keeps. A first learn flashes "**Fireball** has been
+learned!"; a level gain flashes "**Fireball** has been upgraded to level 2!"; a slot already
+at `max_upgrade_level` flashes nothing. `skill` takes dot paths, never the `->` syntax below.
 
 ### Targeted-spec syntax (`status`, `skin_layer`, `item_slot`, `ability`)
 
@@ -278,13 +320,19 @@ silently. `skin_layer`, `item_slot`, and `ability` never flash.
 | `equip_item` | Equip the **active item** (uid) — internal/advanced | `true` | |
 | `unequip_item` | Unequip the **active item** (uid) — internal/advanced | `true` | |
 | `add_item` | Add item to inventory | `"sword, potion#5"` | |
+| `remove_item` | Remove items from an inventory. `true` takes one of the **active item** (the exact stack whose choice or scene is running) — what a usable item's own scene wants; a number takes that many off the same stack. Otherwise the spec mirrors `add_item`; equipped stacks are drained last | `true`, `3`, `"potion#5"`, `"key -> chest_inventory"` | |
 | `transfer_item` | Move items between inventories (source defaults to party; aborts if the source lacks the quantity) | `"gold#200 -> merchant"`, `"chest.gold#5 -> _party_inventory"` | |
 | `item_view` | Show an item card under the dialogue text until the event ends | `true` (active item), `"healing_herb"` (party item), `false` (hide) | |
 | `collect` | Collect the current collectable encounter: grants its item(s) and hides it (see Collectables in the ->dungeons.glossary). Auto-attached to `collectable` encounters; use on a custom `!` choice for a custom label | `"berry#2"` | |
 | `loot` | Open loot exchange. A `^pool` value opens a placement-unique pooled inventory (requires the experience plugin with auto_scaling – see its Rewards & Scaling guide) | `"chest_inventory"`, `"^chest_common"` | ✓ |
 | `trade` | Open trade exchange. `^pool` values work as for `loot`, with stock re-rolled when the MC's level changes | `"merchant_inventory"`, `"^merchant_basic"` | ✓ |
 | `learn_recipe` | Learn a crafting recipe (one id, or comma-separated) | `"iron_sword, steel_sword"` | |
-| `learn_recipe_item` | Learn the recipe named by the active item's `learn_recipe` field, then consume the item (notifies; "already known" if learned). Powers the auto "Learn" choice on recipe-scroll items | `true` | |
+| `learn_recipe_item` | Learn the recipe named by the active item's `learn_recipe` field, then consume the item (notifies; "already known" if learned). Powers the auto "Learn" choice on recipe-scroll items. Discovers the item (item-card check mark) | `true` | |
+| `choose_item` | Item picker popup (pauses the scene). Pick lands in `active_item` + `chosen_item_id`; branch with `_chosen_item(id)`. `remove: true` consumes the pick; `scene` plays after; cancel resumes with `chosen_item_id` `''` | `"all"`, `"keys"`, `{tags: ["herb"], remove: true, scene: "fed"}` | ✓ |
+| `read_book` | Open the paged book reader for an item with the `book` trait (`dungeon_id.room_id.scene_id`; pages = that scene's paragraphs; Next/Previous/Read again/Close choices). Resumes at the bookmark; finishing the last page discovers the item. Powers the auto "Read" choice | `true` (active item), `"book_eilfiel"` | |
+| `read_page` / `read_close` | Internal paging actions of the book reader (its choices dispatch them) | `2` / `true` | |
+| `view_painting` | Open an item's painting scene: the registered asset named by the `painting` trait full-screen, the item description as the text (a runtime-synthesized one-paragraph scene in the current dungeon). Discovers the item. Powers the auto "View" choice | `true` (active item), `"painting_ane"` | |
+| `use_scene` | Open the scene named by an item's `use_scene` trait, with that item as the active one (so the scene reads `|item|` and can end with `{remove_item: true}`). Powers the auto "Use" choice on usable items | `true` (active item), `"lockpick"` | |
 
 ### equip
 

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { Character } from '../../core/character/character';
-import { computed, ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { SceneSlot, GRADE_FILTER_TALL_ID } from '../../systems/dungeonSystem';
 import CharacterDoll from './CharacterDoll.vue';
 import ItemSlots from './ItemSlots.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import { Game } from '../../game';
 import { useCharacterAnimation } from '../../../composables/useCharacterAnimation';
-import { OVERLAY_BASE_SCALE } from '../../utils/characterReference';
+import { OVERLAY_BASE_SCALE, VIEW_CROSSFADE_SECONDS } from '../../utils/characterReference';
 
 const props = withDefaults(defineProps<{
   character: Character;
@@ -111,6 +111,34 @@ const isSpineRendering = computed(() =>
 const animatedArtOffset = computed(() => {
   if (isSpineRendering.value) return { dx: 0, dy: 0, scale: 1 };
   return props.character.getStaticArtOffset(props.view);
+});
+
+// A view swap crossfades the doll's art in place: the static doll keys its layer TransitionGroup
+// by image, so the outgoing view's images fade out while the incoming view's fade in — both
+// under THIS one wrapper transform, which is per view (dryad_tale's mc is art_scale 0.95 in the
+// default view against 1.5 in the back view). Snapping it would throw the outgoing art into the
+// incoming view's frame for the length of its fade, so a class turns on a CSS transform
+// transition for the same window and the wrapper eases from wherever it stood. CSS rather than
+// a gsap tween on the numbers: the tween would have to reconstruct the outgoing frame by hand
+// (by the time a watcher runs, every computed reading props.view has already moved to the
+// incoming view) and then hold its own clock in step with the doll's CSS layer fade. The class
+// is scoped to view swaps, so a slot MOVE — which gsap already drives frame by frame through
+// animatedScale — is never smeared by a second easing on top.
+const crossfadingView = ref(false);
+const viewCrossfadeCss = `${VIEW_CROSSFADE_SECONDS}s`;
+let crossfadeTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(() => props.view, () => {
+  crossfadingView.value = true;
+  if (crossfadeTimer) clearTimeout(crossfadeTimer);
+  crossfadeTimer = setTimeout(() => {
+    crossfadingView.value = false;
+    crossfadeTimer = null;
+  }, VIEW_CROSSFADE_SECONDS * 1000);
+});
+
+onUnmounted(() => {
+  if (crossfadeTimer) clearTimeout(crossfadeTimer);
 });
 
 const artScale = computed(() => animatedArtOffset.value.scale);
@@ -328,7 +356,8 @@ const onLeave = (_el: Element, done: () => void) => {
   <transition name="character-exit" @before-leave="onBeforeLeave" @leave="onLeave">
     <div ref="characterRef" class="character-slot" :style="{ zIndex: zindex }">
       <div class="character-slot-positioner">
-        <div ref="scaleWrapperRef" class="character-slot-scale-wrapper">
+        <div ref="scaleWrapperRef" class="character-slot-scale-wrapper"
+          :class="{ 'view-crossfading': crossfadingView }">
           <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper">
             <div ref="contentRef" class="character-content">
               <div class="character-doll-wrapper">
@@ -382,6 +411,13 @@ const onLeave = (_el: Element, done: () => void) => {
   /* Scene colour grade. Deliberately here and not on .character-slot — the slot root also contains
      the overlay wrapper (name/HP/tokens) and the item slots, which are UI. */
   filter: v-bind("scaleWrapperFilter");
+}
+
+/* Only while the doll is crossing between views: the per-view art frame (art_dx/dy/scale differ
+   per view) eases across the same window as the layer fade instead of snapping the outgoing
+   art into the incoming view's frame. */
+.character-slot-scale-wrapper.view-crossfading {
+  transition: transform v-bind("viewCrossfadeCss") ease;
 }
 
 .character-slot-rotation-wrapper {

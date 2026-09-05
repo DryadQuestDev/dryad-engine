@@ -54,6 +54,9 @@ function createWindow() {
     width: 1200,
     height: 800,
     show: false, // Don't show until maximized
+    // Linux has no icon resource in the ELF, so the window icon is the only
+    // one it gets. Windows takes it from the exe, macOS ignores it.
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       nodeIntegration: false,

@@ -42,3 +42,46 @@ export function stripCommentLines(text: string): string {
     .filter((_, i) => !isCommentLine(masked[i] ?? ''))
     .join('\n');
 }
+
+export type MappedText = {
+  text: string;
+  /** Map an offset in `text` back to the offset in the original string. */
+  toOriginal: (offset: number) => number;
+};
+
+/**
+ * `stripCommentLines` that remembers where each kept line came from, so a
+ * scanner running over the stripped text can report positions in the
+ * original (what the editor actually shows).
+ */
+export function stripCommentLinesMapped(text: string): MappedText {
+  const masked = stripCodeBlocks(text).split('\n');
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  const keptStarts: number[] = [];
+  const origStarts: number[] = [];
+  let origPos = 0;
+  let keptPos = 0;
+  lines.forEach((line, i) => {
+    if (!isCommentLine(masked[i] ?? '')) {
+      kept.push(line);
+      keptStarts.push(keptPos);
+      origStarts.push(origPos);
+      keptPos += line.length + 1;
+    }
+    origPos += line.length + 1;
+  });
+  const toOriginal = (offset: number): number => {
+    if (keptStarts.length === 0) return 0;
+    let lo = 0;
+    let hi = keptStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (keptStarts[mid] <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    const col = Math.max(0, Math.min(offset - keptStarts[lo], kept[lo].length));
+    return origStarts[lo] + col;
+  };
+  return { text: kept.join('\n'), toOriginal };
+}

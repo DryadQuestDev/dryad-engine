@@ -50,6 +50,14 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
     }
   }
 
+  // Same rule as the Space/Enter advance in OverlayNavigation: a modal popup covers the list
+  // and eats mouse clicks, but this listener stays mounted underneath it. Without the guard a
+  // number key picks a choice the player can't even see — and a delayed one ({xp}) re-fires
+  // it on every press. (hide_events needs no check here: it v-ifs this component away.)
+  if (game.getOpenPopups().length) {
+    return;
+  }
+
   if (visibleChoices.value.length > 0 && game.dungeonSystem.choiceType.value !== 'encounter') {
     const key = parseInt(e.key, 10);
     if (!isNaN(key) && key >= 0 && key <= 9) {

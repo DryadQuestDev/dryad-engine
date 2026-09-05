@@ -20,16 +20,25 @@ game.registerEmitter('turn_advanced');
 
 /**
  * Tick every character's limited statuses (duration > 0) by `turns`. Permanent (-1)
- * and passive (0) durations are untouched by the engine's tickDuration. For party
- * members, notify about statuses that fully expired.
+ * and passive (0) durations are untouched by the engine's tickDuration. Statuses with
+ * `meta.stack_bleeding: N` also lose N stacks per turn (removed entirely at 0 stacks) —
+ * stacks-as-timer statuses that decay with adventure time instead of a duration. For
+ * party members, notify about statuses that fully expired.
  * @param {number} turns
  */
 function tickStatuses(turns) {
     const party = new Set(game.getParty().map((c) => c.id));
     for (const character of game.getAllCharacters()) {
         // Snapshot first — ticking can remove a status, mutating the statuses map mid-loop.
-        const before = character.getStatuses().map((s) => ({ id: s.id, name: s.name || s.id }));
-        for (const s of before) character.tickStatusDuration(s.id, turns);
+        const before = character.getStatuses().map((s) => ({
+            id: s.id,
+            name: s.name || s.id,
+            bleed: Number(s.meta?.stack_bleeding) || 0,
+        }));
+        for (const s of before) {
+            character.tickStatusDuration(s.id, turns);
+            if (s.bleed > 0) character.removeStatusStacks(s.id, s.bleed * turns);
+        }
 
         if (!party.has(character.id)) continue;
         const remaining = new Set(character.getStatuses().map((s) => s.id));

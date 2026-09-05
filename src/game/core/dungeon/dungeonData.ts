@@ -6,6 +6,8 @@ import { Populate, Skip } from "../../../utility/save-system";
 export class DungeonData {
 
     public visitedRooms: Set<string> = new Set();
+    // Rooms whose key lock has been opened (locks stay open for the save).
+    public unlockedRooms: Set<string> = new Set();
     public visibleRooms: Set<string> = new Set();
 
     public visitedEvents: Set<string> = new Set();

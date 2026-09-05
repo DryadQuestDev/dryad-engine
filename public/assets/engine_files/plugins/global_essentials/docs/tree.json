@@ -54,7 +54,8 @@
     "releasing_game",
     "custom_vue",
     "3rd_party",
-    "save_restoration"
+    "save_restoration",
+    "achievements"
   ],
   "builtins": [
     "actions",

@@ -2,7 +2,7 @@
 import { Game } from '../../game/game';
 import CustomComponentContainer from '../../game/views/CustomComponentContainer.vue';
 import { Global } from '../../global/global';
-import { ref, onMounted } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { ManifestObject } from '../../schemas/manifestSchema';
 import ManifestInfo from './ManifestInfo.vue';
 import { checkManifestCompatibility } from '../../utility/version-checker';
@@ -11,12 +11,19 @@ const game = Game.getInstance();
 const global = Global.getInstance();
 
 const COMPONENT_ID = 'mod-picker';
+const TEMP_SLOT = '__load_temporary_save__';
 
 // State
 const availableMods = ref<ManifestObject[]>([]);
 const selectedMods = ref<Set<string>>(new Set());
 const expandedMod = ref<string | null>(null);
 const isLoading = ref(false);
+
+// Applying mods is a save-and-reload: the run is written to a temporary slot and loaded back on the
+// other side. So it is gated on the same condition as saving — mid-battle, in replay, on a
+// game-over screen. saveGame() only warns to the console when it refuses, so without this the
+// reload would land on a slot that was never written and drop the run to the main menu.
+const savesBlocked = computed(() => game.coreSystem.isSaveDisabled());
 
 // Load available mods
 onMounted(async () => {
@@ -98,6 +105,11 @@ async function applyModChanges() {
     return;
   }
 
+  if (savesBlocked.value) {
+    global.addNotificationId('mods_save_disabled');
+    return;
+  }
+
   isLoading.value = true;
 
   try {
@@ -120,15 +132,27 @@ async function applyModChanges() {
     newModList.push('_core');
 
     // Update the game's modList
+    const previousModList = game.coreSystem.modList;
     game.coreSystem.modList = newModList;
 
     console.log('New mod list:', newModList);
 
     // Save current game state to temporary slot
-    await game.saveGame('__load_temporary_save__');
+    await game.saveGame(TEMP_SLOT);
+
+    // saveGame reports nothing back — it returns the same either way whether it stored the run, a
+    // listener vetoed it, or IndexedDB threw. Reloading on an unwritten slot loses the run to the
+    // main menu, so confirm the slot is really there before arming the reload.
+    const stored = await global.indexedDbSaveService.load(game.coreSystem.gameId, TEMP_SLOT);
+    if (!stored) {
+      game.coreSystem.modList = previousModList;
+      global.addNotificationId('error_mods_save_failed');
+      isLoading.value = false;
+      return;
+    }
 
     // Set up localStorage to reload the game after refresh
-    localStorage.setItem('game_loading_slot', '__load_temporary_save__');
+    localStorage.setItem('game_loading_slot', TEMP_SLOT);
     localStorage.setItem('game_loading_game_id', game.coreSystem.gameId);
 
     // Reload the page to apply mod changes
@@ -192,7 +216,8 @@ async function applyModChanges() {
     </div>
 
     <div v-if="availableMods.length > 0" class="actions">
-      <button @click="applyModChanges" :disabled="isLoading" class="apply-button">
+      <div v-if="savesBlocked" class="blocked-message">{{ global.getString('mods_save_disabled') }}</div>
+      <button @click="applyModChanges" :disabled="isLoading || savesBlocked" class="apply-button">
         {{ isLoading ? 'Applying...' : 'Set Mods' }}
       </button>
     </div>
@@ -371,8 +396,21 @@ async function applyModChanges() {
 
 .actions {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
   gap: 10px;
+}
+
+.blocked-message {
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: #ffd6a8;
+  background: rgba(180, 110, 0, 0.18);
+  border: 1px solid rgba(255, 180, 60, 0.45);
+  border-radius: 10px;
 }
 
 .apply-button {

@@ -87,7 +87,7 @@ The plugin defines the following character stats:
 | `damage_per_missing_health` | % damage bonus scaled by fraction of missing HP. |
 | `damage_per_ally` | % damage bonus per alive ally. |
 | `focus_fire` | Marks target on attack. Each mark increases damage from this attacker by this stat's value %. |
-| `thorns` | Starting thorns stacks at battle start. % of received damage reflected back. |
+| `thorns` | Starting thorns stacks at battle start. Each stack reflects 1 flat damage back to the attacker per hit. |
 
 **Healing**
 
@@ -95,6 +95,7 @@ The plugin defines the following character stats:
 |---|---|
 | `heal_amplification` | Multiplier for healing effects cast by this character. |
 | `heal_received_mult` | Additive % modifier to all incoming healing. |
+| `lifesteal` | % of the damage this character deals that is healed back. Applies to every ability; an effect's `lifesteal` aspect adds on top for that cast. |
 
 **Damage Modifiers**
 

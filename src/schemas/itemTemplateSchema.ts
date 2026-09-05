@@ -12,8 +12,6 @@ export const ItemTemplateSchema = {
     is_currency: { type: 'boolean', tooltip: 'If true, the item can be used as currency for the \'price\' field. You might need to reload the tab to update the price options.' },
     learn_recipe: { type: 'chooseOne', fromFile: 'item_recipes', tooltip: 'If set, the item shows a "Learn" choice in the inventory that teaches this recipe (grayed out once learned). Learning consumes the item.' },
     traits: { type: 'schema', fromFile: 'item_traits', fromFileType: 'custom', tooltip: 'Custom item traits defined in item_traits file.' },
-    attributes: { type: 'schema', fromFile: 'item_attributes', fromFileType: 'chooseOne', tooltip: 'Item attributes with selectable values from item_attributes file.' },
-    properties: { type: 'schema', fromFile: 'item_properties', fromFileType: 'number', tooltip: 'Numeric properties (e.g., weight) from item_properties file.' },
     apply_statuses_on_consume: {
         type: 'schema[]', tooltip: 'Statuses applied when the item is CONSUMED (referencing status templates, which carry their own duration/max_stacks/polarity/group_id). Any entry makes the item show a "Consume" choice. An item can also carry an equip `status` — the two are independent (e.g. +2 luck on equip, +10 health on consume).', objects: {
             status: { type: 'chooseOne', fromFile: 'character_statuses', tooltip: 'Status template to apply on consume.' },

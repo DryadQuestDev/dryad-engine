@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { shouldShowEntityIds } from '../../utils/idBadge';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
@@ -13,6 +14,8 @@ const game = Game.getInstance();
 
 const COMPONENT_ID = 'item-card';
 
+const showIds = computed(() => shouldShowEntityIds());
+
 const props = defineProps<{
   item: Item;
   characterId?: string;
@@ -20,19 +23,36 @@ const props = defineProps<{
 
 // Get rarity CSS class
 const rarityClass = computed(() => {
-  const rarity = props.item.attributes['rarity'];
+  const rarity = props.item.getRarity();
   return rarity ? `rarity_${rarity}` : '';
 });
 
-const isQuest = computed(() => props.item.attributes['rarity'] === 'quest');
+const isQuest = computed(() => props.item.getRarity() === 'quest');
 const questLabel = computed(() => Global.getInstance().getString('item_tag.quest'));
 
 // Visual level indicator (generic `item_level` trait; stamped by whatever scales the item)
 const itemLevel = computed(() => props.item.getTrait('item_level') || 0);
 
+// Discovered collectable (recipe learned / book finished / painting viewed) — card-only marker;
+// brick fallback names stay unmarked on purpose.
+const isDiscovered = computed(() => game.isItemDiscovered(props.item.id));
+
 const itemCategory = computed(() => game.itemSystem.itemCategoriesMap.get(props.item.category));
 const categoryIcon = computed(() => itemCategory.value?.icon || '');
 const categoryName = computed(() => itemCategory.value?.singular || itemCategory.value?.name || '');
+
+// Rarity word in front of the category ("Rare Weapon"). Games can name their tiers via a
+// `rarity_<tier>` locale line; without one the raw attribute value is capitalized. Quest items
+// already carry the QUEST badge in the header, so prefixing there would say it twice.
+const rarityLabel = computed(() => {
+  const rarity = String(props.item.getRarity() || '');
+  if (!rarity || rarity === 'quest') return '';
+  const key = `rarity_${rarity}`;
+  if (game.coreSystem.localeMap?.has(key)) return game.getLine(key);
+  const global = Global.getInstance();
+  if (global.localeMap.has(key)) return global.getString(key);
+  return rarity.charAt(0).toUpperCase() + rarity.slice(1);
+});
 
 const itemImage = computed(() => props.item.getTrait('image') || '');
 
@@ -85,8 +105,10 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
       <div class="card-header-text">
         <div class="header-top">
           <h3 class="item-name" :class="rarityClass">
+            <span v-if="isDiscovered" class="item-discovered-check" title="Discovered">✓</span>
             <span v-if="itemLevel > 0" class="item-level-tag">Lv {{ itemLevel }}</span>
             {{ item.getTrait('name') || 'Item Name' }}
+            <span v-if="showIds" class="entity-id-badge">{{ item.id }}</span>
           </h3>
           <span v-if="isQuest" class="quest-tag">{{ questLabel }}</span>
           <!-- Item cost display (only if item has price) -->
@@ -101,12 +123,15 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
         </div>
         <div v-if="categoryName" class="item-category-line">
           <img v-if="categoryIcon" :src="categoryIcon" :alt="categoryName" class="item-category-icon" />
-          <span class="item-category-name">{{ categoryName }}</span>
+          <span class="item-category-name">{{ rarityLabel ? `${rarityLabel} ${categoryName}` : categoryName }}</span>
         </div>
       </div>
     </div>
 
     <div class="card-body">
+      <!-- Game components that lead the card (before the description) — e.g. resource readouts. -->
+      <CustomComponentContainer slot="item-card-top" :context="{ item }" />
+
       <div v-script="item.getTrait('description') || ''" class="item-description"></div>
 
       <!-- Equip status (equip stats info) — shown first -->
@@ -201,6 +226,15 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
   padding: 1px 7px;
   margin-right: 2px;
   white-space: nowrap;
+}
+
+.item-discovered-check {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 0.7em;
+  font-weight: 700;
+  color: #7ed491;
+  margin-right: 2px;
 }
 
 .quest-tag {

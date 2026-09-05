@@ -2,7 +2,7 @@
 import { Global } from '../../global/global';
 import { Game } from '../game';
 import CustomComponentContainer from './CustomComponentContainer.vue';
-import { computed, watch, onMounted } from 'vue';
+import { computed, ref, watch, onMounted } from 'vue';
 import { useStorage } from '@vueuse/core';
 import Button from 'primevue/button';
 import { DEV_AUTO_SAVE_SLOT, DEV_PREV_SCENE_SLOT, DEV_REPLAY_SCENE_KEY, DEV_LEFT_SCENE_KEY } from '../../services/indexeddb-save.service';
@@ -13,6 +13,22 @@ const global = Global.getInstance();
 const game = Game.getInstance();
 
 const expanded = useStorage('debug-panel-expanded', false);
+
+// Panel width in px, applied by GameScreen.vue on `.game-body-panel` (ignored while expanded).
+const DEFAULT_PANEL_WIDTH = 350;
+const MIN_PANEL_WIDTH = 100;
+const panelWidth = useStorage('debug-panel-width', DEFAULT_PANEL_WIDTH);
+
+// Buffer the field locally so a half-typed value ("1" on the way to "150") doesn't collapse
+// the panel mid-keystroke — the store is only written on change/blur, clamped.
+const widthInput = ref(panelWidth.value);
+watch(panelWidth, (w) => { widthInput.value = w; });
+
+function commitWidth() {
+  const parsed = Math.round(Number(widthInput.value));
+  panelWidth.value = Number.isFinite(parsed) && parsed > 0 ? Math.max(MIN_PANEL_WIDTH, parsed) : DEFAULT_PANEL_WIDTH;
+  widthInput.value = panelWidth.value;
+}
 
 // Get debug menu options from unified registry
 const debugMenuOptions = computed(() => {
@@ -49,7 +65,7 @@ watch(game.coreSystem.debugSettings, () => {
 function test() {
   console.warn("testing...");
   let item = game.itemSystem.getInventory('_party_inventory')?.getFirstItemById('ancient_tome') || null;
-  item?.properties['durability'].addCurrentValue(-20);
+  if (item && typeof item.traits.durability === 'number') item.traits.durability -= 20;
   console.warn(item);
 
   game.getProperty('lewds')?.addCurrentValue(1);
@@ -57,17 +73,36 @@ function test() {
 
 const isWebMode = import.meta.env.VITE_WEB_MODE === 'true';
 
-// Reload into the pre-scene checkpoint and force-replay the current scene, so an edited
-// scene shows its new content and re-fires its enter actions once on clean state. The
+const inScene = computed(() => !!game.dungeonSystem.currentSceneId.value);
+
+const hardResetLabel = computed(() => inScene.value ? '🔄 Hard Scene Reset' : '🔄 Reload Game');
+
+const hardResetTooltip = computed(() => inScene.value
+  ? 'Dev tool: reload and re-enter the current scene from scratch — rebuilds its text from your latest content edits and re-runs its enter actions once (on clean pre-scene state).'
+  : 'Dev tool: reload the app and resume right where you are — picks up your latest content, script and CSS edits.');
+
+// In a scene: reload into the pre-scene checkpoint and force-replay the current scene, so an
+// edited scene shows its new content and re-fires its enter actions once on clean state. The
 // checkpoint carries its own currentSceneId, so the replay flag needs no scene id.
-function hardSceneReset() {
-  if (!game.dungeonSystem.currentSceneId.value) return;
+// Outside a scene (map, menus): checkpoint where we stand and reload into it.
+async function hardSceneReset() {
   // Re-assert dev flags: a second app instance (the editor) shares localStorage and can
   // clear devMode, which would otherwise reload the game with the debug panel gone.
   localStorage.setItem('devMode', 'true');
   localStorage.setItem('showDebugPanel', 'true');
-  localStorage.setItem(DEV_REPLAY_SCENE_KEY, '1');
-  game.loadGame(DEV_PREV_SCENE_SLOT);
+
+  if (inScene.value) {
+    localStorage.setItem(DEV_REPLAY_SCENE_KEY, '1');
+    game.loadGame(DEV_PREV_SCENE_SLOT);
+    return;
+  }
+
+  // Keep the editor's "Continue" marker honest: outside a scene it resumes the auto-save.
+  localStorage.removeItem(DEV_LEFT_SCENE_KEY);
+  // forceSave: the current state may have saves disabled (replay mode etc.), but a dev
+  // reload still needs a checkpoint to come back to.
+  await game.saveGame(DEV_AUTO_SAVE_SLOT, { noNotification: true, forceSave: true });
+  game.loadGame(DEV_AUTO_SAVE_SLOT);
 }
 
 async function backToEditor() {
@@ -109,6 +144,9 @@ async function backToEditor() {
     </button>
 
     <div class="back-to-editor-container">
+      <input type="number" class="panel-width-input" v-model.number="widthInput" :min="MIN_PANEL_WIDTH" step="10"
+        @change="commitWidth" @blur="commitWidth"
+        v-tooltip.left="`Debug panel width in pixels (min ${MIN_PANEL_WIDTH})`" />
       <Button label="Back to Editor" icon="pi pi-arrow-left" @click="backToEditor" class="back-to-editor-button"
         severity="warning" />
     </div>
@@ -118,10 +156,10 @@ async function backToEditor() {
       <Button label="📚 Documentation" @click="global.setViewer('docs')" class="docs-button" />
     </div>
 
-    <!-- Hard Scene Reset — only while a scene is playing -->
-    <div v-if="game.dungeonSystem.currentSceneId.value" class="hard-reset-container">
-      <Button label="🔄 Hard Scene Reset" @click="hardSceneReset" class="hard-reset-button" severity="secondary"
-        v-tooltip.left="'Dev tool: reload and re-enter the current scene from scratch — rebuilds its text from your latest content edits and re-runs its enter actions once (on clean pre-scene state).'" />
+    <!-- Hard reset: re-enters the current scene, or plain reloads when outside one -->
+    <div class="hard-reset-container">
+      <Button :label="hardResetLabel" @click="hardSceneReset" class="hard-reset-button" severity="secondary"
+        v-tooltip.left="hardResetTooltip" />
     </div>
 
     <!-- Custom tabs -->
@@ -236,6 +274,9 @@ async function backToEditor() {
 }
 
 .back-to-editor-container {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
   background: #e0e0e0;
   border: 2px solid #999;
   border-radius: 6px;
@@ -244,8 +285,34 @@ async function backToEditor() {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.panel-width-input {
+  width: 4.5rem;
+  flex-shrink: 0;
+  padding: 0.5rem;
+  background: #f5f5f5;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.panel-width-input:hover {
+  background: #fff;
+  border-color: #999;
+}
+
+.panel-width-input:focus {
+  outline: none;
+  background: #fff;
+  border-color: #666;
+}
+
 .back-to-editor-button {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   font-size: 1rem;
   font-weight: 600;
   padding: 0.75rem;

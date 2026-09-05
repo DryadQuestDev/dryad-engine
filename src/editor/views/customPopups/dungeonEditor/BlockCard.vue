@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
 import { inject } from 'vue';
@@ -9,6 +9,7 @@ import SceneEditor from './SceneEditor.vue';
 import RichContentEditor from './PlainEditor.vue';
 import { inputMatchesSearch } from './searchState';
 import { tagWithUid } from './uid';
+import { focusFieldAt, type RevealRequest } from './reveal';
 
 const sceneExistsForBlock = inject<(blockIndex: number, sceneId: string) => boolean>('sceneExistsForBlock');
 
@@ -51,7 +52,9 @@ const props = withDefaults(defineProps<{
   canMoveDown: boolean;
   issues?: LintIssue[];
   locked?: boolean;
-}>(), { issues: () => [], locked: false });
+  /** Focus request aimed at this block; `null` for every other block. */
+  reveal?: RevealRequest | null;
+}>(), { issues: () => [], locked: false, reveal: null });
 
 const paramsHasIssue = computed(() =>
   (props.issues ?? []).some((i) => i.field === 'paramsRaw'),
@@ -59,6 +62,49 @@ const paramsHasIssue = computed(() =>
 const issueSummary = computed(() =>
   (props.issues ?? []).map((i) => i.message).join('\n'),
 );
+
+const NO_RANGES: Array<[number, number]> = [];
+// Ranges inside the merged prose textarea, in its model coordinates.
+const proseIssueRanges = computed<Array<[number, number]>>(() => {
+  const out: Array<[number, number]> = [];
+  for (const issue of props.issues ?? []) {
+    const at = issue.at;
+    if (at?.target === 'prose' && at.start !== undefined) out.push([at.start, at.end ?? at.start + 1]);
+  }
+  return out.length ? out : NO_RANGES;
+});
+const rowParamsErrors = computed(() => {
+  const set = new Set<number>();
+  for (const issue of props.issues ?? []) {
+    const at = issue.at;
+    if (at?.target === 'row-params' && at.rowIndex !== undefined) set.add(at.rowIndex);
+  }
+  return set;
+});
+
+// Route the reveal to whichever child owns the target; children receive
+// `null` unless it is theirs, so their watchers stay quiet.
+const proseReveal = computed(() => (props.reveal?.at.target === 'prose' ? props.reveal : null));
+const sceneReveal = computed(() => {
+  const r = props.reveal;
+  return r && (r.at.target === 'column-content' || r.at.target === 'column-params') ? r : null;
+});
+function rowReveal(rowIndex: number): RevealRequest | null {
+  const r = props.reveal;
+  if (!r || (r.at.target !== 'row-params' && r.at.target !== 'row-text')) return null;
+  return r.at.rowIndex === rowIndex ? r : null;
+}
+
+const paramsInputRef = ref<InstanceType<typeof InputText> | null>(null);
+const rawTextareaRef = ref<HTMLTextAreaElement | null>(null);
+
+watch(() => props.reveal, (r) => {
+  if (!r) return;
+  nextTick(() => {
+    if (r.at.target === 'header-params') focusFieldAt(paramsInputRef.value, r.at.start, r.at.end);
+    else if (r.at.target === 'raw') focusFieldAt(rawTextareaRef.value, r.at.start, r.at.end);
+  });
+});
 
 const questKind = computed<QuestKind | null>(() => {
   if (props.block.kind !== 'template') return null;
@@ -305,7 +351,7 @@ function onSceneUpdate(newScene: SceneBlock) {
         <InputText :model-value="(block as any).id" @update:model-value="(v: any) => updateHeader('id', v ?? '')"
           placeholder="id" class="id-input" :disabled="locked"
           :class="{ 'input-search-hit': !!(block as any).id && inputMatchesSearch(kindSigil[block.kind] + (block as any).id) }" />
-        <InputText v-if="block.kind !== 'room'" :model-value="(block as any).paramsRaw ?? ''"
+        <InputText v-if="block.kind !== 'room'" ref="paramsInputRef" :model-value="(block as any).paramsRaw ?? ''"
           @update:model-value="(v: any) => updateHeader('paramsRaw', v ?? '')" placeholder="{params}"
           class="params-input"
           :class="{ 'params-input--error': paramsHasIssue, 'input-search-hit': inputMatchesSearch((block as any).paramsRaw) }" />
@@ -325,12 +371,13 @@ function onSceneUpdate(newScene: SceneBlock) {
 
     <!-- Raw body -->
     <div v-if="block.kind === 'raw'" class="raw-body">
-      <textarea class="raw-textarea" :value="block.text" @input="(e: any) => updateRawText(e.target.value)"
-        spellcheck="false" rows="3" />
+      <textarea ref="rawTextareaRef" class="raw-textarea" :value="block.text"
+        @input="(e: any) => updateRawText(e.target.value)" spellcheck="false" rows="3" />
     </div>
 
     <!-- Scene body — dedicated grid editor -->
-    <SceneEditor v-else-if="block.kind === 'scene'" :block="block" @update:block="onSceneUpdate" />
+    <SceneEditor v-else-if="block.kind === 'scene'" :block="block" :issues="issues" :reveal="sceneReveal"
+      @update:block="onSceneUpdate" />
 
     <!-- Encounter / Template body — flat row groups -->
     <div v-else-if="block.kind === 'encounter' || block.kind === 'template'" ref="bodyRef" class="block-body">
@@ -339,13 +386,15 @@ function onSceneUpdate(newScene: SceneBlock) {
         <div v-if="group.kind === 'text'" class="text-group">
           <RichContentEditor :model-value="group.value"
             @update:model-value="(v: string) => updateTextGroup(v)"
-            placeholder="content…" class="text-group-area" />
+            placeholder="content…" class="text-group-area"
+            :issue-ranges="proseIssueRanges" :reveal="proseReveal" />
         </div>
         <RowEditor v-else :row="(block.rows[group.rowIndex] as Row)" :index="group.rowIndex"
           :can-move-up="canMoveStruct(group.rowIndex, -1)" :can-move-down="canMoveStruct(group.rowIndex, 1)"
           @update:row="(r: Row) => updateRow(group.rowIndex, r)" @remove="removeRow(group.rowIndex)"
           @move-up="moveRow(group.rowIndex, -1)" @move-down="moveRow(group.rowIndex, 1)"
           :scene-exists="sceneExistsForRow(group.rowIndex)"
+          :params-error="rowParamsErrors.has(group.rowIndex)" :reveal="rowReveal(group.rowIndex)"
           @insert-scene="onInsertSceneForChoice(group.rowIndex)"
           v-bind="{ 'data-row-kind': (block.rows[group.rowIndex] as Row).kind, 'data-row-uid': (block.rows[group.rowIndex] as any).__uid }" />
       </template>
@@ -472,6 +521,7 @@ function onSceneUpdate(newScene: SceneBlock) {
   white-space: pre-line;
 }
 
+input.params-input--error,
 .params-input--error :deep(input) {
   outline: 2px solid #d32f2f;
   outline-offset: -1px;

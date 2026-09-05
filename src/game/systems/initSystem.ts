@@ -5,6 +5,7 @@ import { gameLogger } from '../utils/logger';
 import { Character } from '../core/character/character';
 import { AssetObject } from '../../schemas/assetSchema';
 import { CharacterSceneSlotObject } from '../../schemas/characterSceneSlotSchema';
+import { CharacterTemplateObject } from '../../schemas/characterTemplateSchema';
 import { Status, StatusInstance } from '../core/character/status';
 // Import Vue components for registration
 import ExplorationComponent from '../views/states/exploration/Exploration.vue';
@@ -13,6 +14,7 @@ import BattleComponent from '../views/states/battle/Battle.vue';
 import QuestsTab from '../views/progression/QuestsTab.vue';
 import CharacterTab from '../views/progression/CharacterTab.vue';
 import CharacterSheet from '../views/progression/CharacterSheet.vue';
+import InventoryComponent from '../views/progression/InventoryComponent.vue';
 import InventoryHeader from '../views/progression/InventoryHeader.vue';
 import GalleryTab from '../views/progression/GalleryTab.vue';
 import EncyclopediaTab from '../views/progression/EncyclopediaTab.vue';
@@ -29,6 +31,8 @@ import DebugProperties from '../views/debug_containers/DebugProperties.vue';
 import DebugActors from '../views/debug_containers/DebugActors.vue';
 import OverlayNavigation from '../views/overlays/OverlayNavigation.vue';
 import OverlayExchange from '../views/overlays/OverlayExchange.vue';
+import DropItemPopup from '../views/popups/DropItemPopup.vue';
+import ChooseItemPopup from '../views/popups/ChooseItemPopup.vue';
 import BackComponent from '../views/navigation-toolbar/Back.vue';
 import EncounterNavComponent from '../views/navigation-toolbar/EncounterNav.vue';
 import DungeonNameComponent from '../views/navigation-toolbar/DungeonName.vue';
@@ -43,6 +47,10 @@ import { Item } from '../core/character/item';
 import { Dungeon } from '../core/dungeon/dungeon';
 import { Inventory } from '../core/character/inventory';
 import { Choice } from '../core/content/choice';
+import { ItemRecipeObject } from '../../schemas/itemRecipeSchema';
+import { ItemTemplateObject } from '../../schemas/itemTemplateSchema';
+import AccoladesTab from '../views/progression/AccoladesTab.vue';
+import AccoladeToast from '../views/ui-container/AccoladeToast.vue';
 
 // ============================================
 // CORE EMITTER SIGNATURES
@@ -55,15 +63,27 @@ export const CORE_EMITTER_SIGNATURES = {
     "game_initiated": (): boolean | void => { },
     "game_save": (saveName: string): boolean | void => { },
     "save_load_before": (saveData: any): boolean | void => { }, // fires with the raw save JSON immediately before deserialization. Listeners may mutate saveData in place to migrate old-shape data. Return false to abort the load entirely.
+    // fires inside the save-migration pass (registerSaveMigration), after every declared section has
+    // synced and every item_migrate has fired, before the engine re-binds equip statuses and puts
+    // resource pools back. Only when the pass actually runs: old save, or any load in dev mode.
+    "save_migrated": (): boolean | void => { },
     "html_mount": (): boolean | void => { },
     "state_change": (stateId: string, newValue: any, oldValue: any): boolean | void => { },
     "dungeon_create": (dungeon: Dungeon): boolean | void => { }, // will be triggered when a dungeon is created, including on loading a save file(because dungeons are not serialized).
-    "dungeon_enter": (dungeonId: string, roomId: string): boolean | void => { },
+    // fires on a CROSS-dungeon entry only, before ANY dungeon state mutates — the movement block,
+    // the same-dungeon short-circuit and the key gate have all already passed, so a listener here
+    // sees the player still standing in the old dungeon. Return false to abort the entry cleanly.
+    // Room-to-room movement inside the current dungeon fires room_enter_before instead.
+    "dungeon_enter_before": (dungeonId: string, roomId: string): boolean | void => { },
+    "dungeon_enter_after": (dungeonId: string, roomId: string): boolean | void => { },
     "room_enter_before": (roomId: string, dungeonId: string): boolean | void => { },
     "room_enter_after": (roomId: string, dungeonId: string): boolean | void => { },
     "encounter_selected": (encounterId: string, dungeonId: string): boolean | void => { }, // an encounter was selected — clicked on the map / screen, or cycled to with the toolbar. Props never fire. Return false to block the selection.
     "encounter_discovered": (encounterId: string, dungeonId: string): boolean | void => { }, // a hidden `@x{discover: "perception#6"}` encounter was revealed; fires once, on the room entry that reveals it.
     "encounter_collected": (encounterId: string, itemSpec: string, dungeonId: string): boolean | void => { }, // a collectable encounter was collected. Regrow needs no listener — time plugins call game.tickCollectables instead.
+    "collectable_resolve": (request: { dungeonId: string, encounterId: string, pool: string, itemId: string | null }): boolean | void => { }, // a collectable with a collect_pool asks for its item during dungeon creation (so also on save load). A listener claims the request by setting request.itemId to an item template id; listeners must skip requests already carrying one. An unanswered request degrades the encounter to a plain one with a logged error.
+    "item_discovered": (itemId: string): boolean | void => { }, // an item was discovered (recipe learned from its scroll, book read to the last page, painting viewed). Fires once per item per save; drives the item-card check mark.
+    "key_used": (keyItemId: string, targetId: string): boolean | void => { }, // a key was auto-used on a locked room or inventory. targetId is "dungeonId.roomId" for rooms, the inventory id for chests. Informational — the unlock already happened.
     "scene_play_before": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
     // fires when a committed scene is about to run its paragraph actions (after gates/redirects,
     // before the actions/assets) — the place to stage default actors so they precede the scene's assets.
@@ -85,8 +105,29 @@ export const CORE_EMITTER_SIGNATURES = {
     // listeners can reassign character.renderedLayers to filter layers
     "character_render": (character: Character): boolean | void => { },
     "asset_render": (asset: AssetObject): boolean | void => { },
+    // triggered while an asset's image layers are built, on EVERY render path — the staged
+    // scene, the gallery, the fullscreen overlay, the editor preview. Listeners receive a
+    // throwaway copy and may filter/reorder `asset.layers` or swap an entry for
+    // { file, classes } to put css classes on one layer. Must be PURE: it runs inside a
+    // computed, so writing reactive state from a listener risks a render loop, and the copy
+    // is discarded rather than staged or saved.
+    "asset_resolve": (asset: AssetObject): boolean | void => { },
 
     "item_create": (item: Item): boolean | void => { },
+    // fires for every inventory item the save-migration pass visits, right after its template-owned
+    // fields were reset (per the declared scopes), with a copy of its template. Per-instance
+    // derivations done at item_create (level scaling, runtime-added choices) are put back here —
+    // items are deserialized, so item_create never fires for them on load.
+    "item_migrate": (item: Item, template: ItemTemplateObject): boolean | void => { },
+    // Fired before an item is discarded via the drop_item action. Return false in a listener to
+    // veto the drop (e.g. protect key items).
+    "item_drop_before": (item: Item, character: Character): boolean | void => { },
+    // Fired to decide whether a DISCARD AFFORDANCE renders for an item — the item card's Drop
+    // choice and the experience plugin's reward-panel trash button both ask. Return false to hide
+    // it. The GAME's veto only; the engine's own rules live in Item.isDroppable(), which each of
+    // those UIs checks alongside this.
+    // Pure predicate: it runs on every render, so listeners must only return, never act.
+    "item_drop_render": (item: Item, character?: Character): boolean | void => { },
     //"item_destroy": (item: Item): boolean | void => { },
     "item_equip_before": (item: Item, character: Character): boolean | void => { },
     "item_equip_after": (item: Item, character: Character): boolean | void => { },
@@ -99,11 +140,17 @@ export const CORE_EMITTER_SIGNATURES = {
     "inventory_close": (inventory: Inventory): boolean | void => { },
     "inventory_apply": (inventory: Inventory): boolean | void => { },
     "inventory_transfer": (inventory: Inventory, targetInventory: Inventory, item: Item, quantity: number, isTrade: boolean): boolean | void => { },
+    "inventory_transfer_after": (inventory: Inventory, targetInventory: Inventory, item: Item, quantity: number, isTrade: boolean): boolean | void => { }, // post-mutation counterpart of inventory_transfer — the items already moved. item is the live target-side stack (possibly a pre-existing stack the transfer merged into). Informational.
+    "currency_change": (inventory: Inventory, currencyId: string, delta: number): boolean | void => { }, // a trade moved currency in or out of an inventory (negative = paid, positive = received); fires once per currency id, after the stacks changed, and only for genuine is_currency templates. Informational.
+    "inventory_craft": (inventory: Inventory, recipe: ItemRecipeObject): boolean | void => { }, // a recipe was crafted — inputs consumed and outputs added. Informational.
+    "quest_updated": (questId: string, goalId: string, result: { isNewQuest: boolean, wasQuestCompleted: boolean, isQuestCompletedNow: boolean, questTitle: string }, dungeonId: string): boolean | void => { }, // a quest log line landed (deduped — repeats of the same log don't fire). Informational.
+    "accolade_completed": (accoladeId: string, points: number): boolean | void => { }, // an achievement's progress reached its target. The engine scores the points and shows the notification; grant any in-game reward from here. Informational. // a quest log line landed (deduped — repeats of the same log don't fire). Informational.
     "trade_init": (traderInventory: Inventory, item: Item): boolean | void => { }, // runs over each item in the exchange inventory after it is opened OR the trade is opened
     "recipe_learned": (recipeId: string): boolean | void => { }, // triggered when a recipe is learned
     "skill_learned": (skillTreeId: string, skillId: string, level: number): boolean | void => { }, // triggered when a skill is learned
     "skill_unlearned": (skillTreeId: string, skillId: string): boolean | void => { }, // triggered when a skill is unlearned
 
+    "status_apply_before": (character: Character, status: Status, applyArgs?: { stacks?: number; duration?: number; source?: string }): boolean | void => { }, // triggered before a status is applied, including reapplies. Return false to prevent it. Mutate applyArgs (when present) to change the stacks/duration that land
     "status_added": (character: Character, status: Status): boolean | void => { }, // triggered after a new status is added to a character (reapplies don't fire this)
     "status_removed": (character: Character, status: Status): boolean | void => { }, // triggered after a status is removed from a character
     "status_expired": (character: Character, status: Status, instance: StatusInstance): boolean | void => { }, // triggered per expired instance when tickStatusDuration drops its duration to <= 0
@@ -127,6 +174,7 @@ export class InitSystem {
     public init(): void {
         this.registerStates();
         this.registerEmitters();
+        this.game.accoladeSystem.init(this.game, { tab: AccoladesTab, toast: AccoladeToast });
         this.registerComponents();
         this.registerConditions();
         this.registerPlaceholders();
@@ -225,6 +273,14 @@ export class InitSystem {
         this.game.registerState('block_scene_advance', false);
         this.game.registerState('block_party_inventory', false);
         this.game.registerState('show_character_list', true);
+        // Suppress the scene actor rail for a beat without hiding the whole event layer the way
+        // hide_events does. The rail already hides itself when nothing is staged.
+        this.game.registerState('hide_actor_list', false);
+        // The player's own collapse/expand of that rail, behind the eye icon on the panel itself.
+        // Deliberately NOT named show_actor_list: it sits next to hide_actor_list above, and two
+        // near-identical names with opposite polarity is a trap. This one only folds the faces
+        // away — hide_actor_list is what removes the panel outright.
+        this.game.registerState('actor_list_expanded', true);
         this.game.registerState('progression_state', null);
         this.game.registerState('progression_sub_state', null);
         this.game.registerState('suppress_character_progression', false);
@@ -245,6 +301,12 @@ export class InitSystem {
         this.game.registerState('disable_saves', false);
         this.game.registerState('replay_mode', false);
         this.game.registerState('replay_mode_unlock_choices', false);
+        // Opens every gallery scene for replay, including ones the player never reached.
+        this.game.registerState('replay_mode_unlock_scenes', false);
+        // Freezes accolade progress writes — set by debug tooling so seeding doesn't earn achievements.
+        this.game.registerState('accolades_frozen', false);
+        // Achievements tab view filter: 'all' | 'earned' | 'locked'.
+        this.game.registerState('accolades_filter', 'all');
 
         this.game.registerState('max_log', 40);
 
@@ -262,6 +324,22 @@ export class InitSystem {
     /**
      * Register all core event emitters
      */
+    // Open a book page: update the reading state + bookmark, then play the page's scene.
+    // The last page (no following paragraph line) discovers the item and clears the bookmark.
+    private playBookPage(itemId: string, dungeonId: string, base: string, page: number): void {
+        this.game.setState('reading_book', { itemId, dungeonId, base, page });
+        const bookmarks = { ...((this.game.getState('book_bookmarks') || {}) as Record<string, number>) };
+        const nextPageExists = !!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.${page + 1}`);
+        if (nextPageExists) {
+            bookmarks[itemId] = page;
+        } else {
+            delete bookmarks[itemId];
+            this.game.itemSystem.discoverItem(itemId);
+        }
+        this.game.setState('book_bookmarks', bookmarks);
+        this.game.dungeonSystem.playSceneResolver(`${base}.1.1.${page}`, dungeonId);
+    }
+
     private registerEmitters(): void {
         const coreEmitters = Object.keys(CORE_EMITTER_SIGNATURES) as string[];
         for (const emitterName of coreEmitters) {
@@ -326,16 +404,32 @@ export class InitSystem {
             slot: 'overlay',
             component: OverlayExchange
         });
+
+        // Modal confirm (+ quantity slider for stacks) for the drop_item action.
+        this.game.coreSystem.addComponent({
+            id: 'drop_item_popup',
+            slot: 'popup',
+            component: DropItemPopup
+        });
+
+        // Item picker for the choose_item scene action.
+        this.game.coreSystem.addComponent({
+            id: 'choose_item_popup',
+            slot: 'popup',
+            component: ChooseItemPopup
+        });
     }
 
     /**
      * Register progression tab components
      */
     private registerProgressionComponents(): void {
+        const global = Global.getInstance();
+
         this.game.coreSystem.addComponent({
             id: 'quests',
             slot: 'progression-tabs',
-            title: 'Quests',
+            title: global.getString('progression.tab.quests'),
             component: QuestsTab,
             order: 0
         });
@@ -343,7 +437,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'character',
             slot: 'progression-tabs',
-            title: 'Characters',
+            title: global.getString('progression.tab.party'),
             component: CharacterTab,
             order: 10
         });
@@ -351,7 +445,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'gallery',
             slot: 'progression-tabs',
-            title: 'Gallery',
+            title: global.getString('progression.tab.gallery'),
             component: GalleryTab,
             order: 20
         });
@@ -359,7 +453,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'encyclopedia',
             slot: 'progression-tabs',
-            title: 'Encyclopedia',
+            title: global.getString('progression.tab.encyclopedia'),
             component: EncyclopediaTab,
             order: 30
         });
@@ -369,17 +463,33 @@ export class InitSystem {
      * Register character tab components (sub-tabs within character sheet)
      */
     private registerCharacterTabComponents(): void {
+        const global = Global.getInstance();
+
         this.game.coreSystem.addComponent({
             id: 'character-sheet',
             slot: 'character-tabs',
-            title: 'Character Sheet',
+            title: global.getString('character.tab.character_sheet'),
             component: CharacterSheet
+        });
+
+        // The party inventory gets the whole tab, so it drops the grid's default 400px cap and
+        // fills the height instead.
+        this.game.coreSystem.addComponent({
+            id: 'inventory',
+            slot: 'character-tabs',
+            title: global.getString('character.tab.inventory'),
+            component: InventoryComponent,
+            order: 2,
+            props: {
+                inventory_id: PARTY_INVENTORY_ID,
+                maxHeight: 'none'
+            }
         });
 
         this.game.coreSystem.addComponent({
             id: 'skill-trees',
             slot: 'character-tabs',
-            title: 'Skills',
+            title: global.getString('character.tab.skills'),
             component: SkillTree,
             order: 3
         });
@@ -398,10 +508,12 @@ export class InitSystem {
      * Register debug tab components
      */
     private registerDebugComponents(): void {
+        const global = Global.getInstance();
+
         this.game.coreSystem.addComponent({
             id: 'debug-options',
             slot: 'debug-tabs',
-            title: 'Options',
+            title: global.getString('debug.tab.options'),
             component: DebugOptions,
             order: 1
         });
@@ -409,7 +521,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-dungeons',
             slot: 'debug-tabs',
-            title: 'Dungeons',
+            title: global.getString('debug.tab.dungeons'),
             component: DebugDungeons,
             order: 2
         });
@@ -417,7 +529,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-characters',
             slot: 'debug-tabs',
-            title: 'Characters',
+            title: global.getString('debug.tab.characters'),
             component: DebugCharacters,
             order: 3
         });
@@ -425,7 +537,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-choices',
             slot: 'debug-tabs',
-            title: 'Debug Choices',
+            title: global.getString('debug.tab.choices'),
             component: DebugChoices,
             order: 4
         });
@@ -433,7 +545,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-actions',
             slot: 'debug-tabs',
-            title: 'Execute Actions',
+            title: global.getString('debug.tab.actions'),
             component: DebugActions,
             order: 5
         });
@@ -441,7 +553,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-registry',
             slot: 'debug-tabs',
-            title: 'Registry',
+            title: global.getString('debug.tab.registry'),
             component: DebugRegistry,
             order: 5
         });
@@ -449,7 +561,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-inventories',
             slot: 'debug-tabs',
-            title: 'Inventories',
+            title: global.getString('debug.tab.inventories'),
             component: DebugInventories,
             order: 6
         });
@@ -457,7 +569,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-stores',
             slot: 'debug-tabs',
-            title: 'Stores',
+            title: global.getString('debug.tab.stores'),
             component: DebugStores,
             order: 7
         });
@@ -465,7 +577,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-properties',
             slot: 'debug-tabs',
-            title: 'Properties',
+            title: global.getString('debug.tab.properties'),
             component: DebugProperties,
             order: 8
         });
@@ -473,7 +585,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'debug-actors',
             slot: 'debug-tabs',
-            title: 'Actors',
+            title: global.getString('debug.tab.actors'),
             component: DebugActors,
             order: 9
         });
@@ -607,6 +719,12 @@ export class InitSystem {
                 itemId = parts[1];
             }
             return this.game.itemSystem.getInventory(inventoryId)?.getItemQuantity(itemId) ?? 0;
+        });
+
+        // Whether the last choose_item pick was this template id ('' after a cancel).
+        // Usage: if{_chosen_item(key_mansion) = false}{redirect: "shift:1"} fi{}
+        this.game.registerCondition("_chosen_item", (param: string) => {
+            return this.game.getState('chosen_item_id') === param;
         });
 
         this.game.registerCondition("_room_visited", (param: string) => {
@@ -769,6 +887,41 @@ export class InitSystem {
             return learned?.level || 0;
         });
 
+        // Does the character currently have an ability? 1 if yes, 0 if not. Reads the FINAL ability
+        // set, so status-granted and item-granted abilities count, and one hidden behind an unmet
+        // meta.require_status reads as absent — the same view the ability bar shows.
+        // Usage: _ability(mc.dryad_fire_ult) = 1
+        //        _ability(fireball) = 1            (uses selected character)
+        this.game.registerCondition("_ability", (path: string) => {
+            const parts = path.split(".");
+
+            let characterId: string;
+            let abilityId: string;
+
+            if (parts.length === 1) {
+                characterId = this.game.getState('selected_character');
+                if (!characterId) {
+                    gameLogger.error(`[_ability] No selected character for path: "${path}"`);
+                    return 0;
+                }
+                abilityId = parts[0];
+            } else if (parts.length === 2) {
+                characterId = parts[0];
+                abilityId = parts[1];
+            } else {
+                gameLogger.error(`[_ability] Invalid path format: "${path}". Use "abilityId" or "characterId.abilityId"`);
+                return 0;
+            }
+
+            const character = this.game.getCharacter(characterId);
+            if (!character) {
+                gameLogger.error(`[_ability] Character "${characterId}" not found`);
+                return 0;
+            }
+
+            return character.getAbility(abilityId) ? 1 : 0;
+        });
+
     }
 
 
@@ -919,6 +1072,18 @@ export class InitSystem {
             choiceModifier: (choice: Choice) => {
                 choice.name = `[wip] ${choice.name}`;
                 choice.isAvailable = computed(() => false);
+            }
+        });
+
+        // Encumbrance-sensitive travel choice: greys out + becomes unclickable while the party bag
+        // is overweight (a proactive affordance — the deep enterRoom/enterDungeon guard is the real
+        // enforcement). Reactive: getInventory returns the reactive proxy, so maxWeight and item
+        // weight both drive it. No-op unless a game caps the party inventory.
+        this.game.registerAction("enc_sensitive", {
+            choiceModifier: (choice: Choice) => {
+                choice.isAvailable = computed(
+                    () => !this.game.itemSystem.getInventory(PARTY_INVENTORY_ID)?.isOverCapacity()
+                );
             }
         });
         /*
@@ -1142,33 +1307,15 @@ export class InitSystem {
                         const assetId = bracketMatch[1].trim();
                         const propsString = bracketMatch[2];
 
-                        // Check if asset already exists in scene
-                        const existingAsset = this.game.dungeonSystem.assets.value.find(a => a.id === assetId);
-
+                        // Delegate to addAssets for both create and update — it already branches
+                        // on whether the id is staged, and it revives an asset caught mid-exit.
+                        // Duplicating the lookup here would bypass that revive and leave the
+                        // backdrop stranded for `{asset: "!bg"}` followed by `{asset: "bg"}`.
                         if (propsString) {
-                            // Has inline properties - parse them
                             const inlineProps = this.game.dungeonSystem.parseInlineProperties(propsString);
-
-                            if (existingAsset) {
-                                // Update existing asset
-                                Object.assign(existingAsset, inlineProps);
-                                this.game.trigger('asset_render', existingAsset);
-                                // add to discovered assets for the gallery system
-                                this.game.coreSystem.addAssetToGallery(existingAsset);
-                                gameLogger.info(`[asset] Updated asset: "${assetId}"`);
-                            } else {
-                                // Create new asset with merged properties
-                                this.game.dungeonSystem.addAssets({ id: assetId, ...inlineProps });
-                            }
+                            this.game.dungeonSystem.addAssets({ id: assetId, ...inlineProps });
                         } else {
-                            // No inline properties
-                            if (existingAsset) {
-                                // Asset already exists, skip
-                                gameLogger.info(`[asset] Asset "${assetId}" already in scene, skipping`);
-                            } else {
-                                // Add new asset from template
-                                this.game.dungeonSystem.addAssets(assetId);
-                            }
+                            this.game.dungeonSystem.addAssets(assetId);
                         }
                     }
                 } else {
@@ -1374,6 +1521,42 @@ export class InitSystem {
             }
         });
 
+        // List a character in the scene's actor panel without staging any art for them — someone
+        // present in the fiction who has no portrait on stage, or who should be inspectable before
+        // they appear. Mirrors `actor`'s syntax: bare ids add, `!id` removes, `false` clears.
+        // Scene-scoped, so it clears when the actors do. Staged actors are listed automatically and
+        // do not need this; listing one anyway is harmless (the panel de-duplicates).
+        this.game.registerAction("panel_actor", {
+            action: (data: string | boolean) => {
+                const dungeonSystem = this.game.dungeonSystem;
+                if (data === false) {
+                    dungeonSystem.panelActors.value = [];
+                    return;
+                }
+                if (typeof data !== 'string') {
+                    gameLogger.error('[panel_actor] expects a comma-separated id string or false, got', data);
+                    return;
+                }
+                const next = [...dungeonSystem.panelActors.value];
+                for (const spec of this.game.logicSystem.getParts(data)) {
+                    const id = spec.trim();
+                    if (!id) continue;
+                    if (id.startsWith('!')) {
+                        const removeId = id.substring(1).trim();
+                        const at = next.indexOf(removeId);
+                        if (at !== -1) next.splice(at, 1);
+                        continue;
+                    }
+                    if (!this.game.getCharacter(id)) {
+                        gameLogger.error(`[panel_actor] Character "${id}" not found — not listed.`);
+                        continue;
+                    }
+                    if (!next.includes(id)) next.push(id);
+                }
+                dungeonSystem.panelActors.value = next;
+            }
+        });
+
         this.game.registerAction("quest", {
             action: (questPath: string) => {
                 // Support multiple quest logs separated by commas
@@ -1510,20 +1693,36 @@ export class InitSystem {
         });
 
 
-        this.game.registerAction("create_character", (data: any) => {
-            if (!data.id) {
-                throw new Error("Character id is required when creating a character.");
-            }
+        // Accepts {create_character: "villager"} / "villager, guard" (id doubles as template id)
+        // as well as {create_character: {id: "npc1", template: "villager", party: true}}.
+        this.game.registerAction("create_character", (data: string | Record<string, any>) => {
+            for (const spec of this.toCharacterSpecs(data, true)) {
+                if (!spec.id) {
+                    throw new Error("Character id is required when creating a character.");
+                }
 
-            let character
-            if (data.template) {
-                character = this.game.characterSystem.createCharacter(data.id, data.template);
-            } else {
-                character = this.game.characterSystem.createCharacter(data.id, data);
-            }
-            gameLogger.info(`[create_character] Created character "${data.id}"${data.template ? ` from template "${data.template}"` : ''}`);
+                // Checked here, before createCharacter: addCharacter throws on a duplicate id, and
+                // resolveActions has no try/catch — a throw from a room hook aborts enterRoom()
+                // before the room_enter_after trigger, leaving a half-built character behind.
+                if (this.game.characterSystem.getCharacter(spec.id)) {
+                    gameLogger.error(`[create_character] Character "${spec.id}" already exists, skipping`);
+                    continue;
+                }
+                if (spec.template && !this.game.characterSystem.templatesMap.has(spec.template)) {
+                    gameLogger.error(`[create_character] No template found for "${spec.template}"`);
+                    continue;
+                }
 
-            this.game.characterSystem.addCharacter(character, data.party);
+                let character
+                if (spec.template) {
+                    character = this.game.characterSystem.createCharacter(spec.id, spec.template);
+                } else {
+                    character = this.game.characterSystem.createCharacter(spec.id, spec as CharacterTemplateObject);
+                }
+                gameLogger.info(`[create_character] Created character "${spec.id}"${spec.template ? ` from template "${spec.template}"` : ''}`);
+
+                this.game.characterSystem.addCharacter(character, spec.party);
+            }
         });
 
         this.game.registerAction("update_character", (data: any) => {
@@ -1566,36 +1765,52 @@ export class InitSystem {
             gameLogger.info(`[delete_character] Deleted character "${data.id}"`);
         });
 
-        // Accepts {reset_character: "orc"} / "orc, goblin" as well as {reset_character: {id: "orc"}}.
-        this.game.registerAction("reset_character", (data: string | { id?: string }) => {
-            const ids = typeof data === 'string'
-                ? this.game.logicSystem.getParts(data, true).filter(id => id)
-                : [data?.id];
-            if (!ids.length || !ids[0]) {
-                throw new Error("Character id is required when resetting a character.");
-            }
+        // Accepts {reset_character: "orc"} / "orc, goblin" as well as
+        // {reset_character: {id: "orc", template: "orc_veteran", party: false}}.
+        this.game.registerAction("reset_character", (data: string | Record<string, any>) => {
+            for (const spec of this.toCharacterSpecs(data)) {
+                if (!spec.id) {
+                    throw new Error("Character id is required when resetting a character.");
+                }
 
-            for (const id of ids) {
                 // Every state check lives here, not in resetCharacter: resolveActions has no try/catch,
                 // so a throw from a room hook aborts enterRoom() before the room_enter_after trigger.
-                const character = this.game.characterSystem.getCharacter(id!);
+                const templates = this.game.characterSystem.templatesMap;
+                if (spec.template && !templates.has(spec.template)) {
+                    gameLogger.error(`[reset_character] No template found for "${spec.template}"`);
+                    continue;
+                }
+
+                const character = this.game.characterSystem.getCharacter(spec.id);
+                let fresh: Character;
                 if (!character) {
-                    // Nothing live — resetCharacter falls back to id-as-template-id.
-                    if (!this.game.characterSystem.templatesMap.has(id!)) {
-                        gameLogger.error(`[reset_character] No live character or template found for "${id}"`);
+                    // Nothing live — fall back to id-as-template-id, so the same call creates or rebuilds.
+                    const templateId = spec.template || spec.id;
+                    if (!templates.has(templateId)) {
+                        gameLogger.error(`[reset_character] No live character or template found for "${spec.id}"`);
                         continue;
                     }
-                    this.game.characterSystem.resetCharacter(id!);
-                    gameLogger.warn(`[reset_character] "${id}" was not live, created from template`);
-                    continue;
+                    fresh = this.game.characterSystem.resetCharacter(spec.id, templateId);
+                    gameLogger.warn(`[reset_character] "${spec.id}" was not live, created from template "${templateId}"`);
+                } else {
+                    const templateId = spec.template || character.templateId;
+                    if (!templateId || !templates.has(templateId)) {
+                        gameLogger.error(`[reset_character] Character "${spec.id}" has no known template ("${templateId}")`);
+                        continue;
+                    }
+                    fresh = this.game.characterSystem.resetCharacter(character, templateId);
+                    gameLogger.info(`[reset_character] Reset character "${spec.id}" from template "${templateId}"`);
                 }
-                const templateId = character.templateId;
-                if (!templateId || !this.game.characterSystem.templatesMap.has(templateId)) {
-                    gameLogger.error(`[reset_character] Character "${id}" has no known template ("${templateId}")`);
-                    continue;
+
+                // Party membership is preserved by resetCharacter; only an explicit key overrides it.
+                if (spec.party !== undefined) {
+                    const inParty = this.game.characterSystem.isCharacterInParty(fresh);
+                    if (spec.party == true && !inParty) {
+                        this.game.characterSystem.addToParty(fresh);
+                    } else if (spec.party != true && inParty) {
+                        this.game.characterSystem.removeFromParty(fresh);
+                    }
                 }
-                this.game.characterSystem.resetCharacter(character);
-                gameLogger.info(`[reset_character] Reset character "${id}" from template "${templateId}"`);
             }
         });
 
@@ -1614,23 +1829,26 @@ export class InitSystem {
                     for (const item of group.items) {
                         if (item.remove) {
                             const existing = character.getStatus(item.name);
-                            const statusName = existing?.name || existing?.id || item.name;
                             character.removeStatus(item.name);
-                            if (announce) this.game.addFlash(Global.getInstance().getString('status.removed', {
+                            // Only announce a removal that happened. A room description clearing a
+                            // status on entry runs on every entry, so arriving without the status
+                            // would otherwise flash a line naming it by its raw id.
+                            // The flash footer runs through v-script, so the lore link renders as a
+                            // hoverable status card.
+                            if (announce && existing) this.game.addFlash(Global.getInstance().getString('status.removed', {
                                 character: characterName,
-                                status: statusName,
+                                status: `[[status:${existing.id || item.name}]]`,
                             }));
                         } else {
                             try {
                                 const status = this.game.createStatus(item.name);
                                 character.addStatus(status);
-                                const statusName = status?.name || status?.id || item.name;
                                 const lineId = status?.polarity === 'positive' ? 'status.added.positive'
                                     : status?.polarity === 'negative' ? 'status.added.negative'
                                         : 'status.added.neutral';
                                 if (announce) this.game.addFlash(Global.getInstance().getString(lineId, {
                                     character: characterName,
-                                    status: statusName,
+                                    status: `[[status:${status?.id || item.name}]]`,
                                 }));
                             } catch (e) {
                                 gameLogger.error(`[status] cannot apply "${item.name}" to "${group.characterId}": ${e}`);
@@ -1770,10 +1988,55 @@ export class InitSystem {
                         continue;
                     }
 
+                    // Capture the level as a NUMBER, not the entry: learnSkill mutates the live
+                    // `learnedSkills` object in place, so a held reference would already read the
+                    // new level by the time we compare.
+                    const before = character.learnedSkills.find(s => s.skillTreeId === treeId && s.id === slotId)?.level ?? 0;
+
                     character.learnSkill(treeId, slotId, level);
+
+                    const after = character.learnedSkills.find(s => s.skillTreeId === treeId && s.id === slotId)?.level ?? 0;
+                    // learnSkill silently no-ops at max_upgrade_level, and a room description
+                    // re-runs its actions on every entry — announce only a level that moved.
+                    if (after <= before) continue;
+
+                    // Flashes are party-only, the same contract `status` keeps: the player has no
+                    // stake in a skill landing on an NPC or an off-screen character.
+                    if (this.game.isCharacterInParty(character)) {
+                        const skillId = this.game.characterSystem.skillTreesMap.get(treeId)?.skills?.find(s => s.id === slotId)?.skill;
+                        const skillName = (skillId && this.game.characterSystem.skillSlotsMap.get(skillId)?.name) || slotId;
+                        // Three lines, not two: `#level` on an UNLEARNED slot lands several levels at
+                        // once, and picking on `before` alone would drop the level the author asked for.
+                        const lineId = before ? 'skill.upgraded'
+                            : after > 1 ? 'skill.learned.level'
+                                : 'skill.learned';
+                        this.game.addFlash(Global.getInstance().getString(lineId, {
+                            skill: skillName,
+                            level: after,
+                        }));
+                    }
                 }
             }
         });
+    }
+
+    /**
+     * Normalize a create_character / reset_character payload into a list of specs.
+     * `"a, b"` becomes one spec per id. Objects pass through untouched, so create_character can
+     * still treat the object itself as an inline template body.
+     * Arrays need no handling here: resolveActions already runs the action once per element.
+     * @param templateFromId - fill `template` with the id, the shape createDefaultEntities uses.
+     *        create_character needs it (nothing else names a template); reset_character must not
+     *        have it, or an explicit id would shadow the live character's own templateId —
+     *        `orc_boss_2` built from `orc` has to keep resetting to `orc`.
+     */
+    private toCharacterSpecs(data: string | Record<string, any>, templateFromId: boolean = false): Record<string, any>[] {
+        if (typeof data === 'string') {
+            return this.game.logicSystem.getParts(data, true)
+                .filter(id => id)
+                .map(id => templateFromId ? { id, template: id } : { id });
+        }
+        return [data || {}];
     }
 
     /**
@@ -1959,6 +2222,7 @@ export class InitSystem {
             }
 
             this.game.itemSystem.addLearnedRecipe(recipeId);
+            this.game.itemSystem.discoverItem(item.id);
             inventory?.removeItem(item);
             this.game.showNotification(Global.getInstance().getString('recipe.learned', { recipe: recipeName }));
         });
@@ -2003,6 +2267,10 @@ export class InitSystem {
                 if (!entry?.status) continue;
                 try {
                     const status = this.game.createStatus(entry.status);
+                    // A consumable's status wears the icon of the item that applied it, so game data
+                    // does not have to duplicate the art on both. Recorded as an id — see
+                    // Status.displayImage. A status that defines its own image keeps it.
+                    if (!status.image) status.iconSource = item.id;
                     character.addStatus(status, { stacks: entry.stacks ?? 1 });
                 } catch (e) {
                     gameLogger.error(`[consume_item] cannot apply status "${entry.status}" from item "${item.id}": ${e}`);
@@ -2044,7 +2312,7 @@ export class InitSystem {
             this.game.trigger('item_consume_after', item, character);
 
             const itemName = item.getTrait('name') || item.id;
-            const rarity = item.attributes['rarity'] || '';
+            const rarity = item.getRarity() || '';
             const rarityClass = rarity ? `item-name rarity_${rarity}` : '';
             const itemHtml = `<b class="${rarityClass}">${itemName}</b>`;
             Global.getInstance().addNotification(
@@ -2053,8 +2321,148 @@ export class InitSystem {
             gameLogger.info(`[consume_item] "${character.id}" consumed "${item.id}"`);
         });
 
+        // Open the drop confirmation popup (quantity slider for stacks). The popup owns the confirm,
+        // the cancellable item_drop_before emitter, and the removal — see DropItemPopup.vue. Items
+        // the render emitter vetoes never reach here; getItemChoices omits their Drop choice.
+        this.game.registerState('drop_item_pending', null);
+        this.game.registerAction("drop_item", (data: { itemUid: string; characterId: string }) => {
+            const itemUid = data.itemUid || this.game.getState('active_item');
+            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+            const inventory = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
+            if (!inventory?.getItemByUid(itemUid)) return;
+            this.game.setState('drop_item_pending', { itemUid, characterId });
+            this.game.openPopup('drop_item_popup');
+        });
+
+        // choose_item — DQ9's item picker popup. Pauses the scene (eventDelayed parks it on the
+        // synthetic continue choice), opens a grid of matching party-bag items; the pick lands in
+        // active_item (uid) + chosen_item_id (template id, survives remove: true), then the
+        // follow-up scene plays (or the story resumes). Cancel resumes with chosen_item_id = ''.
+        // Value: "all" | "<category>" | { id?, category?, tags?, remove?, scene?, title? }
+        // (id/category/tags accept a string or an array; branch on _chosen_item(item_id)).
+        this.game.registerState('choose_item_pending', null);
+        this.game.registerState('chosen_item_id', '');
+        this.game.registerAction("choose_item", {
+            eventDelayed: true,
+            action: (value: string | { id?: string | string[]; category?: string | string[]; tags?: string | string[]; remove?: boolean; scene?: string; title?: string }) => {
+                let pending: Record<string, any>;
+                if (typeof value === 'string' || value === true as any) {
+                    pending = (typeof value === 'string' && value !== 'all') ? { category: value } : {};
+                } else {
+                    pending = { ...value };
+                    if (pending.category === 'all') delete pending.category;
+                }
+                this.game.setState('chosen_item_id', '');
+                this.game.setState('choose_item_pending', pending);
+                this.game.openPopup('choose_item_popup');
+            },
+        });
+
+        // ── Books & paintings ──
+        // A book item (trait `book` = scene id in the global dungeon, e.g. "books.eilfiel") reads
+        // through the scene system: paragraphs are pages, choices are Next/Previous/Read again/
+        // Close (created in dungeonSystem.createBookChoices while reading_book is set). Bookmarks
+        // persist per item; finishing the last page discovers the item and clears the bookmark.
+        this.game.registerState('reading_book', null);
+        this.game.registerState('book_bookmarks', {});
+
+        const resolveItemValue = (value: any): Item | null => {
+            const itemUid = value?.itemUid || (value === true || typeof value !== 'string' ? this.game.getState('active_item') : '');
+            if (itemUid) {
+                return this.game.itemSystem.getItemByUid(itemUid) || null;
+            }
+            if (typeof value === 'string') {
+                return this.game.itemSystem.getInventory(PARTY_INVENTORY_ID)?.getItemsById(value)[0] || null;
+            }
+            return null;
+        };
+
+        this.game.registerAction("read_book", (value: any) => {
+            const item = resolveItemValue(value);
+            const ref = (item?.traits as any)?.book;
+            if (!item || !ref) {
+                gameLogger.warn(`[read_book] no item with a book trait resolved from`, value);
+                return;
+            }
+            // The engine's scene-reference grammar owns the parsing — the trait takes anything
+            // the scene action takes (dungeon.room.scene, room.scene, full #ids, &anchors).
+            const resolved = this.game.dungeonSystem.resolveSceneId(String(ref));
+            if (!resolved.sceneId) {
+                gameLogger.error(`[read_book] book trait "${ref}" on "${item.id}" did not resolve to a scene.`);
+                return;
+            }
+            const dungeonId = resolved.dungeonId || this.game.dungeonSystem.currentDungeonId.value || '';
+            const base = resolved.sceneId.replace(/^#/, '').split('.').slice(0, -3).join('.');
+            if (!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.1`)) {
+                gameLogger.error(`[read_book] scene "#${base}.1.1.1" not found in dungeon "${dungeonId}" (book trait on "${item.id}").`);
+                return;
+            }
+            const bookmarks = (this.game.getState('book_bookmarks') || {}) as Record<string, number>;
+            this.playBookPage(item.id, dungeonId, base, bookmarks[item.id] || 1);
+        });
+
+        this.game.registerAction("read_page", (page: number) => {
+            const reading = this.game.getState('reading_book') as { itemId: string; dungeonId: string; base: string; page: number } | null;
+            if (!reading || typeof page !== 'number') {
+                return;
+            }
+            this.playBookPage(reading.itemId, reading.dungeonId, reading.base, page);
+        });
+
+        this.game.registerAction("read_close", () => {
+            this.game.setState('reading_book', null);
+            this.game.dungeonSystem.playScene(null, null);
+        });
+
+        // A painting item (trait `painting` = asset id; the item id when equal/empty) opens a fake
+        // scene: the registered full-size asset as background, the item's description as the scene
+        // text. The scene line is synthesized into the global dungeon on first view. Viewing
+        // discovers the item.
+        this.game.registerAction("view_painting", (value: any) => {
+            const item = resolveItemValue(value);
+            const traitValue = (item?.traits as any)?.painting;
+            if (!item || !traitValue) {
+                gameLogger.warn(`[view_painting] no item with a painting trait resolved from`, value);
+                return;
+            }
+            // Each painting is a one-paragraph scene in the "_paintings" SHADOW dungeon: the
+            // definition accumulates a pre-parsed line per viewed painting and persists in saves
+            // (so a save taken mid-view restores cleanly). Assets stage via the inline {asset}.
+            const assetId = (typeof traitValue === 'string' && traitValue.length) ? traitValue : item.id;
+            const lineId = `#view.${item.id}.1.1.1`;
+            const shadow = this.game.dungeonSystem.shadowDungeons.value.get('_paintings');
+            const existingLines = (Array.isArray(shadow?.content) ? shadow!.content : []) as { id: string; val?: string }[];
+            if (!existingLines.some(line => line.id === lineId)) {
+                const description = (item.traits as any)?.description || '';
+                this.game.dungeonSystem.addShadowDungeon('_paintings', {
+                    content: [...existingLines, { id: lineId, val: `${description}\n{asset: "${assetId}"}` }],
+                });
+            }
+            this.game.itemSystem.discoverItem(item.id);
+            this.game.dungeonSystem.playSceneResolver(`_paintings.view.${item.id}`, null);
+        });
+
+        // A usable item (trait `use_scene` = a scene reference) opens that scene from the party
+        // inventory with the item as the active one, so the scene reads |item| and can spend or
+        // destroy it. Deliberately dumb: no cost, no gating, no consumption — the scene owns all
+        // of that, which is what makes one trait enough for every kind of usable item.
+        this.game.registerAction("use_scene", (value: any) => {
+            const item = resolveItemValue(value);
+            const ref = (item?.traits as any)?.use_scene;
+            if (!item || !ref) {
+                gameLogger.warn(`[use_scene] no item with a use_scene trait resolved from`, value);
+                return;
+            }
+            this.game.coreSystem.setState('active_item', item.uid);
+            this.game.dungeonSystem.playSceneResolver(String(ref), null);
+        });
+
         this.game.registerAction("add_item", (data: string | string[]) => {
             this.game.itemSystem.addItemsBySpec(data);
+        })
+
+        this.game.registerAction("remove_item", (data: boolean | number | string | string[]) => {
+            this.game.itemSystem.removeItemsBySpec(data);
         })
 
         this.game.registerAction("transfer_item", (data: string | string[]) => {
@@ -2093,11 +2501,9 @@ export class InitSystem {
                     gameLogger.error('[collect] missing item spec', value);
                     return;
                 }
-                this.game.itemSystem.addItemsBySpec(spec);
-
-                // The flash lives in the scene-text flow, which is exactly what's NOT on
-                // screen when a map node vanishes — so pickups also get a notification,
-                // item name in its rarity color.
+                // No scene-text flash — the notification below is the pickup's only feedback,
+                // so the room description doesn't double-report when it's on screen.
+                this.game.itemSystem.addItemsBySpec(spec, false);
                 for (const part of spec.split(',').map(s => s.trim()).filter(Boolean)) {
                     const [itemId, rawQty] = part.split('#').map(s => s.trim());
                     const quantity = parseInt(rawQty, 10) || 1;

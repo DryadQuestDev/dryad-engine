@@ -244,3 +244,37 @@ if (data.isEventVisited('intro_event')) {
   console.log('Player has seen the intro');
 }
 ```
+
+## Shadow dungeons
+
+`game.addShadowDungeon(id, { config?, content?, rooms?, encounters? })` defines a **runtime-constructed
+dungeon** the whole engine treats like an authored one — enterable, scene-playable, cross-referenceable
+from content. The id must start with `_` (authored ids never do). `content` is a raw DryadScript
+document (parsed with the real content parser) or a pre-parsed line array; `config` becomes the
+`_config_` (dungeon_type defaults to `text`); `rooms`/`encounters` take the same objects the JSON files
+hold.
+
+Definitions **persist in saves** and are re-materialized on load, so saving inside a shadow dungeon is
+safe. Re-defining an id replaces its content but keeps its dungeon data (flags, visited rooms) — use a
+fresh id for a fresh state. `game.removeShadowDungeon(id)` cleans up (refused while the player is
+inside). Shadow content can only reference **pre-registered** assets, battles, and items.
+
+```js
+game.addShadowDungeon('_dream', {
+  rooms: [{ id: 'mist', uid: 'mist', x: 500, y: 500, doors: [] }],
+  content: `^mist
+
+@description
+A place that exists only tonight.
+
+#voice
+1
+%
+Something speaks out of the mist.
+{flag: "dream_heard = 1"}`,
+});
+game.playScene('_dream.mist.voice');
+```
+
+The engine itself uses one: viewed paintings accumulate as one-line scenes in the `_paintings` shadow
+dungeon.

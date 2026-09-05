@@ -27,6 +27,7 @@ import { PluginObject } from '../schemas/pluginShema';
 import { updateGamePlayOrder } from '../utility/game-order-tracker';
 import { gameLogger } from '../game/utils/logger';
 import { showConfirm, showAlert } from '../services/dialogService';
+import { closeAll as closeAllPopups, closePopupsByKey } from '../game/views/popups/popupStore';
 import { MusicPlayer } from '../services/musicPlayer';
 
 // expose imports
@@ -46,6 +47,7 @@ import CharacterFace from '../game/views/CharacterFace.vue';
 import CharacterDoll from '../game/views/progression/CharacterDoll.vue';
 import BackgroundAsset from '../game/views/BackgroundAsset.vue';
 import CustomComponentContainer from '../game/views/CustomComponentContainer.vue';
+import Savelist from './views/Savelist.vue';
 
 // Progression components
 import CharacterSheet from '../game/views/progression/CharacterSheet.vue';
@@ -66,6 +68,7 @@ import SkillSlot from '../game/views/progression/SkillSlot.vue';
 import AbilityCard from '../game/views/progression/AbilityCard.vue';
 import StatusObjectDisplay from '../game/views/progression/StatusObjectDisplay.vue';
 import StatusBrick from '../game/views/progression/StatusBrick.vue';
+import StatusCard from '../game/views/popups/cards/StatusCard.vue';
 import AbilitiesViewer from '../game/views/progression/AbilitiesViewer.vue';
 import CharacterViewer from '../game/views/progression/CharacterViewer.vue';
 import CharacterViewerPopup from '../game/views/progression/CharacterViewerPopup.vue';
@@ -166,6 +169,10 @@ export class Global {
   public openMenu(menuState: string = 'main') {
     this.menuInitialState.value = menuState;
     this.isMenuOpen.value = true;
+  }
+
+  public closeMenu() {
+    this.isMenuOpen.value = false;
   }
 
   public setViewer(type: string) {
@@ -372,6 +379,14 @@ export class Global {
       gameLogger.warn("Save load aborted by save_load_before listener.");
       return null;
     }
+
+    // Materialize shadow dungeons from the raw save BEFORE deserialization, so dungeon data
+    // merges onto real instances and the current dungeon can restore inside a shadow one.
+    const shadowDefinitions = (data as any)?.dungeonSystem?.shadowDungeons;
+    if (shadowDefinitions && typeof shadowDefinitions === 'object') {
+      this.game.dungeonSystem.rematerializeShadowDungeons(shadowDefinitions);
+    }
+
     loadSave(this.game, data);
 
     // Clean up any slots marked for removal (from exit animations that were in progress during save)
@@ -402,8 +417,8 @@ export class Global {
       gameLogger.warn("Could not find valid playTime in saveMeta - resetting to 0");
     }
 
-    // Stash the loaded save's versions map so game scripts can detect a version/mod change
-    // and run a migration pass via game.runDefaultSaveMigration().
+    // Stash the loaded save's versions map — the migration pass below and game.isOldSave()
+    // both compare it against the current (game + mods) versions.
     if (data.saveMeta?.versions && typeof data.saveMeta.versions === 'object') {
       this.game.coreSystem.loadedSaveVersions = { ...data.saveMeta.versions };
     }
@@ -416,6 +431,8 @@ export class Global {
     this.initGameAfterScriptsLoaded();
     gameLogger.success(`Loaded game "${gameId}" from save "${saveName}"`);
     this.game.coreSystem.stateLoading.value = false;
+    // Restore saved entities from the current definitions before any listener can read them.
+    this.game.coreSystem.runRegisteredSaveMigrations();
     this.game.coreSystem.trigger("game_initiated");
     return this.game;
     // end fetch played time
@@ -531,6 +548,7 @@ export class Global {
       game.coreSystem.dataRegistry.set(`dungeons/${dungeon}/rooms`, dungeonRoomsMap);
       game.coreSystem.dataRegistry.set(`dungeons/${dungeon}/encounters`, dungeonEncountersMap);
     }
+
     // load character slot templates
     game.dungeonSystem.characterSlotTemplates = await this.fetchMapValues(gameId, `character_slot_templates`, modsIds);
 
@@ -568,11 +586,10 @@ export class Global {
     game.itemSystem.itemTemplatesMap = await this.fetchMapValues(gameId, `item_templates`, modsIds);
     game.itemSystem.inventoryTemplatesMap = await this.fetchMapValues(gameId, `item_inventories`, modsIds);
     game.itemSystem.itemTraitsMap = await this.fetchMapValues(gameId, `item_traits`, modsIds);
-    game.itemSystem.itemAttributesMap = await this.fetchMapValues(gameId, `item_attributes`, modsIds);
-    game.itemSystem.itemPropertiesMap = await this.fetchMapValues(gameId, `item_properties`, modsIds);
     game.itemSystem.itemSlotsMap = await this.fetchMapValues(gameId, `item_slots`, modsIds);
     game.itemSystem.itemCategoriesMap = await this.fetchMapValues(gameId, `item_categories`, modsIds);
     game.itemSystem.itemRecipesMap = await this.fetchMapValues(gameId, `item_recipes`, modsIds);
+    game.itemSystem.recipeGroupsMap = await this.fetchMapValues(gameId, `recipe_groups`, modsIds);
 
     // load object maps for asset system
     game.dungeonSystem.assetsMap = await this.fetchMapValues(gameId, `assets`, modsIds);
@@ -615,6 +632,12 @@ export class Global {
     game.narrativeSystem.encyclopediaTreesMap = await this.fetchMapValues(gameId, `encyclopedia_trees`, modsIds, 'order');
     game.narrativeSystem.buildEncyclopediaIndex();
     game.narrativeSystem.buildSegmentIndex();
+
+    game.accoladeSystem.initData(
+      await this.fetchMapValues(gameId, `accolades`, modsIds, 'order'),
+      await this.fetchMapValues(gameId, `accolade_tiers`, modsIds, 'order'),
+      await this.fetchMapValues(gameId, `accolade_groups`, modsIds, 'order'),
+    );
 
     // set debug settings
     game.coreSystem.debugSettings.value = this.optionsToObject(DebugSettings);
@@ -876,12 +899,15 @@ export class Global {
       // expose dialog utilities
       showConfirm,
       showAlert,
+      // expose hover/pinned popup control (e.g. close lingering item cards before a modal)
+      popups: { closeAll: closeAllPopups, closePopupsByKey },
       // expose reusable components
       components: {
         CharacterFace,
         CharacterDoll,
         BackgroundAsset,
         CustomComponentContainer,
+        Savelist,
         // Progression components
         CharacterSheet,
         CharacterStats,
@@ -904,6 +930,7 @@ export class Global {
         AbilityCard,
         StatusObjectDisplay,
         StatusBrick,
+        StatusCard,
         AbilitiesViewer,
       }
     };

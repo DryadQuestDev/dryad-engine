@@ -36,6 +36,36 @@ Generic animated progress bar for displaying percentage-based values like health
 
 ---
 
+## Savelist
+
+The engine's save/load list — the same component the menu renders. Lists every save slot for the game with its name, date, playtime and `(game + mods)` versions; clicking a row loads it. Useful for a game-over screen that has to offer a way back without sending the player through the menu.
+
+**Props:**
+- `gameId` (string | null, required) - Which game's slots to list. Normally `game.getId()`.
+- `isFromGame` (boolean, required) - `true` adds the save-name field, "Save Locally" and "Save to File" (the in-menu form). `false` leaves loading only: the slot list plus "Load from File".
+
+**Example:**
+```js
+const { Savelist } = window.engine.components;
+
+export const FallenPopup = defineComponent({
+  components: { Savelist },
+  setup() {
+    return { gameId: game.getId() };
+  },
+  template: /*html*/`
+    <div class="fallen-popup">
+      <h1>She has fallen</h1>
+      <Savelist :game-id="gameId" :is-from-game="false" />
+    </div>
+  `,
+});
+```
+
+The list sizes itself with `flex-grow: 1` and scrolls internally, so give the wrapper `display: flex; flex-direction: column` and a bounded height.
+
+---
+
 # Characters
 
 ## CharacterFace
@@ -68,10 +98,11 @@ Renders a full character doll with all skin layers composited together. Supports
 
 ## CharacterSheet
 
-Default character sheet layout with vertical sections for statuses, stats, and inventory. Automatically shows/hides sections based on character data.
+Default character sheet layout with vertical sections for statuses, stats, and abilities. Automatically shows/hides sections based on character data. The party inventory lives in its own `inventory` character tab.
 
 **Props:**
 - `character` (Character, required) - The character to display
+- `viewerMode` (boolean, optional) - Read-only embed: hides the dismiss and rename controls
 
 Stat groups are controlled via `game.registerStatGroupResolver()`. See [Character API](../characters/characters_api.md).
 
@@ -150,7 +181,7 @@ Renders a character in a scene slot with full animation support. Handles positio
 
 ## CharacterViewer
 
-Displays a character doll with stats/statuses panel. Supports single or multiple characters with a face list for switching between them. Auto-hides face list when displaying a single character. Item interaction is always disabled.
+Displays a character doll with stats/statuses panel. Supports single or multiple characters with a face list for switching between them. Auto-hides face list when displaying a single character. The face list pages at 10 characters, with prev/next controls; the page follows the selection, so `initialIndex` opens on the page holding that character. Item interaction is always disabled.
 
 **Props:**
 - `characters` (Character | Character[], required) - Single character or array of characters to display
@@ -241,6 +272,8 @@ Displays an inventory with item grid. Shows unequipped items with support for fi
 
 **Props:**
 - `inventory_id` (string, required) - The ID of the inventory to display
+- `character` (Character, optional) - Reference character for the "equippable" filter. Defaults to the selected character.
+- `maxHeight` (string, optional, default `'400px'`) - CSS max-height of the item grid. Pass `'none'` to let it fill the available height instead (what the `inventory` character tab does).
 
 ---
 
@@ -255,24 +288,33 @@ Displays inventory header with item count and weight statistics.
 
 ## ItemGrid
 
-Renders a grid of items with popup support for item details and actions. Handles drag-and-drop and hover interactions.
+Renders a grid of items, one ItemSlot per entry, and starts the drag payload. Card, pin and double-click behavior all come from ItemSlot.
 
 **Props:**
 - `items` ((Item | null)[], required) - Array of items to display. Null values render as empty slots.
+- `disabled` (boolean, optional) - Disables item choices while keeping the hover card
+- `maxHeight` (string, optional, default `'400px'`) - CSS max-height of the scrolling grid. Pass `'none'` to let it fill its container.
 
 ---
 
 ## ItemSlot
 
-Renders a single item slot with icon, quantity badge, and durability indicator. Handles hover and drag events.
+Renders a single item slot with icon, quantity badge, and durability indicator.
+
+Hovering shows the item card; clicking pins it (click again, or outside, to unpin); double-clicking equips the item into its first free compatible slot, or unequips it when it is worn. Double-click is equip-only — consumables, books and recipes keep to their explicit choice buttons, so a mis-click can't spend one. It goes through the same `item_equip_before` / `item_unequip_before` veto and the same `canUseItems()` check as those buttons.
 
 **Props:**
 - `item` (Item, required) - The item to display
+- `characterId` (string, optional) - Character the card's choices and the double-click act on. Defaults to the selected character.
+- `disabled` (boolean, optional) - Disables click, double-click and drag while keeping the hover card
+- `popupPlacement` (Placement, optional, default `'right-start'`) - Where the item card anchors
+- `popupNoChoices` (boolean, optional) - Hide the card's choice buttons, and disable double-click equip along with them
+- `popupDismissOnClick` (boolean, optional) - Clicking the slot closes its card instead of pinning it — for slots whose click opens their own UI
+- `noPopup` (boolean, optional) - Suppress the card entirely — for click-to-choose pickers where a floating card would cover the slots
 
 **Emits:**
 - `click` - When item is clicked
 - `dragstart` - When drag starts
-- `hover` - When hover state changes
 
 ---
 
@@ -398,6 +440,30 @@ Renders a single status as a compact "brick" (icon or name, polarity-colored bor
 
 // Applied to a character (live stacks/duration)
 <StatusBrick :status="myStatus" :character-id="character.id" />
+```
+
+---
+
+## StatusCard
+
+The full status detail card — title, description, stacks/duration, and its stat block. This is what `StatusBrick` shows on hover, exposed on its own so you can mount it as a popover on any element of your choosing (a table row, a list item, a custom picker). Reads the definition from `character_statuses`, so an unapplied status renders fine.
+
+**Props:**
+- `statusId` (string, required) - Status template id
+- `characterId` (string, optional) - Owning character; switches the card to that character's live instance for stacks, duration and computed stats
+- `statusInstanceIndex` (number, optional) - Which instance to read for a multi-stack status on that character
+- `titleChip` (string, optional) - Small chip shown left of the title (e.g. `"Consume"`)
+- `stacksOverride` (number, optional) - Explicit stack count for previews where the status is not applied yet
+
+**Example:**
+```js
+// As a hover popover on your own row (the v-popover directive)
+const StatusCard = markRaw(game.getComponent('StatusCard'));
+const binding = (id) => ({ component: StatusCard, props: { statusId: id }, placement: 'right-start' });
+// <tr v-popover="binding(row.id)"> ... </tr>
+
+// Inline, bound to a character's live instance
+<StatusCard status-id="burn" :character-id="character.id" />
 ```
 
 ---

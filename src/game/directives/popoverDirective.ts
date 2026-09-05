@@ -4,7 +4,6 @@ import {
     pushTransient,
     hideTransient,
     togglePin,
-    clickTransient,
     closePopupsByKey,
 } from '../views/popups/popupStore';
 import HtmlPopupBody from '../views/popups/cards/HtmlPopupBody.vue';
@@ -18,7 +17,16 @@ export type PopoverBinding =
         component?: Component;
         props?: Record<string, unknown>;
         context?: Record<string, any>;
-        sticky?: boolean;
+        /**
+         * Force the card to catch the pointer while it is a hover card — scroll it, follow its
+         * lore links, press its buttons. WCAG 1.4.13 calls this "hoverable". Omitted, the card
+         * follows the player's `interactive_tooltips` setting, which defaults to peek: the card
+         * is pointer-transparent, so it never blocks the slots it overlaps and dies with the
+         * anchor hover. Set this only where the card can never be pinned instead — an anchor
+         * whose click is spent on something else (rpg_battler's ability rows use `dismissOnClick`
+         * to fire the ability) would otherwise leave a long card unreachable.
+         */
+        interactive?: boolean;
         /** When true, clicking the anchor closes the popup immediately instead of pinning it. For action triggers like ability buttons. */
         dismissOnClick?: boolean;
         /** When true, clicking the anchor does nothing to the popup — no pin, no dismiss; the card stays hover-only. Use when the anchor's click is handled for another purpose (e.g. a selection toggle). */
@@ -33,7 +41,7 @@ export type PopoverBinding =
 type Normalized = {
     component: Component;
     props: Record<string, unknown>;
-    sticky: boolean;
+    interactive: boolean;
     dismissOnClick: boolean;
     disableClick: boolean;
     closable: boolean;
@@ -62,7 +70,7 @@ function normalize(value: PopoverBinding, modifiers: Record<string, boolean>): N
         return {
             component: markRaw(HtmlPopupBody),
             props: { html: value },
-            sticky: false,
+            interactive: false,
             dismissOnClick: false,
             disableClick: false,
             closable: false,
@@ -75,7 +83,7 @@ function normalize(value: PopoverBinding, modifiers: Record<string, boolean>): N
         return {
             component: markRaw(value.component),
             props: value.props ?? {},
-            sticky: value.sticky === true,
+            interactive: value.interactive === true,
             dismissOnClick: value.dismissOnClick === true,
             disableClick: value.disableClick === true,
             closable: value.closable === true,
@@ -88,7 +96,7 @@ function normalize(value: PopoverBinding, modifiers: Record<string, boolean>): N
         return {
             component: markRaw(HtmlPopupBody),
             props: { html: value.html, context: value.context },
-            sticky: value.sticky === true,
+            interactive: value.interactive === true,
             dismissOnClick: value.dismissOnClick === true,
             disableClick: value.disableClick === true,
             closable: value.closable === true,
@@ -108,6 +116,7 @@ function buildEntry(el: HTMLElement, opts: Normalized) {
         component: opts.component,
         props: opts.props,
         closable: opts.closable,
+        interactive: opts.interactive,
         placement: opts.placement,
         width: opts.width,
     };
@@ -118,12 +127,18 @@ export const popover: Directive<HTMLElement, PopoverBinding> = {
         const opts = normalize(binding.value, binding.modifiers);
         (el as any)[OPTS] = opts;
 
-        const onEnter = () => {
+        // Mouse only. A tap synthesizes mouseenter before click, so a touch device would open a
+        // hover card that never receives the matching leave — it would sit behind the pinned copy
+        // for the rest of the session. Filtering on pointerType also covers hybrid laptops, which
+        // a `(pointer: fine)` media query would report as mouse-only.
+        const onEnter = (e: PointerEvent) => {
+            if (e.pointerType !== 'mouse') return;
             const cur = (el as any)[OPTS] as Normalized;
             const entry = buildEntry(el, cur);
             if (entry) pushTransient(entry);
         };
-        const onLeave = () => {
+        const onLeave = (e: PointerEvent) => {
+            if (e.pointerType !== 'mouse') return;
             hideTransient(el);
         };
         const onClick = () => {
@@ -132,11 +147,10 @@ export const popover: Directive<HTMLElement, PopoverBinding> = {
             if (!entry) return;
             if (cur!.disableClick) return;
             if (cur!.dismissOnClick) { closePopupsByKey(entry.key); return; }
-            if (cur!.sticky) togglePin(entry);
-            else clickTransient(entry);
+            togglePin(entry);
         };
-        el.addEventListener('mouseenter', onEnter);
-        el.addEventListener('mouseleave', onLeave);
+        el.addEventListener('pointerenter', onEnter);
+        el.addEventListener('pointerleave', onLeave);
         el.addEventListener('click', onClick);
         (el as any)[HANDLERS] = { onEnter, onLeave, onClick };
     },
@@ -146,8 +160,8 @@ export const popover: Directive<HTMLElement, PopoverBinding> = {
     unmounted(el) {
         const h = (el as any)[HANDLERS] as { onEnter: any; onLeave: any; onClick: any } | undefined;
         if (h) {
-            el.removeEventListener('mouseenter', h.onEnter);
-            el.removeEventListener('mouseleave', h.onLeave);
+            el.removeEventListener('pointerenter', h.onEnter);
+            el.removeEventListener('pointerleave', h.onLeave);
             el.removeEventListener('click', h.onClick);
             delete (el as any)[HANDLERS];
         }

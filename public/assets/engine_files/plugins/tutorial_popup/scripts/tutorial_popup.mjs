@@ -2,30 +2,27 @@
 const { game, vue } = window.engine;
 const { ref, computed } = vue;
 
-const queue = ref([]);
-const currentId = ref(null);
+// Hints that arrive while the modal is open become PAGES of the same modal (arrows in the
+// footer) instead of a second popup after dismissal. The session is the open modal's page list.
+const session = ref([]);
+const index = ref(0);
 const warned = new Set();
 
-export const currentRecord = computed(() => currentId.value ? game.getRecord(currentId.value) : null);
+export const currentRecord = computed(() => {
+  const id = session.value[index.value];
+  return id ? game.getRecord(id) : null;
+});
+export const pageIndex = computed(() => index.value);
+export const pageCount = computed(() => session.value.length);
 
 export function isShown(recordId) {
   return (game.getState('tutorial_seen') || []).includes(recordId);
 }
 
-function markShown(recordId) {
+function markShown(ids) {
   const seen = game.getState('tutorial_seen') || [];
-  if (!seen.includes(recordId)) game.setState('tutorial_seen', [...seen, recordId]);
-}
-
-function advance() {
-  const next = queue.value.shift();
-  if (!next) {
-    currentId.value = null;
-    game.closePopup('tutorial_hint');
-    return;
-  }
-  currentId.value = next;
-  game.openPopup('tutorial_hint');
+  const add = ids.filter((id) => !seen.includes(id));
+  if (add.length) game.setState('tutorial_seen', [...seen, ...add]);
 }
 
 // Dev-only escape hatch, set in the plugin's Config tab. isDevMode() is false for players,
@@ -47,27 +44,37 @@ export function showHint(recordId) {
     }
     return;
   }
-  if (currentId.value === recordId || queue.value.includes(recordId)) return;
-  queue.value.push(recordId);
-  if (!currentId.value) advance();
+  if (session.value.includes(recordId)) return;
+  session.value = [...session.value, recordId];
+  if (session.value.length === 1) {
+    index.value = 0;
+    game.openPopup('tutorial_hint');
+  }
 }
 
-export function dismissCurrent() {
-  if (currentId.value) markShown(currentId.value);
-  if (game.getGameSetting('show_tutorial') === false) {
-    queue.value = [];
-    currentId.value = null;
-    game.closePopup('tutorial_hint');
-    return;
-  }
-  advance();
+export function pageBy(delta) {
+  index.value = Math.min(Math.max(index.value + delta, 0), session.value.length - 1);
+}
+
+// Got it closes the whole stack: every page is latched, read or not — skipped pages stay
+// re-readable in the Encyclopedia (tutorial records are auto_discovery).
+export function dismissAll() {
+  markShown(session.value);
+  session.value = [];
+  index.value = 0;
+  game.closePopup('tutorial_hint');
 }
 
 export const tutorialEnabled = computed({
   get: () => game.getGameSetting('show_tutorial') !== false,
   set: (value) => {
     game.setGameSetting('show_tutorial', value);
-    if (!value) queue.value = [];
+    // Turning hints off mid-modal keeps only the page being read; the unread rest are
+    // dropped UNLATCHED so they can return if hints are ever re-enabled.
+    if (!value && session.value.length > 1) {
+      session.value = [session.value[index.value]];
+      index.value = 0;
+    }
   },
 });
 

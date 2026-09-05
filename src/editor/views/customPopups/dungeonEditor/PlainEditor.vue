@@ -4,6 +4,12 @@ import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { useStorage } from '@vueuse/core';
 import { dungeonSearchQuery, dungeonStructuredFilter } from './searchState';
 import { useLazyMount } from './useLazyMount';
+import { measureOffsetTop } from './textareaMeasure';
+import type { RevealRequest } from './reveal';
+import {
+  HL_BG, HL_COLORS, modelToInnerOffset, parseModelValue, serializeModelValue, shiftHighlight,
+  type Highlight, type HighlightColor,
+} from './highlightMarkup';
 import type { IndexCategory } from '../../../../utility/dungeonEditor/index';
 
 const editorSettings = useStorage<{ autoCurlyQuotes?: boolean; autoEnDash?: boolean }>('dungeonEditor_settings', {});
@@ -11,6 +17,13 @@ const editorSettings = useStorage<{ autoCurlyQuotes?: boolean; autoEnDash?: bool
 const props = defineProps<{
   modelValue: string;
   placeholder?: string;
+  /**
+   * Lint ranges to underline, in modelValue coordinates (highlight markup
+   * included) — the editor maps them onto the text it displays.
+   */
+  issueRanges?: Array<[number, number]>;
+  /** Focus request for this editor; `null` for every editor that isn't the target. */
+  reveal?: RevealRequest | null;
 }>();
 
 const emit = defineEmits<{
@@ -213,121 +226,6 @@ function findStateRanges(text: string): { altered: Array<[number, number]>; init
   return { altered, initial };
 }
 
-const HL_COLORS = ['yellow', 'pink', 'orange', 'green', 'blue', 'purple'] as const;
-type HighlightColor = typeof HL_COLORS[number];
-
-const HL_BG: Record<string, string> = {
-  yellow: 'rgba(255, 235, 59, 0.42)',
-  pink: 'rgba(255, 105, 180, 0.42)',
-  orange: 'rgba(255, 152, 0, 0.42)',
-  green: 'rgba(76, 175, 80, 0.42)',
-  blue: 'rgba(33, 150, 243, 0.38)',
-  purple: 'rgba(156, 39, 176, 0.38)',
-};
-
-type Highlight = { start: number; end: number; color: string };
-
-// =====================================================================
-// modelValue (wire format with `<span class="hl-X">…</span>` markup) ↔
-// internal state (plain `innerText` + side-channel `highlights` ranges).
-// The textarea binds to `innerText` only — markup chars never reach it,
-// so no empty-space gaps for tag chars.
-// =====================================================================
-
-// Find the closing `</span>` matching the hl-open at `from`, counting any
-// nested `<span…>` so that a literal `<span>x</span>` inside a highlight
-// doesn't terminate it early. Returns the index of the matching `</span>`,
-// or -1 if unclosed.
-function findMatchingSpanClose(mv: string, from: number): number {
-  const tagRe = /<(\/?)span\b[^>]*>/gi;
-  tagRe.lastIndex = from;
-  let depth = 1;
-  let m: RegExpExecArray | null;
-  while ((m = tagRe.exec(mv)) !== null) {
-    if (m[1] === '/') {
-      depth--;
-      if (depth === 0) return m.index;
-    } else {
-      depth++;
-    }
-  }
-  return -1;
-}
-
-function parseModelValue(mv: string): { text: string; hls: Highlight[] } {
-  const openRe = /<span\s+class=["']hl-([\w-]+)["']>/gi;
-  const hls: Highlight[] = [];
-  let cleaned = '';
-  let i = 0;
-  while (i < mv.length) {
-    openRe.lastIndex = i;
-    const m = openRe.exec(mv);
-    if (!m) {
-      cleaned += mv.slice(i);
-      break;
-    }
-    cleaned += mv.slice(i, m.index);
-    const color = m[1];
-    const innerStart = m.index + m[0].length;
-    if (!HL_BG[color]) {
-      // Unknown color — preserve the open tag as literal text.
-      cleaned += m[0];
-      i = innerStart;
-      continue;
-    }
-    const closeIdx = findMatchingSpanClose(mv, innerStart);
-    if (closeIdx === -1) {
-      // Unclosed hl-span — preserve as literal so we don't lose content.
-      cleaned += m[0];
-      i = innerStart;
-      continue;
-    }
-    const inner = mv.slice(innerStart, closeIdx);
-    const start = cleaned.length;
-    cleaned += inner;
-    const end = cleaned.length;
-    if (end > start) hls.push({ start, end, color });
-    i = closeIdx + '</span>'.length;
-  }
-  return { text: cleaned, hls };
-}
-
-function serializeModelValue(text: string, hls: Highlight[]): string {
-  if (hls.length === 0) return text;
-  // Splice from the end backward so earlier offsets don't shift.
-  const sorted = [...hls].sort((a, b) => b.start - a.start);
-  let out = text;
-  for (const h of sorted) {
-    out = out.slice(0, h.end) + '</span>' + out.slice(h.end);
-    out = out.slice(0, h.start) + `<span class="hl-${h.color}">` + out.slice(h.start);
-  }
-  return out;
-}
-
-// Edit replaces oldText[prefix..oldSuffix) with `insertedLen` chars at
-// [prefix, prefix+insertedLen). Maps old highlight endpoints to new ones.
-// Stickiness: typing AT highlight start → text goes BEFORE highlight
-// (start advances). Typing AT highlight end → text goes AFTER highlight
-// (end stays). Typing INSIDE → highlight extends.
-function shiftHighlight(
-  h: Highlight,
-  prefix: number,
-  oldSuffix: number,
-  insertedLen: number,
-): Highlight | null {
-  const delta = insertedLen - (oldSuffix - prefix);
-  let newStart: number;
-  if (h.start < prefix) newStart = h.start;
-  else if (h.start >= oldSuffix) newStart = h.start + delta;
-  else newStart = prefix + insertedLen;
-  let newEnd: number;
-  if (h.end <= prefix) newEnd = h.end;
-  else if (h.end > oldSuffix) newEnd = h.end + delta;
-  else newEnd = prefix + insertedLen;
-  if (newStart >= newEnd) return null;
-  return { start: newStart, end: newEnd, color: h.color };
-}
-
 // Per-token visual style strings (paint into the overlay).
 //
 // IMPORTANT: never use `font-weight` or `font-style` here. They change glyph
@@ -346,18 +244,36 @@ const STYLE_CHOICE = `color:#c62828;${FAUX_BOLD}`;
 const STYLE_SEARCH = 'background:#fff59d;color:#000';
 const STYLE_INITIAL = `color:#a100ff;${FAUX_BOLD}`;
 const STYLE_ALTERED = `color:#c95500;${FAUX_BOLD}`;
+// Lint marks are paint-only (underline + tint) so glyph metrics stay identical
+// to the textarea's.
+const STYLE_ISSUE = 'text-decoration:underline wavy #d32f2f;text-decoration-skip-ink:none;background:rgba(211,47,47,0.14)';
 
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function renderOverlay(text: string, hls: Highlight[]): string {
+function renderOverlay(
+  text: string,
+  hls: Highlight[],
+  issues: Array<[number, number]>,
+  flash: [number, number] | null,
+): string {
   if (!text) return '';
   const len = text.length;
   const tokenStyle: Array<string | null> = new Array(len).fill(null);
   const emStyle: Array<string | null> = new Array(len).fill(null);
   const strongStyle: Array<string | null> = new Array(len).fill(null);
   const hlBg: Array<string | null> = new Array(len).fill(null);
+  // 0 = plain, 1 = lint issue, 2 = lint issue being revealed (gets the flash class).
+  const issueMark = new Uint8Array(len);
+  for (const [s, e] of issues) {
+    const last = Math.min(e, len);
+    for (let i = Math.max(s, 0); i < last; i++) issueMark[i] = 1;
+  }
+  if (flash) {
+    const last = Math.min(flash[1], len);
+    for (let i = Math.max(flash[0], 0); i < last; i++) issueMark[i] = 2;
+  }
 
   for (const r of hls) {
     const bg = HL_BG[r.color];
@@ -419,12 +335,14 @@ function renderOverlay(text: string, hls: Highlight[]): string {
     const eS = emStyle[i];
     const sS = strongStyle[i];
     const h = hlBg[i];
+    const im = issueMark[i];
     let j = i + 1;
     while (j < len
       && tokenStyle[j] === t
       && emStyle[j] === eS
       && strongStyle[j] === sS
-      && hlBg[j] === h) {
+      && hlBg[j] === h
+      && issueMark[j] === im) {
       j++;
     }
     const chunk = escHtml(text.slice(i, j));
@@ -433,9 +351,13 @@ function renderOverlay(text: string, hls: Highlight[]): string {
     if (eS) parts.push(eS);
     if (sS && !t) parts.push(sS);  // token bold wins; emph bold otherwise
     if (h) parts.push(`background-color:${h}`);
+    if (im) parts.push(STYLE_ISSUE);
     // Search chunks carry a real class so the popup's match counter and
     // prev/next navigation can find them via querySelectorAll('.at-search').
-    const cls = t === STYLE_SEARCH ? ' class="at-search"' : '';
+    const classes: string[] = [];
+    if (t === STYLE_SEARCH) classes.push('at-search');
+    if (im === 2) classes.push('at-issue-flash');
+    const cls = classes.length ? ` class="${classes.join(' ')}"` : '';
     out += parts.length ? `<span${cls} style="${parts.join(';')}">${chunk}</span>` : chunk;
     i = j;
   }
@@ -452,14 +374,14 @@ function renderOverlay(text: string, hls: Highlight[]): string {
 
 const innerText = ref('');
 const highlights = ref<Highlight[]>([]);
-let lastEmitted = '';
+const lastEmitted = ref('');
 
 function syncFromModelValue(mv: string) {
-  if (mv === lastEmitted) return;
+  if (mv === lastEmitted.value) return;
   const { text, hls } = parseModelValue(mv ?? '');
   innerText.value = text;
   highlights.value = hls;
-  lastEmitted = mv ?? '';
+  lastEmitted.value = mv ?? '';
 }
 syncFromModelValue(props.modelValue ?? '');
 
@@ -469,12 +391,36 @@ function commitState(newText: string, newHls: Highlight[]) {
   innerText.value = newText;
   highlights.value = newHls;
   const serialized = serializeModelValue(newText, newHls);
-  if (serialized === lastEmitted) return;
-  lastEmitted = serialized;
+  if (serialized === lastEmitted.value) return;
+  lastEmitted.value = serialized;
   emit('update:modelValue', serialized);
 }
 
-const overlayHtml = computed(() => renderOverlay(innerText.value, highlights.value));
+// Lint offsets arrive in modelValue coordinates; the textarea/overlay show
+// innerText with the `<span class="hl-…">` markup removed. The parser records
+// exactly which tag spans it stripped, so the mapping is exact for any
+// incoming markup. Lazy: only evaluated while there are ranges to place.
+const removedSpans = computed(() => parseModelValue(lastEmitted.value).removed);
+
+const NO_RANGES: Array<[number, number]> = [];
+const innerIssueRanges = computed<Array<[number, number]>>(() => {
+  const ranges = props.issueRanges;
+  if (!ranges || ranges.length === 0) return NO_RANGES;
+  const spans = removedSpans.value;
+  const len = innerText.value.length;
+  return ranges.map(([s, e]) => {
+    const is = modelToInnerOffset(spans, s, len);
+    const ie = Math.max(is + 1, modelToInnerOffset(spans, e, len));
+    return [is, ie] as [number, number];
+  });
+});
+
+const flashRange = ref<[number, number] | null>(null);
+let flashTimer: number | null = null;
+
+const overlayHtml = computed(() =>
+  renderOverlay(innerText.value, highlights.value, innerIssueRanges.value, flashRange.value),
+);
 
 // =====================================================================
 // Editor host + textarea + scroll sync
@@ -485,6 +431,42 @@ const taRef = ref<HTMLTextAreaElement | null>(null);
 const overlayRef = ref<HTMLPreElement | null>(null);
 
 const { isActive, activate } = useLazyMount(hostRef);
+
+// Put the caret on a lint range, flash it, and scroll its line into view.
+// The textarea is sized to its content (no inner scrolling), so the scroll
+// has to happen on whichever ancestor scrolls — a throwaway marker at the
+// caret's y lets scrollIntoView find that container for us.
+async function revealRange(start: number, end: number) {
+  activate();
+  await nextTick();
+  const ta = taRef.value;
+  const host = hostRef.value;
+  if (!ta || !host) return;
+  const spans = removedSpans.value;
+  const len = innerText.value.length;
+  const s = modelToInnerOffset(spans, start, len);
+  const e = Math.max(s + 1, modelToInnerOffset(spans, end, len));
+  flashRange.value = [s, e];
+  if (flashTimer !== null) window.clearTimeout(flashTimer);
+  flashTimer = window.setTimeout(() => {
+    flashRange.value = null;
+    flashTimer = null;
+  }, 1600);
+  ta.focus({ preventScroll: true });
+  ta.setSelectionRange(s, s);
+  const y = measureOffsetTop(ta, s);
+  const marker = document.createElement('div');
+  marker.style.cssText = `position:absolute;left:0;top:${y}px;width:1px;height:1px;pointer-events:none`;
+  host.appendChild(marker);
+  marker.scrollIntoView({ behavior: 'instant', block: 'center' });
+  marker.remove();
+}
+
+watch(() => props.reveal, (r) => {
+  if (!r) return;
+  const start = r.at.start ?? 0;
+  revealRange(start, r.at.end ?? start + 1);
+});
 
 function onInput(e: Event) {
   const ta = e.target as HTMLTextAreaElement;
@@ -566,44 +548,6 @@ const { floatingStyles } = useFloating(virtualRef, floatingRef, {
   middleware: [offset(8), flip(), shift({ padding: 8 })],
   whileElementsMounted: autoUpdate,
 });
-
-// Measure the pixel position of `offset` within the textarea, including
-// soft-wrapped lines. Native textarea doesn't expose per-char rects, so we
-// build a hidden mirror element styled identically and read the position of
-// a marker placed at `offset`.
-function measureOffsetTop(ta: HTMLTextAreaElement, offset: number): number {
-  const cs = getComputedStyle(ta);
-  const mirror = document.createElement('div');
-  // Copy every style that affects text layout.
-  const props = [
-    'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontVariant',
-    'letterSpacing', 'wordSpacing', 'lineHeight', 'tabSize',
-    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
-    'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
-    'whiteSpace', 'wordBreak', 'overflowWrap', 'boxSizing', 'textIndent',
-  ];
-  for (const p of props) (mirror.style as any)[p] = (cs as any)[p];
-  mirror.style.position = 'absolute';
-  mirror.style.visibility = 'hidden';
-  mirror.style.top = '0';
-  mirror.style.left = '-9999px';
-  mirror.style.width = ta.clientWidth + 'px';
-  mirror.style.height = 'auto';
-  mirror.style.overflow = 'hidden';
-
-  const before = ta.value.substring(0, offset);
-  mirror.appendChild(document.createTextNode(before));
-  const marker = document.createElement('span');
-  marker.textContent = '​';
-  mirror.appendChild(marker);
-  document.body.appendChild(mirror);
-  const markerRect = marker.getBoundingClientRect();
-  const mirrorRect = mirror.getBoundingClientRect();
-  document.body.removeChild(mirror);
-  // Y of marker relative to the mirror's content origin.
-  return markerRect.top - mirrorRect.top;
-}
 
 function updateToolbarFromSelection() {
   const ta = taRef.value;
@@ -758,6 +702,7 @@ function applyHighlight(color: HighlightColor | false) {
 onBeforeUnmount(() => {
   showToolbar.value = false;
   virtualRef.value = null;
+  if (flashTimer !== null) window.clearTimeout(flashTimer);
 });
 </script>
 
@@ -877,6 +822,17 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
+/* Lint reveal flash — painted into the v-html overlay, so it can't be scoped. */
+.at-issue-flash {
+  animation: at-issue-flash 1.6s ease-out;
+}
+
+@keyframes at-issue-flash {
+  0% { background-color: rgba(255, 82, 82, 0.8); }
+  40% { background-color: rgba(255, 82, 82, 0.6); }
+  100% { background-color: rgba(211, 47, 47, 0.14); }
+}
+
 /* Floating selection toolbar — teleported to <body>, so styles must be
    unscoped to reach it. */
 .hl-toolbar {

@@ -131,6 +131,10 @@ export class DungeonFabric {
 
             // set actions
             room.actions = roomObject.actions || {};
+
+            // lock
+            room.key = roomObject.key ?? '';
+            room.keyConsume = !!roomObject.key_consume;
         }
 
         for (let roomObject of roomsObjects) {
@@ -190,12 +194,25 @@ export class DungeonFabric {
             encounter.polygon = encounterObject.polygon ?? '';
 
             if (encounterObject.type === 'collectable') {
-                if (encounterObject.collect_item) {
+                let collectItem = encounterObject.collect_item ?? '';
+                if (encounterObject.collect_pool) {
+                    // Random gather spot: ask listeners (e.g. the experience plugin) for the item.
+                    // Must happen before initCollectable, which derives prose/icon/choice from it.
+                    const request = { dungeonId: dungeon.id, encounterId: encounter.id, pool: encounterObject.collect_pool, itemId: null as string | null };
+                    game.trigger('collectable_resolve', request);
+                    if (request.itemId) {
+                        collectItem = request.itemId;
+                    } else {
+                        gameLogger.error(`Collectable "${encounter.id}" in dungeon "${dungeon.id}" asked gather table "${encounterObject.collect_pool}" but no collectable_resolve listener supplied an item — treating it as a plain encounter.`);
+                        collectItem = '';
+                    }
+                }
+                if (collectItem) {
                     const quantity = encounterObject.collect_quantity ?? 1;
-                    encounter.collectSpec = encounterObject.collect_item + (quantity > 1 ? '#' + quantity : '');
+                    encounter.collectSpec = collectItem + (quantity > 1 ? '#' + quantity : '');
                     encounter.regrowTurns = encounterObject.regrow ?? 0;
                     encounter.collectClue = !!encounterObject.collect_clue;
-                } else {
+                } else if (!encounterObject.collect_pool) {
                     gameLogger.error(`Collectable encounter "${encounterObject.id}" in dungeon "${dungeon.id}" has no collect_item — treating it as a plain encounter.`);
                 }
             }
@@ -381,11 +398,19 @@ export class DungeonFabric {
         if (!encounter.rawContent && template) {
             // Name in its rarity color, like everywhere else the engine names items.
             encounter.rawContent = `<b>${game.itemSystem.getItemNameHtml(itemId)}</b>. ${traits?.description || ''}`;
+        } else if (encounter.rawContent && template) {
+            // Authored @ lines refer to the granted item via |title| / |description| — these are
+            // not registry placeholders, they only exist on collectables. Substitute them here,
+            // where the item is known (matters for collect_pool spots, whose item is per-save).
+            encounter.rawContent = encounter.rawContent
+                .replace(/\|title\|/g, `<b>${game.itemSystem.getItemNameHtml(itemId)}</b>`)
+                .replace(/\|description\|/g, String(traits?.description || ''));
         }
 
         // No sprite assigned (manually or via encounters_default)? Use the item's icon.
         if (!encounter.image && traits?.image) {
             encounter.image = traits.image;
+            encounter.usesItemIcon = true;
         }
 
         // The author may have written their own {collect: ...} choice for a custom label.

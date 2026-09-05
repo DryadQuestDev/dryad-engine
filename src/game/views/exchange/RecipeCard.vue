@@ -26,14 +26,13 @@ const inputItems = computed(() => {
   return props.recipe.input_items.map(input => {
     const template = game.itemSystem.itemTemplatesMap.get(input.item_id || '');
     const traits = template?.traits as any;
-    const attributes = template?.attributes as any;
     const quantity = input.quantity || 1;
     return {
       id: input.item_id,
       name: traits?.name || input.item_id,
       image: traits?.image || '',
       quantity,
-      rarity: attributes?.rarity || '',
+      rarity: traits?.rarity || '',
       available: availableQuantity(input.item_id || '') >= quantity
     };
   });
@@ -46,13 +45,12 @@ const outputItems = computed(() => {
   return props.recipe.output_items.map(output => {
     const template = game.itemSystem.itemTemplatesMap.get(output.item_id || '');
     const traits = template?.traits as any;
-    const attributes = template?.attributes as any;
     return {
       id: output.item_id,
       name: traits?.name || output.item_id,
       image: traits?.image || '',
       quantity: output.quantity || 1,
-      rarity: attributes?.rarity || ''
+      rarity: traits?.rarity || ''
     };
   });
 });

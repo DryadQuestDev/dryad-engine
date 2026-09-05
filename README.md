@@ -72,6 +72,12 @@ Open `http://localhost:4200` in your browser.
 ./production/dryad-engine-windows/dryad-engine.exe
 ```
 
+### 4. Running on macOS
+
+There is no native macOS build. The Linux build runs on macOS once darwin versions of Electron and sharp are installed, so `build.sh` ships a `start-macos.command` launcher and a `README-macOS.txt` in the Linux build root. The launcher fetches both on first run, then starts the engine.
+
+Sources live in `build-extras/`; `__ELECTRON_VERSION__` and `__VERSION__` are substituted at build time.
+
 ## Documentation
 
 Documentation is integrated into the engine. Launch the engine and access docs from the Editor.

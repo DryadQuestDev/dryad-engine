@@ -175,6 +175,12 @@ export class PluginManager {
         // 5. Load plugin editor popups
         await this.initPluginPopups();
 
+        // 6. Reset editor-preview state — the plugin set may have changed with the
+        // game/mod, so preview scripts re-register and stale scoped css is dropped
+        // on the next preview open. (Aspect renderers already registered on the
+        // singleton persist until then; they overwrite by id on re-register.)
+        this.loadedEditorPreviewScripts.clear();
+        document.querySelectorAll('style[data-editor-preview-css]').forEach((el) => el.remove());
     }
 
     /**
@@ -182,6 +188,62 @@ export class PluginManager {
      */
     public getPopupsForTab(subtabId: string): string[] {
         return this.pluginPopupsByTab.get(subtabId) || [];
+    }
+
+    // ── Editor preview hooks (plugin.json `editor_preview`) ──
+    // Lets a plugin make editor-side game-preview surfaces (e.g. the ability picker)
+    // render like the game. Each entry: `script` — a SELF-CONTAINED .mjs (blob-imported,
+    // so relative imports don't resolve) whose default export is invoked with the
+    // editor's data-hydrated Game singleton (to register aspect renderers etc.);
+    // `css` — injected scope-wrapped under `.editor-game-preview` so game styling
+    // can't bleed into editor chrome. Called lazily by preview surfaces after hydration.
+    private loadedEditorPreviewScripts = new Set<string>();
+
+    public async initEditorPreview(game: unknown): Promise<void> {
+        for (const plugin of this.plugins.value) {
+            const entries = (plugin as any).editor_preview;
+            if (!Array.isArray(entries) || entries.length === 0) continue;
+            const pluginPath = await this.resolvePluginPath(plugin.id);
+            if (!pluginPath) continue;
+            for (const entry of entries) {
+                try {
+                    if (entry.script) {
+                        const url = `assets/${pluginPath}/${entry.script}`;
+                        if (!this.loadedEditorPreviewScripts.has(url)) {
+                            const mod = await this.importPluginScript(url);
+                            const register = mod.default ?? mod.registerEditorPreview;
+                            if (typeof register === 'function') {
+                                register(game);
+                                this.loadedEditorPreviewScripts.add(url);
+                            } else {
+                                console.error(`[PluginManager] editor_preview script has no callable default export: ${url}`);
+                            }
+                        }
+                    }
+                    if (entry.css) {
+                        await this.loadScopedPreviewCss(`assets/${pluginPath}/${entry.css}`);
+                    }
+                } catch (e) {
+                    console.error(`[PluginManager] Failed to load editor_preview entry from plugin '${plugin.id}':`, e);
+                }
+            }
+        }
+    }
+
+    /**
+     * Wraps the fetched css in `.editor-game-preview { ... }` via native CSS nesting so
+     * its rules apply only inside preview containers. Top-level `:root` blocks are
+     * rewritten to `&` so their variables land on the wrapper instead of matching nothing.
+     */
+    private async loadScopedPreviewCss(url: string): Promise<void> {
+        if (document.querySelector(`style[data-editor-preview-css="${url}"]`)) return;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+        const cssText = (await response.text()).replaceAll(':root', '&');
+        const style = document.createElement('style');
+        style.setAttribute('data-editor-preview-css', url);
+        style.textContent = `.editor-game-preview {\n${cssText}\n}`;
+        document.head.appendChild(style);
     }
 
     /**

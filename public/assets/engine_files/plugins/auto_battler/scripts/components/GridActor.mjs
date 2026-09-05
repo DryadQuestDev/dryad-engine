@@ -29,7 +29,7 @@ export const GridActor = defineComponent({
         if (!s.meta?.is_battle) continue;
         const def = statusDefs?.get(s.id);
         const polarity = s.polarity || def?.polarity || 'neutral';
-        const image = s.image || def?.image;
+        const image = s.displayImage || s.image || def?.image;
         const name = s.name || def?.name || s.id;
         if (s.multiStack) {
           const instances = s.getInstances();

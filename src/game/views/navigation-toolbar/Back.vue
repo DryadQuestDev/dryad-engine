@@ -12,7 +12,7 @@ const isInactive = () => {
 };
 
 const handleClick = () => {
-  dungeonSystem.selectedEncounterId.value = null;
+  dungeonSystem.deselectEncounter();
   dungeonSystem.centerToActiveLocation(true);
 };
 </script>

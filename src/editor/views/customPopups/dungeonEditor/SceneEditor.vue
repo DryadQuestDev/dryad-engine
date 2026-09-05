@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
 import Dialog from 'primevue/dialog';
@@ -7,11 +7,72 @@ import InputNumber from 'primevue/inputnumber';
 import RichContentEditor from './PlainEditor.vue';
 import type { SceneBlock, SceneColumn, SceneRow } from '../../../../utility/dungeonEditor/ast';
 import { newSceneColumn, newSceneRow } from '../../../../utility/dungeonEditor/ast';
+import type { LintIssue } from '../../../../utility/dungeonEditor/lint';
 import { tagWithUid } from './uid';
 import { inputMatchesSearch } from './searchState';
+import { flashElement, focusFieldAt, type RevealRequest } from './reveal';
 
-const props = defineProps<{ block: SceneBlock }>();
+const props = defineProps<{
+  block: SceneBlock;
+  issues?: LintIssue[];
+  /** Focus request aimed at one of this scene's cells; `null` otherwise. */
+  reveal?: RevealRequest | null;
+}>();
 const emit = defineEmits<{ 'update:block': [block: SceneBlock] }>();
+
+const rootRef = ref<HTMLElement | null>(null);
+
+const cellKey = (rowIdx: number, colIdx: number) => `${rowIdx}:${colIdx}`;
+
+// Per-cell lookups built once per lint pass. Each PlainEditor keeps getting
+// the same array reference across scene re-renders, so typing in one column
+// doesn't recompute every sibling's overlay.
+const contentIssueRanges = computed(() => {
+  const m = new Map<string, Array<[number, number]>>();
+  for (const issue of props.issues ?? []) {
+    const at = issue.at;
+    if (!at || at.target !== 'column-content') continue;
+    if (at.rowIndex === undefined || at.colIndex === undefined || at.start === undefined) continue;
+    const key = cellKey(at.rowIndex, at.colIndex);
+    const list = m.get(key) ?? [];
+    list.push([at.start, at.end ?? at.start + 1]);
+    m.set(key, list);
+  }
+  return m;
+});
+
+const paramsIssueCells = computed(() => {
+  const set = new Set<string>();
+  for (const issue of props.issues ?? []) {
+    const at = issue.at;
+    if (at?.target === 'column-params' && at.rowIndex !== undefined && at.colIndex !== undefined) {
+      set.add(cellKey(at.rowIndex, at.colIndex));
+    }
+  }
+  return set;
+});
+
+function revealFor(rowIdx: number, colIdx: number): RevealRequest | null {
+  const r = props.reveal;
+  if (!r || r.at.target !== 'column-content') return null;
+  return r.at.rowIndex === rowIdx && r.at.colIndex === colIdx ? r : null;
+}
+
+watch(() => props.reveal, (r) => {
+  if (!r || r.at.rowIndex === undefined) return;
+  const rowIdx = r.at.rowIndex;
+  const colIdx = r.at.colIndex ?? 0;
+  nextTick(() => {
+    const cell = rootRef.value?.querySelector<HTMLElement>(
+      `[data-scene-row="${rowIdx}"] [data-scene-col="${colIdx}"]`,
+    );
+    if (!cell) return;
+    if (r.at.target === 'column-params') {
+      focusFieldAt(cell.querySelector('input.params-input'), r.at.start, r.at.end);
+    }
+    flashElement(cell);
+  });
+});
 
 const choiceDialogVisible = ref(false);
 const choiceCount = ref(3);
@@ -90,7 +151,7 @@ function updateColumn<K extends keyof SceneColumn>(
 </script>
 
 <template>
-  <div class="scene-editor">
+  <div ref="rootRef" class="scene-editor">
     <div v-if="block.rows.length === 0" class="scene-empty">
       No rows yet. Click <strong>+ Row</strong> below to add the first one.
     </div>
@@ -123,7 +184,7 @@ function updateColumn<K extends keyof SceneColumn>(
               <InputText :model-value="column.paramsRaw ?? ''"
                 @update:model-value="(v: any) => updateColumn(rowIdx, colIdx, 'paramsRaw', v ? v : undefined)"
                 placeholder="{params}" class="params-input"
-                :class="{ 'input-search-hit': inputMatchesSearch(column.paramsRaw) }" />
+                :class="{ 'params-input--error': paramsIssueCells.has(cellKey(rowIdx, colIdx)), 'input-search-hit': inputMatchesSearch(column.paramsRaw) }" />
             </template>
             <div v-else class="col-spacer" />
             <Button icon="pi pi-chevron-up" severity="secondary" text rounded size="small" :disabled="colIdx === 0"
@@ -136,7 +197,9 @@ function updateColumn<K extends keyof SceneColumn>(
           </div>
           <RichContentEditor :model-value="column.content"
             @update:model-value="(v: string) => updateColumn(rowIdx, colIdx, 'content', v)"
-            placeholder="content…" class="content-area" />
+            placeholder="content…" class="content-area"
+            :issue-ranges="contentIssueRanges.get(cellKey(rowIdx, colIdx))"
+            :reveal="revealFor(rowIdx, colIdx)" />
         </div>
       </div>
 
@@ -300,6 +363,24 @@ function updateColumn<K extends keyof SceneColumn>(
 input.params-input {
   color: #9c27b0 !important;
   font-weight: 600;
+}
+
+input.params-input--error,
+.params-input--error :deep(input) {
+  outline: 2px solid #d32f2f;
+  outline-offset: -1px;
+}
+
+/* Target of a TOC sub-jump or a lint reveal. */
+.scene-row.flash,
+.scene-column.flash {
+  animation: scene-flash 1.2s ease-out;
+}
+
+@keyframes scene-flash {
+  0% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0.6); }
+  30% { box-shadow: 0 0 0 4px rgba(255, 235, 59, 0.45); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0); }
 }
 
 .content-area {

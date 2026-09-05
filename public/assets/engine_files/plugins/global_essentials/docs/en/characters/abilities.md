@@ -159,6 +159,8 @@ Ability definitions with `ingame_description` templates can auto-generate player
 
 Aspects without `ingame_description` are silently skipped (useful for auxiliary fields like `damage_type` that are consumed by other templates).
 
+**debug_info** - Marks a definition as a developer readout. Its raw value is listed at the bottom of the ability card only when dev mode is on and the **Show Hidden Stats** debug setting is enabled — players never see it. Use it for tuning fields with no player-facing meaning (AI weights, internal flags). Works on both `meta` and `aspect` roles.
+
 **Auto-linkification.** When an aspect's value references a `fromFile` entity by id (e.g. a status id in `status_apply`), the resolver looks up the entity's display name and — if a narrative record exists with the same id — wraps the result in a lore link automatically. So `Apply [v] for [status_duration] turns` produces a clickable record link when the applied status has one, and plain text otherwise. No need to wrap `[v]` in `[[ ... ]]` manually; the engine handles it per-id.
 
 **`[v:status]` mode.** When an aspect's value is *always* a status id (or array of status ids) and you want the rich status popup — name, description, live stats, granted abilities — write `[v:status]` instead of `[v]`:

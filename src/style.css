@@ -235,6 +235,24 @@ p {
   z-index: 20;
 }
 
+/* Dev-facing entity-id badge next to card titles (editor: always; game: with the
+   show_hidden_stats dev toggle — see src/game/utils/idBadge.ts) */
+.entity-id-badge {
+  font-family: monospace;
+  font-size: 0.62em;
+  font-weight: 400;
+  color: #8b93a3;
+  background: rgba(139, 147, 163, 0.12);
+  border: 1px solid rgba(139, 147, 163, 0.3);
+  border-radius: 4px;
+  padding: 0 5px;
+  vertical-align: middle;
+  margin-left: 6px;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
 .p-dialog-mask {
   z-index: 4999 !important;
 }
@@ -245,6 +263,17 @@ p {
 
 .p-galleria-mask {
   z-index: 5000 !important;
+}
+
+/* ConfirmDialog must stack ABOVE any open modal (e.g. editor custom popups) — the
+   blanket 4999/5000 !important rules above flatten PrimeVue's incremental z-index,
+   leaving confirm-over-dialog ordering to DOM luck. */
+.p-dialog-mask:has(.p-confirmdialog) {
+  z-index: 5999 !important;
+}
+
+.p-confirmdialog.p-dialog {
+  z-index: 6000 !important;
 }
 
 /* PrimeVue ConfirmDialog — match the engine's popup look (black body + glass mask) */
@@ -553,6 +582,12 @@ span.lore-link:focus-visible,
   background-image: url('/assets/engine_assets/icons/all_items.svg');
 }
 
+/* Built-in inventory "Quest" filter tab icon (the tab that shows every item of
+   quest rarity). Override this class to re-skin it. */
+.inventory-filter-icon-quest {
+  background-image: url('/assets/engine_assets/icons/quest.svg');
+}
+
 /* Space reserved on the left for the fixed .ui-container tray (cog / book /
    users icons). Panels rendered next to it (ProgressionContainer,
    OverlayNavigation's .overlay.text) read this var so they don't overlap.
@@ -569,29 +604,58 @@ span.lore-link:focus-visible,
 }
 
 /* Item Slot Shared Styles */
+
+/* Tiling grain used by item slots. Inline SVG turbulence, desaturated, so it needs
+   no asset file and tints itself against whatever gradient sits under it. */
+:root {
+  --slot-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
 .item-slot-wrapper {
   position: relative;
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
-  --sticky-border-color: #fff307;
-  --sticky-shadow-color: rgba(247, 244, 65, 0.5);
+  --pinned-border-color: #fff307;
+  --pinned-shadow-color: rgba(247, 244, 65, 0.5);
+  /* Rarity drives the slot's tinted gradient and frame. Items without a rarity
+     attribute fall back to a neutral steel tone at a low tint. */
+  --rarity-tone: var(--rarity-color, #9aa0ad);
+  --rarity-tint: 7%;
 }
 
 .item-slot {
   position: relative;
   width: 100%;
   height: 100%;
-  background: #2a2a2a;
-  border: 1px solid #444;
-  border-radius: 4px;
+  /* Solid fallback: if color-mix/gradients ever fail to parse, the brick still reads. */
+  background-color: #23262c;
+  background-image:
+    var(--slot-noise),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 45%),
+    radial-gradient(ellipse 78% 62% at 50% 34%,
+      color-mix(in srgb, var(--rarity-tone) var(--rarity-tint), transparent),
+      transparent 72%),
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--rarity-tone) calc(var(--rarity-tint) * 1.3), #2c303a) 0%,
+      color-mix(in srgb, var(--rarity-tone) var(--rarity-tint), #202329) 48%,
+      color-mix(in srgb, var(--rarity-tone) calc(var(--rarity-tint) * 0.45), #131519) 100%);
+  background-size: 140px 140px, auto, auto, auto;
+  background-blend-mode: soft-light, normal, normal, normal;
+  border: 1px solid color-mix(in srgb, var(--rarity-tone) 55%, #15171b);
+  border-radius: 5px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    inset 0 -10px 14px -10px rgba(0, 0, 0, 0.9),
+    0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .item-slot.not-affordable {
@@ -599,20 +663,14 @@ span.lore-link:focus-visible,
   filter: grayscale(0.5);
 }
 
-.item-slot.equipped.sticky {
-  border-color: var(--sticky-border-color);
-  box-shadow: 0 0 8px var(--sticky-shadow-color);
+.item-slot.equipped.pinned {
+  border-color: var(--pinned-border-color);
+  box-shadow: 0 0 8px var(--pinned-shadow-color);
 }
 
-.item-slot.sticky,
-.item-slot.hovering-choices {
-  border-color: var(--sticky-border-color) !important;
-  box-shadow: 0 0 8px var(--sticky-shadow-color) !important;
-}
-
-.item-slot.just-unstickied:hover {
-  border-color: #666;
-  box-shadow: none;
+.item-slot.pinned {
+  border-color: var(--pinned-border-color) !important;
+  box-shadow: 0 0 8px var(--pinned-shadow-color) !important;
 }
 
 .item-icon {
@@ -677,29 +735,38 @@ span.lore-link:focus-visible,
 
 /* Item Rarity Styles */
 
-/* Define rarity color variables — tuned to read well on dark item backgrounds */
+/* Define rarity color variables — tuned to read well on dark item backgrounds.
+   `--rarity-tint` is how much of that color bleeds into the slot's gradient, so
+   rarer gear reads as richer at a glance. Custom rarities only need to set
+   `--rarity-color`; the tint then falls back to the neutral 10%. */
 .rarity_common {
   --rarity-color: #c0c0c0;
+  --rarity-tint: 5%;
 }
 
 .rarity_uncommon {
   --rarity-color: #4ade80;
+  --rarity-tint: 10%;
 }
 
 .rarity_rare {
   --rarity-color: #60a5fa;
+  --rarity-tint: 12%;
 }
 
 .rarity_epic {
   --rarity-color: #c084fc;
+  --rarity-tint: 14%;
 }
 
 .rarity_legendary {
   --rarity-color: #ff8c42;
+  --rarity-tint: 17%;
 }
 
 .rarity_quest {
   --rarity-color: #ffd700;
+  --rarity-tint: 16%;
 }
 
 /* Apply rarity color to text (item names) */
@@ -713,17 +780,21 @@ span.lore-link:focus-visible,
   color: var(--rarity-color);
 }
 
-/* Apply rarity color to item icon outlines */
+/* The slot frame carries the rarity color now, so the icon only needs to lift
+   off the textured background. */
 .item-slot-wrapper .item-icon {
-  outline: 2px solid var(--rarity-color);
-  outline-offset: -2px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
 }
 
-/* Apply rarity color to hover box-shadows */
+/* Hover: brighten the frame and light the brick from within */
 .item-slot-wrapper:hover .item-slot {
+  border-color: color-mix(in srgb, var(--rarity-tone) 85%, #fff);
   box-shadow:
-    0 0 4px 2px color-mix(in srgb, var(--rarity-color), transparent 50%),
-    0 0 4px 2px var(--rarity-color);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 16px color-mix(in srgb, var(--rarity-tone) 28%, transparent),
+    inset 0 -10px 14px -10px rgba(0, 0, 0, 0.9),
+    0 0 7px color-mix(in srgb, var(--rarity-tone), transparent 45%);
 }
 
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, provide } from 'vue';
+import { ref, shallowRef, computed, watch, nextTick, onMounted, onBeforeUnmount, provide } from 'vue';
 import { useSortable } from '@vueuse/integrations/useSortable';
 import { useStorage, watchDebounced } from '@vueuse/core';
 import {
@@ -17,6 +17,7 @@ import { parseToAst } from '../../../utility/dungeonEditor/parseToAst';
 import { serializeAst } from '../../../utility/dungeonEditor/serializeAst';
 import { exportDocumentAsHtml, exportDocumentAsText } from '../../../utility/dungeonEditor/exportHtml';
 import { lintDungeonContent, type LintIssue } from '../../../utility/dungeonEditor/lint';
+import { lineStartOffset } from '../../../utility/dungeonEditor/locate';
 import { convertPov } from '../../../utility/dungeonEditor/povConvert';
 import { buildDocumentIndex, type IndexCategory } from '../../../utility/dungeonEditor/index';
 import {
@@ -31,6 +32,8 @@ import IndexPopover from './dungeonEditor/IndexPopover.vue';
 import QuestCard from './dungeonEditor/QuestCard.vue';
 import DungeonSelect from '../shared/DungeonSelect.vue';
 import { tagBlockDeep as tagBlock, tagBlocks } from './dungeonEditor/uid';
+import type { RevealRequest } from './dungeonEditor/reveal';
+import { measureOffsetTop } from './dungeonEditor/textareaMeasure';
 import { groupQuestBlocks, questIdOf, questKindOf as questKindOfUtil } from '../../../utility/dungeonEditor/quest';
 const props = defineProps<EditorCustomPopupProps>();
 const emit = defineEmits<{
@@ -227,6 +230,13 @@ function onDungeonChange() {
   const newItem = editorInstance.activeObject.value;
   if (!newItem || Array.isArray(newItem)) return;
   localItem.value = JSON.parse(JSON.stringify(newItem));
+  // Push the fresh clone up to CustomPopupWrapper immediately. The wrapper's
+  // own localItem (what its Save buttons Object.assign into activeObject) is
+  // otherwise still the previous dungeon's snapshot until the first commit()
+  // here — and a Save in that window merges the OLD dungeon's fields, id
+  // included, into the new dungeon's config: the id-vs-folder save block,
+  // deterministically, on every retry.
+  emit('update:item', localItem.value);
   replaceDocBlocks(localItem.value.dungeon_content ?? '');
   restoreSelection();
 }
@@ -337,6 +347,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (issueCopiedTimer !== null) window.clearTimeout(issueCopiedTimer);
   window.removeEventListener('keydown', onGlobalKeydown);
 });
 
@@ -1140,17 +1151,130 @@ function hasLintIssues(): boolean {
 }
 defineExpose({ hasLintIssues });
 
-// Stable shared empty array. `.filter()` allocates a fresh array on every
-// call, so passing it as a prop forces every BlockCard to re-render on every
-// keystroke (Vue sees a different prop reference). Returning the same
-// reference when there are no issues lets Vue's prop diffing skip the
-// re-render. Massive perf win on big dungeons (~55 BlockCards × ~13ms =
-// ~730ms saved per keystroke per the profiler).
+// A card's `issues` prop must keep its identity between lint passes: a
+// fresh `.filter()` result per render would force every BlockCard with
+// issues to re-render on every keystroke (Vue sees a different prop
+// reference — ~13ms per card per the profiler). So the arrays are built
+// once per lint pass and the shared empty array covers everyone else.
 const EMPTY_ISSUES: LintIssue[] = [];
+const issuesByBlock = computed(() => {
+  const m = new Map<number, LintIssue[]>();
+  for (const issue of lintIssues.value) {
+    let list = m.get(issue.blockIndex);
+    if (!list) {
+      list = [];
+      m.set(issue.blockIndex, list);
+    }
+    list.push(issue);
+  }
+  return m;
+});
 function issuesForBlock(blockIndex: number): LintIssue[] {
+  return issuesByBlock.value.get(blockIndex) ?? EMPTY_ISSUES;
+}
+// Quest groups span a block range; memoized per range until the next lint pass.
+const groupIssuesCache = new Map<string, LintIssue[]>();
+watch(lintIssues, () => groupIssuesCache.clear(), { flush: 'sync' });
+function issuesForGroup(group: { startIndex: number; endIndex: number }): LintIssue[] {
   if (lintIssues.value.length === 0) return EMPTY_ISSUES;
-  const filtered = lintIssues.value.filter((i) => i.blockIndex === blockIndex);
-  return filtered.length === 0 ? EMPTY_ISSUES : filtered;
+  const key = `${group.startIndex}:${group.endIndex}`;
+  let list = groupIssuesCache.get(key);
+  if (!list) {
+    list = [];
+    for (let b = group.startIndex; b < group.endIndex; b++) {
+      list.push(...(issuesByBlock.value.get(b) ?? EMPTY_ISSUES));
+    }
+    if (list.length === 0) list = EMPTY_ISSUES;
+    groupIssuesCache.set(key, list);
+  }
+  return list;
+}
+
+function issueLabel(issue: LintIssue): string {
+  const block = doc.value.blocks[issue.blockIndex];
+  return block ? `${kindSigil[block.kind]}${labelFor(block)}` : `block ${issue.blockIndex}`;
+}
+
+/** One issue as a copyable line: `L12 #scene_id: message`. */
+function formatIssue(issue: LintIssue): string {
+  return `L${issue.line} ${issueLabel(issue)}: ${issue.message}`;
+}
+
+const issueCopied = ref<number | 'all' | null>(null);
+let issueCopiedTimer: number | null = null;
+
+async function copyIssueText(text: string, which: number | 'all') {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    console.warn('[DungeonContentEditor] Copy failed:', err);
+    return;
+  }
+  issueCopied.value = which;
+  if (issueCopiedTimer !== null) window.clearTimeout(issueCopiedTimer);
+  issueCopiedTimer = window.setTimeout(() => {
+    issueCopied.value = null;
+    issueCopiedTimer = null;
+  }, 1200);
+}
+
+function copyIssue(issue: LintIssue, i: number) {
+  copyIssueText(formatIssue(issue), i);
+}
+
+function copyAllIssues() {
+  copyIssueText(lintIssues.value.map(formatIssue).join('\n'), 'all');
+}
+
+// The current reveal, handed only to the card that owns the target block —
+// every other card keeps receiving `null`, so Vue's prop diffing skips them.
+const revealRequest = shallowRef<RevealRequest | null>(null);
+let revealSeq = 0;
+
+function revealFor(blockIndex: number): RevealRequest | null {
+  const r = revealRequest.value;
+  return r && r.blockIndex === blockIndex ? r : null;
+}
+
+function revealForGroup(group: { startIndex: number; endIndex: number }): RevealRequest | null {
+  const r = revealRequest.value;
+  return r && r.blockIndex >= group.startIndex && r.blockIndex < group.endIndex ? r : null;
+}
+
+// Select the block, then let its card focus the exact input / textarea line.
+// In the Raw view the issue's absolute line is selected in the textarea instead.
+function jumpToIssue(issue: LintIssue) {
+  if (showRaw.value) {
+    revealRawLine(issue.line);
+    return;
+  }
+  jumpToBlock(issue.blockIndex);
+  if (!issue.at) return;
+  revealRequest.value = { seq: ++revealSeq, blockIndex: issue.blockIndex, at: issue.at };
+  // The request is index-keyed: consume it once the card has seen it, so a
+  // later move/remove/insert can't replay it on whatever block lands there.
+  nextTick(() => { revealRequest.value = null; });
+}
+
+const rawViewRef = ref<HTMLElement | null>(null);
+const rawTextareaRef = ref<InstanceType<typeof Textarea> | null>(null);
+
+function revealRawLine(line: number) {
+  const ta = (rawTextareaRef.value as any)?.$el;
+  const view = rawViewRef.value;
+  if (!(ta instanceof HTMLTextAreaElement) || !view) return;
+  const text = ta.value;
+  const start = lineStartOffset(text, line);
+  const nl = text.indexOf('\n', start);
+  const end = nl === -1 ? text.length : nl;
+  ta.focus({ preventScroll: true });
+  ta.setSelectionRange(start, end);
+  // autoResize makes the textarea as tall as its content, so the scroll
+  // container is the raw view around it.
+  const y = measureOffsetTop(ta, start);
+  const taRect = ta.getBoundingClientRect();
+  const viewRect = view.getBoundingClientRect();
+  view.scrollTop += (taRect.top + y) - (viewRect.top + view.clientHeight / 2);
 }
 
 useSortable(tocListRef, doc.value.blocks, {
@@ -1359,19 +1483,27 @@ function questKindOf(id: string | undefined): QuestKind | null {
       </div>
     </div>
 
-    <div v-if="lintIssues.length" class="lint-banner" :class="{ 'lint-banner--expanded': lintBannerExpanded }"
-      @click="lintBannerExpanded = !lintBannerExpanded">
-      <div class="lint-banner-summary">
+    <div v-if="lintIssues.length" class="lint-banner" :class="{ 'lint-banner--expanded': lintBannerExpanded }">
+      <div class="lint-banner-summary" @click="lintBannerExpanded = !lintBannerExpanded">
         <span class="lint-icon">⚠</span>
         <span>{{ lintIssues.length }} {{ lintIssues.length === 1 ? 'issue' : 'issues' }} — click to {{
           lintBannerExpanded ? 'hide' : 'review' }}</span>
+        <span class="lint-spacer" />
+        <button type="button" class="lint-copy-all" @click.stop="copyAllIssues"
+          v-tooltip.bottom="'Copy every issue as text: line, block, message'">
+          <i :class="issueCopied === 'all' ? 'pi pi-check' : 'pi pi-copy'" />
+          Copy all
+        </button>
       </div>
-      <ul v-if="lintBannerExpanded" class="lint-list" @click.stop>
-        <li v-for="(issue, i) in lintIssues" :key="i" class="lint-item" @click="jumpToBlock(issue.blockIndex)">
-          <span class="lint-block-ref">
-            {{ kindSigil[doc.blocks[issue.blockIndex]?.kind] }}{{ labelFor(doc.blocks[issue.blockIndex]) }}
-          </span>
-          <span class="lint-message">{{ issue.message }}</span>
+      <ul v-if="lintBannerExpanded" class="lint-list">
+        <!-- Inline spans with literal separators, so a drag-selection reads
+             exactly like `formatIssue`; only the line/block refs jump, the
+             message stays a plain selectable span. -->
+        <li v-for="(issue, i) in lintIssues" :key="i" class="lint-item" :class="`lint-item--${issue.severity}`">
+          <span class="lint-line" @click="jumpToIssue(issue)">L{{ issue.line }}</span> <span class="lint-block-ref" @click="jumpToIssue(issue)">{{ issueLabel(issue) }}</span>: <span class="lint-message">{{ issue.message }}</span>
+          <button type="button" class="lint-item-copy" @click.stop="copyIssue(issue, i)" title="Copy this issue">
+            <i :class="issueCopied === i ? 'pi pi-check' : 'pi pi-copy'" />
+          </button>
         </li>
       </ul>
     </div>
@@ -1494,6 +1626,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
             }" @click="(e: MouseEvent) => onBlockClick(item.idx, e)">
               <BlockCard :block="doc.blocks[item.idx]" :index="item.idx" :can-move-up="item.idx > 0"
                 :can-move-down="item.idx < doc.blocks.length - 1" :issues="issuesForBlock(item.idx)"
+                :reveal="revealFor(item.idx)"
                 :locked="isLockedBlock(doc.blocks[item.idx])" @update:block="onBlockUpdate" @remove="onBlockRemove"
                 @move-up="onBlockMoveUp" @move-down="onBlockMoveDown" @insert-scene="onBlockInsertScene" />
             </div>
@@ -1503,7 +1636,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
                 'block-anchor--selected': selectedIndex !== null && selectedIndex >= item.group.startIndex && selectedIndex < item.group.endIndex,
                 'block-anchor--indented': indented[item.group.startIndex],
               }" @click="(e: MouseEvent) => onBlockClick(item.group.startIndex, e)">
-              <QuestCard :group="item.group" :blocks="doc.blocks"
+              <QuestCard :group="item.group" :blocks="doc.blocks" :issues="issuesForGroup(item.group)"
+                :reveal="revealForGroup(item.group)"
                 @update:block="(idx: number, b: Block) => updateBlock(idx, b)"
                 @add-block-after="(afterIdx: number, b: Block) => insertBlockAfter(afterIdx, b)"
                 @remove-block="(idx: number) => removeBlock(idx)"
@@ -1517,9 +1651,9 @@ function questKindOf(id: string | undefined): QuestKind | null {
         </template>
       </div>
 
-      <div v-else class="raw-view">
-        <Textarea :model-value="serialized" @update:model-value="onRawEdit" class="raw-textarea" spellcheck="false"
-          autoResize />
+      <div v-else ref="rawViewRef" class="raw-view">
+        <Textarea ref="rawTextareaRef" :model-value="serialized" @update:model-value="onRawEdit"
+          class="raw-textarea" spellcheck="false" autoResize />
       </div>
     </div>
   </div>
@@ -1599,27 +1733,53 @@ function questKindOf(id: string | undefined): QuestKind | null {
   padding: 0.4rem 0.75rem;
   border-radius: 4px;
   margin: 0 0.25rem 0.5rem;
-  cursor: pointer;
-  user-select: none;
   flex: 0 0 auto;
-}
-
-.lint-banner:hover {
-  background: #fde5e1;
 }
 
 .lint-banner-summary {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.85rem;
+  gap: 0.5rem;
   font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.lint-banner-summary:hover {
+  color: #7f0000;
 }
 
 .lint-icon {
   font-size: 1rem;
 }
 
+.lint-spacer {
+  flex: 1 1 0;
+}
+
+.lint-copy-all,
+.lint-item-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #b71c1c;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(183, 28, 28, 0.35);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+
+.lint-copy-all:hover,
+.lint-item-copy:hover {
+  background: #fff;
+  border-color: #b71c1c;
+}
+
+/* The list is the part a dev drags across to copy — keep it selectable. */
 .lint-list {
   list-style: none;
   padding: 0.5rem 0 0;
@@ -1627,31 +1787,63 @@ function questKindOf(id: string | undefined): QuestKind | null {
   border-top: 1px solid rgba(183, 28, 28, 0.2);
   max-height: 180px;
   overflow-y: auto;
+  user-select: text;
+  cursor: text;
 }
 
 .lint-item {
-  display: flex;
-  gap: 0.6rem;
-  padding: 0.25rem 0.35rem;
+  display: block;
+  position: relative;
+  padding: 0.25rem 2rem 0.25rem 0.35rem;
   border-radius: 3px;
-  cursor: pointer;
   font-size: 0.82rem;
-  align-items: baseline;
 }
 
 .lint-item:hover {
   background: rgba(183, 28, 28, 0.08);
 }
 
+.lint-line {
+  display: inline-block;
+  font-family: var(--font-family-mono, monospace);
+  color: #6d4c41;
+  min-width: 3.5ch;
+  text-align: right;
+  cursor: pointer;
+}
+
 .lint-block-ref {
   font-family: var(--font-family-mono, monospace);
   font-weight: 700;
-  flex: 0 0 auto;
   color: #880e4f;
+  cursor: pointer;
+}
+
+.lint-line:hover,
+.lint-block-ref:hover {
+  text-decoration: underline;
 }
 
 .lint-message {
   color: #b71c1c;
+}
+
+.lint-item--warning .lint-message {
+  color: #8d6e00;
+}
+
+.lint-item-copy {
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.1rem 0.35rem;
+  opacity: 0;
+}
+
+.lint-item:hover .lint-item-copy,
+.lint-item-copy:focus-visible {
+  opacity: 1;
 }
 
 .toolbar-divider {

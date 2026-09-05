@@ -2,8 +2,10 @@ import { jsonrepair } from "jsonrepair";
 import { Choice } from "../core/content/choice";
 import { Character } from "../core/character/character";
 import { Game } from "../game";
+import type { DungeonLine } from "./dungeonSystem";
 import { computed, ComputedRef } from "vue";
 import { gameLogger } from "../utils/logger";
+import { normalizeAbilityEffects, sortEffectIds } from "../../utility/abilityEffects";
 import { CustomChoiceObject } from "../../schemas/customChoiceSchema";
 import { PoolDefinitionObject } from "../../schemas/poolDefinitionSchema";
 import { PoolEntryObject } from "../../schemas/poolEntrySchema";
@@ -668,7 +670,7 @@ export class LogicSystem {
     }
 
     private resolveLoreLinks(text: string): string {
-        const regex = /\[\[(!?)(?:([a-z]+):)?([a-zA-Z0-9_]+)(?:(?:>|&gt;)([^\]]+?))?\]\]/g;
+        const regex = /\[\[(!?)(?:([a-z]+):)?([a-zA-Z0-9_-]+)(?:(?:>|&gt;)([^\]]+?))?\]\]/g;
         const narrative = this.game.narrativeSystem;
         return text.replace(regex, (_match, bang: string, kind: string | undefined, id: string, customLabel?: string) => {
             if (kind === 'item') {
@@ -678,7 +680,7 @@ export class LogicSystem {
                     return customLabel || id;
                 }
                 const name = customLabel || def.traits?.name || def.name || id;
-                const rarity = def.attributes?.rarity;
+                const rarity = def.traits?.rarity;
                 const rarityClass = rarity ? ` rarity rarity_${rarity}` : '';
                 return `<span class='lore-link${rarityClass}' data-lore-id='${id}' data-lore-kind='item' tabindex='0'>${name}</span>`;
             }
@@ -875,18 +877,19 @@ export class LogicSystem {
         }
         let realDungeonId = this.game.getDungeonId(dungeon);
 
-        // Collect variants: base + ~2, ~3, ...
-        const variants = [templateId];
-        for (let i = 2; ; i++) {
-            const variantId = `${templateId}~${i}`;
+        // Collect variants: base + ~2, ~3, ... — keeping only those whose own `if` / `ifOr` holds,
+        // so `|$a||$b|` with complementary conditions renders exactly one of them.
+        const variants: DungeonLine[] = [];
+        for (let i = 1; ; i++) {
+            const variantId = i === 1 ? templateId : `${templateId}~${i}`;
             const line = this.game.getLineByDungeonId(variantId, realDungeonId);
             if (!line) break;
-            variants.push(variantId);
+            if (this.performConditionalEvaluation(line.params)) variants.push(line);
         }
+        if (variants.length === 0) return "";
 
         const chosen = variants[Math.floor(Math.random() * variants.length)];
-        let content = this.game.getLineByDungeonId(chosen, realDungeonId).val;
-        let resolved = this.resolveString(content).output;
+        let resolved = this.resolveString(chosen.val).output;
         return resolved;
     }
 
@@ -1602,17 +1605,26 @@ export class LogicSystem {
 
         const character = (characterId ? this.game.getCharacter(characterId) : undefined) ?? undefined;
 
-        const result: { name?: string, lines: string[] }[] = [];
-        for (const effectId in abilityData.effects) {
+        const result: { id: string, order: number, name?: string, attach?: string, lines: string[] }[] = [];
+        for (const effectId of sortEffectIds(abilityData.effects)) {
             const aspects = abilityData.effects[effectId];
             const fallback = baseData?.effects?.[effectId];
             const lines = this.buildDescriptionLines(aspects, definitionsMap, undefined, fallback, character, abilityData);
-            if (lines.length > 0) {
-                result.push({ name: aspects.__name || fallback?.__name, lines });
+            // Authored text for behaviour no aspect can express (a script condition, a computed stat).
+            // Kept separate from the generated lines so the UI can run placeholders over it — the
+            // generated lines are machine-built and rendered with the resolver off.
+            const attach = aspects.__description_attach ?? fallback?.__description_attach;
+            if (lines.length > 0 || attach) {
+                result.push({
+                    id: effectId,
+                    order: aspects.__order ?? fallback?.__order ?? 0,
+                    name: aspects.__name || fallback?.__name,
+                    attach, lines,
+                });
             }
         }
 
-        return isFlat ? result.flatMap(r => r.lines) : result;
+        return isFlat ? result.flatMap(r => r.attach ? [r.attach, ...r.lines] : r.lines) : result;
     }
 
     public buildAbilityMetaDescription(
@@ -1649,17 +1661,7 @@ export class LogicSystem {
             meta: template.meta || {},
             effects: {}
         };
-        if (Array.isArray(template.effects)) {
-            for (const effect of template.effects) {
-                if (effect.id) {
-                    const normalized: any = { ...(effect.aspects || {}) };
-                    if (effect.name) normalized.__name = effect.name;
-                    data.effects[effect.id] = normalized;
-                }
-            }
-        } else if (template.effects) {
-            data.effects = template.effects as any;
-        }
+        data.effects = normalizeAbilityEffects(template.effects);
         return data;
     }
 
@@ -1683,6 +1685,9 @@ export class LogicSystem {
             if (!definition || !definition.ingame_description) continue;
             if (definition.ingame_hide) continue;
             if (roleFilter && definition.role !== roleFilter) continue;
+            // A false boolean flag means "off" — its line ("Bonus Action", "(consumed)") would
+            // state the opposite of the authored data.
+            if (fields[fieldId] === false) continue;
 
             let line = definition.ingame_description as string;
             line = line.replace(/\[v(?::(id|status|character))?\]/g, (_m, mode) => {
@@ -1696,7 +1701,9 @@ export class LogicSystem {
             line = line.replace(/(?<!\[)\[([a-zA-Z0-9_]+)(?::(id|status|character))?\](?!\])/g, (match: string, siblingId: string, mode?: string) => {
                 if (siblingId === 'v') return match;
                 const value = fields[siblingId] ?? fallbackFields?.[siblingId];
-                if (value === undefined) return '';
+                // false collapses like absence: a sibling ref to an off boolean flag must not
+                // render the flag's template.
+                if (value === undefined || value === false) return '';
                 if (mode === 'id') return String(value);
                 if (mode === 'status') return this.resolveStatusLinks(value);
                 if (mode === 'character') return this.resolveCharacterName(value);

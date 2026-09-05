@@ -10,6 +10,8 @@ export const AbilityTemplateSchema = {
         type: 'schema[]', objects: {
             id: { type: 'string', tooltip: 'Effect ID used to reference this effect in game, e.g: "primary_strike", "secondary_burn".' },
             name: { type: 'string', tooltip: 'Display name for this effect shown in auto-generated descriptions.' },
+            order: { type: 'number', tooltip: 'Display AND execution order, lowest first. Effects without one sit at 0 and fall back to alphabetical id order. Set it when an ability\'s effects must resolve or read in a particular sequence.' },
+            description_attach: { type: 'htmlarea', tooltip: 'Free text rendered as-is ABOVE this effect\'s auto-generated lines. For behaviour that cannot be expressed as aspects — a script-driven condition, a computed stat — so the card can still explain it. The effect is listed even when it has no aspects to describe.' },
             aspects: { type: 'schema', fromFile: 'ability_definitions', fromFileType: 'custom', fromFileTypeAnd: { role: "aspect" }, tooltip: 'Aspects of the ability effect when used.' },
         }
     },

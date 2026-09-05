@@ -193,26 +193,6 @@ onMounted(() => {
                     <span class="detail-value">{{ item.uid }}</span>
                   </div>
 
-                  <!-- Properties -->
-                  <div v-if="Object.keys(item.properties).length > 0" class="detail-row">
-                    <span class="detail-label">Properties:</span>
-                    <div class="properties-grid">
-                      <div v-for="(prop, propId) in item.properties" :key="propId" class="property-item">
-                        <span class="property-name">{{ propId }}:</span>
-                        <span class="property-value">{{ prop.currentValue }}/{{ prop.getMaxValue() }}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Attributes -->
-                  <div v-if="Object.keys(item.attributes).length > 0" class="detail-row">
-                    <span class="detail-label">Attributes:</span>
-                    <div class="attributes-list">
-                      <span v-for="(value, key) in item.attributes" :key="key" class="attribute-tag">
-                        {{ key }}: {{ value }}
-                      </span>
-                    </div>
-                  </div>
 
                   <!-- Tags -->
                   <div v-if="item.tags.length > 0" class="detail-row">

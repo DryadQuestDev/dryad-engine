@@ -35,9 +35,9 @@ These fields control **when** an ability can be used:
 | `caster_max_health` | number | Caster must have LESS than X% HP for the ability to be usable. |
 | `target_min_health` | number | Target must have LESS than X% HP (execute abilities). |
 | `target_max_health` | number | Target must have MORE than X% HP. |
-| `cooldown` | number | Turns of cooldown after use. Defined in global_essentials. |
+| `cd` | number | Turns of cooldown after use. Defined in global_essentials. |
 | `charges` | number | Maximum uses per battle. 0 = unlimited (cooldown only). Resets between battles. |
-| `cd_on_battle_start` | number | Initial cooldown applied when battle starts (delays first use). |
+| `cd_on_battle_start` | boolean | When true, the ability starts the battle on cooldown for its full `cd`, so it cannot be cast on turn 1. |
 | `cd_group` | string | Shared cooldown group. When cast, all abilities with the same `cd_group` on this character also go on cooldown (using the cast ability's cooldown value). |
 | `unamplified` | boolean | When true, the ability scales from raw `power` only — both `power_bonus` and `power_amplifier` are ignored. |
 | `channel` | boolean | Marks the ability as a **channel** (see below). |
@@ -55,12 +55,12 @@ These fields define **what** the ability does. An ability can have multiple effe
 
 | Field | Type | Description |
 |---|---|---|
-| `chance` | number | Probability of this effect triggering (0--1). Undefined = always. |
+| `chance` | number | Percent chance of this effect triggering (0--100). Undefined = always. |
 | `damage` | number | Damage as % of caster's power. 120 = 120% of power. |
 | `damage_type` | chooseOne | `physical` (→ `physical_armor`), `magic` (→ `magical_armor`), or `absolute` (ignores armor). Elemental flavour goes on the ability's `meta.school`, not here. |
 | `healing` | number | Healing as % of caster's power, applied to the effect's **target(s)**. 100 = 100% of power. |
 | `healing_self` | number | Heal the **caster** for this % of caster power, regardless of the ability's target (useful on offensive abilities). |
-| `lifesteal` | number | % of the **ability's total damage** (summed across all of its effects/targets this cast) healed back to the caster, scaled by the caster's `heal_amplification` and `heal_received_mult`. Put it on any one effect — it need not be the damaging one; if several effects set it, the highest applies. |
+| `lifesteal` | number | Added to the caster's `lifesteal` **stat** for this cast: % of the **ability's total damage** (summed across all of its effects/targets this cast) healed back to the caster, scaled by the caster's `heal_amplification` and `heal_received_mult`. Put it on any one effect — it need not be the damaging one; several effects SUM. |
 
 ### Statuses
 
@@ -94,19 +94,20 @@ Status apply/remove come in four **scopes** — `_target` (the ability's target(
 | Field | Type | Description |
 |---|---|---|
 | `require_status_target` | chooseOne (`character_statuses`) | The effect only applies to targets that have ≥1 stack of this status; others are skipped. |
-| `require_status_target_consume` | boolean | When true, removes 1 stack of `require_status_target` from each target the effect applies to. (e.g. `require_status_target: combo` + consume = the old Combo behavior.) |
+| `require_status_target_consume` | boolean | When true, removes 1 stack of `require_status_target` from each target the effect applies to. Spent **after** the damage lands, so a payoff hit still benefits from the status it consumes; a dodged or vetoed hit leaves the status standing. (e.g. `require_status_target: combo` + consume = the old Combo behavior.) |
 | `cleanse` | boolean | Remove cleansable `meta.is_battle` statuses. Ally target: removes negative. Enemy target: removes positive. |
 | `splash` | number | Also hits up to N neighbors of the primary target in their party lineup. Works for both enemy and ally targets. |
 | `splash_only` | boolean | Excludes the primary target from this effect -- only splash neighbors are hit. Requires `splash`. |
 | `bounce` | number | After the ability resolves, the **whole ability** re-resolves N more times on random targets of the same side, with a short delay per bounce. By default a hop can't land on the previous target; the chain ends early if no valid target remains. Bounces re-apply effects only -- they do **not** re-pay cost or re-trigger cooldown/charges. |
 | `bounce_same` | boolean | When true, a bounce may land on the **same** target as the previous hop (allows repeats). Default false (consecutive hops must differ). |
+| `flurry` | number | **Total** number of strikes on the **same** target -- the primary cast counts, so `3` = normal hit + 2 extra re-resolves of the whole ability, with a short delay per strike; `1` or less adds nothing. Fizzles if the target dies -- remaining strikes are lost. Extra strikes re-apply effects only -- they do **not** re-pay cost or re-trigger cooldown/charges. Melee re-lunges per strike; use `bounce` for hops between random targets. |
 | `summon` | chooseOne (`character_templates`) | Spawn a combatant from the chosen character template onto the **caster's side**. It joins the battle and acts this round based on its speed (it is **not** added to the persistent party). One summon per effect — add more effects to summon multiple creatures. Independent of the ability's `target`; ignored on bounces. |
 
 ## Cooldowns & Charges
 
 - **Cooldown** -- After use, the ability enters cooldown for N turns. Reduced by 1 at the start of that character's turn.
 - **Charges** -- Limited uses per battle. Set to -1 internally for unlimited. When charges hit 0, the ability cannot be used.
-- **`cd_on_battle_start`** -- Some abilities start on cooldown (e.g., ultimates that should not be available on turn 1).
+- **`cd_on_battle_start`** -- Flag for abilities that open the fight on cooldown (e.g., ultimates that should not be available on turn 1). The wait equals the ability's own `cd`, so an ability with no `cd` is unaffected.
 
 Cooldowns and charges are tracked per-character per-ability and reset between battles.
 

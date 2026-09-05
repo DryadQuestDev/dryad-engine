@@ -79,14 +79,18 @@ export type SoundPlayback = {
 export type EmitterMap = typeof CORE_EMITTER_SIGNATURES;
 
 /**
- * One save-migration section: `true` = the whole section, `false` = skip it,
- * `string[]` = the keys to skip (opt-out mode) or the only keys to sync (opt-in mode).
+ * One save-migration section: `true` = the whole section, `false` = skip it entirely,
+ * `{ only }` = the only keys to sync, `{ skip }` = keys to leave as the save has them.
+ * Both lists can appear together — allowed keys are `only` minus `skip`.
  */
-export type MigrationScope = boolean | string[];
+export type MigrationScope = boolean | { only?: string[]; skip?: string[] };
 
-/** Options for `Game.runDefaultSaveMigration()`. Every mutating section has its own key. */
+/** Options for one save-migration declaration. Every mutating section has its own key. */
 export interface SaveMigrationOptions {
-  /** `opt-out` (default): sync everything, lists name what to skip. `opt-in`: sync nothing, lists name what to sync. */
+  /**
+   * What sections nobody mentions do — `opt-out` (default) syncs them, `opt-in` skips them.
+   * Only honored on the `_core` declaration: a mod can't flip the game's global default.
+   */
   mode?: 'opt-in' | 'opt-out';
   /** Stat ids. */
   stats?: MigrationScope;
@@ -98,8 +102,10 @@ export interface SaveMigrationOptions {
   abilities?: MigrationScope;
   /** Skin layer ids. */
   skinLayers?: MigrationScope;
-  /** View ids (`_default` for the default view). Covers static art placement too. */
+  /** View ids (`_default` for the default view) — spine atlas/skeleton and their placement. */
   spine?: MigrationScope;
+  /** View ids (`_default` for the default view) — static (non-spine) art_dx / art_dy / art_scale placement. */
+  staticArt?: MigrationScope;
   /** Template item-slot ids. Backfills missing slots and repositions existing ones — never removes. */
   itemSlots?: MigrationScope;
   /** Skill tree ids. */
@@ -108,18 +114,34 @@ export interface SaveMigrationOptions {
   learnedSkills?: MigrationScope;
   /** Status ids. */
   statuses?: MigrationScope;
-  /** Item trait ids. */
+  /** Item trait ids — reset every inventory item's traits to its template, purge stale ids. */
   itemTraits?: MigrationScope;
-  /** Item attribute ids. */
-  itemAttributes?: MigrationScope;
-  /** Item property ids. */
-  itemProperties?: MigrationScope;
-  /** Item template ids — refreshes the equip-status object and re-binds it on equipped items. */
-  itemStatuses?: MigrationScope;
+  /**
+   * Item template ids — rebuild every other template-owned field of each inventory item from its
+   * template: equip-status object, price, consume payloads, slots, category, tags, actions, choices.
+   * Identity, quantity, the equipped flag and trade prices are the instance's own and never move.
+   */
+  items?: MigrationScope;
 }
+
+/** One declaration plus who contributed it — `_core` for the game, otherwise a mod or plugin id. */
+export type SaveMigrationRegistration = { source: string; options: SaveMigrationOptions };
+
+/** Every mutating section of `SaveMigrationOptions`, i.e. its keys minus `mode`. */
+const MIGRATION_SECTIONS = [
+  'stats', 'traits', 'attributes', 'abilities', 'skinLayers', 'spine', 'staticArt', 'itemSlots',
+  'skillTrees', 'learnedSkills', 'statuses', 'itemTraits', 'items',
+] as const;
+type MigrationSection = typeof MIGRATION_SECTIONS[number];
 
 /** Resolved section gate: `enabled` short-circuits the whole section, `allows` filters per key. */
 type ScopeFilter = { enabled: boolean; allows(key: string): boolean };
+
+/** Every section's resolved gate, ready to run a pass against. */
+type MigrationScopes = Record<MigrationSection, ScopeFilter>;
+
+const ALLOW_ALL: ScopeFilter = { enabled: true, allows: () => true };
+const DENY_ALL: ScopeFilter = { enabled: false, allows: () => false };
 
 /**
  * Sync one core-status view map (spine or static art) against the template's.
@@ -134,19 +156,65 @@ function syncViewMap<T>(current: Map<string, T>, fromTemplate: Map<string, T>, s
   }
 }
 
-/** See the `MigrationScope` table in `Game.runDefaultSaveMigration()`. Omitted follows the mode. */
+/** See the `MigrationScope` table in `Game.registerSaveMigration()`. Omitted follows the mode. */
 function resolveScope(value: MigrationScope | undefined, optIn: boolean): ScopeFilter {
-  if (value === true) return { enabled: true, allows: () => true };
-  if (value === false) return { enabled: false, allows: () => false };
-  if (Array.isArray(value)) {
-    const keys = new Set(value);
-    return optIn
-      ? { enabled: keys.size > 0, allows: k => keys.has(k) }
-      : { enabled: true, allows: k => !keys.has(k) };
+  if (value === true) return ALLOW_ALL;
+  if (value === false) return DENY_ALL;
+  if (value) {
+    const only = value.only ? new Set(value.only) : null;
+    const skip = new Set(value.skip ?? []);
+    if (only && only.size === 0) return DENY_ALL;
+    return { enabled: true, allows: k => (!only || only.has(k)) && !skip.has(k) };
   }
-  return optIn
-    ? { enabled: false, allows: () => false }
-    : { enabled: true, allows: () => true };
+  return optIn ? DENY_ALL : ALLOW_ALL;
+}
+
+/** Resolve one declaration on its own — the manual `runDefaultSaveMigration(options)` path. */
+function resolveScopes(options: SaveMigrationOptions): MigrationScopes {
+  const optIn = options.mode === 'opt-in';
+  const scopes = {} as MigrationScopes;
+  for (const key of MIGRATION_SECTIONS) scopes[key] = resolveScope(options[key], optIn);
+  return scopes;
+}
+
+/**
+ * Merge every registered declaration into one gate per section. Restrictive wins, so the merge
+ * is order-independent and a mod can only ever make the pass do LESS — never resurrect state
+ * another source meant to keep:
+ * - `false` from any source disables the section outright.
+ * - `skip` entries from every source union, and always subtract last.
+ * - `only` lists union (a mod extends coverage); `true` from any source widens it to every key.
+ * - `mode` comes from the `_core` declaration alone; elsewhere it's ignored with a warning.
+ */
+function mergeScopes(registrations: SaveMigrationRegistration[]): MigrationScopes {
+  const optIn = registrations.find(r => r.source === '_core')?.options.mode === 'opt-in';
+  for (const reg of registrations) {
+    if (reg.source !== '_core' && reg.options.mode) {
+      gameLogger.warn(`[save-migration] "${reg.source}" set mode: '${reg.options.mode}' — ignored, only _core owns the default`);
+    }
+  }
+
+  const scopes = {} as MigrationScopes;
+  for (const key of MIGRATION_SECTIONS) {
+    let mentioned = false, denied = false, widened = false, narrowed = false;
+    const only = new Set<string>();
+    const skip = new Set<string>();
+    for (const { options } of registrations) {
+      const value = options[key];
+      if (value === undefined) continue;
+      mentioned = true;
+      if (value === false) { denied = true; continue; }
+      if (value === true) { widened = true; continue; }
+      if (value.only) { narrowed = true; for (const k of value.only) only.add(k); }
+      if (value.skip) for (const k of value.skip) skip.add(k);
+    }
+
+    if (denied || (!mentioned && optIn)) { scopes[key] = DENY_ALL; continue; }
+    const all = widened || !narrowed;                 // nobody narrowed it → every key
+    if (!all && only.size === 0) { scopes[key] = DENY_ALL; continue; }
+    scopes[key] = { enabled: true, allows: k => (all || only.has(k)) && !skip.has(k) };
+  }
+  return scopes;
 }
 
 /**
@@ -164,23 +232,57 @@ export class CoreSystem {
   @Skip()
   private imageCache = new Map<string, HTMLImageElement>();
 
+  /** Entry cap for imageCache. Entries, not bytes — the corpus varies ~100x per file. */
+  private static readonly IMAGE_CACHE_LIMIT = 600;
+
   /**
-   * Keeps an image in browser memory cache by maintaining a reference.
-   * Call this on image @load to prevent browser from evicting the cached image.
-   * Cache is capped at 600 entries; oldest is evicted when full.
-   * Returns the cached element so callers can await its load/decode.
+   * Canonical cache key. The two writers disagree on spelling: the preloader passes the raw
+   * data path ("assets/games_assets/…/body.webp") while the v-persist directive passes el.src,
+   * which the DOM has already resolved to an absolute URL. Unresolved, the same file occupies
+   * two entries, each invisible to the other — so warming can never see what the renderer
+   * already holds, and either copy can evict the other. Resolve both to the absolute form.
+   */
+  private imageCacheKey(src: string): string {
+    try {
+      return new URL(src, document.baseURI).href;
+    } catch {
+      return src;
+    }
+  }
+
+  /**
+   * True when the image already has an element in the cache. Note this means "someone has
+   * started fetching this", not "this is paint-ready" — the element is inserted synchronously,
+   * before load. Callers use it to skip redundant decode work, not to assert readiness.
+   */
+  public hasImage(src: string): boolean {
+    return !!src && this.imageCache.has(this.imageCacheKey(src));
+  }
+
+  /**
+   * Holds a reference to an image so the browser keeps its encoded data around, and hands the
+   * element back so callers can await its load/decode. Capped at IMAGE_CACHE_LIMIT entries,
+   * evicting least-recently-used.
    */
   public persistImage(src: string): HTMLImageElement | undefined {
     if (!src) return undefined;
-    const existing = this.imageCache.get(src);
-    if (existing) return existing;
-    if (this.imageCache.size >= 600) {
-      const firstKey = this.imageCache.keys().next().value!;
-      this.imageCache.delete(firstKey);
+    const key = this.imageCacheKey(src);
+    const existing = this.imageCache.get(key);
+    if (existing) {
+      // A hit is a use: re-insert so it moves to the young end. Under plain insertion order a
+      // layer that is still on screen ages out behind whatever icons happened to stream past
+      // it, because v-persist only fires on mount — re-touching happens when layers remount
+      // (the doll's TransitionGroup is keyed by image), not on every render.
+      this.imageCache.delete(key);
+      this.imageCache.set(key, existing);
+      return existing;
+    }
+    if (this.imageCache.size >= CoreSystem.IMAGE_CACHE_LIMIT) {
+      this.imageCache.delete(this.imageCache.keys().next().value!);
     }
     const img = new Image();
     img.src = src;
-    this.imageCache.set(src, img);
+    this.imageCache.set(key, img);
     return img;
   }
 
@@ -217,6 +319,15 @@ export class CoreSystem {
 
   @Skip()
   public stateLoading = ref(true);
+
+  // True only while a save migration runs. Migration snapshots every resource pool, churns
+  // statuses/items (remove + re-add) and raw-restores the pools, so its intermediate values are
+  // never meant to be observed — but the churn goes through the ordinary setters and would emit
+  // them (a status that raises a resource's max, removed then re-added, reads as that resource
+  // being spent). Migrations run after stateLoading clears, so they need their own gate.
+  // Not a ref: read synchronously.
+  @Skip()
+  private migratingSave = false;
 
   /**
    * Full-screen "Loading" overlay (same visual as the initial game load) that
@@ -263,39 +374,59 @@ export class CoreSystem {
   }
 
   /**
+   * Save-migration declarations in registration order, one per source. Filled at script-load
+   * time by `game.registerSaveMigration()` — the game, its mods and plugins each contribute
+   * their own — and executed by the engine on save load, just before `game_initiated`.
+   */
+  @Skip()
+  public saveMigrations: SaveMigrationRegistration[] = [];
+
+  /**
+   * Declare how `source` wants old saves restored. Re-registering the same source replaces
+   * its previous declaration. See `Game.registerSaveMigration()` for the full docs.
+   */
+  public registerSaveMigration(source: string, options: SaveMigrationOptions): void {
+    const existing = this.saveMigrations.findIndex(r => r.source === source);
+    if (existing >= 0) this.saveMigrations[existing] = { source, options };
+    else this.saveMigrations.push({ source, options });
+  }
+
+  /**
+   * Merge every registered declaration and run the pass. Called by the engine on save load;
+   * no-op when nothing was declared.
+   */
+  public runRegisteredSaveMigrations(): void {
+    if (this.saveMigrations.length === 0) return;
+    const sources = this.saveMigrations.map(r => r.source).join(' + ');
+    this.migratingSave = true;
+    try { this.applySaveMigration(mergeScopes(this.saveMigrations), sources); }
+    finally { this.migratingSave = false; }
+  }
+
+  /**
+   * Run a one-off pass from an explicit options object, ignoring the registry.
+   * See `Game.runDefaultSaveMigration()` for the public-facing wrapper.
+   */
+  public runDefaultSaveMigration(options: SaveMigrationOptions = {}): void {
+    this.migratingSave = true;
+    try { this.applySaveMigration(resolveScopes(options), 'manual'); }
+    finally { this.migratingSave = false; }
+  }
+
+  /**
    * Rebuild every character's state from current definitions (template + statuses + traits).
    * Resource pools are never touched — snapshot at the start, restored verbatim at the end.
    * No-op for new games or when the loaded versions match the current ones —
    * except in dev mode, where it runs on every load regardless of versions.
-   *
-   * See `Game.runDefaultSaveMigration()` for the public-facing wrapper and full docs.
    */
-  public runDefaultSaveMigration(options: SaveMigrationOptions = {}): void {
+  private applySaveMigration(scopes: MigrationScopes, label: string): void {
     const game = Game.getInstance();
     if (game.isNewGame) return;
     const sameVersion = !this.isOldSave();
     if (sameVersion && !game.isDevMode()) return;
 
-    const optIn = options.mode === 'opt-in';
-    const scopes = {
-      stats: resolveScope(options.stats, optIn),
-      traits: resolveScope(options.traits, optIn),
-      attributes: resolveScope(options.attributes, optIn),
-      abilities: resolveScope(options.abilities, optIn),
-      skinLayers: resolveScope(options.skinLayers, optIn),
-      spine: resolveScope(options.spine, optIn),
-      itemSlots: resolveScope(options.itemSlots, optIn),
-      skillTrees: resolveScope(options.skillTrees, optIn),
-      learnedSkills: resolveScope(options.learnedSkills, optIn),
-      statuses: resolveScope(options.statuses, optIn),
-      itemTraits: resolveScope(options.itemTraits, optIn),
-      itemAttributes: resolveScope(options.itemAttributes, optIn),
-      itemProperties: resolveScope(options.itemProperties, optIn),
-      itemStatuses: resolveScope(options.itemStatuses, optIn),
-    };
-    const mode = optIn ? 'opt-in' : 'opt-out';
     if (!Object.values(scopes).some(s => s.enabled)) {
-      console.log(`[save-migration] ${mode}: nothing enabled, skipped`);
+      console.log(`[save-migration] ${label}: nothing enabled, skipped`);
       return;
     }
 
@@ -304,7 +435,7 @@ export class CoreSystem {
     const oldSig = stringify(this.loadedSaveVersions ?? {});
     const newSig = stringify(this.getVersions());
 
-    console.log(`[save-migration] ${mode} · ${oldSig || '(none)'} → ${newSig}${sameVersion ? ' (dev mode, no version bump)' : ''}`);
+    console.log(`[save-migration] ${label} · ${oldSig || '(none)'} → ${newSig}${sameVersion ? ' (dev mode, no version bump)' : ''}`);
     const migrationStart = performance.now();
 
     // Resource pools are save-owned. The status remove/re-add below clamps non-replenishable
@@ -334,7 +465,7 @@ export class CoreSystem {
 
       // 1. Stats — reset to the template values. Safe against resource pools only because the
       // whole migration is wrapped in the snapshot/restore above: setStat delta-adjusts
-      // replenishable resources (like tale's mana-as-lifespan) and that gets undone at the end.
+      // replenishable resources (e.g. a pool that doubles as a lifespan) and that gets undone at the end.
       if (scopes.stats.enabled) {
         const tplStats = (template as any).stats || {};
         for (const key of Object.keys(coreStatus.stats || {})) {
@@ -432,11 +563,11 @@ export class CoreSystem {
       // 3.8. Spine + static art views — template is authoritative for the core status;
       // per-view partial overrides from other statuses re-accumulate on reevaluate.
       // Reuse Status.setValues so the template's entries parse identically to creation.
-      if (scopes.spine.enabled) {
-        const spineParser = new Status();
-        spineParser.setValues({ spine: (template as any).spine || [], static_art: (template as any).static_art || [] } as any);
-        syncViewMap(coreStatus.spineViews, spineParser.spineViews, scopes.spine);
-        syncViewMap(coreStatus.staticArtViews, spineParser.staticArtViews, scopes.spine);
+      if (scopes.spine.enabled || scopes.staticArt.enabled) {
+        const artParser = new Status();
+        artParser.setValues({ spine: (template as any).spine || [], static_art: (template as any).static_art || [] } as any);
+        if (scopes.spine.enabled) syncViewMap(coreStatus.spineViews, artParser.spineViews, scopes.spine);
+        if (scopes.staticArt.enabled) syncViewMap(coreStatus.staticArtViews, artParser.staticArtViews, scopes.staticArt);
       }
       char.reevaluate();
 
@@ -486,24 +617,31 @@ export class CoreSystem {
       if (scopes.statuses.enabled) {
         const heldSnapshot = char.getStatuses()
           .filter(s => s.id !== '_core_status' && statusesMap.has(s.id) && scopes.statuses.allows(s.id))
-          .map(s => ({ id: s.id, stacks: s.currentStacks }));
-        for (const { id, stacks } of heldSnapshot) {
+          .map(s => ({ id: s.id, stacks: s.currentStacks, image: s.image, iconSource: s.iconSource }));
+        for (const { id, stacks, image, iconSource } of heldSnapshot) {
           char.removeStatus(id);
-          char.addStatus(game.createStatus(id));
+          const fresh = game.createStatus(id);
+          if (!fresh.iconSource && iconSource) fresh.iconSource = iconSource;
+          // The pass may only restore what the definition actually declares. A status whose
+          // definition carries no image was given one at runtime — a consumable's status wears the
+          // icon of the item that applied it — so recreating it from the definition must not blank
+          // that out. Same rule applies to any future runtime-stamped field.
+          if (!fresh.image && image) fresh.image = image;
+          char.addStatus(fresh);
           if (stacks > 1) char.addStatusStacks(id, stacks - 1);
         }
       }
     }
 
-    // Items: rebuild trait/attribute/property/statusObject shape from current definitions.
+    // Items: a saved item is a full snapshot of its template at creation time, so nothing it carries
+    // ever catches up with the editor on its own. Traits are synced per trait id (instance-owned
+    // ones are skipped by declaration); every other template-owned field comes back verbatim from a
+    // fresh clone of the template through the same assignment createItem uses, so the two can never
+    // disagree. Identity (uid), quantity, the equipped flag and trade prices are the instance's own.
     const itemTemplatesMap = game.itemSystem.itemTemplatesMap;
     const itemTraitsMap = game.itemSystem.itemTraitsMap;
-    const itemAttributesMap = game.itemSystem.itemAttributesMap;
-    const itemPropertiesMap = game.itemSystem.itemPropertiesMap;
-    const anyItemScope = scopes.itemTraits.enabled || scopes.itemAttributes.enabled
-      || scopes.itemProperties.enabled || scopes.itemStatuses.enabled;
 
-    if (anyItemScope) for (const inv of game.itemSystem.inventories.value.values()) {
+    for (const inv of game.itemSystem.inventories.value.values()) {
       for (const item of inv.items) {
         const tpl = itemTemplatesMap.get(item.id);
         if (!tpl) continue;                                          // template gone (removed mod); leave alone
@@ -523,53 +661,32 @@ export class CoreSystem {
           }
         }
 
-        // Attributes
-        if (scopes.itemAttributes.enabled) {
-          const tplAttrs = (tpl as any).attributes || {};
-          for (const k of Object.keys(item.attributes || {})) {
-            if (!scopes.itemAttributes.allows(k)) continue;
-            if (!itemAttributesMap.has(k)) { delete item.attributes[k]; continue; }
-            if (typeof tplAttrs[k] === 'string') item.attributes[k] = tplAttrs[k];
-          }
-          for (const k of Object.keys(tplAttrs)) {
-            if (!scopes.itemAttributes.allows(k)) continue;
-            if (!itemAttributesMap.has(k)) continue;
-            if (item.attributes[k] === undefined) item.attributes[k] = tplAttrs[k];
-          }
+        // Everything else the template owns — cloned, since applyTemplateFields assigns by reference
+        // and a shared object would let one instance's runtime edits leak into the template map.
+        if (scopes.items.enabled && scopes.items.allows(item.id)) {
+          game.itemSystem.applyTemplateFields(item, JSON.parse(JSON.stringify(tpl)));
         }
 
-        // Properties — preserve current values; purge stale; backfill missing template properties.
-        if (scopes.itemProperties.enabled) {
-          const tplProps = (tpl as any).properties || {};
-          for (const k of Object.keys(item.properties || {})) {
-            if (!scopes.itemProperties.allows(k)) continue;
-            if (!itemPropertiesMap.has(k)) delete item.properties[k];  // stale: purge
-          }
-          for (const k of Object.keys(tplProps)) {
-            if (!scopes.itemProperties.allows(k)) continue;
-            if (!itemPropertiesMap.has(k)) continue;
-            if (item.properties[k] === undefined) {
-              const prop = game.itemSystem.createProperty(k, tplProps[k] as number);
-              if (prop) item.properties[k] = prop;
-            }
-          }
-        }
-
-        // Status object — refresh from template (no live state to preserve on this field).
-        if (scopes.itemStatuses.enabled && scopes.itemStatuses.allows(item.id)) {
-          item.statusObject = (tpl as any).status ? JSON.parse(JSON.stringify((tpl as any).status)) : {};
-        }
+        // Per-item hook: whatever a plugin or the game derives per INSTANCE at creation (level
+        // scaling, runtime-added choices) is gone after the reset above, and createItem does not
+        // run on load — this is where it gets put back. Fires for every item the pass visits,
+        // whatever the scopes allowed, with its own copy of the template.
+        this.trigger('item_migrate', item, JSON.parse(JSON.stringify(tpl)));
       }
     }
 
-    // Equip-status re-bind — pushes the refreshed statusObject onto whoever wears the item.
-    if (scopes.itemStatuses.enabled) {
-      for (const char of game.getAllCharacters()) {
-        for (const slot of char.itemSlots) {
-          if (!slot.itemUid) continue;
-          const item = game.itemSystem.getItemByUid(slot.itemUid);
-          if (item && scopes.itemStatuses.allows(item.id)) Inventory.applyEquipStatus(item, char);
-        }
+    // Whole-save hook. Before the two finalize steps below on purpose: a listener that edits an
+    // equip-status object gets it bound, and one that moves stats cannot clamp a pool.
+    this.trigger('save_migrated');
+
+    // Equip-status re-bind — a worn item's status is derived from its statusObject, so push it onto
+    // whoever wears it regardless of who changed it (the items section, a listener, or nobody:
+    // applyEquipStatus is an idempotent refresh).
+    for (const char of game.getAllCharacters()) {
+      for (const slot of char.itemSlots) {
+        if (!slot.itemUid) continue;
+        const item = game.itemSystem.getItemByUid(slot.itemUid);
+        if (item) Inventory.applyEquipStatus(item, char);
       }
     }
 
@@ -591,6 +708,14 @@ export class CoreSystem {
     }
     this.registeredStates.add(key);
     this.state.value.set(key, defaultValue);
+  }
+
+  /**
+   * Whether a state key has been registered. Lets a game read a state a MOD owns without
+   * having to guard against getState()'s throw.
+   */
+  public hasState(key: string): boolean {
+    return this.registeredStates.has(key);
   }
 
   /**
@@ -897,7 +1022,12 @@ export class CoreSystem {
   // STORE SYSTEM
   // ============================================
 
-  @Populate(Map, { mode: 'replace' })
+  // Merge, not replace: scripts createStore() during initGame, BEFORE loadSave applies the file.
+  // Replace mode cleared the whole map and rebuilt only the ids the save knew, so a store added
+  // to a script after a save was written vanished on load and its next getStore() threw. Merge
+  // keeps code-created stores alive (as `state` already does) and loads saved entries into the
+  // live Map instance, so a reference held from createStore() stays valid across a load.
+  @Populate(Map, { mode: 'merge' })
   store: Ref<Map<string, Map<string, any>>> = ref(new Map());
 
   public createStore(id: string): Map<string, any> {
@@ -1201,13 +1331,34 @@ export class CoreSystem {
   }
 
   @Skip()
-  ignoreSupressEvents: Set<string> = new Set(['character_render']);
+  // item_drop_render is a pure render predicate, not a game event — suppressing it would answer
+  // "yes, droppable" for protected items and show a Drop button that then refuses.
+  // Emitters that keep firing while events are suppressed. Two families:
+  //  - render/mount events: UI hooks that must still run to paint the restored screen.
+  //  - entity construction: dungeons, collectable pools, characters and items are rebuilt
+  //    from definitions on every save load (they are not serialized), so a listener that
+  //    misses these never gets a second chance — unlike gameplay events, which recur.
+  //  - save migration: save_load_before fires on the raw JSON while stateLoading is still up, and
+  //    the pass itself runs under migratingSave — these hooks exist precisely so listeners can
+  //    act inside the load.
+  ignoreSupressEvents: Set<string> = new Set([
+    'character_render', 'item_drop_render', 'asset_render',
+    'dungeon_create', 'collectable_resolve',
+    'character_create', 'item_create',
+    'save_load_before', 'save_migrated', 'item_migrate',
+  ]);
 
   public trigger<K extends keyof EmitterMap>(
     type: K,
     ...args: Parameters<NonNullable<EmitterMap[K]>>
   ): boolean {
-    if (this.getState('supress_game_events') && !this.ignoreSupressEvents.has(type)) {
+    // stateLoading covers the whole initial-load window (cleared just before game_initiated).
+    // Restoring a save writes resources and states through the ordinary setters, so without
+    // this a load replays gameplay events: to a listener, a restored resource value is
+    // indistinguishable from the player spending that resource. Games cannot tell the two
+    // apart, so the engine has to. One-way flag — never set back to true — so play is unaffected.
+    if ((this.stateLoading.value || this.migratingSave || this.getState('supress_game_events'))
+      && !this.ignoreSupressEvents.has(type)) {
       return true;
     }
     if (!this.emitterConfig.has(type)) {

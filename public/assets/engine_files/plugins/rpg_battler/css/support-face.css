@@ -1,0 +1,51 @@
+/* Floating portrait for the acting support combatant (no battlefield slot).
+   Anchored inside .rpg-viewport (container-type: size) — cqw/cqh resolve against it.
+
+   The classless state is OFF-SCREEN LEFT: the card mounts there, gets `.is-in` a frame
+   later to glide to its resting spot, and loses it again to glide back out. driveTurns
+   awaits both legs (see showSupportFace / hideSupportFace), so the portrait is never on
+   screen during another combatant's turn. --rpg-support-slide is set per battle-speed. */
+.rpg-support-face {
+  position: absolute;
+  left: 15cqw;
+  top: 44cqh;
+  width: 16cqh;
+  z-index: 5;
+  pointer-events: none;
+  /* Far enough left to clear the viewport edge from the resting position. */
+  transform: translateX(-30cqw);
+  opacity: 0;
+  transition:
+    transform var(--rpg-support-slide, 900ms) cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity calc(var(--rpg-support-slide, 900ms) * 0.55) ease;
+}
+
+.rpg-support-face.is-in {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.rpg-support-face-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8cqh;
+}
+
+.rpg-support-face .character-content {
+  filter: drop-shadow(0 0 12px rgba(250, 204, 21, 0.35));
+}
+
+.rpg-support-face-name {
+  padding: 0.3cqh 1.4cqh;
+  border-radius: 1cqh;
+  background: rgba(20, 20, 24, 0.75);
+  border: 1px solid rgba(250, 204, 21, 0.5);
+  color: #f5e9c9;
+  font-size: 2.4cqh;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rpg-support-face { transition-duration: 1ms; }
+}

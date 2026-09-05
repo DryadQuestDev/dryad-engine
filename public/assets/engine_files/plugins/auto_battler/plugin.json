@@ -293,6 +293,7 @@
         "id": "base_weight",
         "role": "meta",
         "type": "number",
+        "debug_info": true,
         "description": "AI priority weight. Higher values = AI prefers this ability. Base weight before situational modifiers."
       },
       {

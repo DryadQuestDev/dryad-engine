@@ -27,6 +27,7 @@ import { GallerySchema } from "../schemas/gallerySchema";
 import { CustomChoiceSchema } from "../schemas/customChoiceSchema";
 import { LocaleSchema } from "../schemas/localeSchema";
 import { ItemRecipeSchema } from "../schemas/itemRecipeSchema";
+import { RecipeGroupSchema } from "../schemas/recipeGroupSchema";
 import ExamplePopup from "./views/customPopups/ExamplePopup.vue";
 import SkillTreeEditorPopup from "./views/customPopups/SkillTreeEditorPopup.vue";
 import FacePickerPopup from "./views/customPopups/FacePickerPopup.vue";
@@ -35,6 +36,7 @@ import CharacterSceneSlotPopup from "./views/customPopups/CharacterSceneSlotPopu
 import AssetPopup from "./views/customPopups/AssetPopup.vue";
 import MaskEditorPopup from "./views/customPopups/MaskEditorPopup.vue";
 import DungeonContentEditorPopup from "./views/customPopups/DungeonContentEditorPopup.vue";
+import AbilityPickerPopup from "./views/customPopups/AbilityPickerPopup.vue";
 import { Editor } from "./editor";
 import { SkillSlotSchema } from "../schemas/skillSlotSchema";
 import { SkillTreeSchema } from "../schemas/skillTreeSchema";
@@ -45,6 +47,9 @@ import { PoolDefinitionSchema } from "../schemas/poolDefinitionSchema";
 import { PoolEntrySchema } from "../schemas/poolEntrySchema";
 import { NarrativeTagSchema, NarrativeSlotSchema, NarrativeStateSchema, NarrativeSegmentSchema } from "../schemas/narrativeSchema";
 import { RecordSchema } from "../schemas/recordSchema";
+import { AccoladeSchema } from "../schemas/accoladeSchema";
+import { AccoladeTierSchema } from "../schemas/accoladeTierSchema";
+import { AccoladeGroupSchema } from "../schemas/accoladeGroupSchema";
 import { EncyclopediaTreeSchema } from "../schemas/encyclopediaTreeSchema";
 import { CharacterViewSchema } from "../schemas/characterViewSchema";
 
@@ -276,7 +281,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'character_template',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker', 'item-slot-picker'],
+        customPopups: ['face-picker', 'item-slot-picker', 'ability-picker'],
       },
       {
         id: 'status_meta',
@@ -293,7 +298,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'character_status',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker'],
+        customPopups: ['face-picker', 'ability-picker'],
       },
       {
         id: 'character_slot_templates',
@@ -311,7 +316,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'skill_slot',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker'],
+        customPopups: ['face-picker', 'ability-picker'],
       },
       {
         id: 'skill_trees',
@@ -394,29 +399,13 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
       },
       {
-        id: 'item_properties',
-        schema: EntityStatSchema,
-        file: 'item_properties',
-        title: 'item_property',
-        isArray: true,
-        requiresMod: true,
-      },
-      {
-        id: 'item_attributes',
-        schema: EntityAttributeSchema,
-        file: 'item_attributes',
-        title: 'item_attribute',
-        isArray: true,
-        requiresMod: true,
-      },
-      {
         id: 'item_templates',
         schema: ItemTemplateSchema,
         file: 'item_templates',
         title: 'item_template',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker'],
+        customPopups: ['face-picker', 'ability-picker'],
       },
       {
         id: 'inventory_traits',
@@ -443,6 +432,14 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
         // customPopups: ['example-popup'],
       },
+      {
+        id: 'recipe_groups',
+        schema: RecipeGroupSchema,
+        file: 'recipe_groups',
+        title: 'recipe_group',
+        isArray: true,
+        requiresMod: true,
+      },
       /*
       {
         id: 'generics',
@@ -467,6 +464,35 @@ export const EDITOR_TABS: EditorTab[] = [
         schema: PoolEntrySchema,
         file: 'pool_entries',
         title: 'pool_entry',
+        isArray: true,
+        requiresMod: true,
+      },
+    ],
+  },
+  {
+    id: 'accolades',
+    subtabs: [
+      {
+        id: 'accolades',
+        schema: AccoladeSchema,
+        file: 'accolades',
+        title: 'accolade',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'accolade_tiers',
+        schema: AccoladeTierSchema,
+        file: 'accolade_tiers',
+        title: 'accolade_tier',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'accolade_groups',
+        schema: AccoladeGroupSchema,
+        file: 'accolade_groups',
+        title: 'accolade_group',
         isArray: true,
         requiresMod: true,
       },
@@ -616,5 +642,12 @@ export function registerEditorCustomComponents(editor: Editor) {
     id: 'dungeon-content-editor',
     name: 'Content Editor',
     component: DungeonContentEditorPopup
+  });
+
+  // Register ability picker popup for abilities/ability_modifiers chooseMany fields
+  editor.registerCustomComponent({
+    id: 'ability-picker',
+    name: 'Abilities',
+    component: AbilityPickerPopup
   });
 }

@@ -25,6 +25,9 @@ const emit = defineEmits<{
 const global = Global.getInstance();
 const game = Game.getInstance();
 const videoRef = ref<HTMLVideoElement | null>(null);
+// The one element every GSAP transition drives, for all three asset types — always a wrapper,
+// never the inner <img>/<video>/spine canvas, whose own transform and filter are owned by the CSS
+// bindings and by the spine renderer.
 const assetElementRef = ref<HTMLElement | null>(null);
 
 // Determine asset type
@@ -42,6 +45,27 @@ const assetPath = computed(() => {
   }
   return undefined;
 });
+
+// How long a `fade` plate takes to bloom in or out. Short on purpose: it rides on top of a
+// picture that is already on screen, so it reads as part of the beat rather than a scene change.
+const PLATE_FADE_SECONDS = 0.35;
+const PLATE_FADE_CSS = `${PLATE_FADE_SECONDS}s`;
+
+/**
+ * The plates to stack, bottom first. Reading the game's asset_resolve listener from inside a
+ * computed is what keeps the scene, the gallery and the editor preview in agreement: the
+ * listener reads live entity state synchronously, so those reads become dependencies here and
+ * a plate swaps the moment the state behind it changes — no re-stage needed.
+ */
+const layerPlates = computed(() => game.dungeonSystem.resolveAssetLayers(props.asset));
+
+// v-persist only hooks `mounted`, and plates are keyed by position so a variant swap changes
+// `src` on a live element instead of remounting it — without this the new plate would never
+// reach the image cache.
+const onLayerLoad = (event: Event) => {
+  const el = event.target as HTMLImageElement;
+  if (el?.src) game.coreSystem.persistImage(el.src);
+};
 
 // Transform properties with defaults
 const xpos = computed(() => props.asset.x ?? 0);
@@ -106,7 +130,12 @@ watch(
   { flush: 'post' }
 );
 
-onUnmounted(() => propTween?.kill());
+onUnmounted(() => {
+  propTween?.kill();
+  killExitEffects();
+  clearHeldEnter();
+  clearIdleStart();
+});
 
 // Calculate CSS transform
 const cssTransform = computed(() => {
@@ -162,9 +191,11 @@ const idleAnimation = computed(() => props.asset.idle ?? 'none');
 const idleDuration = computed(() => props.asset.idle_duration ?? 3);
 const idleIntensity = computed(() => props.asset.idle_intensity ?? 0.5);
 
-// GSAP enter transition animations
-const applyEnterTransition = (element: HTMLElement) => {
-  const type = enterTransition.value;
+// GSAP enter transition animations. `override` replays a transition that was decided earlier —
+// a spine enter held back until the skeleton loaded, whose asset may have had `enter` reset
+// underneath it in the meantime (the editor's Play Enter preview does exactly that).
+const applyEnterTransition = (element: HTMLElement, override?: string) => {
+  const type = override ?? enterTransition.value;
   const duration = enterDuration.value;
   const delay = enterDelay.value;
   const ease = `${enterEase.value}.out`;
@@ -436,6 +467,23 @@ const applyEnterTransition = (element: HTMLElement) => {
     return;
   }
 
+  if (type === 'blurIn') {
+    // Its own branch because the shared table below tweens `filter` to the keyword `none`, and GSAP
+    // cannot interpolate a filter function list into a keyword — it snapped on the first tick, which
+    // left blurIn rendering as a bare fade. blur(0px) gives both ends a matching structure; the
+    // inline filter is dropped afterwards so the wrapper keeps no needless compositing layer.
+    gsap.set(element, { opacity: 0, filter: 'blur(20px)' });
+    gsap.to(element, {
+      opacity: 1,
+      filter: 'blur(0px)',
+      duration,
+      delay,
+      ease,
+      onComplete: () => { gsap.set(element, { clearProps: 'filter' }); },
+    });
+    return;
+  }
+
   // Enter transitions (matching character slot transitions)
   const transitions: Record<string, any> = {
     fade: { opacity: 0 },
@@ -465,7 +513,6 @@ const applyEnterTransition = (element: HTMLElement) => {
     bounce: { y: '-100%', opacity: 0 },
     pop: { scale: 0, opacity: 0 },
     sweep: { x: '-100%', opacity: 0 },
-    blurIn: { opacity: 0, filter: 'blur(20px)' },
     moveInLeft: { x: '-100%' },
     moveInRight: { x: '100%' },
     moveInTop: { y: '-100%' },
@@ -503,11 +550,26 @@ const applyEnterTransition = (element: HTMLElement) => {
   }
 };
 
+// Exit effects that gsap.killTweensOf(element) cannot reach: the pixelate timeline only
+// schedules callbacks (no element target), and PowerGlitch drives its own animation loop.
+// Track them so an interrupted exit can be torn down completely when the asset is revived.
+let exitTimeline: gsap.core.Timeline | null = null;
+let exitGlitch: { stopGlitch: () => void } | null = null;
+
+const killExitEffects = () => {
+  exitTimeline?.kill();
+  exitTimeline = null;
+  exitGlitch?.stopGlitch();
+  exitGlitch = null;
+};
+
 // GSAP exit transition animations
 const applyExitTransition = (element: HTMLElement) => {
   const type = exitTransition.value;
   const duration = exitDuration.value;
   const ease = `${exitEase.value}.in`;
+
+  killExitEffects();
 
   if (type === 'none') return;
 
@@ -556,6 +618,7 @@ const applyExitTransition = (element: HTMLElement) => {
         img.style.opacity = '0';
       }
     });
+    exitTimeline = tl;
 
     const totalCells = cells.length;
     const stepsPerSecond = 30;
@@ -597,13 +660,17 @@ const applyExitTransition = (element: HTMLElement) => {
       shake: { velocity: 15, amplitudeX: 0.05, amplitudeY: 0.05 },
       slice: { count: 10, velocity: 20, minHeight: 0.02, maxHeight: 0.2, hueRotate: true },
     });
+    exitGlitch = glitch;
 
     gsap.to(element, {
       opacity: 0,
       duration: duration * 0.3,
       delay: duration * 0.7,
       ease: 'power2.in',
-      onComplete: () => glitch.stopGlitch(),
+      onComplete: () => {
+        glitch.stopGlitch();
+        if (exitGlitch === glitch) exitGlitch = null;
+      },
     });
     return;
   }
@@ -734,6 +801,20 @@ const applyExitTransition = (element: HTMLElement) => {
     return;
   }
 
+  if (type === 'blurOut') {
+    // Mirror of blurIn: GSAP needs a filter list on BOTH ends to interpolate, and the element's
+    // resting filter computes to the keyword `none`, so the blur used to appear in full on the
+    // first tick. Seed an explicit blur(0px) to tween out of.
+    gsap.set(element, { filter: 'blur(0px)' });
+    gsap.to(element, {
+      opacity: 0,
+      filter: 'blur(20px)',
+      duration,
+      ease,
+    });
+    return;
+  }
+
   // Standard exit transitions
   const transitions: Record<string, any> = {
     fade: { opacity: 0 },
@@ -760,7 +841,6 @@ const applyExitTransition = (element: HTMLElement) => {
     flipVertical: { rotationX: 90, opacity: 0 },
     elastic: { scale: 0, opacity: 0 },
     bounce: { y: '100%', opacity: 0 },
-    blurOut: { opacity: 0, filter: 'blur(20px)' },
   };
 
   if (transitions[type]) {
@@ -1037,6 +1117,68 @@ const applyIdleAnimation = (element: HTMLElement) => {
   }
 };
 
+// A spine asset registers its canvas asynchronously (atlas fetch, then one render tick) and
+// background spine art is never preloaded, so on the first stage the wrapper is an empty box for a
+// handful of frames. Playing the enter transition there fades in nothing and pops the skeleton on
+// afterwards, so the enter is held until SpineAsset reports the skeleton in. The timeout is the
+// escape hatch for a skeleton that never loads (bad path) — the transition runs anyway rather than
+// stranding the element at opacity 0.
+const SPINE_LOAD_TIMEOUT_MS = 5000;
+
+let spineLoaded = false;
+let spineWaitTimer: ReturnType<typeof setTimeout> | null = null;
+let heldEnter: (() => void) | null = null;
+let idleStartTimer: ReturnType<typeof setTimeout> | null = null;
+
+const clearHeldEnter = () => {
+  if (spineWaitTimer !== null) clearTimeout(spineWaitTimer);
+  spineWaitTimer = null;
+  heldEnter = null;
+};
+
+const releaseHeldEnter = () => {
+  const start = heldEnter;
+  clearHeldEnter();
+  start?.();
+};
+
+// Cancel a queued enter→idle handoff, so an asset removed mid-enter cannot start idling on top of
+// its own exit animation.
+const clearIdleStart = () => {
+  if (idleStartTimer !== null) clearTimeout(idleStartTimer);
+  idleStartTimer = null;
+};
+
+// SpineAsset's load signal: forwarded to whoever owns this component, and the cue a held enter
+// transition is waiting on.
+const onSpineLoaded = (stats: SpineStats | null) => {
+  emit('spine-loaded', stats);
+  spineLoaded = !!stats;
+  if (stats && heldEnter) releaseHeldEnter();
+};
+
+const playEnterAndIdle = (element: HTMLElement, heldType?: string) => {
+  // Skip enter animations if loading from save (same as character slots)
+  const shouldPlayEnter = !game.dungeonSystem.isLoadingSave.value;
+  const enterType = heldType ?? enterTransition.value;
+  const hasIdle = idleAnimation.value && idleAnimation.value !== 'none';
+
+  if (shouldPlayEnter && enterType && enterType !== 'none') {
+    applyEnterTransition(element, enterType);
+
+    // Start idle once the enter transition has finished, plus a small buffer.
+    if (hasIdle) {
+      const enterTime = (enterDuration.value + enterDelay.value) * 1000;
+      idleStartTimer = setTimeout(() => applyIdleAnimation(element), enterTime + 50);
+    }
+    return;
+  }
+
+  // No enter transition to reveal the asset — lift any hold taken while waiting on the skeleton.
+  gsap.set(element, { opacity: 1 });
+  if (hasIdle) applyIdleAnimation(element);
+};
+
 // Set initial volume and watch for changes
 onMounted(() => {
   if (videoRef.value) {
@@ -1049,8 +1191,7 @@ onMounted(() => {
     });
   }
 
-  // Get the element to animate (prefer assetElementRef for images, videoRef for videos)
-  const element = assetElementRef.value || videoRef.value;
+  const element = assetElementRef.value;
   if (!element) return;
 
   // Handle exit preview (when component mounts with isRemoving already true)
@@ -1059,42 +1200,38 @@ onMounted(() => {
     return; // Skip enter/idle when previewing exit
   }
 
-  // Skip enter animations if loading from save (same as character slots)
-  const shouldPlayEnter = !game.dungeonSystem.isLoadingSave.value;
   const enterType = enterTransition.value;
-  const hasEnterAnimation = shouldPlayEnter && enterType && enterType !== 'none';
+  const willPlayEnter = !game.dungeonSystem.isLoadingSave.value && !!enterType && enterType !== 'none';
 
-  if (hasEnterAnimation) {
-    // Apply enter transition first
-    applyEnterTransition(element);
-
-    // Calculate when enter transition completes to start idle
-    const enterTime = (enterDuration.value + enterDelay.value) * 1000;
-
-    // Start idle animation after enter completes
-    if (idleAnimation.value && idleAnimation.value !== 'none') {
-      setTimeout(() => {
-        applyIdleAnimation(element);
-      }, enterTime + 50); // Small buffer to ensure enter is fully complete
-    }
-  } else {
-    // No enter animation, start idle immediately
-    if (idleAnimation.value && idleAnimation.value !== 'none') {
-      applyIdleAnimation(element);
-    }
+  if (willPlayEnter && isSpineAsset.value && !spineLoaded) {
+    gsap.set(element, { opacity: 0 });
+    heldEnter = () => playEnterAndIdle(element, enterType);
+    spineWaitTimer = setTimeout(releaseHeldEnter, SPINE_LOAD_TIMEOUT_MS);
+    return;
   }
+
+  playEnterAndIdle(element);
 });
 
-// Watch for isRemoving flag to trigger exit animation
-watch(() => props.asset.isRemoving, (isRemoving) => {
+// Watch isRemoving to drive the exit — and to restore visibility on re-staging.
+// When an asset exits and is re-staged before the removal timer fires, it is still in
+// the scene, so addAssets cancels the removal (clears isRemoving) and mutates THIS asset
+// in place. The v-for key is asset.id, so there is no remount and onMounted never re-runs
+// to replay the enter — meanwhile the interrupted exit left the element at opacity:0.
+// The isRemoving true->false transition is the reliable re-entry signal.
+watch(() => props.asset.isRemoving, (isRemoving, wasRemoving) => {
+  const element = assetElementRef.value;
+  if (!element) return;
+
   if (isRemoving) {
-    const element = assetElementRef.value || videoRef.value;
-    if (element) {
-      // Stop idle animation before exit
-      stopIdleAnimation(element);
-      // Play exit animation
-      applyExitTransition(element);
-    }
+    // A spine asset removed before its skeleton arrived must not un-hide itself later.
+    clearHeldEnter();
+    // Stop idle animation before exit
+    stopIdleAnimation(element);
+    // Play exit animation
+    applyExitTransition(element);
+  } else if (wasRemoving) {
+    resetAssetToVisible(element);
   }
 });
 
@@ -1104,8 +1241,36 @@ watch(videoVolume, (newVolume) => {
   }
 });
 
+/**
+ * Snap the element back to a clean, fully-visible resting state after an interrupted exit.
+ * The keyed element is reused rather than remounted, so onMounted/applyEnterTransition never
+ * re-runs to restore it.
+ */
+const resetAssetToVisible = (element: HTMLElement) => {
+  killExitEffects();
+  gsap.killTweensOf(element);
+
+  gsap.set(element, {
+    clearProps: 'x,y,scale,scaleX,scaleY,rotation,rotationX,rotationY,filter,transform,transformOrigin'
+  });
+
+  // The pixelate exit writes mask styles and opacity straight to element.style, bypassing
+  // GSAP — clearProps does not know about them, so clear them by hand.
+  element.style.maskImage = '';
+  element.style.webkitMaskImage = '';
+  element.style.maskSize = '';
+  element.style.webkitMaskSize = '';
+  gsap.set(element, { opacity: 1 });
+
+  element.classList.remove('idle-jitter');
+  if (idleAnimation.value && idleAnimation.value !== 'none') {
+    applyIdleAnimation(element);
+  }
+};
+
 // Helper to stop all idle animations (GSAP and CSS) and reset to original state
 const stopIdleAnimation = (element: HTMLElement) => {
+  clearIdleStart();
   gsap.killTweensOf(element);
   // Remove CSS animation classes
   element.classList.remove('idle-jitter');
@@ -1122,8 +1287,7 @@ watch([idleAnimation, idleDuration, idleIntensity],
     const durationChanged = newDuration !== oldDuration;
     const intensityChanged = newIntensity !== oldIntensity;
 
-    // Get the active element (video or image)
-    const element = videoRef.value || assetElementRef.value;
+    const element = assetElementRef.value;
     if (!element) return;
 
     // Restart idle if any idle property changed and idle is active
@@ -1145,14 +1309,36 @@ watch([idleAnimation, idleDuration, idleIntensity],
   <div v-if="isImageAsset || isVideoAsset" class="background-asset-wrapper">
     <!-- Animation wrapper for GSAP - separate from CSS transforms -->
     <div ref="assetElementRef" class="background-asset-animation-wrapper">
-      <img v-if="isImageAsset" :src="assetPath" class="background-asset" alt="Background" />
+      <!-- Stacked plates. The transform/opacity/filter live on the .background-asset-stack
+           container, never per plate: at alpha 0.5 a per-plate opacity would let the plates
+           below show THROUGH the ones above instead of fading the finished picture, and the
+           scene grade would run once per plate and tint each translucent plate in isolation.
+           It also leaves each <img>'s `filter` free for a per-layer recolor class. -->
+      <!-- Two keying strategies in one list, which is the point of the ternary. A plate that is
+           one of several ALTERNATIVES keeps its slot (index key), so switching it patches `src`
+           on the live element and the two options are never in the stack together — fading
+           between them would show whatever they cover through the pair. A plate that merely ADDS
+           to the finished picture asks for `fade` and is keyed by file, so it mounts and unmounts
+           and TransitionGroup can crossfade it. Numbers and paths can't collide as keys. -->
+      <TransitionGroup v-if="isImageAsset && layerPlates.length > 1" tag="div" name="plate-fade"
+        class="background-asset-stack">
+        <img v-for="(plate, i) of layerPlates" :key="plate.fade ? plate.file : i" :src="plate.file"
+          :class="plate.classes" class="background-asset-layer" alt="" v-persist @load="onLayerLoad" />
+      </TransitionGroup>
+      <img v-else-if="isImageAsset" :src="assetPath" class="background-asset" alt="Background" />
       <video v-else-if="isVideoAsset" ref="videoRef" :src="assetPath" class="background-asset" autoplay loop
         playsinline />
     </div>
   </div>
   <div v-else-if="isSpineAsset" class="spine-aspect-outer">
-    <div class="spine-aspect-wrapper">
-      <SpineAsset :asset="asset" @spine-loaded="emit('spine-loaded', $event)" />
+    <!-- Same role as .background-asset-animation-wrapper: GSAP owns this element's transform,
+         opacity and filter, and the spine canvas rides along inside it. It must stay OUTSIDE
+         .spine-aspect-wrapper, whose overflow:hidden would clip a slide or a zoom-out, and INSIDE
+         .spine-aspect-outer, which is the cqh container the renderer positions the canvas against. -->
+    <div ref="assetElementRef" class="spine-animation-wrapper">
+      <div class="spine-aspect-wrapper">
+        <SpineAsset :asset="asset" @spine-loaded="onSpineLoaded" />
+      </div>
     </div>
   </div>
 </template>
@@ -1182,6 +1368,45 @@ watch([idleAnimation, idleDuration, idleIntensity],
   transform: translateZ(0);
 }
 
+/* Stacked-plate container — carries exactly what .background-asset carries, so a stacked asset
+   and a single-image one behave identically. Its plates deliberately carry none of it. */
+.background-asset-stack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: v-bind("cssTransform");
+  transform-origin: center;
+  opacity: v-bind("shownAlpha");
+  filter: v-bind("cssFilter");
+}
+
+/* One plate. `filter` is left unset on purpose: it belongs to whatever recolor class the
+   game puts on this layer, the same way the character doll leaves it free. */
+.background-asset-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: v-bind("objectFit");
+  user-select: none;
+}
+
+/* Only `fade` plates ever enter or leave, so only they see these. Plates are already
+   absolutely positioned, so a leaving one holds its place without disturbing the others.
+   Opacity only — `filter` stays free for the plate's recolor class. */
+.plate-fade-enter-active,
+.plate-fade-leave-active {
+  transition: opacity v-bind("PLATE_FADE_CSS") ease;
+}
+
+.plate-fade-enter-from,
+.plate-fade-leave-to {
+  opacity: 0;
+}
+
 /* Inner asset - CSS transforms for positioning/scale/rotation */
 .background-asset {
   position: absolute;
@@ -1202,6 +1427,15 @@ watch([idleAnimation, idleDuration, idleIntensity],
   container-type: size;
   z-index: v-bind("zindex");
   pointer-events: none;
+}
+
+/* Animation wrapper — GSAP animates this element. Deliberately carries no transform of its own:
+   the aspect box below still centres itself against the same rect, since inset:0 matches the
+   outer's box exactly. */
+.spine-animation-wrapper {
+  position: absolute;
+  inset: 0;
+  will-change: transform, opacity;
 }
 
 .spine-aspect-wrapper {

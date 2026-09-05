@@ -27,7 +27,7 @@ During development, you can inspect all registered items in real-time using the 
 
 ```javascript
 // Listen to a built-in emitter
-game.on("dungeon_enter", (dungeonId, roomId) => {
+game.on("dungeon_enter_after", (dungeonId, roomId) => {
   // Your code runs whenever a dungeon is entered
 });
 

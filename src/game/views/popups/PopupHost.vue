@@ -1,17 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
-import { getStack, getPinned, popTop, closeAll, unpinPopup } from './popupStore';
+import { getStack, getPinned, closeAll, unpinPopup } from './popupStore';
 import PopupItem from './PopupItem.vue';
 
 const stack = getStack();
 const pinned = getPinned();
-
-function onKey(e: KeyboardEvent) {
-    if (e.key !== 'Escape') return;
-    if (stack.value.length === 0) return;
-    e.stopPropagation();
-    popTop();
-}
 
 function onDocClick(e: MouseEvent) {
     const target = e.target as HTMLElement | null;
@@ -22,11 +15,12 @@ function onDocClick(e: MouseEvent) {
     // Close the transient stack if clicked entirely outside.
     if (stack.value.length > 0 && !insidePopup) closeAll();
 
-    // Pinned popups: dismiss any whose body wasn't clicked, and whose anchor wasn't clicked either.
-    if (pinned.value.length > 0) {
-        const insideKey = insidePopup?.dataset.popupKey;
+    // Pinned popups: dismiss any whose anchor wasn't clicked. A click landing anywhere in the popup
+    // layer belongs to the chain rather than counting as a click-outside — a nested card sits in its
+    // own .popup under its own key, so matching the key alone would unpin the card its chain hangs
+    // off. Anchors are not popups, so clicking a different slot still swaps the pin.
+    if (pinned.value.length > 0 && !insidePopup) {
         for (const entry of [...pinned.value]) {
-            if (insideKey === entry.key) continue;
             if (entry.anchorEl.contains(target)) continue;
             unpinPopup(entry.key);
         }
@@ -34,12 +28,10 @@ function onDocClick(e: MouseEvent) {
 }
 
 onMounted(() => {
-    document.addEventListener('keydown', onKey);
     document.addEventListener('click', onDocClick, { capture: true });
 });
 
 onUnmounted(() => {
-    document.removeEventListener('keydown', onKey);
     document.removeEventListener('click', onDocClick, { capture: true });
 });
 </script>

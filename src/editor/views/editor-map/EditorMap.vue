@@ -37,9 +37,13 @@ onMounted(async () => {
 // Fallback function for encounter images
 const getEncounterImage = (encounter: DungeonEncounterObject) => {
   if (encounter.image) return encounter.image;
-  if (encounter.type === 'collectable' && encounter.collect_item) {
-    const itemImage = itemImages.value.get(encounter.collect_item);
-    if (itemImage) return itemImage;
+  if (encounter.type === 'collectable') {
+    // Random gather spot — the item only exists at runtime, so mark it with its own icon.
+    if (encounter.collect_pool) return 'assets/engine_assets/encounters/ph2.png';
+    if (encounter.collect_item) {
+      const itemImage = itemImages.value.get(encounter.collect_item);
+      if (itemImage) return itemImage;
+    }
   }
   return 'assets/engine_assets/encounters/ph.png';
 };

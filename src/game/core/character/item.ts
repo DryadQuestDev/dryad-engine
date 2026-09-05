@@ -1,5 +1,4 @@
 import { Game } from "../../game";
-import { Property } from "../../property";
 import { Populate } from "../../../utility/save-system";
 import { BaseStatusObject } from "../../../schemas/characterStatusSchema";
 import { ItemSlotObject } from "../../../schemas/itemSlotSchema";
@@ -10,10 +9,7 @@ export class Item {
     public id: string = "";
     public uid: string = "";
     public traits: Record<string, any> = {};
-    public attributes: Record<string, string> = {};
 
-    @Populate(Property)
-    public properties: Record<string, Property> = {};
     public statusObject: BaseStatusObject = {};
     public actions: any = {};
     public choices: string[] = [];
@@ -53,6 +49,18 @@ export class Item {
             || hasResource(this.consume_percentage)
             || hasResource(this.consume_absolute)
             || !!(this.actions?.item_consume_before || this.actions?.item_consume_after);
+    }
+
+    /**
+     * Whether this item may be thrown away at all — the engine's own rule, shared by every discard
+     * UI (the item card's Drop choice, the experience plugin's reward-panel trash button). Equipped
+     * gear is unequipped rather than discarded, and anything of quest rarity is never throwable.
+     * Games add their own protected kinds through the `item_drop_render` emitter, which each UI
+     * checks alongside this.
+     */
+    public isDroppable(): boolean {
+        return !this.isEquipped
+            && this.getRarity() !== 'quest';
     }
 
     /**
@@ -183,19 +191,14 @@ export class Item {
     }
 
     /**
-     * Get CSS class names based on item attributes
-     * Converts attributes like { rarity: "rare", type: "ring" } to classes like "rarity_rare type_ring"
+     * CSS class names for the item's rarity tier (e.g. ["rarity_rare"]); empty when unset.
+     * The `rarity_<tier>` classes in style.css carry the tint variables.
      */
-    public getAttributeClasses(): string[] {
-        const classes: string[] = [];
-        for (const [key, value] of Object.entries(this.attributes)) {
-            if (value) {
-                // Sanitize the value to be CSS-safe (replace spaces and special chars with underscores)
-                const sanitizedValue = String(value).toLowerCase().replace(/[^a-z0-9]/g, '_');
-                classes.push(`${key}_${sanitizedValue}`);
-            }
-        }
-        return classes;
+    public getRarityClasses(): string[] {
+        const rarity = this.getRarity();
+        if (!rarity) return [];
+        const sanitized = String(rarity).toLowerCase().replace(/[^a-z0-9]/g, '_');
+        return [`rarity_${sanitized}`];
     }
 
 
@@ -216,7 +219,7 @@ export class Item {
         return this.getTrait('type') || '';
     }
     public getWeight(): number {
-        return this.getTrait('weight') || 0 * this.quantity;
+        return (this.getTrait('weight') || 0) * this.quantity;
     }
 
 

@@ -1,0 +1,58 @@
+/* ── Effect / damage-type colors ──
+   Used by locale damage-type spans (e.g. <span class="physical">Physical</span>) and by
+   the ability-effect renderers in aspect-renderers.mjs to highlight (X) values in tooltips.
+   Kept in its own file so the editor's preview hook (plugin.json `editor_preview`) can load
+   just the colors, scope-wrapped, without the battle VFX rules. */
+
+:root {
+  --dmg-physical: rgb(193, 222, 248);
+  --dmg-magic: #b388ff;
+  --dmg-burn: #ff6b35;
+  --dmg-poison: #66bb6a;
+  --dmg-bleeding: #e04040;
+  --dmg-absolute: #ff4081;
+  /* "pure" damage — ignores armor/resists */
+  --effect-heal: #42b983;
+  --effect-value: #f0e07c;
+  /* soft lemon yellow — distinct from #f0c674 (delta-value gold in AbilityCard) */
+}
+
+.physical {
+  color: var(--dmg-physical);
+  font-weight: 600;
+}
+
+.magic {
+  color: var(--dmg-magic);
+  font-weight: 600;
+}
+
+.burn {
+  color: var(--dmg-burn);
+  font-weight: 600;
+}
+
+.poison {
+  color: var(--dmg-poison);
+  font-weight: 600;
+}
+
+.bleeding {
+  color: var(--dmg-bleeding);
+  font-weight: 600;
+}
+
+.absolute {
+  color: var(--dmg-absolute);
+  font-weight: 600;
+}
+
+.heal {
+  color: var(--effect-heal);
+  font-weight: 600;
+}
+
+.value {
+  color: var(--effect-value);
+  font-weight: 600;
+}

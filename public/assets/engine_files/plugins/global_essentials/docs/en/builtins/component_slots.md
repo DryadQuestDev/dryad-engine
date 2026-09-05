@@ -37,7 +37,7 @@ Each slot passes **context props** to registered components, giving them access 
 | `character-face` | Character face display | `character` |
 | `character-list-item` | Inside character face in party list (via `overlaySlot`) | `character` |
 | `character-sheet-top` | Top of character sheet (above stats) | |
-| `character-sheet-bottom` | Bottom of character sheet (below inventory) | |
+| `character-sheet-bottom` | Bottom of character sheet (below abilities) | |
 | `character-statuses-top` | Inside status list, before items/statuses (inline) | `character` |
 | `character-statuses-bottom` | Inside status list, after items/statuses (inline) | `character` |
 | `debug-panel` | Debug panel | `activeTabId` |
@@ -45,7 +45,8 @@ Each slot passes **context props** to registered components, giving them access 
 | `exploration-state` | Inside exploration view | `dungeon`, `currentRoom` |
 | `inventory` | Inside inventory component | `inventory` |
 | `inventory-header` | Header above inventory grid | `inventory` |
-| `item-card` | Item card display | `item` |
+| `item-card-top` | Item card, before the description | `item` |
+| `item-card` | Item card, after the body | `item` |
 | `item-choices` | Item choice popups | `item` |
 | `item-grid` | Inventory grid area | `items` |
 | `menu-after` | After main menu content | `menuState` |
@@ -87,14 +88,16 @@ Each slot passes **context props** to registered components, giving them access 
 | `quests` | Quest log |
 | `character` | Character sheet |
 | `gallery` | Gallery tab |
+| `encyclopedia` | Encyclopedia tab |
+| `accolades` | Achievements tab (only when the game defines achievements) |
 
 ### character-tabs
 
 | ID | Description | Props |
 |----|-------------|-------|
-| `stats` | Character stats display | |
+| `character-sheet` | Statuses, stats and abilities | |
+| `inventory` | Party inventory | `inventory_id`, `maxHeight` |
 | `skill-trees` | Skill tree interface | |
-| `inventory` | Party inventory | `inventory_id` |
 
 ### debug-tabs
 

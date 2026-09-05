@@ -10,6 +10,7 @@ export const AssetSchema = {
 
     // File fields (conditional based on type)
     file_image: { type: 'file', fileType: 'image', tooltip: 'Path to an image file.', show: { type: ['image'] } },
+    layers: { type: 'file[]', fileType: 'image', tooltip: 'Extra image layers stacked on top of the base image, in order. Every layer shares the asset\'s fit mode, position, scale, opacity and blur — author them pre-registered at the same canvas size. Listeners on the asset_resolve emitter may filter this list or swap an entry for { file, classes } to add css classes to one layer.', show: { type: ['image'] } },
     file_video: { type: 'file', fileType: 'video', tooltip: 'Path to a video file.', show: { type: ['video'] } },
     file_spine_atlas: { type: 'file', fileType: 'atlas', tooltip: 'Path to Spine atlas file (.atlas).', show: { type: ['spine'] } },
     file_spine_skeleton: { type: 'file', fileType: 'spine_skeleton', tooltip: 'Path to Spine skeleton file (.json or .skel binary).', show: { type: ['spine'] } },
@@ -136,28 +137,28 @@ export const AssetSchema = {
             'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex',
             'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'
         ],
-        show: { type: ['image', 'video'] }
+        show: { type: ['image', 'video', 'spine'] }
     },
     enter_duration: {
         type: 'number',
         tooltip: 'Enter transition duration in seconds.',
         defaultValue: 0.5,
         step: 0.1,
-        show: { enter: ['blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'moveInBottom', 'moveInLeft', 'moveInRight', 'moveInTop', 'pop', 'rotate', 'rotateIn', 'rotateOut', 'shrink', 'slideDown', 'slideInBottom', 'slideInLeft', 'slideInRight', 'slideInTop', 'slideLeft', 'slideRight', 'slideUp', 'sweep', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video'] }
+        show: { enter: ['blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'moveInBottom', 'moveInLeft', 'moveInRight', 'moveInTop', 'pop', 'rotate', 'rotateIn', 'rotateOut', 'shrink', 'slideDown', 'slideInBottom', 'slideInLeft', 'slideInRight', 'slideInTop', 'slideLeft', 'slideRight', 'slideUp', 'sweep', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video', 'spine'] }
     },
     enter_delay: {
         type: 'number',
         tooltip: 'Delay before enter transition starts in seconds.',
         defaultValue: 0,
         step: 0.1,
-        show: { enter: ['blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'moveInBottom', 'moveInLeft', 'moveInRight', 'moveInTop', 'pop', 'rotate', 'rotateIn', 'rotateOut', 'shrink', 'slideDown', 'slideInBottom', 'slideInLeft', 'slideInRight', 'slideInTop', 'slideLeft', 'slideRight', 'slideUp', 'sweep', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video'] }
+        show: { enter: ['blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'moveInBottom', 'moveInLeft', 'moveInRight', 'moveInTop', 'pop', 'rotate', 'rotateIn', 'rotateOut', 'shrink', 'slideDown', 'slideInBottom', 'slideInLeft', 'slideInRight', 'slideInTop', 'slideLeft', 'slideRight', 'slideUp', 'sweep', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video', 'spine'] }
     },
     enter_ease: {
         type: 'chooseOne',
         tooltip: 'Enter transition easing function.',
         defaultValue: 'power2',
         options: ['linear', 'power1', 'power2', 'power3', 'power4', 'back', 'elastic', 'bounce', 'circ', 'expo', 'sine'],
-        show: { enter: ['blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'moveInBottom', 'moveInLeft', 'moveInRight', 'moveInTop', 'pop', 'rotate', 'rotateIn', 'rotateOut', 'shrink', 'slideDown', 'slideInBottom', 'slideInLeft', 'slideInRight', 'slideInTop', 'slideLeft', 'slideRight', 'slideUp', 'sweep', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video'] }
+        show: { enter: ['blurIn', 'bounce', 'dissolve', 'ease', 'easeIn', 'easeInOut', 'easeOut', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'moveInBottom', 'moveInLeft', 'moveInRight', 'moveInTop', 'pop', 'rotate', 'rotateIn', 'rotateOut', 'shrink', 'slideDown', 'slideInBottom', 'slideInLeft', 'slideInRight', 'slideInTop', 'slideLeft', 'slideRight', 'slideUp', 'sweep', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video', 'spine'] }
     },
 
     // Exit Transition Properties
@@ -173,21 +174,21 @@ export const AssetSchema = {
             'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex',
             'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'
         ],
-        show: { type: ['image', 'video'] }
+        show: { type: ['image', 'video', 'spine'] }
     },
     exit_duration: {
         type: 'number',
         tooltip: 'Exit transition duration in seconds.',
         defaultValue: 0.5,
         step: 0.1,
-        show: { exit: ['blurOut', 'bounce', 'dissolve', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'rotate', 'rotateOut', 'shrink', 'slideDown', 'slideLeft', 'slideOutBottom', 'slideOutLeft', 'slideOutRight', 'slideOutTop', 'slideRight', 'slideUp', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video'] }
+        show: { exit: ['blurOut', 'bounce', 'dissolve', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'rotate', 'rotateOut', 'shrink', 'slideDown', 'slideLeft', 'slideOutBottom', 'slideOutLeft', 'slideOutRight', 'slideOutTop', 'slideRight', 'slideUp', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video', 'spine'] }
     },
     exit_ease: {
         type: 'chooseOne',
         tooltip: 'Exit transition easing function.',
         defaultValue: 'power2',
         options: ['linear', 'power1', 'power2', 'power3', 'power4', 'back', 'elastic', 'bounce', 'circ', 'expo', 'sine'],
-        show: { exit: ['blurOut', 'bounce', 'dissolve', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'rotate', 'rotateOut', 'shrink', 'slideDown', 'slideLeft', 'slideOutBottom', 'slideOutLeft', 'slideOutRight', 'slideOutTop', 'slideRight', 'slideUp', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video'] }
+        show: { exit: ['blurOut', 'bounce', 'dissolve', 'elastic', 'fade', 'fadeSlideDown', 'fadeSlideLeft', 'fadeSlideRight', 'fadeSlideUp', 'flip', 'flipVertical', 'grow', 'rotate', 'rotateOut', 'shrink', 'slideDown', 'slideLeft', 'slideOutBottom', 'slideOutLeft', 'slideOutRight', 'slideOutTop', 'slideRight', 'slideUp', 'zoomIn', 'zoomOut', 'pixelate', 'glitch', 'scanlines', 'static', 'shatter', 'vortex', 'wipeLeft', 'wipeRight', 'wipeUp', 'wipeDown', 'blinds'], type: ['image', 'video', 'spine'] }
     },
 
     // Idle Animations
@@ -199,21 +200,21 @@ export const AssetSchema = {
             'nod', 'pan', 'pulse', 'rock', 'rotate', 'shake', 'shimmy', 'sway', 'wave', 'wiggle'
         ],
         defaultValue: 'none',
-        show: { type: ['image', 'video'] }
+        show: { type: ['image', 'video', 'spine'] }
     },
     idle_duration: {
         type: 'number',
         tooltip: 'Duration of one idle cycle in seconds.',
         defaultValue: 3,
         step: 0.1,
-        show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch'], type: ['image', 'video'] }
+        show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch'], type: ['image', 'video', 'spine'] }
     },
     idle_intensity: {
         type: 'number',
         tooltip: 'Intensity of the idle animation (0-1). Higher = more movement.',
         defaultValue: 0.5,
         step: 0.1,
-        show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch'], type: ['image', 'video'] }
+        show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch'], type: ['image', 'video', 'spine'] }
     },
 
 

@@ -4,6 +4,8 @@ import Dialog from 'primevue/dialog';
 import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import { Editor } from '../../editor';
+import { jumpToEntity } from '../../editorJump';
+import { Global } from '../../../global/global';
 import type { Schema } from '../../../utility/schema';
 
 const props = defineProps<{
@@ -55,6 +57,15 @@ async function commitItem(): Promise<boolean> {
   if (!localItem.value) return false;
   const ao = editor.activeObject.value;
 
+  // activeObject is null for the whole duration of a loadActiveObject (e.g.
+  // an in-popup dungeon switch still reading files). Every assign branch
+  // below would silently no-op and saveActiveObject would find nothing to
+  // save — the popup would close having dropped the edits.
+  if (!ao) {
+    Global.getInstance().addNotificationId('save_wait_loading');
+    return false;
+  }
+
   if (props.isNewItem && !localItem.value.uid && editor.isArray.value && Array.isArray(ao)) {
     Object.assign(editor.newItem.value, localItem.value);
     const result = editor.addItem();
@@ -102,6 +113,15 @@ async function handleApplyAndSave() {
     emit('close');
   }
 }
+
+// Generic save-and-jump: commit the popup's item first (navigating with a popup
+// open would make commitItem target the wrong tab's activeObject), close, then
+// navigate to the requested entity via the shared id-filter.
+async function handleRequestSaveJump(payload: { mainTab: string; subTab: string; entityId: string }) {
+  if (!await commitItem()) return;
+  emit('close');
+  await jumpToEntity(payload.mainTab, payload.subTab, payload.entityId);
+}
 </script>
 
 <template>
@@ -114,7 +134,8 @@ async function handleApplyAndSave() {
         <small class="p-error">{{ idError }}</small>
       </div>
       <component v-if="customComponent && localItem" :is="customComponent.component" ref="childRef"
-        v-model:item="localItem" :coreItem="coreItem" :schema="schema" :subtabId="subtabId" />
+        v-model:item="localItem" :coreItem="coreItem" :schema="schema" :subtabId="subtabId"
+        @request-save-jump="handleRequestSaveJump" />
       <div v-else class="error-message">
         Component not found: {{ componentId }}
       </div>

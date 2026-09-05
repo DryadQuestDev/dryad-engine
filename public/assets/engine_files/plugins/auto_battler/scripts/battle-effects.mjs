@@ -342,7 +342,7 @@ export function resolveAbility(casterId, abilityId, targetPos, abilityOverride) 
       const abilityState = battle.abilitiesState[casterId]?.[abilityId];
       if (abilityState) {
         if (abilityState.charges > 0) abilityState.charges--;
-        const cd = meta.cooldown || 0;
+        const cd = meta.cd || 0;
         if (cd > 0) abilityState.cooldown = cd;
       }
       return [];

@@ -32,6 +32,12 @@ export class Status {
     public multiStack: boolean = false;
     public durationIncrement: boolean = false; // single-stack: reapply adds duration instead of refreshing
     public image: string = "";
+    // Where this status BORROWS its look from when it defines no image of its own: the id of the
+    // item that applied it, or of the ability that cast it. An id rather than a path, so a save
+    // never freezes art: re-icon the source and every existing save follows, and a deleted source
+    // degrades to no icon instead of a broken one. `image` stays authoritative and stays saved,
+    // because a dev's hand-rolled createStatus({ image }) has nowhere else to keep it.
+    public iconSource: string = "";
     public name: string = "";
     public description: string = "";
     public polarity: string = "";
@@ -65,6 +71,20 @@ export class Status {
 
     constructor(initialStats: Record<string, number> = {}) {
         this.stats = { ...initialStats };
+    }
+
+    /**
+     * The icon to draw: an explicit image wins, otherwise the source's art is looked up live.
+     * A prototype getter, so the save system (which walks own keys) never serializes it.
+     */
+    public get displayImage(): string {
+        if (this.image) return this.image;
+        if (!this.iconSource) return "";
+        const game = Game.getInstance();
+        const item = game.itemSystem.itemTemplatesMap.get(this.iconSource) as any;
+        if (item?.traits?.image) return item.traits.image as string;
+        const ability = game.characterSystem.abilityTemplatesMap.get(this.iconSource);
+        return ((ability?.meta as any)?.icon as string) || "";
     }
 
     // ===== currentStacks / duration are proxied through _instances. =====
@@ -180,6 +200,7 @@ export class Status {
         if ('name' in obj && obj.name) this.name = obj.name;
         if ('description' in obj && obj.description) this.description = obj.description;
         if ('image' in obj && obj.image) this.image = obj.image;
+        if ('icon_source' in obj && (obj as any).icon_source) this.iconSource = (obj as any).icon_source;
         if ('rarity' in obj && typeof obj.rarity === 'string') this.rarity = obj.rarity;
         if ('polarity' in obj && obj.polarity) this.polarity = obj.polarity;
         if ('group_id' in obj && (obj as any).group_id) this.groupId = (obj as any).group_id;
@@ -317,21 +338,20 @@ export class Status {
     public removeStacks(amount: number): number {
         let remaining = amount;
         let removed = 0;
-        const kept: StatusInstance[] = [];
-        for (const inst of this._instances) {
-            if (remaining <= 0) { kept.push(inst); continue; }
-            if (inst.stacks <= remaining) {
-                remaining -= inst.stacks;
-                removed += inst.stacks;
-                // drop this instance
-                continue;
-            }
-            inst.stacks -= remaining;
-            removed += remaining;
-            remaining = 0;
-            kept.push(inst);
+        // Cleanse semantics: strip the stacks with the LONGEST remaining duration first
+        // (permanent -1 counts as longest), so removing N stacks always prevents the most
+        // future ticking. Shields deliberately do the opposite through their own drain in
+        // the battle plugin — this path serves cleanses and stack decay.
+        const lifespan = (d: number) => d === -1 ? Number.MAX_SAFE_INTEGER : d;
+        const byLongest = [...this._instances].sort((a, b) => lifespan(b.duration) - lifespan(a.duration));
+        for (const inst of byLongest) {
+            if (remaining <= 0) break;
+            const take = Math.min(inst.stacks, remaining);
+            inst.stacks -= take;
+            removed += take;
+            remaining -= take;
         }
-        this._instances = kept;
+        this._instances = this._instances.filter(inst => inst.stacks > 0);
         return removed;
     }
 

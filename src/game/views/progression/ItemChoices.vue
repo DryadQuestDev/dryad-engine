@@ -23,9 +23,8 @@ const choices = computed(() => {
 // Handle choice click
 function handleChoiceClick(choice: Choice) {
   if (!choice.isChoiceAvailable()) {
-    Global.getInstance().addNotificationId("items_no_use");
+    Global.getInstance().addNotificationId(choice.unavailableNotificationId || "items_no_use");
     return;
-    //console.warn("Items cannot be used during scenes.");
   }
   game.coreSystem.setState('active_character', game.coreSystem.getState('selected_character'));
   game.coreSystem.setState('active_inventory', PARTY_INVENTORY_ID);

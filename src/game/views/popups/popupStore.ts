@@ -12,6 +12,13 @@ export interface PopupEntry {
     props: Record<string, any>;
     /** Whether PopupItem renders a close button overlay. Default false. */
     closable?: boolean;
+    /**
+     * Force the card to catch the pointer (scroll, lore links, buttons) even while it is a
+     * transient hover card. WCAG 1.4.13 calls this "hoverable". Omitted, the card follows the
+     * player's `interactive_tooltips` setting, whose default is peek: pointer-transparent, so
+     * it never blocks the slots it overlaps. Pinned cards are always interactive.
+     */
+    interactive?: boolean;
     placement?: Placement;
     width?: number | string;
     /**
@@ -23,11 +30,11 @@ export interface PopupEntry {
     displayDepth?: number;
 }
 
-// Transient stack: hover/click-sticky-within-stack, depth-nested via DOM ancestor.
+// Transient stack: hover-driven, locked in place by a lore-link click, depth-nested via DOM ancestor.
 const stack: Ref<PopupEntry[]> = ref([]);
 // Pinned list: explicitly opened, persists until explicit close or click-outside.
 const pinned: Ref<PopupEntry[]> = ref([]);
-const sticky: Ref<boolean> = ref(false);
+const stackLocked: Ref<boolean> = ref(false);
 const hoveredLinkDepths = new Set<number>();
 const hoveredPopupDepths = new Set<number>();
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -40,8 +47,8 @@ export function getPinned(): Ref<PopupEntry[]> {
     return pinned;
 }
 
-export function isStickyRef(): Ref<boolean> {
-    return sticky;
+export function isStackLockedRef(): Ref<boolean> {
+    return stackLocked;
 }
 
 /** Returns true if any open transient popup is anchored inside the given element. */
@@ -72,7 +79,7 @@ function pruneStack(): void {
 }
 
 function scheduleClose(): void {
-    if (sticky.value) return;
+    if (stackLocked.value) return;
     cancelClose();
     closeTimer = setTimeout(() => {
         closeTimer = null;
@@ -85,11 +92,16 @@ export function pushTransient(entry: Omit<PopupEntry, 'mode'>): void {
     cancelClose();
     const linkDepth = getLinkDepth(entry.anchorEl);
     hoveredLinkDepths.add(linkDepth);
-    if (sticky.value) return;
+    if (stackLocked.value) return;
     // If the same popup is already pinned, don't duplicate it as a transient on hover.
     if (isPinned(entry.key)) return;
-    const existing = stack.value[linkDepth];
-    if (existing && existing.key === entry.key && existing.anchorEl === entry.anchorEl) return;
+    // A pin owns the screen: while one is up, hovering the rest of the UI must not throw peek
+    // cards over it. Anchors at depth 0 are that rest of the UI; anything deeper lives inside an
+    // open popup — a lore link in the pinned card — and its nested chain has to keep working.
+    if (linkDepth === 0 && pinned.value.length > 0) return;
+    // One card per key, ever — the same record reached from two links (a record whose content
+    // links back to itself, say) must not render a second copy on top of the first.
+    if (stack.value.some(e => e.key === entry.key)) return;
     stack.value = [...stack.value.slice(0, linkDepth), { ...entry, mode: 'transient', displayDepth: linkDepth }];
 }
 
@@ -104,10 +116,11 @@ export function hideTransient(anchorEl: HTMLElement): void {
 export function clickTransient(entry: Omit<PopupEntry, 'mode'>): void {
     cancelClose();
     if (isPinned(entry.key)) return;
-    sticky.value = true;
+    stackLocked.value = true;
+    // Already on screen from the hover — the click's job is just to make it persistent. Pushing
+    // again would stack an identical copy over it.
+    if (stack.value.some(e => e.key === entry.key)) return;
     const linkDepth = getLinkDepth(entry.anchorEl);
-    const existing = stack.value[linkDepth];
-    if (existing && existing.key === entry.key && existing.anchorEl === entry.anchorEl) return;
     stack.value = [...stack.value.slice(0, linkDepth), { ...entry, mode: 'transient', displayDepth: linkDepth }];
 }
 
@@ -121,15 +134,9 @@ export function notifyPopupLeave(depth: number): void {
     scheduleClose();
 }
 
-export function makeSticky(): void {
+export function lockStack(): void {
     cancelClose();
-    sticky.value = true;
-}
-
-export function popTop(): void {
-    if (stack.value.length === 0) return;
-    stack.value = stack.value.slice(0, -1);
-    sticky.value = false;
+    stackLocked.value = true;
 }
 
 /** Close the popup at the given depth and every popup stacked above it. depth=0 closes everything in the transient stack. */
@@ -142,7 +149,7 @@ export function closeFromDepth(depth: number): void {
     stack.value = stack.value.slice(0, depth);
     for (const d of [...hoveredPopupDepths]) if (d >= depth) hoveredPopupDepths.delete(d);
     for (const d of [...hoveredLinkDepths]) if (d > depth) hoveredLinkDepths.delete(d);
-    sticky.value = false;
+    stackLocked.value = false;
 }
 
 export function closeAll(): void {
@@ -150,7 +157,7 @@ export function closeAll(): void {
     hoveredLinkDepths.clear();
     hoveredPopupDepths.clear();
     stack.value = [];
-    sticky.value = false;
+    stackLocked.value = false;
 }
 
 // ── Pinned popups ──
@@ -166,6 +173,10 @@ export function isPinned(key: string): boolean {
 /** Add or update a pinned popup. Idempotent on `key`. */
 export function pinPopup(entry: Omit<PopupEntry, 'mode'>): void {
     const full: PopupEntry = { ...entry, mode: 'pinned' };
+    // The hover card under the cursor is now redundant — the pinned copy renders in the same
+    // place. On touch there is no pointerleave to prune it, so drop it here. Only the tail is
+    // safe to pop: deeper entries are indexed by depth and a filter would leave a hole.
+    if (stack.value.at(-1)?.key === full.key) stack.value = stack.value.slice(0, -1);
     const idx = findPinnedIndex(full.key);
     if (idx === -1) {
         pinned.value = [...pinned.value, full];
@@ -201,8 +212,8 @@ export function closePopupsByKey(prefix?: string): void {
     pinned.value = pinned.value.filter(e => !e.key.startsWith(prefix));
     if (stack.value.some(e => e.key.startsWith(prefix))) {
         stack.value = stack.value.filter(e => !e.key.startsWith(prefix));
-        // If we removed everything, release sticky so future hovers can open new popups.
-        if (stack.value.length === 0) sticky.value = false;
+        // If we removed everything, release the lock so future hovers can open new popups.
+        if (stack.value.length === 0) stackLocked.value = false;
     }
 }
 

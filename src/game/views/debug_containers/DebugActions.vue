@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
+import { useStorage } from '@vueuse/core';
 import { jsonrepair } from 'jsonrepair';
 import Textarea from 'primevue/textarea';
+import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
 import { Game } from '../../game';
 
 const game = Game.getInstance();
 
-const actionInput = ref<string>('');
+const actionInput = useStorage<string>('debug-actions:input', '');
 const actionError = ref<string>('');
 const actionNames = ref<string[]>([]);
+const searchQuery = ref<string>('');
+
+const filteredActionNames = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return actionNames.value;
+  return actionNames.value.filter(name => name.toLowerCase().includes(query));
+});
 
 onMounted(() => {
   actionNames.value = Array.from(game.logicSystem.actionRegistry.keys()).sort();
@@ -54,10 +63,16 @@ function insertAction(name: string) {
       <Button label="Execute" @click="executeActions" />
       <div v-if="actionError" class="action-error">{{ actionError }}</div>
     </div>
+    <div class="search-toolbar">
+      <InputText v-model="searchQuery" class="search-input" placeholder="Search actions" />
+      <span v-if="searchQuery" class="search-clear" @click="searchQuery = ''">✕</span>
+    </div>
     <div class="action-list">
-      <button v-for="name in actionNames" :key="name" type="button" class="action-chip" @click="insertAction(name)">
+      <button v-for="name in filteredActionNames" :key="name" type="button" class="action-chip"
+        @click="insertAction(name)">
         {{ name }}
       </button>
+      <div v-if="!filteredActionNames.length" class="action-empty">No actions match your search</div>
     </div>
   </div>
 </template>
@@ -94,6 +109,47 @@ function insertAction(name: string) {
   font-family: monospace;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.search-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  border: 1px solid #cbd5e0;
+  border-radius: 0.375rem;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #2b6cb0;
+  box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
+}
+
+.search-clear {
+  position: absolute;
+  right: 0.75rem;
+  cursor: pointer;
+  color: #718096;
+  font-size: 1.125rem;
+  padding: 0.25rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.search-clear:hover {
+  color: #2d3748;
+}
+
+.action-empty {
+  font-size: 0.8rem;
+  color: #718096;
 }
 
 .action-list {

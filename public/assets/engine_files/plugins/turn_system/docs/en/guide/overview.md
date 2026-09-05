@@ -23,7 +23,22 @@ Statuses with `duration > 0` tick down one per turn and expire when they hit 0:
 
 Ten room moves later, the status expires. Permanent statuses (`duration: -1`, the default) and passive ones (`duration: 0`) are untouched.
 
-When a status fully expires on a **party member**, a notification is shown (locale line `turn_status_expired`, override it in your game's locale to reword).
+### Stack bleeding — stacks as the timer
+
+For multi-stack statuses where the stack count itself should decay with time, set `stack_bleeding` in the status meta instead of a duration:
+
+```json
+{
+  "id": "crest_charge",
+  "name": "Crest Charge",
+  "meta": { "stack_bleeding": 1 },
+  "stats": { "crit_chance": 2 }
+}
+```
+
+Every turn removes that many stacks (oldest first); the status disappears when it bleeds to 0. Gaining stacks is the only way to extend it — power and remaining time are the same number, visible on the status card.
+
+When a status fully expires on a **party member** — by duration or by bleeding out — a notification is shown (locale line `turn_status_expired`, override it in your game's locale to reword).
 
 ### 3. Pass time from scenes
 

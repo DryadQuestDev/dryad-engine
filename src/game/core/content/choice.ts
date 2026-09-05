@@ -17,6 +17,24 @@ export class Choice {
   public isVisible: ComputedRef<boolean>; //  if
   public isAvailable: ComputedRef<boolean>; // active
 
+  /**
+   * Locale string id shown when the player clicks this choice while it is grayed out
+   * (e.g. "recipe_already_learned"). Without one the generic "items_no_use" shows.
+   */
+  public unavailableNotificationId?: string;
+
+  /**
+   * A synthetic `delayed_action` continue: its actions run ONCE and the story is expected to
+   * move on afterwards (a battle, an overlay, a reward popup). Anything that parks the scene
+   * on a popup instead of navigating leaves this choice live underneath, so without the latch
+   * a repeated advance re-fires it — unlimited XP from a held Space bar.
+   * Ordinary `>` choices are deliberately repeatable (one that doesn't navigate fires its
+   * actions and stays on the paragraph), so they never set this.
+   */
+  public oneShot: boolean = false;
+
+  private spent: boolean = false;
+
   public nameComputed: ComputedRef<string>;
 
 
@@ -55,6 +73,12 @@ export class Choice {
     if (!this.isChoiceAvailable()) {
       return;
     }
+
+    if (this.oneShot && this.spent) {
+      return;
+    }
+    // Latched before the actions run: one of them may synchronously reach back into the UI.
+    this.spent = true;
 
     if (this.id) {
       Game.getInstance().dungeonSystem.usedDungeonData.value.addVisitedChoice(this.id);

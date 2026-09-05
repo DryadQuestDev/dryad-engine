@@ -25,7 +25,7 @@ export function serializeAst(doc: Document): string {
   return doc.blocks.filter(Boolean).map(serializeBlockCached).join('\n\n');
 }
 
-function serializeBlock(block: Block): string {
+export function serializeBlock(block: Block): string {
   if (block.kind === 'raw') return block.text;
 
   if (block.kind === 'room') {
@@ -43,7 +43,7 @@ function serializeBlock(block: Block): string {
   return header + '\n' + body;
 }
 
-function serializeRow(row: Row): string {
+export function serializeRow(row: Row): string {
   switch (row.kind) {
     case 'choice': {
       let s = '!' + row.name;
@@ -75,7 +75,7 @@ function serializeScene(scene: SceneBlock): string {
   return out.join('\n');
 }
 
-function serializeSceneColumn(column: SceneColumn): string {
+export function serializeSceneColumn(column: SceneColumn): string {
   const prefix = column.kind === '%' ? '%' : '~' + (column.name ?? '') + (column.paramsRaw ?? '');
   if (column.content === '') return prefix;
   return prefix + '\n' + column.content;

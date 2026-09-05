@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
+
+const showIds = computed(() => shouldShowEntityIds());
 
 const props = defineProps<{
     treeId: string;
@@ -15,7 +18,9 @@ const treeCharacter = computed(() => props.characterId ? game.getCharacter(props
 <template>
     <div v-if="tree" class="popup-inner">
         <div class="popup-header">
-            <span class="popup-title">{{ tree.name || tree.id }}</span>
+            <span class="popup-title">{{ tree.name || tree.id }}
+                <span v-if="showIds" class="entity-id-badge">{{ treeId }}</span>
+            </span>
         </div>
         <div v-if="tree.description"
             v-script="{ html: tree.description, context: { character: treeCharacter } }"

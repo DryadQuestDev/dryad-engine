@@ -19,6 +19,11 @@ global.menuInitialState.value = 'main';
 
 const isGameRunning = global.engineState.value === 'game';
 
+// Changing mods writes the running state to a temporary slot and reloads into it, so it is a save
+// in all but name — blocked whenever saving is (a battle, replay, a game-over screen). Without
+// this the save silently no-ops and the reload lands on a slot that was never written.
+const savesBlocked = computed(() => isGameRunning && game.coreSystem.isSaveDisabled());
+
 // Check if in dev mode
 const isDevMode = computed(() => localStorage.getItem('devMode') === 'true');
 
@@ -65,7 +70,11 @@ function setMenuState(state: string) {
           <li v-if="isGameRunning && game.coreSystem.gameSettingsSchema.length > 0"
             @click="setMenuState('game_settings')">Game
             Settings</li>
-          <li v-if="isGameRunning" @click="setMenuState('mod_picker')">Mods Manager</li>
+          <li v-if="isGameRunning" :class="{ 'menu-disabled': savesBlocked }"
+            @click="savesBlocked || setMenuState('mod_picker')">
+            Mods Manager
+            <span v-if="savesBlocked" class="menu-disabled-hint">{{ global.getString('mods_save_disabled') }}</span>
+          </li>
           <li v-if="isGameRunning" @click="global.toMainMenu">Main Menu</li>
           <li @click="global.toggleMenu">Close</li>
         </ul>
@@ -158,6 +167,25 @@ function setMenuState(state: string) {
   background: rgba(255, 255, 255, 0.14);
   border-color: var(--glass-tint);
   color: #fff;
+}
+
+.menu-container-content li.menu-disabled {
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.menu-container-content li.menu-disabled:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(216, 221, 228, 0.92);
+}
+
+.menu-disabled-hint {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  opacity: 0.8;
 }
 
 @media (pointer: coarse),

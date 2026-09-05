@@ -69,21 +69,55 @@ The player can toggle zoom manually during their turn.
 
 When a battle starts:
 
-1. Enemies are spawned from templates (or fetched if `is_live_instance` is true)
+1. Enemies are spawned from templates — or, for an `is_live_instance` entry, each live character named by `live_character_ids` is fetched and healed to full
 2. Turn order is calculated from all combatants' speed stats
-3. Ability states are initialized (cooldowns from `cd_on_battle_start`, charges from ability meta)
+3. Ability states are initialized (abilities flagged `cd_on_battle_start` open on cooldown for their `cd`, charges from ability meta)
 4. Statuses with `meta.source` are seeded from the named character stat (e.g., a character with `wind_mantle: 5` starts the fight with the Wind Mantle status at 5 stacks)
 5. The `battle_start` emitter fires (return false to cancel)
 6. Saves are disabled and the battle screen is shown
-7. The first character's turn begins
+7. Round 1 opens like every other round (below) — battle start is not a special case
+
+### Enemy Scaling and Difficulty
+
+The plugin does **not** scale enemies. It fights whatever stats the characters report, and the
+difficulty setting (`rpg_battle_difficulty`) is a game setting the plugin stores but never applies.
+Both curves belong to the game.
+
+Implement them as a stat computer rather than by writing stats at battle start. Register one
+computer, attach it to a character template with `computed_stats`, and return the *delta* — the stat
+channel is additive, so a ×N multiplier is authored as `base × (N − 1)`:
+
+```js
+game.registerStatComputer('my_scale', (character) => {
+    const mult = myCurve(character);           // dungeon level, difficulty, whatever the game uses
+    if (mult === 1) return {};
+    const base = character.getCoreStatus()?.stats || {};
+    return { health: base.health * (mult - 1), power: base.power * (mult - 1) };
+});
+```
+
+Read `getCoreStatus().stats`, never `getBaseStat` — the latter sums *every* status, so it would
+multiply gear and mid-battle buffs too. Never call `getStat` on the character being computed: that
+re-enters the same computer and overflows the stack.
+
+Because the value is derived, an enemy reports its true fight stats everywhere — a pre-battle
+inspect panel, the in-battle viewer and the damage math all read the same number, and nothing has to
+be snapshotted or restored.
+
+One thing a computer cannot do: max health is a computed, but the health **resource** is imperative
+state. `adjustAllResources` only runs from status mutations, so when a curve moves under a live
+character its current health does not follow. Nudge it from whatever event moves the curve.
 
 ### During Battle
 
 Each round:
 
-1. A "Turn N" log entry is added
-2. The `battle_turn_start` emitter fires
-3. Each character takes their turn in speed order
+1. Initiative is re-rolled and the turn order is re-sorted by current speed
+2. A "Turn N" log entry is added
+3. The `battle_turn_start` emitter fires
+4. The **Turn N starts** banner holds for `round_start_delay` ms (Battle Config, default 1500, scaled by the player's battle-speed setting) with the camera pulled out — the settled lineup is readable before anyone acts. Set it to 0 to open rounds immediately
+5. Queued turn-start scenes play
+6. Each character takes their turn in speed order
 
 ### Mid-Battle Scenes
 
@@ -104,8 +138,9 @@ When the battle ends:
 4. All `meta.is_battle` statuses are removed from all participants
 5. Spawned enemies are deleted
 6. Saves are re-enabled and the previous game state is restored
-7. The `battle_closed` emitter fires (teardown complete -- safe to set post-battle state)
-8. On victory only, the scene that triggered the battle resumes; on defeat it stays halted -- handle what happens next in a `battle_closed` listener
+7. The `battle_closed_before` emitter fires (teardown complete -- safe to set post-battle state)
+8. On victory only, the scene that triggered the battle resumes; on defeat it stays halted -- handle what happens next in a `battle_closed_before` listener
+9. The `battle_closed_after` emitter fires (the story has moved past the paragraph that started the fight -- the safe point to snapshot or save)
 
 ## Battle Speed
 

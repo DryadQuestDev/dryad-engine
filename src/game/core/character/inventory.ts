@@ -8,12 +8,16 @@ import { Character } from "./character";
 import { Status } from "./status";
 import { Global } from "../../../global/global";
 import { ItemRecipeObject } from "../../../schemas/itemRecipeSchema";
+import { PARTY_INVENTORY_ID } from "../../systems/itemSystem";
 import { TradeContext } from "../../systems/itemSystem";
 
 //type apply
 
 
 export class Inventory {
+
+    // Custom inventory traits from the template (inventory_traits declarations) — e.g. key locks.
+    public traits: Record<string, any> = {};
 
     /**
      * Apply the equip-status for an item onto a character. Removes any existing `item_<uid>` first,
@@ -28,6 +32,9 @@ export class Inventory {
         status.id = id;
         status.setValues(item.statusObject);
         status.isHidden = true;
+        // The equip status is hidden, so its own icon is never drawn — the source id exists purely
+        // as the fallback for the abilities this item grants (Character.computeFinalAbilities).
+        if (!status.image) status.iconSource = item.id;
         // Mirror granted-status stacks to the equipped item quantity. Must be set BEFORE
         // addStatus so the character's reevaluate() inside addStatus sees the right count;
         // otherwise per-stack stats compute against stacks=1 and stay stale until some
@@ -45,6 +52,12 @@ export class Inventory {
 
     // 0 or undefined - unlimited; Otherwise, the maximum weight in the inventory
     public maxWeight: number = 0;
+
+    // When true, addItem may exceed the slot (maxSize) and weight (maxWeight) limits — isOverCapacity
+    // still reports it, for gating/display. Undefined = the party inventory allows over-capacity,
+    // every other inventory hard-blocks — resolved in validateInventorySpace so an explicit false can
+    // force even the party bag to hard-block.
+    public allowOverCapacity?: boolean;
 
     // execute when clicking 'apply' button in inventory
     public interactive: string = '';
@@ -213,6 +226,16 @@ export class Inventory {
     }
 
     /**
+     * Over capacity by EITHER restriction: too many slots used (isOverflowing) or too heavy
+     * (isOverweight). The union used for encumbrance gating (movement block, over-encumbered banner,
+     * enc_sensitive). False when neither a size nor a weight cap is set.
+     * @returns True if over the slot or weight limit
+     */
+    public isOverCapacity(): boolean {
+        return this.isOverflowing() || this.isOverweight();
+    }
+
+    /**
      * Get comprehensive inventory statistics
      * @param visibleItemCount Optional count of visible items (for cases where items are filtered in UI)
      * @returns Object containing all inventory statistics
@@ -321,8 +344,14 @@ export class Inventory {
      * @throws Error if inventory is full and cannot accommodate the items
      */
     private validateInventorySpace(itemId: string, quantity: number, maxStack: number): void {
+        // Over-capacity is allowed on inventories that opt in — the party bag by default (soft
+        // encumbrance: reported via isOverCapacity but pickup still works), any other inventory
+        // hard-blocks. An explicit allow_over_capacity wins either way. Governs BOTH the slot and
+        // weight limits.
+        const allowOverCapacity = this.allowOverCapacity ?? (this.id === PARTY_INVENTORY_ID);
+
         // Check size limit
-        if (this.maxSize > 0) {
+        if (this.maxSize > 0 && !allowOverCapacity) {
             const currentCount = this.items.filter(i => !i.isEquipped).length;
             const slotsNeeded = this.calculateSlotsNeeded(itemId, quantity, maxStack);
             const availableSlots = this.maxSize - currentCount;
@@ -336,7 +365,7 @@ export class Inventory {
         }
 
         // Check weight limit
-        if (this.maxWeight > 0) {
+        if (this.maxWeight > 0 && !allowOverCapacity) {
             const currentWeight = this.getTotalWeight();
             const weightToAdd = this.calculateWeightToAdd(itemId, quantity);
 
@@ -685,18 +714,24 @@ export class Inventory {
             return false;
         }
 
-        // Transfer logic
+        // Transfer logic. addItem clones or merges, so the element it returns is the live
+        // target-side stack — the transferred instance itself never lands in the target.
+        let movedItem = sourceItem;
         if (sourceItem.quantity === quantity) {
             // Move entire stack
             this.removeItem(sourceItem);
-            target.addItem(sourceItem, sourceItem.quantity);
+            const landed = target.addItem(sourceItem, sourceItem.quantity);
+            movedItem = landed?.[0] ?? sourceItem;
         } else {
             // Split stack
             sourceItem.quantity -= quantity;
             const newItem = this.cloneItem(sourceItem);
             newItem.quantity = quantity;
-            target.addItem(newItem, newItem.quantity);
+            const landed = target.addItem(newItem, newItem.quantity);
+            movedItem = landed?.[0] ?? newItem;
         }
+
+        Game.getInstance().trigger('inventory_transfer_after', this, target, movedItem, quantity, isTrade);
 
         return true;
     }
@@ -803,6 +838,13 @@ export class Inventory {
                 if (stack.quantity === 0) {
                     this.removeItem(stack);
                 }
+            }
+
+            // deductCurrency doubles as a generic remover ({transfer_item}, skill purchases) —
+            // only genuine currency templates report as currency_change.
+            const template = game.itemSystem.itemTemplatesMap.get(currencyId);
+            if (template?.is_currency) {
+                game.trigger('currency_change', this, currencyId, -requiredAmount);
             }
         }
 
@@ -1030,8 +1072,7 @@ export class Inventory {
         // Keep selected recipe after crafting so user can craft multiple times
         // this.selectedRecipeId = "";
 
-        // TODO: Add 'inventory_craft' event to game triggers
-        // game.trigger('inventory_craft', this, recipe);
+        game.trigger('inventory_craft', this, recipe);
     }
 
 }

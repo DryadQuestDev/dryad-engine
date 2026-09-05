@@ -236,6 +236,14 @@
   transition: opacity 0.6s linear, filter 0.3s linear;
 }
 
+
+/* Collectable with no authored sprite — it draws the granted item's icon, which is full-size
+   item art. Pin it to a map-sized footprint (the encounter's own scale still applies on top). */
+.map_image.item_icon {
+  width: 25px;
+  height: auto;
+}
+
 .map_prop {
   will-change: transform;
   transition: opacity 0.6s linear, filter 0.3s linear;

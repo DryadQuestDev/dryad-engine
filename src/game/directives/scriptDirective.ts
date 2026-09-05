@@ -134,15 +134,18 @@ function buildEntry(link: HTMLElement, opts: NormalizedOpts): { key: string; com
 }
 
 function attachListeners(el: HTMLElement) {
-    const onOver = (e: MouseEvent) => {
+    // Mouse only — a tap synthesizes mouseover before click and never sends the matching out.
+    const onOver = (e: PointerEvent) => {
+        if (e.pointerType !== 'mouse') return;
         const opts = (el as any)[OPTS] as NormalizedOpts | undefined;
         if (!opts || opts.disabled || opts.navMode) return;
         const link = findLink(e.target);
         if (!link) return;
         const entry = buildEntry(link, opts);
-        if (entry) pushTransient({ ...entry, anchorEl: link });
+        if (entry) pushTransient({ ...entry, anchorEl: link, interactive: true });
     };
-    const onOut = (e: MouseEvent) => {
+    const onOut = (e: PointerEvent) => {
+        if (e.pointerType !== 'mouse') return;
         const opts = (el as any)[OPTS] as NormalizedOpts | undefined;
         if (!opts || opts.disabled || opts.navMode) return;
         const link = findLink(e.target);
@@ -162,10 +165,10 @@ function attachListeners(el: HTMLElement) {
             return;
         }
         const entry = buildEntry(link, opts);
-        if (entry) clickTransient({ ...entry, anchorEl: link });
+        if (entry) clickTransient({ ...entry, anchorEl: link, interactive: true });
     };
-    el.addEventListener('mouseover', onOver);
-    el.addEventListener('mouseout', onOut);
+    el.addEventListener('pointerover', onOver);
+    el.addEventListener('pointerout', onOut);
     el.addEventListener('click', onClick);
     (el as any)[HANDLERS] = { onOver, onOut, onClick };
 }
@@ -173,8 +176,8 @@ function attachListeners(el: HTMLElement) {
 function detachListeners(el: HTMLElement) {
     const h = (el as any)[HANDLERS] as { onOver: any; onOut: any; onClick: any } | undefined;
     if (!h) return;
-    el.removeEventListener('mouseover', h.onOver);
-    el.removeEventListener('mouseout', h.onOut);
+    el.removeEventListener('pointerover', h.onOver);
+    el.removeEventListener('pointerout', h.onOut);
     el.removeEventListener('click', h.onClick);
     delete (el as any)[HANDLERS];
 }

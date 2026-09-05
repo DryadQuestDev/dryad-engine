@@ -2,13 +2,16 @@
 
 import { currentRpgBattle, addFloatingText, pushLog } from './rpg-battle-state.mjs';
 import { isBattleScenePauseActive, teardownBattleScenes, resetBattleScenes } from './rpg-battle-scenes.mjs';
-import { initBattleTracking, summonCombatant, previewAbilityUsable } from './rpg-battle-flow.mjs';
-import { checkStaggerThreshold, getStatusDefinitions, getEffectivePower, applyDefenses, applyDamageInstance, applyStatusEffect, logEffect } from './rpg-battle-effects.mjs';
+import { initBattleTracking, summonCombatant, summonFromTemplate, sideAtUnitCap, previewAbilityUsable, spawnEnemies } from './rpg-battle-flow.mjs';
+import { checkStaggerThreshold, getEffectivePower, applyDefenses, applyDamageInstance, applyHeal, applyStatusEffect, logEffect, getSide, isCharAlive, isSupport } from './rpg-battle-effects.mjs';
+import { registerAspectRenderers } from './aspect-renderers.mjs';
 import { RpgBattleScreen } from './components/RpgBattleScreen.mjs';
 import { RpgCombatStats } from './components/RpgCombatStats.mjs';
+import './DebugBattles.mjs';
 import { RpgChannelCard } from './components/RpgChannelCard.mjs';
 import { RpgCharOverlay } from './components/RpgCharOverlay.mjs';
 import { RpgHealthOverlay } from './components/RpgHealthOverlay.mjs';
+import './components/RpgPartySelect.mjs';
 
 const { game } = window.engine;
 
@@ -19,17 +22,39 @@ console.log('rpg_battler plugin loaded');
 game.registerEmitter('battle_start');
 // Emitter: battle_end — Fired when battle ends, BEFORE pre-battle states are restored and the
 // roster is cleaned up — battle data (enemies, statuses) is still readable here, but state
-// writes get overwritten by the restore; set post-battle state in battle_closed instead.
+// writes get overwritten by the restore; set post-battle state in battle_closed_before instead.
 // Args: (result: 'victory' | 'defeat'). Not cancellable.
 game.registerEmitter('battle_end');
-// Emitter: battle_closed
+// Emitter: battle_finished
+// Fired the moment the battle is DECIDED, before the result overlay renders — every time,
+// including a re-fight. Also fired by the scripted `{win: "<battleId>"}` action, so "a battle was
+// won" is one hook whether it was fought or awarded. This is the hook for anything that must have its state ready for the
+// overlay to display. `battle_end` is too late (it fires from the Continue button, once the
+// overlay is being torn down) and `battle_defeated` is first-clear-only.
+// Args: (result: 'victory' | 'defeat', battleId: string | null). Not cancellable.
+game.registerEmitter('battle_finished');
+// Emitter: battle_closed_before
 // Fired after the battle is fully torn down: pre-battle states restored, battle statuses
 // removed, spawned enemies deleted, battle cleared. Fires before the triggering scene
 // resumes (victory only). Safe place to set post-battle game state.
 // Args: (result: 'victory' | 'defeat'). Not cancellable.
-game.registerEmitter('battle_closed');
+game.registerEmitter('battle_closed_before');
+// Emitter: battle_closed_after
+// Fired at the very end of the battle, after `battle_closed_before` AND after the triggering
+// scene has been resumed (victory) — the first moment the story has moved past the paragraph
+// that ran {battle: "id"}. That paragraph's delayed action is still armed at _before time, so a
+// save taken there reloads into a re-fight of the battle just won; take it here instead.
+// A scene that chains straight into another fight has already started it by the time this fires —
+// check `rpg_battle.isActive()` if that matters.
+// Args: (result: 'victory' | 'defeat'). Not cancellable.
+game.registerEmitter('battle_closed_after');
 // Emitter: battle_turn_start — Fired at the start of a new round. Args: (turnNumber).
 game.registerEmitter('battle_turn_start');
+// Emitter: battle_wave_start — Fired when a wave AFTER the first takes the field (the previous
+// wave was wiped and victory was withheld). Never fires for the opening wave.
+// Args: (waveIndex: number /* 0-based, so the second wave is 1 */, enemyIds: string[]).
+// Not cancellable.
+game.registerEmitter('battle_wave_start');
 // Emitter: battle_action_start — Fired before ability execution. Args: (caster, event).
 // event = { abilityId, targetId }. Mutate to redirect ability or change target. Return false to cancel.
 // For power adjustments, listen to `rpg_compute_power` instead — that hook fires for both runtime and tooltip.
@@ -67,79 +92,10 @@ game.registerEmitter('battle_took_damage');
 // ── Aspect renderers ──
 
 // CSS classes are defined in css/rpg-battle.css: .physical .magic .burn .poison .bleeding .heal .value
-function colorize(text, cls) {
-  return `<span class="${cls}">${text}</span>`;
-}
-
-// Status ids that have a dedicated color class; everything else falls back to .value.
-const STATUS_COLOR_CLASSES = new Set(['burn', 'poison', 'bleeding']);
-function statusClassFor(statusIds) {
-  if (Array.isArray(statusIds)) {
-    for (const id of statusIds) if (STATUS_COLOR_CLASSES.has(id)) return id;
-  }
-  return 'value';
-}
-
-function powerScaledRenderer({ value, character, ability }, colorClass = 'value') {
-  // Delta-overlaid values arrive as { _base, _merged } objects; unwrap them for scaling.
-  const isDelta = value && typeof value === 'object' && '_base' in value && '_merged' in value;
-  const num = isDelta ? value._merged : value;
-  const display = isDelta
-    ? `${value._base}➜<span class="delta-value">${num}</span>`
-    : num;
-  if (ability?.meta?.flat) return `<b>${colorize(display, colorClass)}</b>`;
-  let txt = `<b>${display}% of power</b>`;
-  if (character && typeof num === 'number' && isFinite(num)) {
-    const effective = getEffectivePower(character, ability);
-    txt += ` <b>(${colorize(Math.round(effective * num / 100), colorClass)})</b>`;
-  }
-  return txt;
-}
-
-game.registerAspectRenderer('damage', (ctx) => powerScaledRenderer(ctx, ctx.aspects?.damage_type || 'value'));
-game.registerAspectRenderer('healing', (ctx) => powerScaledRenderer(ctx, 'heal'));
-game.registerAspectRenderer('healing_self', (ctx) => powerScaledRenderer(ctx, 'heal'));
-
-function statusStacksRenderer(applyAspectId) {
-  return ({ value, aspects, character, ability }) => {
-    const statusIds = aspects[applyAspectId];
-    const cls = statusClassFor(statusIds);
-    const isDelta = value && typeof value === 'object' && '_base' in value && '_merged' in value;
-    const plainDisplay = isDelta
-      ? `${value._base}➜<span class="delta-value">${value._merged}</span>`
-      : value;
-    if (ability?.meta?.flat || !Array.isArray(statusIds) || statusIds.length === 0) {
-      return `<b>${colorize(plainDisplay, cls)}</b>`;
-    }
-    const defs = getStatusDefinitions();
-    const anyScaled = statusIds.some(id => defs?.get(id)?.meta?.power_scaling);
-    if (!anyScaled) return `<b>${colorize(plainDisplay, cls)}</b>`;
-    return powerScaledRenderer({ value, character, ability }, cls);
-  };
-}
-game.registerAspectRenderer('status_stacks_target', statusStacksRenderer('status_apply_target'));
-game.registerAspectRenderer('status_stacks_self', statusStacksRenderer('status_apply_self'));
-game.registerAspectRenderer('status_stacks_allies', statusStacksRenderer('status_apply_allies'));
-game.registerAspectRenderer('status_stacks_enemies', statusStacksRenderer('status_apply_enemies'));
-
-// Generic yellow highlight for any other numeric ability-effect aspect that hits the
-// default <b>${value}</b> fallback (durations, cooldowns, charges, splash, conditions, etc.).
-function valueRenderer({ value }) {
-  const isDelta = value && typeof value === 'object' && '_base' in value && '_merged' in value;
-  const display = isDelta
-    ? `${value._base}➜<span class="delta-value">${value._merged}</span>`
-    : value;
-  return `<b>${colorize(display, 'value')}</b>`;
-}
-for (const id of [
-  'status_duration_target', 'status_duration_self', 'status_duration_allies', 'status_duration_enemies',
-  'status_remove_stacks_target', 'status_remove_stacks_self', 'status_remove_stacks_allies', 'status_remove_stacks_enemies',
-  'cooldown_change', 'charges_change', 'lifesteal', 'splash', 'bounce', 'chance',
-  'caster_min_health', 'caster_max_health', 'target_min_health', 'target_max_health',
-  'charges', 'cd_on_battle_start',
-]) {
-  game.registerAspectRenderer(id, valueRenderer);
-}
+// Aspect renderers live in aspect-renderers.mjs — a self-contained module the editor's
+// preview hook (plugin.json `editor_preview`) also loads, so tooltips read identically
+// in the editor's ability picker. Only the runtime injects getEffectivePower.
+registerAspectRenderers(game, { getEffectivePower });
 
 // Grey out abilities in the engine's AbilityCard when a character couldn't use them on their turn.
 game.registerAbilityUsabilityChecker(previewAbilityUsable);
@@ -172,7 +128,10 @@ function addDefeated(battleId) {
 game.registerAction('win', {
   eventDelayed: true,
   action: (/** @type {string} */ battleId) => {
+    // addDefeated only TRACKS the clear (once per definition, for `_defeated` content gates).
+    // The win itself is announced every time, so per-win listeners never get skipped.
     if (typeof battleId === 'string' && battleId) addDefeated(battleId);
+    game.trigger('battle_finished', 'victory', battleId || null);
   },
 });
 
@@ -187,7 +146,53 @@ game.registerCondition('_defeated', isDefeated);
 
 function getMaxPartySize() {
   const config = game.getData('plugins_data/rpg_battler/battle_config');
-  return config?.max_party_size || 4;
+  return config?.max_battle_units || 4;
+}
+
+export function getMaxTotalUnits() {
+  const config = game.getData('plugins_data/rpg_battler/battle_config');
+  return config?.max_total_units || 5;
+}
+
+// Pre-battle party picker: when more eligible members exist than max_battle_units, start()
+// stashes its params here and opens the picker popup; confirmPartySelect re-enters start()
+// with the chosen roster. battle_always members are locked in, battle_ignore never appears.
+export const partySelectRequest = window.engine.vue.ref(/** @type {{ params: any, eligible: string[], locked: string[], max: number } | null} */ (null));
+
+// Pre-battle state snapshot. Taken at PREPARE (the picker opening) when there is a prepare
+// step, else at battle start — saves are disabled from that moment, and endRpgBattle's normal
+// restore covers the whole span because the battle object consumes this snapshot.
+let preBattleStates = /** @type {{ disableSaves: any, blockInventory: any, gameState: any, hideEvents: any } | null} */ (null);
+
+function captureBattleStates() {
+  if (preBattleStates) return preBattleStates;
+  preBattleStates = {
+    disableSaves: game.getState('disable_saves'),
+    blockInventory: game.getState('block_party_inventory'),
+    gameState: game.getState('game_state'),
+    hideEvents: game.getState('hide_events'),
+  };
+  return preBattleStates;
+}
+
+export function confirmPartySelect(/** @type {string[]} */ chosenIds) {
+  const request = partySelectRequest.value;
+  partySelectRequest.value = null;
+  game.closePopup('rpg_party_select');
+  if (!request) return;
+  game.getService('rpg_battle').start({ ...request.params, playerParty: chosenIds, _partySelected: true });
+}
+
+export function cancelPartySelect() {
+  partySelectRequest.value = null;
+  game.closePopup('rpg_party_select');
+  // No battle will consume the snapshot — restore everything the prepare step blocked.
+  if (preBattleStates) {
+    game.setState('disable_saves', preBattleStates.disableSaves);
+    game.setState('block_party_inventory', preBattleStates.blockInventory);
+    game.setState('hide_events', preBattleStates.hideEvents);
+    preBattleStates = null;
+  }
 }
 
 game.registerService('rpg_party', {
@@ -250,65 +255,6 @@ game.addComponent({
 });
 
 /**
- * Spawn enemies from a battle definition's enemy list.
- * @param {RpgBattleEntry[]} entries
- * @returns {{ ids: string[], spawned: string[] }} all enemy IDs, and the subset the battle created (non-live)
- */
-function spawnEnemies(entries) {
-  const ids = [];
-  const spawned = [];
-  for (const entry of entries) {
-    for (let i = 0; i < (entry.amount || 1); i++) {
-      if (entry.is_live_instance) {
-        const char = game.getCharacter(entry.character_id);
-        if (char) ids.push(char.id);
-      } else {
-        const uid = game.createUid();
-        const char = game.createCharacter(uid, entry.character_id);
-        game.addCharacter(char);
-        ids.push(char.id);
-        spawned.push(char.id);
-      }
-    }
-  }
-  return { ids, spawned };
-}
-
-
-// ── Difficulty ──
-
-/** @param {RpgBattle} battle */
-function applyDifficultyToEnemies(battle) {
-  const diff = game.getGameSetting('rpg_battle_difficulty') || 'medium';
-  const cfg = game.getData('plugins_data/rpg_battler/battle_config') || {};
-  const d = cfg.difficulty || {};
-  const pctByDiff = {
-    easy: d.easy ?? -30,
-    medium: d.medium ?? 0,
-    hard: d.hard ?? 30,
-    very_hard: d.very_hard ?? 60,
-  };
-  const pct = pctByDiff[diff] ?? 0;
-  if (!pct) return;
-
-  for (const enemyId of battle.enemyParty) {
-    const char = game.getCharacter(enemyId);
-    if (!char) continue;
-    const core = char.getCoreStatus();
-    const baseHealth = core?.stats?.health ?? 0;
-    const basePower = core?.stats?.power ?? 0;
-    const status = game.createStatus('difficulty');
-    if (!status) continue;
-    status.stats = {
-      health: Math.round(baseHealth * pct / 100),
-      power: Math.round(basePower * pct / 100),
-    };
-    char.addStatus(status, { stacks: 1 });
-  }
-}
-
-
-/**
  * Fallback battle background when a battle sets none: the configured default asset
  * of the current room, else the current (map) dungeon. Read from the parsed dungeon
  * data so it reflects the editor config, not whatever happens to be staged.
@@ -340,6 +286,36 @@ function resolveSceneDefaultBackground() {
 
 // ── Battle service ──
 
+/**
+ * Expand a battle definition into one entry per body. Template entries repeat `amount` times;
+ * a live entry spawns nothing and carries no `amount` — it IS the characters it lists.
+ * @param {string} battleId
+ * @returns {RpgRosterEntry[]}
+ */
+function battleRoster(battleId) {
+  const def = game.getData('plugins_data/rpg_battler/battles', true)?.get(battleId);
+  const roster = [];
+  for (const key in def || {}) {
+    const match = /^enemies(\d*)$/.exec(key);
+    if (!match) continue;
+    const wave = match[1] ? Number(match[1]) - 1 : 0;
+    for (const entry of def[key] || []) {
+      if (entry.is_live_instance) {
+        for (const id of entry.live_character_ids || []) {
+          // No template to price — read the live character's own trait.
+          roster.push({ characterId: id, templateId: null, wave, threat: game.getCharacter(id)?.getTrait('threat') || 0 });
+        }
+        continue;
+      }
+      const threat = game.getData('character_templates', true)?.get(entry.character_id)?.traits?.threat || 0;
+      for (let i = 0; i < (entry.amount || 1); i++) {
+        roster.push({ characterId: null, templateId: entry.character_id, wave, threat });
+      }
+    }
+  }
+  return roster;
+}
+
 game.registerService('rpg_battle', {
   /**
    * @param {StartRpgBattleParams} params
@@ -353,47 +329,106 @@ game.registerService('rpg_battle', {
       return { ok: false, reason: 'already_active' };
     }
 
-    let enemyEntries = params.enemies;
+    let waves = params.waves;
     let background = params.background || null;
 
-    if (params.battleId && !enemyEntries) {
+    if (!waves && params.enemies) waves = [params.enemies, params.enemies2];
+
+    if (params.battleId && !waves) {
       const battles = game.getData('plugins_data/rpg_battler/battles', true);
       const def = battles?.get(params.battleId);
       if (!def) {
         throw new Error(`rpg_battler: battle "${params.battleId}" not found — create it in the editor under the RPG Battler tab → Battles, or fix the id passed to the battle action.`);
       }
-      enemyEntries = def.enemies;
+      // The editor exposes flat wave fields (enemies, enemies2) because a nested
+      // array-of-arrays has no sane form UI; everything past this point is wave-agnostic,
+      // so adding `enemies3` later is a schema-only change.
+      waves = [def.enemies, def.enemies2];
       if (!background && def.background) background = def.background;
     }
+
+    // Empty/absent waves drop out — a battle with only `enemies` is simply a one-wave battle.
+    waves = (waves || []).filter(w => w?.length);
 
     // No explicit background → fall back to the dungeon/room's configured default asset.
     if (!background) background = resolveSceneDefaultBackground();
 
-    if (!enemyEntries || enemyEntries.length === 0) {
+    if (waves.length === 0) {
       console.warn('rpg_battler: no enemies provided');
       return { ok: false, reason: 'no_enemies' };
     }
+    const enemyEntries = waves[0];
 
-    // Use current party as default
-    if (!params.playerParty || params.playerParty.length === 0) {
-      params.playerParty = game.getParty().map(c => c.id);
-    }
+    // Everything below works on a LOCAL roster: a scene's `{battle: {...}}` action value is
+    // the same object every time that choice fires, so mutating params would carry one
+    // battle's roster (and its support split) into the next.
+    // Use current party as default — members flagged battle_ignore never enter battles
+    let roster = params.playerParty?.length
+      ? [...params.playerParty]
+      : game.getParty().filter(c => !c.getTrait('battle_ignore')).map(c => c.id);
 
-    if (!params.playerParty || params.playerParty.length === 0) {
+    if (roster.length === 0) {
       console.warn('rpg_battler: no player party available');
       return { ok: false, reason: 'no_party' };
     }
 
-    // Enforce max party size
-    const max = getMaxPartySize();
-    if (params.playerParty.length > max) {
-      console.warn(`rpg_battler: party size (${params.playerParty.length}) exceeds max (${max}), using first ${max}`);
-      params.playerParty = params.playerParty.slice(0, max);
+    // Supports (battle_support) fight from the sidelines: split them out BEFORE the size
+    // gate so the picker never shows them and max_battle_units only counts real slots.
+    // On a picker re-entry the chosen roster no longer holds them, so they ride along on
+    // _supportParty — which is only ever trusted on that re-entry, never as a cache.
+    const supportIds = params._partySelected
+      ? (params._supportParty || [])
+      : roster.filter(id => game.getCharacter(id)?.getTrait('battle_support'));
+    roster = roster.filter(id => !supportIds.includes(id));
+
+    if (roster.length === 0) {
+      console.warn('rpg_battler: player party has only support members');
+      return { ok: false, reason: 'no_party' };
     }
 
+    // Enforce max starting units. With more eligible members than slots, open the party
+    // picker instead of silently slicing — battle_always members are locked into it.
+    const max = getMaxPartySize();
+    if (roster.length > max) {
+      if (!params._partySelected) {
+        const locked = roster.filter(id => game.getCharacter(id)?.getTrait('battle_always'));
+        // With locked members alone filling (or overfilling) the roster there is nothing to
+        // pick — proceed with them directly. Opening the picker here would soft-lock: locked
+        // faces can't be deselected, so Fight could never enable.
+        if (locked.length >= max) {
+          roster = locked.slice(0, max);
+        } else {
+          // PREPARE = the first battle event: snapshot pre-battle states and engage the full
+          // blocking set right away (saves, party inventory, events). A save or inventory
+          // change mid-pick would desync the half-started battle. The screen itself
+          // (game_state) only swaps when the battle actually starts.
+          captureBattleStates();
+          game.setState('disable_saves', true);
+          game.setState('block_party_inventory', true);
+          game.setState('hide_events', true);
+          // A COPY of params — confirmPartySelect spreads this back into start(), and the
+          // caller's own object must stay untouched for the next battle.
+          partySelectRequest.value = {
+            params: { ...params, playerParty: roster, _supportParty: supportIds },
+            eligible: [...roster], locked, max,
+          };
+          game.openPopup('rpg_party_select');
+          return { ok: false, reason: 'party_select_pending' };
+        }
+      } else {
+        console.warn(`rpg_battler: party size (${roster.length}) exceeds max (${max}), using first ${max}`);
+        roster = roster.slice(0, max);
+      }
+    }
+
+    // Supports rejoin AFTER size enforcement, appended at the END of the roster so they
+    // never sit between real members (splash/neighbor adjacency walks party order).
+    const supportSet = new Set(supportIds.filter(id => game.getCharacter(id)));
+    const playerParty = [...roster, ...supportSet];
+
     const { ids: enemyParty, spawned: spawnedEnemies } = spawnEnemies(enemyEntries);
-    const turnOrder = [...params.playerParty, ...enemyParty];
-    const playerSet = new Set(params.playerParty);
+    const turnOrder = [...playerParty, ...enemyParty];
+    const playerSet = new Set(playerParty);
 
     /** @type {RpgBattle} */
     const battle = {
@@ -401,11 +436,15 @@ game.registerService('rpg_battle', {
       battleId: params.battleId || null,
       turn: 0,
       phase: 'active',
-      playerParty: [...params.playerParty],
+      playerParty: [...playerParty],
       enemyParty,
       turnOrder,
       summoned: [],
       spawnedEnemies,
+      // Waves past the first spawn when the field is cleared (see advanceWave). waveIndex is
+      // the wave currently on the field; a single-wave battle just never advances.
+      waves,
+      waveIndex: 0,
       actorTurn: -1,
       activeCharId: null,
       activeSide: 'player',
@@ -415,12 +454,13 @@ game.registerService('rpg_battle', {
       log: [],
       backgroundAssetId: background,
       charState: {},
-      prevDisableSaves: game.getState('disable_saves'),
-      prevBlockInventory: game.getState('block_party_inventory'),
-      prevGameState: game.getState('game_state'),
-      prevHideEvents: game.getState('hide_events'),
+      prevDisableSaves: captureBattleStates().disableSaves,
+      prevBlockInventory: captureBattleStates().blockInventory,
+      prevGameState: captureBattleStates().gameState,
+      prevHideEvents: captureBattleStates().hideEvents,
       prevAssets: game.getAssets(),
     };
+    preBattleStates = null; // consumed — the battle object now owns the restore values
 
     // Initialize charState for all combatants
     const allCombatants = [...battle.playerParty, ...battle.enemyParty];
@@ -431,6 +471,7 @@ game.registerService('rpg_battle', {
         abilities: {},
         defeated: false,
         bonusUsed: 0,
+        support: supportSet.has(id),
       };
     }
 
@@ -462,13 +503,13 @@ game.registerService('rpg_battle', {
       return { ok: false, reason: 'prevented' };
     }
 
-    applyDifficultyToEnemies(battle);
 
     // Opening statuses on the whole player party (e.g. an ambush advantage):
     // { battle: { battleId: "bats", statuses: ["advantage"] } }
     if (params.statuses?.length) {
       for (const statusId of params.statuses) {
         for (const charId of battle.playerParty) {
+          if (isSupport(charId)) continue;
           applyStatusEffect(charId, charId, statusId, 1);
         }
       }
@@ -481,6 +522,16 @@ game.registerService('rpg_battle', {
     try {
       const battleStates = [...(game.getData('character_attributes', true).get('battle_state')?.values || [])];
       const preloadTargets = new Set(allCombatants);
+      // Later waves are known upfront, so their art loads behind THIS loading screen —
+      // a wave spawns mid-fight with no pause to fetch images.
+      for (const wave of waves.slice(1)) {
+        // preloadCharacterAssets resolves a live character id or a template id, so a wave's live
+        // entries warm from the same call as its template ones.
+        for (const entry of wave) {
+          if (entry?.is_live_instance) for (const id of entry.live_character_ids || []) preloadTargets.add(id);
+          else if (entry?.character_id) preloadTargets.add(entry.character_id);
+        }
+      }
       for (const id of allCombatants) {
         const abilities = game.getCharacter(id)?.getAbilities() || {};
         for (const abId in abilities) {
@@ -523,22 +574,33 @@ game.registerService('rpg_battle', {
     return isDefeated(battleId);
   },
   /**
-   * Base threat of a battle DEFINITION — Σ template threat × amount over its enemies. Pre-battle
-   * estimate; unscaled base value.
+   * Base threat of a battle DEFINITION: Σ template `threat` trait × amount over the enemies of
+   * EVERY wave, plus the battle's own `threat` field on top. Games price it either way — per
+   * character (templates carry `threat`, the battle field adds boss stakes) or per battle
+   * (templates carry none and the field holds the full value on the 1-100 design scale:
+   * vermin ~5 … chapter boss ~90-100, overflow allowed — the dryad_tale style). Every
+   * threat-driven system reads this: loot budgets, XP, game-side economies (allure pricing).
+   * Unscaled base value.
    * @param {string} battleId @returns {number}
    */
   getThreat(battleId) {
-    const def = game.getData('plugins_data/rpg_battler/battles', true)?.get(battleId);
-    let total = def?.bonus_threat || 0;
-    for (const entry of def?.enemies || []) {
-      const template = game.getData('character_templates', true)?.get(entry.character_id);
-      total += (template?.traits?.threat || 0) * (entry.amount || 1);
-    }
+    let total = game.getData('plugins_data/rpg_battler/battles', true)?.get(battleId)?.threat || 0;
+    for (const body of battleRoster(battleId)) total += body.threat;
     return total;
   },
   /**
-   * Base threat summed over the LIVE enemy party. Traits are frozen per-template, so this equals
-   * the definition sum — call from a battle_end listener (roster is deleted by battle_closed).
+   * The resolved roster of a battle DEFINITION — one entry per body, across every wave. This is
+   * the single walk of the definition shape; anything needing "who is in this battle" (headcounts,
+   * threat, previews) reads it instead of re-deriving the wave / live-instance / template rules.
+   * @param {string} battleId
+   * @returns {RpgRosterEntry[]}
+   */
+  getRoster: battleRoster,
+  /**
+   * Base threat summed over the LIVE enemy party's `threat` traits (per-character authoring
+   * style only — returns 0 for games that author battle-level `threat`). Traits are frozen
+   * per-template, so this equals the definition sum — call from a battle_end listener (the
+   * roster is deleted by battle_closed_before).
    * @returns {number}
    */
   getLiveThreat() {
@@ -624,11 +686,93 @@ game.registerService('rpg_battle', {
     for (const r of results) logEffect(battle, casterId, r);
   },
   /**
+   * Heal a combatant with a RAW amount through the heal pipeline — the caller computes the base
+   * value (flat, % of max health, whatever) and the modifiers are applied inside, then the heal
+   * floats and logs like any pipeline heal. casterId is explicit: given, that caster's
+   * heal_amplification applies; omitted, the heal is casterless and only the target's
+   * heal_received_mult shapes it.
+   * @param {string} targetId @param {number} amount raw heal before modifiers
+   * @param {{ casterId?: string, label?: string }} [opts] label attributes the log line to a
+   *   named source ("recovers X HP from <label>"); without it the line reads as a plain heal.
+   * @returns {number} health actually restored (0 on no battle / dead target / fizzle)
+   */
+  heal(targetId, amount, opts = {}) {
+    const battle = currentRpgBattle.value;
+    if (!battle) return 0;
+    const target = game.getCharacter(targetId);
+    if (!target || !(amount > 0)) return 0;
+    // The dead don't heal — a defeated combatant awaiting processDeaths must stay at 0.
+    if (target.getResource('health') <= 0) return 0;
+    const caster = opts.casterId ? (game.getCharacter(opts.casterId) || null) : null;
+    const { healed, raw } = applyHeal(caster, target, amount);
+    if (healed <= 0) return 0;
+    const result = opts.label
+      ? { type: 'status_hot', targetId, amount: healed, rawAmount: raw, statusName: opts.label }
+      : { type: 'heal', targetId, amount: healed, rawAmount: raw };
+    logEffect(battle, caster ? caster.id : targetId, result);
+    return healed;
+  },
+  /**
    * Apply N stacks of a status through the pipeline (floating text → log → stagger check).
    * Stacks taken as-is (no power-scaling — caller computed the final amount). Operates on the
    * active battle.
    * @param {string} casterId @param {string} targetId @param {string} statusId @param {number} stacks @param {number} [duration]
    */
+  /**
+   * Which side a combatant fights on. Lets a game script ask whether two characters are enemies
+   * without reaching into the battle's party arrays.
+   * @param {string} charId
+   * @returns {'player' | 'enemy' | null} null when no battle is running or the id is unknown
+   */
+  getSide(charId) {
+    const battle = currentRpgBattle.value;
+    if (!battle || !charId) return null;
+    if (!battle.playerParty.includes(charId) && !battle.enemyParty.includes(charId)) return null;
+    return getSide(charId);
+  },
+  /**
+   * The living combatants standing next to `targetId` in its OWN party. Counts exactly like
+   * `splash_count`: `count` is the TOTAL number of NEIGHBOURS to return, taking the left one first
+   * then the right, so 1 yields one and 2 yields both. Only immediate neighbours exist, so anything
+   * above 2 still returns at most 2. Pass `includeSelf` to get the target at the head of the list —
+   * `count` still counts neighbours only, so (2, true) is a three-in-a-row blast.
+   * Positions come from the full roster, so a target that just died still finds its neighbours; only
+   * living ids come back, and `includeSelf` is ignored for a dead target.
+   * @param {string} targetId @param {number} [count=1] @param {boolean} [includeSelf=false]
+   * @returns {string[]}
+   */
+  getNeighbors(targetId, count = 1, includeSelf = false) {
+    const battle = currentRpgBattle.value;
+    if (!battle || !targetId) return [];
+    // Supports stand outside the line: they have no neighbors and are never one.
+    if (isSupport(targetId)) return [];
+    // Positions come from the FULL roster, not the living, so a combatant that just died still has
+    // a place in the line and can still spread something outward. Only living ids are returned, and
+    // the walk steps over corpses — so for a living target this matches splash's alive-only pool.
+    const roster = battle.playerParty.includes(targetId) ? battle.playerParty : battle.enemyParty;
+    const party = roster.filter(id => !isSupport(id));
+    const idx = party.indexOf(targetId);
+    if (idx === -1) return [];
+
+    const nextAlive = (step) => {
+      for (let i = idx + step; i >= 0 && i < party.length; i += step) {
+        if (isCharAlive(party[i])) return party[i];
+      }
+      return null;
+    };
+
+    const out = [];
+    if (count > 0) {
+      const left = nextAlive(-1);
+      if (left) out.push(left);
+      if (out.length < count) {
+        const right = nextAlive(1);
+        if (right) out.push(right);
+      }
+    }
+    const neighbours = out.slice(0, count);
+    return includeSelf && isCharAlive(targetId) ? [targetId, ...neighbours] : neighbours;
+  },
   applyStatus(casterId, targetId, statusId, stacks, duration) {
     const battle = currentRpgBattle.value;
     if (!battle) return;
@@ -644,6 +788,26 @@ game.registerService('rpg_battle', {
    */
   summon(character, side) {
     return summonCombatant(character, side);
+  },
+  /**
+   * Summon a fresh combatant from a character template — the plugin owns the whole pipeline:
+   * unit cap checked BEFORE the character is created (a refused summon never leaks its private
+   * inventory into saves), then created, registered, and inserted into the turn order. Prefer
+   * this over summon() whenever the spawn comes from a template.
+   * @param {string} templateId @param {'player' | 'enemy'} side
+   * @returns {string | null} combatant id, or null (cap reached / unknown template)
+   */
+  summonFromTemplate(templateId, side) {
+    return summonFromTemplate(templateId, side);
+  },
+  /**
+   * Whether a side is at its unit cap. summonFromTemplate checks this itself; check it manually
+   * only before building a CUSTOM character for summon() — a character created and then refused
+   * by the cap leaks its private inventory into saves.
+   * @param {'player' | 'enemy'} side @returns {boolean}
+   */
+  atUnitCap(side) {
+    return sideAtUnitCap(side);
   },
   /** True while queued battle scenes are pending or one is on screen (battle flow paused). */
   isScenePlaying() {
@@ -722,15 +886,17 @@ export function endRpgBattle(result) {
 
   currentRpgBattle.value = null;
 
-  game.trigger('battle_closed', result);
+  game.trigger('battle_closed_before', result);
 
   // Resume the scene that triggered the battle only on victory — on defeat it must not
-  // continue as if won; the game's battle_closed listener owns what happens next.
+  // continue as if won; the game's battle_closed_before listener owns what happens next.
   // instant: teardownBattleScenes put the parked cast back so a CONTINUING scene keeps its actors.
   // When the scene has nothing left, that restored cast was never on screen (the battle covered it),
   // so closing gracefully would fade it out — actors appearing for a moment before vanishing.
   if (result === 'victory') {
     game.nextScene(true);
   }
+
+  game.trigger('battle_closed_after', result);
 }
 

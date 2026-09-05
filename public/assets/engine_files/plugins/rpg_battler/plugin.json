@@ -8,6 +8,12 @@
   "scripts": [
     "main.mjs"
   ],
+  "editor_preview": [
+    {
+      "script": "scripts/aspect-renderers.mjs",
+      "css": "css/effect-colors.css"
+    }
+  ],
   "editor_popups": [
     {
       "id": "rpg-overlay-tuner",
@@ -27,10 +33,25 @@
       "id": "battle_config",
       "name": "Config",
       "schema": {
-        "max_party_size": {
+        "max_battle_units": {
           "type": "number",
           "defaultValue": 4,
-          "tooltip": "Maximum number of characters on the player side."
+          "tooltip": "Maximum units on the player side at battle START (battle_always members + picked members)."
+        },
+        "max_total_units": {
+          "type": "number",
+          "defaultValue": 5,
+          "tooltip": "Maximum player-side units over the whole battle, counting mid-battle summons. Summons beyond the cap fizzle."
+        },
+        "round_start_delay": {
+          "type": "number",
+          "defaultValue": 1500,
+          "tooltip": "How long the \"Turn N starts\" banner holds at the top of every round, in ms, before the first combatant acts. The round's turn order is already settled behind it, so this is the window for reading the lineup - and for watching an opening move land when an enemy wins initiative. Scaled by the player's battle-speed setting. 0 = no banner, rounds open immediately."
+        },
+        "max_enemy_units": {
+          "type": "number",
+          "defaultValue": 6,
+          "tooltip": "Maximum enemy-side units at any moment. Enemy summon abilities are skipped by the AI (and fizzle) at the cap."
         },
         "projectile_travel_size": {
           "type": "number",
@@ -67,6 +88,10 @@
               "tooltip": "Very Hard (%)."
             }
           }
+        },
+        "damage_floor": {
+          "type": "number",
+          "tooltip": "Minimum % of a raw burst hit that always lands after flat armor (physical/magical) — caps how much armor can block. 25 = at least 25% of the hit gets through (armor caps at 75% reduction). 0 = armor may fully block (0 damage possible). Empty = at least 1 damage."
         }
       }
     },
@@ -94,29 +119,77 @@
           "fromFile": "item_inventories",
           "tooltip": "Loot inventory granted when this battle is defeated (by fight victory or a scripted defeat). Empty = the inventory with the same id as the battle, if one exists."
         },
-        "bonus_threat": {
+        "threat": {
           "type": "number",
-          "tooltip": "Flat threat added on top of the enemy-sum for this battle (boss auras, scripted stakes). Included in getThreat and every threat-driven reward."
+          "tooltip": "Battle threat on the 1-100 design scale (vermin ~5-9, pack ~15-26, elite ~30-45, boss ~50-65, chapter boss ~80-100; overflow allowed). Added ON TOP of any enemy template `threat` traits summed across all waves — games without per-character threat put the full value here. Drives loot budgets, XP, and threat-priced economies."
         },
         "enemies": {
           "type": "schema[]",
-          "tooltip": "Enemy composition for this battle.",
+          "tooltip": "Enemy composition for this battle — the first wave.",
           "objects": {
+            "is_live_instance": {
+              "type": "boolean",
+              "defaultValue": false,
+              "tooltip": "Bring an existing live character into the fight as-is instead of spawning a fresh copy from a template. The character keeps its own stats, abilities and equipment, and survives the battle teardown."
+            },
             "character_id": {
               "type": "chooseOne",
               "fromFile": "character_templates",
               "required": true,
-              "tooltip": "Character template or live character ID."
+              "show": {
+                "is_live_instance": "$falsy"
+              },
+              "tooltip": "Character template to spawn this enemy from."
             },
-            "is_live_instance": {
-              "type": "boolean",
-              "defaultValue": false,
-              "tooltip": "If true, fetch the existing live character instead of creating a new instance from template."
+            "live_character_ids": {
+              "type": "string[]",
+              "show": {
+                "is_live_instance": "$truthy"
+              },
+              "tooltip": "IDs of the live characters to bring in - one enemy each, in this order. Typed by hand because live characters are created at runtime by game scripts (game.createCharacter), so no dropdown can list them. An ID with no live character behind it is skipped with an error in the console."
             },
             "amount": {
               "type": "number",
               "defaultValue": 1,
-              "tooltip": "Number of this enemy to spawn."
+              "show": {
+                "is_live_instance": "$falsy"
+              },
+              "tooltip": "Number of copies of this template to spawn. A live entry spawns nothing, so its count is however many IDs it lists."
+            }
+          }
+        },
+        "enemies2": {
+          "type": "schema[]",
+          "tooltip": "Second wave — spawns instead of victory once the first wave is wiped out. The party keeps its health, statuses and cooldowns, so a wave is a stamina test rather than a fresh fight. Leave empty for a single-wave battle.",
+          "objects": {
+            "is_live_instance": {
+              "type": "boolean",
+              "defaultValue": false,
+              "tooltip": "Bring an existing live character into the fight as-is instead of spawning a fresh copy from a template. The character keeps its own stats, abilities and equipment, and survives the battle teardown."
+            },
+            "character_id": {
+              "type": "chooseOne",
+              "fromFile": "character_templates",
+              "required": true,
+              "show": {
+                "is_live_instance": "$falsy"
+              },
+              "tooltip": "Character template to spawn this enemy from."
+            },
+            "live_character_ids": {
+              "type": "string[]",
+              "show": {
+                "is_live_instance": "$truthy"
+              },
+              "tooltip": "IDs of the live characters to bring in - one enemy each, in this order. Typed by hand because live characters are created at runtime by game scripts (game.createCharacter), so no dropdown can list them. An ID with no live character behind it is skipped with an error in the console."
+            },
+            "amount": {
+              "type": "number",
+              "defaultValue": 1,
+              "show": {
+                "is_live_instance": "$falsy"
+              },
+              "tooltip": "Number of copies of this template to spawn. A live entry spawns nothing, so its count is however many IDs it lists."
             }
           }
         }
@@ -340,6 +413,26 @@
         "id": "threat",
         "type": "number",
         "tooltip": "Reward weight of this NPC. A battle's threat is the sum over its enemy party; reward systems scale defeat payouts off it."
+      },
+      {
+        "id": "battle_ignore",
+        "type": "boolean",
+        "tooltip": "If true, this party member never joins battles (skipped when the player side is assembled)."
+      },
+      {
+        "id": "battle_always",
+        "type": "boolean",
+        "tooltip": "If true, this party member is always in the battle party and cannot be deselected in the pre-battle picker."
+      },
+      {
+        "id": "battle_support",
+        "type": "boolean",
+        "tooltip": "Support combatant: joins every battle outside the party limit (never shown in the pre-battle picker), acts in the turn order from the sidelines with a floating portrait instead of a battlefield slot, and can never be targeted or damaged. Invisible to ally-counting effects."
+      },
+      {
+        "id": "battle_ai",
+        "type": "boolean",
+        "tooltip": "If true, this player-side character acts on its own in battle – the battle AI picks its abilities and targets instead of the manual ability panel."
       }
     ],
     "item_traits": [
@@ -373,15 +466,16 @@
         "role": "meta",
         "type": "chooseMany",
         "fromFile": "character_statuses",
-        "ingame_description": "Requires [v:status]",
+        "ingame_description": "Requires [v:status] [require_status_self_consume]",
         "description": "Usability gate: the caster must have at least 1 stack of ANY of these statuses or the ability is unusable (greyed out)."
       },
       {
         "id": "require_status_self_consume",
         "role": "meta",
         "type": "boolean",
-        "ingame_description": "Consume on cast",
-        "description": "When true, removes 1 stack of the first require_status_self status the caster holds on cast."
+        "ingame_hide": true,
+        "ingame_description": "(consumed)",
+        "description": "When true, removes 1 stack of the first require_status_self status the caster holds on cast. Renders inline on the Requires line as \"(consumed)\"."
       },
       {
         "id": "bonus_action",
@@ -423,6 +517,7 @@
         "id": "base_weight",
         "role": "meta",
         "type": "number",
+        "debug_info": true,
         "description": "AI priority weight. Higher values = AI prefers this ability."
       },
       {
@@ -435,10 +530,10 @@
       {
         "id": "cd_on_battle_start",
         "role": "meta",
-        "type": "number",
+        "type": "boolean",
         "order": -96,
-        "ingame_description": "Starts on cooldown: [v]",
-        "description": "Initial cooldown applied at battle start."
+        "ingame_description": "Starts on cooldown",
+        "description": "The ability begins the battle on cooldown for its full `cd`, so it cannot be cast on the first turn. Needs a `cd` to do anything."
       },
       {
         "id": "cd_group",
@@ -488,7 +583,14 @@
         "role": "aspect",
         "type": "number",
         "ingame_description": "[v]% chance for the effect to take effect.",
-        "description": "Probability (0-1) for the entire effect to occur. Undefined = 1.0 (always happens)."
+        "description": "Percent chance (0-100) for the entire effect to occur. Undefined = always happens."
+      },
+      {
+        "id": "free_action",
+        "role": "aspect",
+        "type": "boolean",
+        "ingame_description": "Does not end your turn",
+        "description": "The cast costs no action of any kind — the caster acts again instead of ending their turn. On a normal ability it refunds the main action and leaves the one-per-turn bonus action untouched; on an ability that is already meta.bonus_action it also refunds the bonus slot, so that bonus stays available. Granted per-effect, so pairing it with `chance` on the same effect gives a chance to act again — the grant is rolled with that chance, and a failed roll ends the turn normally. Needs no target: an effect carrying only this still works. Applies to enemies as well as the player. Give the ability a cooldown or a cost, or a free action with neither can be recast indefinitely. Rolled once per cast — bounces never re-roll it."
       },
       {
         "id": "damage",
@@ -521,7 +623,7 @@
         "id": "healing_self",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Heal self for [v]% power",
+        "ingame_description": "Heal self for [v]",
         "description": "Heal the caster for this % of caster power. Independent of the ability's target (useful on offensive abilities).",
         "scales": true
       },
@@ -529,9 +631,30 @@
         "id": "lifesteal",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Steal [v]% of damage dealt as HP",
-        "description": "Heals caster for this % of damage dealt (after defenses).",
+        "ingame_description": "Lifesteal [v]% for this cast",
+        "description": "Added to the caster's lifesteal stat for THIS cast only, on top of whatever gear and strains already give them. Heals for this % of the ability's TOTAL damage dealt (after defenses), splash included, counting only damage that reached health. SUMS across the ability's effects.",
         "scales": true
+      },
+      {
+        "id": "crit_chance",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Crit chance [v]% for this cast",
+        "description": "Added to the caster's crit_chance for THIS cast only, on top of their stat. SUMS across the ability's effects and applies to every damage roll in the cast, splash and bounces included. Unlike a self-applied status — which lands after the damage loop and so only helps the next cast — this affects the cast carrying it."
+      },
+      {
+        "id": "crit_multi",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Crit multi [v]% for this cast",
+        "description": "Added to the caster's crit_multi for THIS cast only. SUMS across the ability's effects. Only matters when the cast actually crits."
+      },
+      {
+        "id": "accuracy",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Accuracy [v]% for this cast",
+        "description": "Added to the caster's accuracy for THIS cast only, cutting through the target's dodge. A negative value adds to the target's dodge instead, making this cast likelier to miss. SUMS across the ability's effects."
       },
       {
         "id": "status_apply_target",
@@ -618,15 +741,16 @@
         "role": "aspect",
         "type": "chooseOne",
         "fromFile": "character_statuses",
-        "ingame_description": "Requires [v:status] on target",
+        "ingame_description": "Requires [v:status] on target [require_status_target_consume]",
         "description": "The effect only applies to targets that have at least 1 stack of this status; others are skipped."
       },
       {
         "id": "require_status_target_consume",
         "role": "aspect",
         "type": "boolean",
-        "ingame_description": "Consume per target",
-        "description": "When true, removes 1 stack of require_status_target from each target the effect applies to."
+        "ingame_hide": true,
+        "ingame_description": "(consumed)",
+        "description": "When true, removes 1 stack of require_status_target from each target the effect applies to. Consumed AFTER the damage is applied, so an ability that spends a damage-amplifying mark still benefits from it on that hit; a dodge or a vetoed apply leaves the status standing."
       },
       {
         "id": "cleanse",
@@ -734,18 +858,25 @@
         "description": "Stacks to remove per status in status_remove_enemies. Unset = remove all stacks."
       },
       {
-        "id": "splash",
+        "id": "splash_count",
         "role": "aspect",
         "type": "number",
-        "ingame_description": "Hit up to [v] neighbors",
-        "description": "Also hits up to N neighbors of the primary target. Works for both enemy and ally targets – neighbors are determined from the target's party."
+        "ingame_description": "Splash to [v] neighbor(s)",
+        "description": "Damage-only spill to N neighbors of the primary target. SUMS across the ability's effects (a gem + a tier add up instead of overlapping). Neighbors are the target's positional party-mates. Needs splash_damage to deal anything."
       },
       {
-        "id": "splash_only",
+        "id": "splash_damage",
         "role": "aspect",
-        "type": "boolean",
-        "ingame_description": "Skip primary target",
-        "description": "When true, the primary target is excluded from this effect – only splash neighbors are hit. Requires splash."
+        "type": "number",
+        "ingame_description": "Neighbors take [v]% damage",
+        "description": "Percent of each damage entry the splashed neighbors take. SUMS across effects, and applies to EVERY damage entry in the ability, each in its own damage_type. Damage only – use splash_statuses to spill statuses too."
+      },
+      {
+        "id": "splash_statuses",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Neighbors get [v]% status stacks",
+        "description": "Percent of the target statuses the splashed neighbors receive, relative to what the primary target gets – 50 gives neighbors half the stacks. SUMS across effects, and applies to EVERY status_apply_target in the ability, keeping each one's duration. Unset or 0 applies no statuses to neighbors. Needs splash_count."
       },
       {
         "id": "bounce",
@@ -763,12 +894,44 @@
         "description": "When true, a bounce may land on the same target as the previous hop. When false (default), consecutive hops must hit different targets and the chain ends early if none remain."
       },
       {
+        "id": "flurry",
+        "role": "aspect",
+        "type": "number",
+        "ingame_description": "Strikes the target [v] times",
+        "description": "TOTAL number of times the ability strikes the SAME target – the primary cast counts, so 3 = the normal hit plus 2 extra strikes, and 1 or less adds nothing. Extra strikes re-resolve the whole ability with a short delay each and fizzle if the target dies – remaining strikes are lost. They re-apply the effects only – they do NOT re-pay cost or trigger cooldown/charges again. Melee flurries re-lunge per strike; for hops between random targets use bounce instead.",
+        "scales": true
+      },
+      {
         "id": "summon",
         "role": "aspect",
         "type": "chooseOne",
         "fromFile": "character_templates",
-        "ingame_description": "Summon [v:character]",
-        "description": "Spawn a combatant from this character template onto the caster's side. It joins the battle and acts this round based on its speed (not added to the persistent party). One summon per effect – add more effects to summon multiple. Ignored on bounces."
+        "ingame_description": "Summon [summon_amount] [v:character]",
+        "description": "Spawn a combatant from this character template onto the caster's side. It joins the battle and acts this round based on its speed (not added to the persistent party). Use summon_amount for several copies of the SAME template; for different templates give each its own effect with its own id. Ignored on bounces."
+      },
+      {
+        "id": "summon_amount",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "How many copies of this effect's summon to spawn (default 1). Only for repeats of the same template — different templates belong in separate effects."
+      },
+      {
+        "id": "summon_status",
+        "role": "aspect",
+        "type": "chooseMany",
+        "fromFile": "character_statuses",
+        "ingame_description": "Grant [summon_status_stacks] [v:status] to the summon",
+        "ingame_description_ref": "name",
+        "description": "Statuses applied to the combatant(s) summoned THIS cast (by any effect's summon). Every effect carrying it contributes independently, so multiple effects stack rather than dedupe. Stacks set by summon_status_stacks; a status with meta.power_scaling scales its stacks off the caster's power."
+      },
+      {
+        "id": "summon_status_stacks",
+        "role": "aspect",
+        "type": "number",
+        "ingame_hide": true,
+        "description": "Stacks per status in summon_status (default 1). Power-scaled if the status has meta.power_scaling.",
+        "scales": true
       }
     ],
     "locale": [
@@ -887,6 +1050,18 @@
       {
         "id": "log_turn_start",
         "val": "Turn |turn|"
+      },
+      {
+        "id": "log_next_wave",
+        "val": "Wave |wave| closes in!"
+      },
+      {
+        "id": "ui_wave",
+        "val": "Wave"
+      },
+      {
+        "id": "ui_turn_start",
+        "val": "Turn |turn| starts"
       },
       {
         "id": "self",
@@ -1011,6 +1186,22 @@
       {
         "id": "combat_crit_multi",
         "val": "Crit Multi"
+      },
+      {
+        "id": "log_reflect",
+        "val": "takes <b class=\"rpg-dmg-physical\">|amount|</b> reflected damage"
+      },
+      {
+        "id": "rpg_party_select_title",
+        "val": "Choose your battle party"
+      },
+      {
+        "id": "rpg_party_select_hint",
+        "val": "|count| / |max| selected"
+      },
+      {
+        "id": "rpg_party_select_fight",
+        "val": "Fight"
       }
     ],
     "status_meta": [
@@ -1048,6 +1239,11 @@
           "is_resource": false
         },
         "description": "Character stat (non-resource) whose value seeds this status's initial stacks at battle start. Empty = starts at 0."
+      },
+      {
+        "id": "prevents_action",
+        "type": "boolean",
+        "description": "If true, the holder forfeits every battle action while the status is held (an obstacle/dummy). Unlike stun, nothing is consumed and no recover float is shown."
       }
     ],
     "character_views": [
@@ -1075,7 +1271,8 @@
         "id": "power",
         "name": "Power",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -99,
         "description": "Base scaling stat. Ability damage = effective power x (damage aspect / 100); healing scales the same way. Effective power = (power + power_bonus) x (1 + power_amplifier/100), except `unamplified` abilities which use raw power only.",
@@ -1085,7 +1282,8 @@
         "id": "power_bonus",
         "name": "Power Bonus",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -98.5,
         "description": "Flat gear-style addition to power, applied before power_amplifier – so it gets amplified too. Ignored by `unamplified` abilities (basic attack uses raw power).",
@@ -1095,7 +1293,8 @@
         "id": "power_amplifier",
         "name": "Power Amplifier",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -98,
         "description": "Percent multiplier on (power + power_bonus): effective power = (power + power_bonus) x (1 + value/100). 100 doubles power. Ignored by `unamplified` abilities.",
@@ -1105,7 +1304,8 @@
         "id": "speed",
         "name": "Speed",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -98,
         "description": "Turn-order sort key – combatants act from highest to lowest speed each round. No other effect.",
@@ -1115,7 +1315,8 @@
         "id": "physical_armor",
         "name": "Physical Armor",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -97,
         "description": "Flat amount subtracted from each physical burst hit after all multipliers. Result is floored at 1 damage; negative armor adds damage instead. DoT ticks ignore armor (they use resists).",
@@ -1125,7 +1326,8 @@
         "id": "magical_armor",
         "name": "Magical Armor",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -96,
         "description": "Flat amount subtracted from each magic burst hit after all multipliers. Result is floored at 1 damage; negative armor adds damage instead. DoT ticks ignore armor (they use resists).",
@@ -1135,7 +1337,8 @@
         "id": "crit_chance",
         "name": "Crit Chance",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -63,
         "description": "Percent chance (0-100) rolled on each damaging hit. Only rolled when above 0.",
@@ -1145,7 +1348,8 @@
         "id": "crit_multi",
         "name": "Crit Multi",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -62,
         "description": "Bonus percent damage on a critical hit: damage x (1 + value/100). 50 = 1.5x total, 150 = 2.5x – this is the bonus on top, not the total multiplier.",
@@ -1155,17 +1359,41 @@
         "id": "dodge",
         "name": "Dodge",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -61,
         "description": "Percent chance (0-100) to negate an incoming hit entirely.",
         "ingame_description": "Chance to avoid incoming damage entirely (0-100%)."
       },
       {
+        "id": "accuracy",
+        "name": "Accuracy",
+        "tags": [
+          "battle",
+          "combat"
+        ],
+        "order": -60,
+        "description": "Reduces the target's effective dodge by this many points (flat), applied before the dodge cap. Negative accuracy adds to the target's dodge instead, so an attacker below 0 can miss a target that has no dodge of its own. 0 = no effect.",
+        "ingame_description": "Cuts through the target's dodge (flat %). Negative accuracy adds to their dodge instead – even a target with no dodge can be missed."
+      },
+      {
+        "id": "lifesteal",
+        "name": "Lifesteal",
+        "tags": [
+          "battle",
+          "combat"
+        ],
+        "order": -59,
+        "description": "Percent of the health an ability strips from its targets that is healed back to the caster. Applies to EVERY ability the character casts; an effect's `lifesteal` aspect adds on top for that one cast. Counts only damage that reached health — a shield-absorbed hit steals nothing — and the heal is shaped by heal_amplification and heal_received_mult like any other.",
+        "ingame_description": "Heals the attacker for this % of the damage they deal."
+      },
+      {
         "id": "resist_burn",
         "name": "Burn Resist",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -95,
         "description": "Percent reduction applied to each burn DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
@@ -1175,7 +1403,8 @@
         "id": "resist_poison",
         "name": "Poison Resist",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -94,
         "description": "Percent reduction applied to each poison DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
@@ -1185,7 +1414,8 @@
         "id": "resist_bleed",
         "name": "Bleed Resist",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -93,
         "description": "Percent reduction applied to each bleed DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
@@ -1195,7 +1425,8 @@
         "id": "damage_dealt_mult",
         "name": "Dmg Dealt %",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -45,
         "description": "Additive percent modifier on outgoing damage. Summed with the per-missing-HP and per-ally bonuses, then damage x max(1 + total/100, 0.1).",
@@ -1205,9 +1436,11 @@
         "id": "damage_taken_mult",
         "name": "Dmg Taken %",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -44,
+        "reduction_is_good": true,
         "description": "Additive percent modifier on incoming damage: damage x max(1 + value/100, 0.1), applied before armor. Positive = takes more damage.",
         "ingame_description": "Additive % modifier to all incoming damage. Positive = take more."
       },
@@ -1215,7 +1448,8 @@
         "id": "heal_amplification",
         "name": "Heal Amp",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -35,
         "description": "Percent boost to healing this character casts – heals, self-heals, and lifesteal: healing x (1 + value/100).",
@@ -1225,7 +1459,8 @@
         "id": "heal_received_mult",
         "name": "Heal Received %",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -34,
         "description": "Additive percent modifier on healing this character receives: healing x (1 + value/100). Positive = receives more.",
@@ -1235,17 +1470,19 @@
         "id": "shield",
         "name": "Shield",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -58,
-        "description": "Battle-start seed for the shield status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each shield stack absorbs 1 damage before health.",
+        "description": "Battle-start seed for the shield status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each shield stack absorbs 1 damage before health. Seeded stacks inherit the status's own duration, so a seeded shield runs the same clock as a cast one.",
         "ingame_description": "Starting shield stacks at battle start. Each stack absorbs 1 damage."
       },
       {
         "id": "preparation",
         "name": "Preparation",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -24,
         "description": "Battle-start seed for the preparation status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Preparation gates certain powerful abilities.",
@@ -1255,17 +1492,19 @@
         "id": "thorns",
         "name": "Thorns",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -40,
-        "description": "Battle-start seed for the thorns status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each stack reflects 1 flat damage to the attacker per hit taken; stacks are not consumed.",
+        "description": "Battle-start seed for the thorns status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each stack reflects 1 flat damage to the attacker per hit taken; stacks are not consumed, and shields do not stop the reflection. Ability-applied thorns is power-scaled; this battle-start seed is a raw stack count.",
         "ingame_description": "Starting thorns stacks at battle start. Each stack reflects 1 damage back to the attacker per hit."
       },
       {
         "id": "damage_per_missing_health",
         "name": "Dmg/Missing HP",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -43,
         "description": "Adds value x missing-health fraction x 100 percentage points to outgoing damage. Example: 0.5 at half health = +25% damage.",
@@ -1275,7 +1514,8 @@
         "id": "damage_per_ally",
         "name": "Dmg/Ally",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -42,
         "description": "Adds this many percentage points to outgoing damage per living ally, excluding self.",
@@ -1285,7 +1525,8 @@
         "id": "focus_fire",
         "name": "Focus Fire",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -5,
         "description": "Intended: attacks mark the target, and each mark raises this attacker's damage against it by this stat's value in percent. Not wired up in the plugin scripts yet – defined for future use.",
@@ -1295,17 +1536,19 @@
         "id": "stagger_threshold",
         "name": "Stagger Threshold",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -30,
         "description": "Base stagger stacks needed to stun this character: effective threshold = ceil(base x (1 + stagger_threshold_pct/100)). 0 or below = cannot be staggered. On trigger the target is stunned and all stagger is consumed.",
-        "ingame_description": "Stagger tokens needed to trigger a stun. Higher = harder to stagger."
+        "ingame_description": "Stagger tokens needed to trigger a stun. Higher = harder to stun."
       },
       {
         "id": "stagger_threshold_pct",
         "name": "Stagger Threshold %",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -29,
         "description": "Percent multiplier on stagger_threshold: effective threshold = ceil(base x (1 + value/100)). Braced grants +100 while recovering from a stun.",
@@ -1315,23 +1558,26 @@
         "id": "bonus_stun_damage",
         "name": "Bonus Stun Damage",
         "tags": [
-          "battle"
+          "battle",
+          "combat"
         ],
         "order": -41,
         "description": "Percent extra damage against staggered targets: damage x (1 + value/100). Active while the target is stunned and through the braced recovery window.",
         "ingame_description": "Extra damage % dealt to staggered targets – while stunned and through the braced recovery."
+      },
+      {
+        "id": "reflect",
+        "name": "Reflect",
+        "tags": [
+          "battle",
+          "combat"
+        ],
+        "order": -39,
+        "description": "Battle-start seed for the reflect status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each stack returns 1% of the damage that reaches health back to the attacker.",
+        "ingame_description": "Starting reflect stacks at battle start. Each stack returns 1% of damage taken to the attacker."
       }
     ],
     "character_statuses": [
-      {
-        "id": "difficulty",
-        "name": "Difficulty",
-        "is_hidden": true,
-        "meta": {
-          "is_battle": true
-        },
-        "uid": "RpgStDifficulty01"
-      },
       {
         "id": "braced",
         "name": "Braced",
@@ -1409,14 +1655,16 @@
       {
         "id": "shield",
         "name": "Shield",
-        "description": "<p>Absorbs incoming damage. Each stack absorbs 1 damage.</p>",
+        "description": "<p>A crust of force over the body. Each stack soaks 1 damage before health, and the whole shield fades after 3 turns.</p>",
+        "duration": 3,
         "image": "assets/engine_assets/plugins/rpg_battler/shield.webp",
         "max_stacks": 0,
         "polarity": "positive",
         "multi_stack": true,
         "meta": {
           "is_battle": true,
-          "power_scaling": true
+          "power_scaling": true,
+          "source": "shield"
         }
       },
       {
@@ -1455,13 +1703,15 @@
       {
         "id": "thorns",
         "name": "Thorns",
-        "description": "<p>Reflects <b>1</b> damage per stack back to the attacker on every incoming hit. Stacks are not consumed; each apply tracks its own duration independently.</p>",
+        "description": "<p>Reflects <b>1</b> damage per stack back to the attacker on every incoming hit, even one a shield absorbs.</p>",
         "image": "assets/engine_assets/plugins/rpg_battler/thorns.webp",
         "max_stacks": 0,
         "polarity": "positive",
         "multi_stack": true,
         "meta": {
-          "is_battle": true
+          "is_battle": true,
+          "power_scaling": true,
+          "source": "thorns"
         }
       },
       {
@@ -1483,7 +1733,8 @@
         "max_stacks": 0,
         "polarity": "positive",
         "meta": {
-          "is_battle": true
+          "is_battle": true,
+          "source": "preparation"
         }
       },
       {
@@ -1495,6 +1746,19 @@
         "polarity": "positive",
         "meta": {
           "is_battle": true
+        }
+      },
+      {
+        "id": "reflect",
+        "name": "Reflect",
+        "description": "<p>Returns <b>1%</b> of the damage that reaches health per stack back to the attacker. Damage a shield soaks stays where it landed.</p>",
+        "image": "assets/engine_assets/plugins/rpg_battler/thorns.webp",
+        "max_stacks": 0,
+        "polarity": "positive",
+        "multi_stack": true,
+        "meta": {
+          "is_battle": true,
+          "source": "reflect"
         }
       }
     ],
@@ -1547,7 +1811,7 @@
           "status",
           "combat"
         ],
-        "summary": "<p>Absorbs incoming damage.</p>"
+        "summary": "<p>Soaks 1 damage per stack before health. Fades after 3 turns.</p>"
       },
       {
         "id": "stun",
@@ -1587,7 +1851,7 @@
           "status",
           "combat"
         ],
-        "summary": "<p>Reflects a portion of incoming damage back to the attacker.</p>"
+        "summary": "<p>Reflects flat damage back to the attacker on every incoming hit.</p>"
       },
       {
         "id": "death_defiance",
@@ -1628,6 +1892,16 @@
           "combat"
         ],
         "summary": "<p>Recovering from a stun. Stagger threshold doubled for the duration.</p>"
+      },
+      {
+        "id": "reflect",
+        "title": "Reflect",
+        "auto_discovery": true,
+        "tags": [
+          "status",
+          "combat"
+        ],
+        "summary": "<p>Returns a share of the damage you take back to the attacker.</p>"
       }
     ]
   }
