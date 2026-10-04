@@ -2,7 +2,7 @@
 
 | Emitter | Args | Description |
 |---|---|---|
-| `character_level_up` | `(character, newLevel)` | Fired each time a character levels up. If a character gains multiple levels at once, fires once per level. |
+| `character_level_up` | `(character, newLevel)` | Fired each time a character levels up, once the `level` trait already holds `newLevel`. If a character gains multiple levels at once, fires once per level. |
 | `reward_assemble` | `({ source, battleId, threat })` | Fired once per battle when its defeat reward is granted (after loot and threat XP). `source` is `'battle'` for a fight victory, `'scene'` for a scripted `{win: ...}` defeat; `threat` is the effective (level-scaled) threat. The hook for game-specific reward economics. |
 | `smith_upgrade` | `(item, levels)` | Fired before an item is reforged at the smith station. Return `false` to prevent the upgrade (stones are kept). |
 | `smith_break` | `(item, stonesRefunded)` | Fired before an item is broken down at the smith station. Return `false` to prevent the break. |

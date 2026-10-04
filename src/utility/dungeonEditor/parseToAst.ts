@@ -7,6 +7,7 @@ import type {
   TemplateBlock,
 } from './ast';
 import { isCommentLine } from './comments';
+import { META_KEY } from './meta';
 
 type OpenBlock = EncounterBlock | SceneBlock | TemplateBlock;
 
@@ -158,6 +159,18 @@ function appendSceneLine(scene: SceneBlock, line: string, isCode: boolean) {
     scene.rows.push({ columns: [] });
     return;
   }
+  // A row number carrying the editor's own `__meta` (its column layout).
+  // Deliberately narrower than `splitTrailingParams`: any OTHER `{…}` after a
+  // number stays prose, because that is what the engine does with it and what
+  // this editor has always done — absorbing it as a row marker would silently
+  // move a paragraph onto a new row and rename every id under it.
+  if (!isCode) {
+    const withMeta = trimmed.match(/^\d+(\{.*\})$/);
+    if (withMeta && withMeta[1].includes(META_KEY)) {
+      scene.rows.push({ columns: [], paramsRaw: withMeta[1] });
+      return;
+    }
+  }
   if (!isCode && trimmed === '%') {
     ensureRow(scene).columns.push({ kind: '%', content: '' });
     return;
@@ -172,6 +185,24 @@ function appendSceneLine(scene: SceneBlock, line: string, isCode: boolean) {
     });
     return;
   }
+  // A comment before the row's first `%`/`~` has no column to live in, and the
+  // content fallback below would auto-recover one — fabricating structure the
+  // author never wrote. Park it verbatim on the nearest real slot instead. A
+  // comment that DOES sit inside a column is left alone: it is already just
+  // content there, and round-trips. The engine drops all of them either way
+  // (`parseText` skips `/^\/\//` before anything else).
+  if (!isCode && isCommentLine(line)) {
+    if (scene.rows.length === 0) {
+      scene.preRows = scene.preRows === undefined ? line : scene.preRows + '\n' + line;
+      return;
+    }
+    const lastRow = scene.rows[scene.rows.length - 1];
+    if (lastRow.columns.length === 0) {
+      lastRow.preColumns = lastRow.preColumns === undefined ? line : lastRow.preColumns + '\n' + line;
+      return;
+    }
+  }
+
   // Blank line: tolerate decorative whitespace between structural markers —
   // only extend existing content with a newline if there's something to extend.
   if (!isCode && trimmed === '') {

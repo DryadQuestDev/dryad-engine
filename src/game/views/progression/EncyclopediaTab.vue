@@ -1,9 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const narrative = game.narrativeSystem;
+
+const maskedTitle = computed(() => global.getString('masked_name'));
+const backLabel = computed(() => global.getString('back'));
+const forwardLabel = computed(() => global.getString('encyclopedia.forward'));
+const searchPlaceholder = computed(() => global.getString('encyclopedia.search'));
+const clearSearchLabel = computed(() => global.getString('encyclopedia.clear_search'));
+const noMatchesLabel = computed(() => global.getString('encyclopedia.no_matches'));
+const emptyLabel = computed(() => global.getString('encyclopedia.empty'));
+const noSelectionLabel = computed(() => global.getString('encyclopedia.no_selection'));
 
 const trees = computed(() => game.getEncyclopediaTrees());
 
@@ -209,7 +220,7 @@ function isGroupCollapsed(treeId: string, groupName: string): boolean {
 function getRecordTitle(recordId: string): string {
     const r = narrative.getRecord(recordId);
     if (!r) return recordId;
-    if (!narrative.isRecordDiscovered(recordId)) return '???';
+    if (!narrative.isRecordDiscovered(recordId)) return maskedTitle.value;
     return r.title;
 }
 
@@ -223,18 +234,18 @@ function onLinkNavigate(recordId: string) {
         <div class="encyclopedia-container">
             <div class="encyclopedia-sidebar">
                 <div class="history-nav">
-                    <button class="history-arrow" :disabled="!canGoBack" @click="goBack" aria-label="Back">
+                    <button class="history-arrow" :disabled="!canGoBack" @click="goBack" :aria-label="backLabel">
                         <i class="pi pi-arrow-left"></i>
                     </button>
-                    <button class="history-arrow" :disabled="!canGoForward" @click="goForward" aria-label="Forward">
+                    <button class="history-arrow" :disabled="!canGoForward" @click="goForward" :aria-label="forwardLabel">
                         <i class="pi pi-arrow-right"></i>
                     </button>
                 </div>
                 <div class="search-bar">
                     <i class="pi pi-search search-icon"></i>
                     <input v-model="searchQuery" type="text" class="search-input"
-                        placeholder="Search discovered entries..." />
-                    <button v-if="isSearching" class="search-clear" @click="clearSearch" aria-label="Clear search">
+                        :placeholder="searchPlaceholder" />
+                    <button v-if="isSearching" class="search-clear" @click="clearSearch" :aria-label="clearSearchLabel">
                         <i class="pi pi-times"></i>
                     </button>
                 </div>
@@ -262,7 +273,7 @@ function onLinkNavigate(recordId: string) {
                             </div>
                         </div>
                         <div v-if="groupedSearchResults.length === 0" class="empty">
-                            No matches.
+                            {{ noMatchesLabel }}
                         </div>
                     </template>
 
@@ -288,7 +299,7 @@ function onLinkNavigate(recordId: string) {
                     </template>
 
                     <div v-if="trees.length === 0" class="empty">
-                        No encyclopedia entries yet.
+                        {{ emptyLabel }}
                     </div>
                 </div>
             </div>
@@ -307,7 +318,7 @@ function onLinkNavigate(recordId: string) {
                     </template>
                 </div>
                 <div v-else class="no-selection">
-                    Select a record to view details.
+                    {{ noSelectionLabel }}
                 </div>
             </div>
         </div>

@@ -1,13 +1,22 @@
 import { gameLogger } from '../game/utils/logger';
+import { rampVolume } from './audioFade';
 
 interface PlayOptions {
-  fade?: number;
+  /** Seconds the outgoing track takes to fade out before this one starts. 0 cuts. */
+  fadeOut?: number;
+  /** Seconds this track takes to reach its gain. */
+  fadeIn?: number;
+  /** The player's music slider, 0–1. */
   volume?: number;
+  /** The track's own gain, 0–1, multiplied onto the slider. */
+  trackVolume?: number;
+  /** Random file order (default) or the listed order. */
+  shuffle?: boolean;
   force?: boolean;
 }
 
 interface StopOptions {
-  fade?: number;
+  fadeOut?: number;
 }
 
 export class MusicPlayer {
@@ -21,84 +30,88 @@ export class MusicPlayer {
   private playlist: string[] = [];
   private trackIndex = 0;
   private player: HTMLAudioElement | null = null;
-  private fadeInterval: number | null = null;
-  private targetVolume = 1;
+  /** The running fade, if any. Only one ramp touches the player at a time. */
+  private cancelRamp: (() => void) | null = null;
+  private userVolume = 1;
+  private trackVolume = 1;
+  /** Fade-in to apply when the next track actually starts (kept across an autoplay block). */
+  private pendingFadeIn = 0;
   private interactionHandler: (() => void) | null = null;
 
   get currentId(): string | null {
     return this._currentId;
   }
 
+  private get effectiveVolume(): number {
+    return this.userVolume * this.trackVolume;
+  }
+
   play(id: string, files: string[], opts: PlayOptions = {}): void {
     if (!id || files.length === 0) return;
     if (!opts.force && this._currentId === id && this.player) return;
 
-    const fade = opts.fade ?? 1.0;
-    if (opts.volume !== undefined) this.targetVolume = opts.volume;
+    const fadeOut = opts.fadeOut ?? 1.0;
+    if (opts.volume !== undefined) this.userVolume = opts.volume;
+    this.trackVolume = opts.trackVolume ?? 1;
+    this.pendingFadeIn = opts.fadeIn ?? 0;
+    const shuffled = opts.shuffle ?? true;
     this._currentId = id;
 
-    if (this.player && fade > 0) {
-      this.fadeOut(fade, () => this.startPlaylist(files));
+    if (this.player && fadeOut > 0) {
+      this.fadeOut(fadeOut, () => this.startPlaylist(files, shuffled));
     } else {
       this.disposePlayer();
-      this.startPlaylist(files);
+      this.startPlaylist(files, shuffled);
     }
   }
 
   stop(opts: StopOptions = {}): void {
-    const fade = opts.fade ?? 1.0;
+    const fadeOut = opts.fadeOut ?? 1.0;
     this._currentId = null;
     if (!this.player) return;
     gameLogger.info('[music] Music stopped');
-    if (fade > 0) {
-      this.fadeOut(fade, () => { });
+    if (fadeOut > 0) {
+      this.fadeOut(fadeOut, () => { });
     } else {
       this.disposePlayer();
     }
   }
 
+  /** The player's slider moved. A running fade keeps its own course and lands on the new level. */
   setVolume(volume: number): void {
-    this.targetVolume = volume;
-    if (this.player && this.fadeInterval === null) {
-      this.player.volume = volume;
+    this.userVolume = volume;
+    if (this.player && this.cancelRamp === null) {
+      this.player.volume = this.effectiveVolume;
+    }
+  }
+
+  private stopRamp(): void {
+    if (this.cancelRamp) {
+      this.cancelRamp();
+      this.cancelRamp = null;
     }
   }
 
   private fadeOut(durationSec: number, onComplete: () => void): void {
-    if (this.fadeInterval !== null) {
-      clearInterval(this.fadeInterval);
-      this.fadeInterval = null;
-    }
+    this.stopRamp();
     if (!this.player) {
       onComplete();
       return;
     }
     const player = this.player;
-    const startVolume = player.volume;
-    const steps = 10;
-    const stepMs = (durationSec * 1000) / steps;
-    let step = 0;
-    this.fadeInterval = window.setInterval(() => {
-      step++;
-      if (step >= steps) {
-        player.pause();
-        player.currentTime = 0;
-        player.remove();
-        if (this.player === player) this.player = null;
-        if (this.fadeInterval !== null) {
-          clearInterval(this.fadeInterval);
-          this.fadeInterval = null;
-        }
-        onComplete();
-      } else {
-        player.volume = Math.max(0, startVolume - startVolume * (step / steps));
-      }
-    }, stepMs);
+    this.cancelRamp = rampVolume(player, player.volume, 0, durationSec, () => {
+      this.cancelRamp = null;
+      player.pause();
+      player.currentTime = 0;
+      player.remove();
+      if (this.player === player) this.player = null;
+      onComplete();
+    });
   }
 
-  private startPlaylist(files: string[]): void {
+  private startPlaylist(files: string[], shuffled: boolean): void {
     this.disposePlayer();
-    this.playlist = shuffle([...files]);
+    this.playlist = shuffled ? shuffle([...files]) : [...files];
     this.trackIndex = 0;
     this.player = new Audio();
     this.player.addEventListener('ended', () => {
@@ -112,10 +125,21 @@ export class MusicPlayer {
     if (!this.player || this.playlist.length === 0) return;
     const player = this.player;
     player.src = this.playlist[this.trackIndex];
-    player.volume = this.targetVolume;
     player.currentTime = 0;
+    const fadeIn = this.pendingFadeIn;
+    player.volume = fadeIn > 0 ? 0 : this.effectiveVolume;
     gameLogger.info(`[music] Playing "${this._currentId}": ${this.playlist[this.trackIndex]}`);
-    player.play().catch((error: any) => {
+    player.play().then(() => {
+      // The fade-in belongs to the first track that actually plays; later tracks of the
+      // playlist start at full gain.
+      if (fadeIn > 0 && this.player === player) {
+        this.pendingFadeIn = 0;
+        this.stopRamp();
+        this.cancelRamp = rampVolume(player, 0, this.effectiveVolume, fadeIn, () => {
+          this.cancelRamp = null;
+        });
+      }
+    }).catch((error: any) => {
       if (error?.name === 'AbortError') {
         return;
       }
@@ -145,10 +169,7 @@ export class MusicPlayer {
   }
 
   private disposePlayer(): void {
-    if (this.fadeInterval !== null) {
-      clearInterval(this.fadeInterval);
-      this.fadeInterval = null;
-    }
+    this.stopRamp();
     if (this.player) {
       this.player.pause();
       this.player.currentTime = 0;

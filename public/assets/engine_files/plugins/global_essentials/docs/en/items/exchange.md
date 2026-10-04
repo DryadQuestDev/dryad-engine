@@ -30,6 +30,8 @@ The exchange UI shows two inventories side by side:
 
 Clicking items moves them between inventories. In trade mode, currency is automatically exchanged.
 
+**One inventory per place.** Inventory ids are global, so every `{loot}` / `{trade}` that names the same id opens the *same* bag — wherever it is written. Two alchemy benches in two dungeons that both say `{loot: "lab"}` share their contents: an item left on one appears on the other. Give each place its own inventory id (prefixing it with the dungeon or chapter keeps them apart, e.g. `mansion_lab`), even when the two start out identical. `^pool` refs are the exception: each placement already gets its own inventory.
+
 ---
 
 ## Currencies

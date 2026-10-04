@@ -20,6 +20,19 @@ export const PARTY_INVENTORY_ID = "_party_inventory";
 export const ITEM_INFO_WIDTH = 250;
 
 /**
+ * A line a game is expected to own, with an engine default behind it: the running game's locale
+ * first, then the engine locale. The key-lock ids (key_used, key_missing_chest, key_missing_door)
+ * are authored per game — and shipped by the global_essentials plugin — so a game that overrides
+ * one keeps its wording, and a game that ships neither still reads as prose instead of a raw
+ * `[key_used]` bracket.
+ */
+export function getGameLineOrEngine(lineId: string, params: Record<string, string | number> = {}): string {
+    const gameLine = Game.getInstance().getLine(lineId, params);
+    if (gameLine && gameLine !== `[${lineId}]`) return gameLine;
+    return Global.getInstance().getString(lineId, params);
+}
+
+/**
  * Trade context for pricing
  * 'player' - Item owned by player (what trader pays to player when buying)
  * 'trader' - Item owned by trader (what trader charges player when selling)
@@ -112,7 +125,7 @@ export class ItemSystem {
         if (consume) {
             inventory.reduceItemQuantity(keyItem, 1);
         }
-        this.game.showNotification(this.game.getLine('key_used', { item: this.getItemNameHtml(keyItemId) }));
+        this.game.showNotification(getGameLineOrEngine('key_used', { item: this.getItemNameHtml(keyItemId) }));
         this.game.trigger('key_used', keyItemId, targetId);
         return true;
     }
@@ -222,7 +235,7 @@ export class ItemSystem {
             if (this.tryUseKey(lockKey, !!lockTraits?.key_consume, inventoryId)) {
                 this.unlockedInventories.value.add(inventoryId);
             } else {
-                this.game.showNotification(this.game.getLine('key_missing_chest'));
+                this.game.showNotification(getGameLineOrEngine('key_missing_chest'));
                 // The loot/trade action may have parked a scene on its delayed choice — resume the
                 // MAIN flow: drop any branch resume first, or the refused branch's success prose
                 // would play.
@@ -341,7 +354,7 @@ export class ItemSystem {
      * Spec grammar per entry (comma-separated string or array):
      * `"item_id"`, `"item_id#quantity"`, `"item_id->inventory_id"`,
      * `"item_id#quantity->inventory_id"`. Inventory defaults to the party inventory,
-     * which also gets the `item.added` flash. Overflow is allowed.
+     * which also gets the `item.added_single` / `item.added_quantity` flash. Overflow is allowed.
      */
     /**
      * Move items between inventories. Spec: "[sourceInv.]itemId[#qty] -> targetInv",
@@ -423,11 +436,15 @@ export class ItemSystem {
 
             // skip validation to allow overflow
             inventory.addItem(item, quantity, true);
-            const quantityText = quantity > 1 ? `(x${quantity})` : "";
 
             // show flash notification only for party inventory
             if (flash && targetInventoryId === PARTY_INVENTORY_ID) {
-                const message = Global.getInstance().getString('item.added', { item: item.getName(), quantity: quantityText });
+                // Two keys rather than one with an injected "(xN)" clause: the count is a number
+                // the locale value places itself, so a translation can drop it, move it before the
+                // name, or write its own multiplier glyph.
+                const message = quantity > 1
+                    ? Global.getInstance().getString('item.added_quantity', { item: item.getName(), count: quantity })
+                    : Global.getInstance().getString('item.added_single', { item: item.getName() });
                 this.game.dungeonSystem.addFlash(message);
             }
 
@@ -485,6 +502,7 @@ export class ItemSystem {
                 gameLogger.warn(`[remove_item] active stack "${item.id}" only held ${removed} (asked for ${amount})`);
             }
             gameLogger.info(`[remove_item] Removed active item "${item.id}"${removed > 1 ? ' x' + removed : ''}`);
+            if (removed > 0) this.flashRemoved(item.getName(), removed);
             return;
         }
         if (typeof data === 'boolean') return;
@@ -524,12 +542,23 @@ export class ItemSystem {
             }
             if (removed > 0) {
                 removedItems.push(`${itemId}${removed > 1 ? ' x' + removed : ''}${targetInventoryId !== PARTY_INVENTORY_ID ? ' from ' + targetInventoryId : ''}`);
+                // The party bag is the player's own; a chest or a merchant losing stock says nothing.
+                if (targetInventoryId === PARTY_INVENTORY_ID) this.flashRemoved(this.getItemNameHtml(itemId), removed);
             }
         }
 
         if (removedItems.length > 0) {
             gameLogger.info(`[remove_item] Removed item(s): ${removedItems.join(', ')}`);
         }
+    }
+
+    // The `item.removed_*` scene flash — the mirror of add_item's `item.added_*`, so a story that
+    // takes something away says so where the pickup did.
+    private flashRemoved(itemName: string, count: number): void {
+        const message = count > 1
+            ? Global.getInstance().getString('item.removed_quantity', { item: itemName, count })
+            : Global.getInstance().getString('item.removed_single', { item: itemName });
+        this.game.dungeonSystem.addFlash(message);
     }
 
     /**
@@ -567,7 +596,7 @@ export class ItemSystem {
     }
 
     public canUseItems(): boolean {
-        if (this.game.coreSystem.getState('block_party_inventory')) {
+        if (this.game.coreSystem.getState('block_party_inventory') || this.game.coreSystem.getState('block_party_inventory_persist')) {
             return false;
         }
         return true;

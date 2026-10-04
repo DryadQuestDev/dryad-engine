@@ -11,6 +11,14 @@ export interface CharacterAnimationConfig {
 export interface CharacterAnimationControls {
   // Element refs that must be set by the component
   elementRef: Ref<HTMLElement | null>;
+  // Wraps the art (scale wrapper → rotation wrapper → content) and nothing else.
+  // Idle loops animate THIS, never the slot root: the root also holds the overlay
+  // (name/HP/tokens), the item slots and the hit mask, which are UI and must stay
+  // put while the body bobs. Optional — unset falls back to the slot root.
+  artWrapperRef: Ref<HTMLElement | null>;
+  // Sits between the art wrapper and the scale wrapper; one-shot animations (lunge, recoil…) play
+  // here and nowhere else, so they stack on top of whatever idle loop is running.
+  actionWrapperRef: Ref<HTMLElement | null>;
   scaleWrapperRef: Ref<HTMLElement | null>;
   rotationWrapperRef: Ref<HTMLElement | null>;
   contentRef: Ref<HTMLElement | null>;
@@ -27,6 +35,10 @@ export interface CharacterAnimationControls {
   playMove: (from: { x?: number; y?: number; scale?: number }, to: { x?: number; y?: number; scale?: number }) => void;
   startIdle: () => void;
   stopIdle: () => void;
+  /** Ease out of the current idle back to rest, then start the slot's (new) idle. */
+  switchIdle: () => void;
+  /** Play a one-shot animation once. `side` is -1 when the actor stands left of center, 1 right of it. */
+  playOneShot: (anim: string, opts: { duration?: number; intensity?: number; side: number }) => void;
 
   // State tracking
   isAnimating: Ref<boolean>;
@@ -43,12 +55,18 @@ export function useCharacterAnimation(
 
   // Element refs - will be set by component
   const elementRef = ref<HTMLElement | null>(null);
+  const artWrapperRef = ref<HTMLElement | null>(null);
+  const actionWrapperRef = ref<HTMLElement | null>(null);
   const scaleWrapperRef = ref<HTMLElement | null>(null);
   const rotationWrapperRef = ref<HTMLElement | null>(null);
   const contentRef = ref<HTMLElement | null>(null);
 
   // Animation state
   const loopAnimation = ref<gsap.core.Tween | gsap.core.Timeline | null>(null);
+  // The breathing half of the `slumped` idle — started once the sink has finished.
+  let slumpBreath: gsap.core.Tween | null = null;
+  let idleSwitch: gsap.core.Tween | null = null;
+  let oneShot: gsap.core.Timeline | null = null;
   const isAnimating = ref(false);
   const currentAnimation = ref<string | null>(null);
 
@@ -406,7 +424,8 @@ export function useCharacterAnimation(
       loopAnimation.value = null;
     }
 
-    const element = elementRef.value;
+    // The art wrapper, not the slot root — see artWrapperRef above.
+    const element = artWrapperRef.value ?? elementRef.value;
     const type = idleAnimation.value;
     if (!type || type === 'none') return;
 
@@ -461,8 +480,12 @@ export function useCharacterAnimation(
         break;
 
       case 'breathe':
+        // A chest rise, not a balloon: Y grows, X gives a little, so the body
+        // reads as inhaling around its anchor instead of inflating from it.
+        // (pulse is the uniform one.)
         loopAnimation.value = gsap.to(element, {
-          scale: 1 + (0.04 * intensity),
+          scaleY: 1 + (0.04 * intensity),
+          scaleX: 1 - (0.015 * intensity),
           transformOrigin: transformOrigin.value,
           duration,
           yoyo: true,
@@ -602,10 +625,40 @@ export function useCharacterAnimation(
           });
         break;
 
+      case 'slumped': {
+        // A pose, not just a motion: sink down and sag forward, then breathe heavily from there.
+        // Eases in from wherever the body is, so switching to it reads as collapsing, not popping.
+        const sink = gsap.timeline()
+          .to(element, {
+            yPercent: 5 * intensity,
+            rotation: 3 * intensity,
+            transformOrigin: '50% 100%',
+            duration: 0.9,
+            ease: 'power2.inOut',
+          });
+        const breath = gsap.to(element, {
+          scaleY: 1 + (0.025 * intensity),
+          transformOrigin: '50% 100%',
+          duration,
+          yoyo: true,
+          repeat: -1,
+          ease: 'sine.inOut',
+          paused: true,
+        });
+        sink.eventCallback('onComplete', () => { breath.play(); });
+        // Held as the loop so stopIdle/cleanup kill both halves.
+        loopAnimation.value = gsap.timeline({ onInterrupt: () => breath.kill() }).add(sink);
+        slumpBreath = breath;
+        break;
+      }
+
       case 'jitter':
         // Use CSS animation for jitter - runs on compositor thread for stability
         element.style.setProperty('--jitter-intensity', `${2 * intensity}px`);
         element.style.setProperty('--jitter-duration', `0.15s`);
+        // Negative delay starts the CSS loop mid-cycle — same reason as the GSAP
+        // phase offset below, since jitter never becomes a tween we can seek.
+        element.style.setProperty('--jitter-delay', `${(-Math.random() * 0.15).toFixed(3)}s`);
         element.classList.add('idle-jitter');
         break;
 
@@ -697,6 +750,17 @@ export function useCharacterAnimation(
           .to({}, { duration: 0.1 }); // Small delay for the glitch to complete
         break;
     }
+
+    // Every idle starts at a random point of its own loop. Without this, two
+    // characters sharing an idle bob in perfect lockstep and read as one sprite
+    // pasted twice. seek() takes TOTAL time, so it wraps through repeats and the
+    // yoyo return leg; suppressEvents keeps timeline .call()s (glitch) from firing
+    // on the way there.
+    if (loopAnimation.value && type !== 'slumped') {
+      const anim = loopAnimation.value;
+      const cycle = (anim.duration() + anim.repeatDelay()) * (anim.yoyo() ? 2 : 1);
+      if (cycle > 0) anim.seek(Math.random() * cycle, true);
+    }
   };
 
   /**
@@ -707,17 +771,20 @@ export function useCharacterAnimation(
       loopAnimation.value.kill();
       loopAnimation.value = null;
     }
+    slumpBreath?.kill();
+    slumpBreath = null;
     if (currentAnimation.value?.startsWith('idle:')) {
       currentAnimation.value = null;
     }
 
     // Reset any inline styles that idle animations may have applied
-    if (elementRef.value) {
+    const idleTarget = artWrapperRef.value ?? elementRef.value;
+    if (idleTarget) {
       // Remove CSS animation class for jitter
-      elementRef.value.classList.remove('idle-jitter');
+      idleTarget.classList.remove('idle-jitter');
       // Clear all properties that idle animations may have modified on element
-      gsap.set(elementRef.value, {
-        clearProps: 'x,y,scale,opacity,filter,transform'
+      gsap.set(idleTarget, {
+        clearProps: 'x,y,xPercent,yPercent,rotation,scale,scaleX,scaleY,opacity,filter,transform'
       });
     }
     if (scaleWrapperRef.value) {
@@ -738,10 +805,103 @@ export function useCharacterAnimation(
   };
 
   /**
+   * Switch idles without a pop: ease the art out of the old loop's pose (a float mid-bob, a
+   * slump) back to rest, then start the slot's current idle — which eases into its own pose.
+   */
+  const switchIdle = () => {
+    const target = artWrapperRef.value ?? elementRef.value;
+    if (!target) return;
+    if (loopAnimation.value) { loopAnimation.value.kill(); loopAnimation.value = null; }
+    slumpBreath?.kill(); slumpBreath = null;
+    idleSwitch?.kill();
+    target.classList.remove('idle-jitter');
+    const parts = [target, contentRef.value, rotationWrapperRef.value].filter(Boolean) as HTMLElement[];
+    idleSwitch = gsap.to(parts, {
+      x: 0, y: 0, xPercent: 0, yPercent: 0, rotation: 0, rotationX: 0, scale: 1, scaleX: 1, scaleY: 1, opacity: 1,
+      duration: 0.35,
+      ease: 'sine.inOut',
+      onComplete: () => {
+        idleSwitch = null;
+        stopIdle();   // clears the inline props the tween left at rest values
+        startIdle();
+      },
+    });
+  };
+
+  /**
+   * One-shot animations: play once on the action wrapper and return to rest. `side` makes the
+   * directional ones point the right way — a lunge goes toward the stage center, a recoil away.
+   */
+  const playOneShot = (anim: string, opts: { duration?: number; intensity?: number; side: number }) => {
+    const el = actionWrapperRef.value;
+    if (!el) return;
+    oneShot?.kill();
+    gsap.set(el, { clearProps: 'all' });
+    const k = opts.intensity ?? 1;
+    const d = opts.duration ?? ({ lunge: 0.55, recoil: 0.6, hop: 0.45, shake: 0.45, shiver: 0.6, nod: 0.5, bounce: 0.5, flash: 0.45 } as Record<string, number>)[anim] ?? 0.5;
+    const inward = -opts.side;    // toward the center
+    const tl = gsap.timeline({ onComplete: () => { gsap.set(el, { clearProps: 'all' }); oneShot = null; } });
+    switch (anim) {
+      case 'lunge':
+        tl.to(el, { xPercent: 14 * k * inward, rotation: 3 * k * inward, transformOrigin: '50% 100%', duration: d * 0.3, ease: 'power3.out' })
+          .to(el, { xPercent: 0, rotation: 0, duration: d * 0.7, ease: 'power2.inOut' }, `+=${d * 0.05}`);
+        break;
+      case 'recoil':
+        tl.to(el, { xPercent: -10 * k * inward, rotation: -4 * k * inward, transformOrigin: '50% 100%', duration: d * 0.2, ease: 'power4.out' })
+          .to(el, { xPercent: 0, rotation: 0, duration: d * 0.8, ease: 'power2.inOut' });
+        break;
+      case 'hop':
+        tl.to(el, { yPercent: -7 * k, duration: d * 0.45, ease: 'power2.out' })
+          .to(el, { yPercent: 0, duration: d * 0.55, ease: 'bounce.out' });
+        break;
+      case 'shake': {
+        const steps = 8;
+        for (let i = 0; i < steps; i++) {
+          tl.to(el, { xPercent: (i % 2 ? -1 : 1) * 2.2 * k * (1 - i / steps), duration: d / (steps + 1), ease: 'sine.inOut' });
+        }
+        tl.to(el, { xPercent: 0, duration: d / (steps + 1) });
+        break;
+      }
+      case 'shiver': {
+        const steps = 16;
+        for (let i = 0; i < steps; i++) {
+          tl.to(el, { xPercent: (i % 2 ? -1 : 1) * 0.6 * k, yPercent: (i % 3 - 1) * 0.3 * k, duration: d / (steps + 1), ease: 'none' });
+        }
+        tl.to(el, { xPercent: 0, yPercent: 0, duration: d / (steps + 1) });
+        break;
+      }
+      case 'nod':
+        tl.to(el, { yPercent: 1.8 * k, rotation: 1.5 * k * inward, transformOrigin: '50% 100%', duration: d * 0.25, ease: 'sine.out' })
+          .to(el, { yPercent: 0, rotation: 0, duration: d * 0.25, ease: 'sine.in' })
+          .to(el, { yPercent: 1.2 * k, duration: d * 0.25, ease: 'sine.out' })
+          .to(el, { yPercent: 0, duration: d * 0.25, ease: 'sine.in' });
+        break;
+      case 'bounce':
+        tl.to(el, { scaleY: 1 - 0.08 * k, scaleX: 1 + 0.05 * k, transformOrigin: '50% 100%', duration: d * 0.2, ease: 'power2.out' })
+          .to(el, { scaleY: 1 + 0.06 * k, scaleX: 1 - 0.03 * k, duration: d * 0.3, ease: 'power2.out' })
+          .to(el, { scaleY: 1, scaleX: 1, duration: d * 0.5, ease: 'elastic.out(1, 0.5)' });
+        break;
+      case 'flash':
+        // A hit flash on this actor only: a quick red wash that drains away.
+        tl.fromTo(el, { filter: 'sepia(0) saturate(1) hue-rotate(0deg) brightness(1)' },
+          { filter: `sepia(${0.9 * k}) saturate(${1 + 5 * k}) hue-rotate(-40deg) brightness(${1 + 0.15 * k})`, duration: d * 0.2, ease: 'power2.out' })
+          .to(el, { filter: 'sepia(0) saturate(1) hue-rotate(0deg) brightness(1)', duration: d * 0.8, ease: 'power2.in' });
+        break;
+      default:
+        tl.kill();
+        return;
+    }
+    oneShot = tl;
+  };
+
+  /**
    * Cleanup all animations
    */
   const cleanup = () => {
     stopIdle();
+    idleSwitch?.kill();
+    oneShot?.kill();
+    if (actionWrapperRef.value) gsap.killTweensOf(actionWrapperRef.value);
     if (elementRef.value) {
       gsap.killTweensOf(elementRef.value);
     }
@@ -768,6 +928,8 @@ export function useCharacterAnimation(
 
   return {
     elementRef,
+    artWrapperRef,
+    actionWrapperRef,
     scaleWrapperRef,
     rotationWrapperRef,
     contentRef,
@@ -780,6 +942,8 @@ export function useCharacterAnimation(
     playMove,
     startIdle,
     stopIdle,
+    switchIdle,
+    playOneShot,
     isAnimating,
     currentAnimation,
     cleanup,

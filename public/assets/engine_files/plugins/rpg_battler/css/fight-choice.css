@@ -1,0 +1,17 @@
+/* ============================================
+   FIGHT CHOICE  ({battle} / {fight: true} choices, main.mjs markFightChoice)
+   ============================================ */
+
+/* The crossed swords before a fight option's label: a mask painted in the text colour, so it follows
+   the choice's own state (normal, hover, visited, locked). The row carries `.fight-choice`; style
+   `.choice-list .choice.fight-choice` to tint the whole option, or hide `.fight-badge` to drop the
+   icon. The outer `.fight-badge` is unmasked, so its ::before/::after can wrap the icon. */
+.fight-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.15em;
+  background-color: currentColor;
+  -webkit-mask: url('assets/engine_assets/plugins/rpg_battler/damage.svg') center / contain no-repeat;
+  mask: url('assets/engine_assets/plugins/rpg_battler/damage.svg') center / contain no-repeat;
+}

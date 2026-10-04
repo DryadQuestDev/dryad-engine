@@ -93,6 +93,32 @@ const rows = battleConfig?.rows_size || 3;
 | `galleries` | Gallery definitions |
 | `custom_choices` | Custom choice definitions |
 | `locale` | Locale string definitions |
+| `character_views` | View definitions used by skin layers and status spines |
+
+### Meta & Trait Key Definitions
+
+These are the key definitions behind an entity's `meta` / `traits` field — the type, default, description and order of each key, as authored in the matching editor tab. The *values* live on the entity itself (`status.meta.is_battle`); these paths tell you what the keys are.
+
+| Path | Description |
+|------|-------------|
+| `stat_meta` | Per-stat meta key definitions (`stat.meta.*`) |
+| `status_meta` | Per-status meta key definitions (`status.meta.*`) |
+| `asset_meta` | Per-asset meta key definitions (`asset.meta.*`) |
+| `dungeon_traits` | Custom dungeon trait definitions (`dungeon config .traits.*`) |
+| `inventory_traits` | Custom inventory trait definitions (`inventory.traits.*`) |
+
+```js
+// What does the status_meta key "power_scaling" expect?
+const def = game.getData("status_meta").get("power_scaling");
+console.log(def.type, def.description);
+
+// Iterate every authored status_meta key, in editor order
+for (const [key, def] of game.getData("status_meta")) {
+  console.log(key, def.type);
+}
+```
+
+A game that has never opened the matching editor tab returns an empty `Map` rather than throwing.
 
 ### Plugin Data
 

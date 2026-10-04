@@ -133,20 +133,32 @@ function learn() {
     const s = skill.value;
     if (!s || !s.id || !canLearn.value || !character.value) return;
     const inv = activeTree.value?.is_private ? character.value.getPrivateInventory() : character.value.getPartyInventory();
-    if (!inv) { global.addNotification('No inventory available'); return; }
+    if (!inv) { global.addNotificationId('skill.no_inventory'); return; }
     if (s.price && Object.keys(s.price).length > 0) {
         if (!inv.deductCurrency(s.price)) return;
     }
     character.value.learnSkill(props.treeId, s.id, 1);
-    global.addNotification(`Learned ${getSkillName(s.skill)}!`);
+    global.addNotificationId('skill.learned', { skill: getSkillName(s.skill) });
 }
 
 function refund() {
     const s = skill.value;
     if (!s || !s.id || !canRefund.value || !character.value) return;
     character.value.unlearnSkill(props.treeId, s.id);
-    global.addNotification(`Refunded ${getSkillName(s.skill)}!`);
+    global.addNotificationId('skill.refunded', { skill: getSkillName(s.skill) });
 }
+
+const levelLabel = computed(() => global.getString('skill.level', { current: currentLevel.value, max: maxLevel.value }));
+
+const learnLabel = computed(() => {
+    if (canLearn.value) return global.getString('learn_recipe');
+    if (skill.value && isSkillLearnable(skill.value)) return global.getString('skill.cannot_afford');
+    return global.getString('skill.locked');
+});
+
+const refundLabel = computed(() => global.getString(canRefund.value ? 'skill.refund' : 'skill.cannot_refund'));
+
+const unknownLabel = computed(() => global.getString('card.unknown', { id: `${props.treeId}/${props.slotId}` }));
 </script>
 
 <template>
@@ -179,7 +191,7 @@ function refund() {
             class="popup-description"></div>
 
         <div class="skill-level">
-            <span>Level: {{ currentLevel }} / {{ maxLevel }}</span>
+            <span>{{ levelLabel }}</span>
         </div>
 
         <div v-if="currentLevel < maxLevel && formattedPrice.length > 0" class="skill-currency">
@@ -195,7 +207,7 @@ function refund() {
             :disabled="!canLearn"
             :class="['learn-button', { disabled: !canLearn }]"
             @click="learn">
-            {{ canLearn ? 'Learn' : (skill && isSkillLearnable(skill) ? 'Cannot Afford' : 'Locked') }}
+            {{ learnLabel }}
         </button>
 
         <div v-if="formattedRefund.length > 0" class="skill-refund">
@@ -209,7 +221,7 @@ function refund() {
             :disabled="!canRefund"
             :class="['refund-button', { disabled: !canRefund }]"
             @click="refund">
-            {{ canRefund ? 'Refund' : 'Cannot Refund' }}
+            {{ refundLabel }}
         </button>
 
         <StatusObjectDisplay v-if="skillSlotData.status" :data="skillSlotData.status"
@@ -217,7 +229,7 @@ function refund() {
             :isActive="currentLevel > 0" />
     </div>
     <div v-else class="popup-inner popup-error">
-        Unknown skill: {{ treeId }}/{{ slotId }}
+        {{ unknownLabel }}
     </div>
 </template>
 

@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
+
+// Registry titles are stored as locale keys so they follow a language switch; a game or plugin
+// that registered a literal title falls through getStringOr and keeps that literal.
+function tabTitle(title?: string): string {
+  return title ? global.getStringOr(title, title) : '';
+}
 
 const COMPONENT_ID = 'progression-container';
+
+const closeLabel = computed(() => global.getString('close'));
 
 // Get tabs from unified registry
 const tabs = computed(() => game.coreSystem.getComponentsBySlot('progression-tabs'));
@@ -42,10 +52,10 @@ function closeProgression() {
     <div class="tabs">
       <div class="tab" v-for="tab of tabs" :key="tab.id" @click="selectTab(tab.id)"
         :class="{ 'active-tab': game.coreSystem.getState('progression_state') === tab.id }">
-        {{ tab.title }}
+        {{ tabTitle(tab.title) }}
       </div>
       <div class="tab" @click="closeProgression">
-        <span class="tab-icon">Close</span>
+        <span class="tab-icon">{{ closeLabel }}</span>
       </div>
     </div>
 

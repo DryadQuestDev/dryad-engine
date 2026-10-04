@@ -222,7 +222,7 @@ export function validateParamsJson(raw: string): string | null {
 /** Turns a range in some scanned text into the anchor the editor can focus. */
 type Locator = (start: number, end: number) => IssueAnchor;
 
-export function lintDungeonContent(_source: string, doc: Document): LintIssue[] {
+export function lintDungeonContent(source: string, doc: Document): LintIssue[] {
   const issues: LintIssue[] = [];
 
   // `line` is filled in once every block has been visited, so pushes only
@@ -387,6 +387,62 @@ export function lintDungeonContent(_source: string, doc: Document): LintIssue[] 
     }
   };
 
+  // Anchors this document opens as a choice menu. Only same-dungeon refs (`&x`) can be
+  // checked here; `&dungeon.x` points into another document.
+  const menuAnchors = new Set(
+    [...source.matchAll(/choices(?:_over)?\s*:\s*["']&(\w+)["']/g)].map(m => m[1]),
+  );
+
+  // `&x` names the paragraph that STARTS right below it: the parser holds the name until
+  // the next paragraph opens and drops it if a blank line, `%`, `~` or `>` comes first. So an
+  // anchor must be a paragraph's first line. `{choices: "&x"}` builds its menu from that
+  // paragraph, and a paragraph with more text after it in the block yields a plain
+  // "continue" instead of the block's `~` choices — a menu anchor sits on the last one.
+  const checkAnchors = (idx: number, content: string, locate: Locator) => {
+    const lines = content.split('\n');
+    const offsets: number[] = [];
+    let offset = 0;
+    for (const line of lines) { offsets.push(offset); offset += line.length + 1; }
+    // Comment lines are invisible to the parser — step over them in both directions.
+    const neighbour = (i: number, dir: 1 | -1): string | null => {
+      for (let j = i + dir; j >= 0 && j < lines.length; j += dir) {
+        if (!isCommentLine(lines[j])) return lines[j];
+      }
+      return null;
+    };
+
+    lines.forEach((line, i) => {
+      if (!line.startsWith('&')) return;
+      const name = line.slice(1).trim();
+      const where = locate(offsets[i], offsets[i] + line.length);
+      const prev = neighbour(i, -1);
+      const next = neighbour(i, 1);
+      if (prev !== null && emitsParagraph(prev)) {
+        push({ blockIndex: idx, field: 'content', severity: 'error', at: where,
+          message: `Anchor '&${name}' is inside a paragraph — it must be the paragraph's first line, or it is dropped` });
+        return;
+      }
+      if (next === null || !emitsParagraph(next)) {
+        push({ blockIndex: idx, field: 'content', severity: 'error', at: where,
+          message: `Anchor '&${name}' has no paragraph right below it — it is dropped. Put it on the first line of the paragraph it names` });
+        return;
+      }
+      if (!menuAnchors.has(name)) return;
+      let gap = false;
+      for (let j = i + 1; j < lines.length; j++) {
+        const l = lines[j];
+        if (isCommentLine(l)) continue;
+        if (l.trimStart().startsWith('>')) return;   // the paragraph offers its own inline choices
+        if (!l.trim()) { gap = true; continue; }
+        if (gap && emitsParagraph(l)) {
+          push({ blockIndex: idx, field: 'content', severity: 'warning', at: where,
+            message: `Menu anchor '&${name}' is not on the block's last paragraph — {choices} will show "continue" and replay the rest instead of the menu` });
+          return;
+        }
+      }
+    });
+  };
+
   doc.blocks.forEach((block, idx) => {
     // serializeAst skips falsy entries; mirror it rather than crash on one.
     if (!block) return;
@@ -450,6 +506,7 @@ export function lintDungeonContent(_source: string, doc: Document): LintIssue[] 
             const locate: Locator = (start, end) => ({ target: 'column-content', rowIndex, colIndex, start, end });
             check(idx, col.content, 'content', locate);
             checkInlineChoices(idx, col.content, locate);
+            checkAnchors(idx, col.content, locate);
           }
         });
       });

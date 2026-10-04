@@ -141,8 +141,8 @@ function updateNestedField(key: string | number | symbol, value: any) {
 
 <style scoped>
 .nested-schema-renderer {
-  background-color: var(--p-surface-50); /* Or another suitable background from your theme */
-  border: 1px solid var(--p-surface-200);
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-left: 4px solid var(--p-primary-color); /* Accent left border */
   border-radius: var(--p-border-radius);
   padding: 1rem;

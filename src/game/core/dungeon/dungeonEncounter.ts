@@ -26,7 +26,34 @@ export class DungeonEncounter {
 
     public type: string = "";
 
-    public rawContent: string = "";
+    private _rawContent: string = "";
+
+    /**
+     * A collectable with no authored text describes itself from the item it grants. Worded on read
+     * rather than stamped in by the fabric: a Dungeon is built once per enter and cached, so a
+     * sentence resolved there would stay in the language that was selected at that moment.
+     */
+    public collectDescriptionItemId?: string;
+
+    public get rawContent(): string {
+        if (this._rawContent || !this.collectDescriptionItemId) {
+            return this._rawContent;
+        }
+        const game = Game.getInstance();
+        const itemId = this.collectDescriptionItemId;
+        const traits = game.itemSystem.itemTemplatesMap.get(itemId)?.traits as Record<string, any> | undefined;
+        const description = String(traits?.description || '');
+        // Name in its rarity color, like everywhere else the engine names items. Without a
+        // description the bare variant is used, or the sentence ends on a dangling separator.
+        return Global.getInstance().getString(
+            description ? 'collectable.default_description' : 'collectable.default_description_bare',
+            { item: game.itemSystem.getItemNameHtml(itemId), description },
+        );
+    }
+
+    public set rawContent(value: string) {
+        this._rawContent = value;
+    }
 
     /**
      * Stat threshold that permanently reveals this encounter, from
@@ -72,6 +99,26 @@ export class DungeonEncounter {
     }
 
     /**
+     * Map point the camera centers on, in content space (without padding). A polygon encounter
+     * renders only its outline, so its x/y (the unused image position) is meaningless — use the
+     * polygon's bounding-box center instead.
+     */
+    public getMapCenter(): { x: number, y: number } {
+        const coords = this.polygon.trim().split(/[\s,]+/).map(Number);
+        if (coords.length < 2 || coords.some(isNaN)) {
+            return { x: this.x, y: this.y };
+        }
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (let i = 0; i + 1 < coords.length; i += 2) {
+            minX = Math.min(minX, coords[i]);
+            maxX = Math.max(maxX, coords[i]);
+            minY = Math.min(minY, coords[i + 1]);
+            maxY = Math.max(maxY, coords[i + 1]);
+        }
+        return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    }
+
+    /**
      * Does this encounter still hold a hint the player hasn't followed? Lights the
      * encounter up on the map for as long as one of its visible `{clue: true}` choices
      * is untaken.
@@ -96,12 +143,16 @@ export class DungeonEncounter {
             return "";
         }
         const game = Game.getInstance();
+        const global = Global.getInstance();
         const stats = game.characterSystem.statsMap;
         const checks = game.dungeonSystem
             .parseDiscoverSpec(this.discoverSpec, this.id)
-            .map(({ statId, threshold }) => `${stats?.get(statId)?.name || statId}[${threshold}]`)
-            .join(', ');
-        return checks ? Global.getInstance().getString('encounter.discovered', { checks }) : "";
+            .map(({ statId, threshold }) => global.getString('encounter.discovered.check', {
+                stat: stats?.get(statId)?.name || statId,
+                threshold,
+            }))
+            .join(global.getString('list_separator'));
+        return checks ? global.getString('encounter.discovered', { checks }) : "";
     }
 
     /**

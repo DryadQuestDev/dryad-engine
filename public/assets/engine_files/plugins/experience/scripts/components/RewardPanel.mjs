@@ -3,7 +3,7 @@
 const { game, vue, gsap } = window.engine;
 const { computed, defineComponent, onMounted, reactive } = vue;
 
-import { pendingReward, clearPending, getMc } from '../reward.mjs';
+import { pendingReward, clearPending, getMc, toggleItemTrashed, isItemTrashed } from '../reward.mjs';
 
 // Pure display over the pending reward (grants happen in reward.mjs on battle_defeated / via the
 // game's own actions). Mounted twice:
@@ -45,22 +45,23 @@ export const RewardPanel = defineComponent({
     // Under each brick sits a trash toggle. The loot is already in the party bag by the time the
     // panel builds, so the toggle can't refuse the pickup — it marks the line and clearPending
     // takes it back out on continue. Whether the toggle renders is the same pair of questions the
-    // item card's Drop choice asks — the engine's own rule (isDroppable: quest items) plus the
-    // game's `item_drop_render` veto — so protected kinds can't be thrown away here either.
+    // item card's Drop choice asks — the engine's own rule (isDiscardable: quest items, no_discard) plus the
+    // game's `item_discard_render` veto — so protected kinds can't be thrown away here either.
+    //
+    // The mark itself lives in the pending-reward state, so a row carries only its INDEX into that
+    // list and reads `trashed` back through it — a snapshot of the entry would stop tracking the
+    // toggle the moment the state object is replaced.
     const partyInventory = game.getInventory('_party_inventory');
     const carrier = getMc();
-    const lootRows = pending.value.items.map(entry => {
+    const lootRows = pending.value.items.map((entry, index) => {
       const instance = partyInventory?.items.find(i => i.id === entry.id);
       if (!instance) return null;
       const clone = partyInventory.cloneItem(instance);
       clone.quantity = entry.quantity;
-      return { entry, item: clone, canTrash: clone.isDroppable() && game.trigger('item_drop_render', clone, carrier) };
+      return { index, item: clone, canTrash: clone.isDiscardable() && game.trigger('item_discard_render', clone, carrier) };
     }).filter(Boolean);
 
-    const trashCount = computed(() => lootRows.filter(row => row.entry.trashed).length);
-    function toggleTrash(/** @type {any} */ row) {
-      row.entry.trashed = !row.entry.trashed;
-    }
+    const trashCount = computed(() => lootRows.filter(row => isItemTrashed(row.index)).length);
 
     const isDefeat = computed(() => props.result === 'defeat');
     const hasAny = computed(() => {
@@ -105,7 +106,7 @@ export const RewardPanel = defineComponent({
     const xpService = game.getService('xp');
 
     // Static per-row animation state — grants are complete before the panel mounts.
-    const rows = pending.value.characters.map(c => {
+    const rows = /** @type {RewardRow[]} */ (pending.value.characters.map(c => {
       const character = game.getCharacter(c.id);
       const privateInv = character?.getPrivateInventory();
       // Level-up reward items land in the character's PRIVATE inventory — clone each as a display
@@ -130,7 +131,7 @@ export const RewardPanel = defineComponent({
         leveled: false,
         statsVisible: false,
       });
-    });
+    }));
 
     for (const [id, resources] of resourcesByCharacter) {
       if (rows.some(r => r.id === id)) continue;
@@ -177,7 +178,7 @@ export const RewardPanel = defineComponent({
       });
     });
 
-    return { pending, line, hasAny, isDefeat, looseLines, rows, lootRows, trashCount, toggleTrash };
+    return { pending, line, hasAny, isDefeat, looseLines, rows, lootRows, trashCount, isItemTrashed, toggleItemTrashed };
   },
   template: /*html*/`
     <div v-if="!isDefeat && hasAny" class="reward-panel">
@@ -234,14 +235,14 @@ export const RewardPanel = defineComponent({
       </div>
 
       <div v-if="lootRows.length" class="reward-items">
-        <div v-for="row in lootRows" :key="row.item.uid" class="reward-item"
-             :class="{ 'is-trashed': row.entry.trashed }">
+        <div v-for="row in lootRows" :key="row.index" class="reward-item"
+             :class="{ 'is-trashed': isItemTrashed(row.index) }">
           <ItemSlot :item="row.item" :disabled="true" />
           <button v-if="row.canTrash" type="button" class="reward-trash"
-                  :class="{ active: row.entry.trashed }"
-                  :title="row.entry.trashed ? line('reward_trash_undo') : line('reward_trash')"
-                  @click="toggleTrash(row)">
-            <i class="pi" :class="row.entry.trashed ? 'pi-replay' : 'pi-trash'"></i>
+                  :class="{ active: isItemTrashed(row.index) }"
+                  :title="isItemTrashed(row.index) ? line('reward_trash_undo') : line('reward_trash')"
+                  @click="toggleItemTrashed(row.index)">
+            <i class="pi" :class="isItemTrashed(row.index) ? 'pi-replay' : 'pi-trash'"></i>
           </button>
         </div>
       </div>

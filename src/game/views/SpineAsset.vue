@@ -3,10 +3,13 @@ import { computed, ref, onMounted, watch, onUnmounted } from 'vue';
 import { AssetObject } from '../../schemas/assetSchema';
 import { spineRenderer, type SpineStats, type SlotColorSpec } from '../utils/spineRenderer';
 import type { Spine } from '@esotericsoftware/spine-pixi-v8';
+import { Game } from '../game';
 
 const props = defineProps<{
   asset: AssetObject;
 }>();
+
+const game = Game.getInstance();
 
 const emit = defineEmits<{
   'spine-loaded': [stats: SpineStats | null];
@@ -52,6 +55,15 @@ const initSpine = async () => {
     if (!result) return;
     spineInstance = result;
     emit('spine-loaded', spineRenderer.getStats(result));
+
+    // Event keys authored in the rig's animations reach scripts as spine_event. The listener lives on
+    // this skeleton's AnimationState, so it goes with the skeleton; a track being mixed out fires none.
+    spineInstance.state.addListener({
+      event: (_entry, event) => {
+        game.trigger('spine_event', props.asset, event.data.name,
+          { int: event.intValue, float: event.floatValue, string: event.stringValue ?? '' });
+      },
+    });
 
     if (localStorage.getItem('devMode') === 'true') {
       console.log('🎬 SpineAsset rendered:', {

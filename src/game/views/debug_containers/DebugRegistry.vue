@@ -367,13 +367,13 @@ function isEditingState(key: string): boolean {
   width: 100%;
   padding: 0.5rem 2rem 0.5rem 0.75rem;
   font-size: 0.875rem;
-  border: 1px solid #cbd5e0;
+  border: 1px solid var(--editor-border);
   border-radius: 0.375rem;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #2b6cb0;
+  border-color: var(--editor-ink-blue);
   box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
 }
 
@@ -381,7 +381,7 @@ function isEditingState(key: string): boolean {
   position: absolute;
   right: 0.75rem;
   cursor: pointer;
-  color: #718096;
+  color: var(--editor-text-faint);
   font-size: 1.125rem;
   padding: 0.25rem;
   line-height: 1;
@@ -389,7 +389,7 @@ function isEditingState(key: string): boolean {
 }
 
 .search-clear:hover {
-  color: #2d3748;
+  color: var(--editor-text);
 }
 
 .slot-group {
@@ -397,12 +397,12 @@ function isEditingState(key: string): boolean {
 }
 
 .slot-title {
-  color: #1a1a1a;
+  color: var(--editor-text);
   font-size: 0.95rem;
   font-weight: 500;
   margin: 0 0 0.75rem 0;
   padding-left: 0.5rem;
-  border-left: 3px solid #cbd5e0;
+  border-left: 3px solid var(--editor-border);
 }
 
 .registry-list {
@@ -412,19 +412,19 @@ function isEditingState(key: string): boolean {
 }
 
 .registry-item {
-  background: #f7fafc;
+  background: var(--editor-surface-raised);
   padding: 0.5rem 0.75rem;
   border-radius: 0.25rem;
   font-family: var(--font-family-mono);
   font-size: 0.875rem;
-  color: #2d3748;
+  color: var(--editor-text);
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
 .registry-item:hover {
-  background: #edf2f7;
+  background: var(--editor-surface-sunken);
 }
 
 /* Emitter item styling */
@@ -441,11 +441,11 @@ function isEditingState(key: string): boolean {
 .listeners-list {
   margin-top: 0.75rem;
   padding-left: 1rem;
-  border-left: 2px solid #cbd5e0;
+  border-left: 2px solid var(--editor-border);
 }
 
 .listeners-label {
-  color: #4a5568;
+  color: var(--editor-text-muted);
   font-size: 0.8rem;
   font-weight: 500;
   margin-bottom: 0.5rem;
@@ -460,22 +460,22 @@ function isEditingState(key: string): boolean {
 }
 
 .listener-bullet {
-  color: #718096;
+  color: var(--editor-text-faint);
   flex-shrink: 0;
 }
 
 .listener-source {
-  color: #2f855a;
+  color: var(--editor-ink-green);
   word-break: break-all;
 }
 
 .listener-no-source {
-  color: #a0aec0;
+  color: var(--editor-text-faint);
   font-style: italic;
 }
 
 .item-name {
-  color: #2b6cb0;
+  color: var(--editor-ink-blue);
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -495,7 +495,7 @@ function isEditingState(key: string): boolean {
 }
 
 .state-item .item-value {
-  color: #2f855a;
+  color: var(--editor-ink-green);
   word-break: break-word;
   font-size: 0.8rem;
   padding-left: 0.5rem;
@@ -508,7 +508,7 @@ function isEditingState(key: string): boolean {
 }
 
 .state-value-pre {
-  background-color: #edf2f7;
+  background-color: var(--editor-surface-sunken);
   padding: 0.75rem;
   border-radius: 4px;
   overflow-x: auto;
@@ -518,7 +518,7 @@ function isEditingState(key: string): boolean {
   font-size: 0.8rem;
   line-height: 1.5;
   font-family: var(--font-family-mono);
-  color: #2f855a;
+  color: var(--editor-ink-green);
 }
 
 .state-edit-form {
@@ -529,7 +529,7 @@ function isEditingState(key: string): boolean {
 
 .state-edit-form h4 {
   margin: 0;
-  color: #2d3748;
+  color: var(--editor-text);
   font-size: 0.875rem;
 }
 
@@ -543,19 +543,19 @@ function isEditingState(key: string): boolean {
 }
 
 .item-title {
-  color: #c05621;
+  color: var(--editor-ink-orange);
   font-style: italic;
   font-size: 0.8rem;
 }
 
 .item-order {
-  color: #6b46c1;
+  color: var(--editor-ink-purple);
   font-size: 0.75rem;
   margin-left: auto;
 }
 
 .empty-message {
-  color: #718096;
+  color: var(--editor-text-faint);
   font-style: italic;
   padding: 1rem;
   text-align: center;
@@ -567,16 +567,16 @@ function isEditingState(key: string): boolean {
 }
 
 .debug-registry::-webkit-scrollbar-track {
-  background: #f7fafc;
+  background: var(--editor-surface-raised);
   border-radius: 4px;
 }
 
 .debug-registry::-webkit-scrollbar-thumb {
-  background: #cbd5e0;
+  background: var(--editor-border-strong);
   border-radius: 4px;
 }
 
 .debug-registry::-webkit-scrollbar-thumb:hover {
-  background: #a0aec0;
+  background: var(--editor-text-faint);
 }
 </style>

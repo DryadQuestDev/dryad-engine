@@ -43,6 +43,11 @@ const internalValue = computed({
 
 const fieldId = computed(() => `gfield-${props.option.id}`);
 
+// Engine settings carry locale keys as label and tooltip; a game or plugin schema that carries a
+// literal falls through getStringOr and keeps it.
+const label = computed(() => global.getStringOr(props.option.label || '', props.option.label || ''));
+const tooltip = computed(() => props.option.tooltip ? global.getStringOr(props.option.tooltip, props.option.tooltip) : undefined);
+
 // For options that should display localized labels
 const displayOptions = computed(() => {
   if (props.option.type === 'chooseOne' || props.option.type === 'chooseMany') {
@@ -69,8 +74,8 @@ const displayOptions = computed(() => {
 </script>
 
 <template>
-  <div class="g-field-renderer" v-tooltip.left="props.option.tooltip">
-    <label :for="fieldId" class="g-field-label">{{ props.option.label }}</label>
+  <div class="g-field-renderer" v-tooltip.left="tooltip">
+    <label :for="fieldId" class="g-field-label">{{ label }}</label>
 
     <!-- String Input -->
     <!-- @vue-ignore-->

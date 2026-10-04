@@ -54,7 +54,7 @@ Each slot passes **context props** to registered components, giving them access 
 | `mod-picker` | Inside mod picker UI | `availableMods`, `selectedMods` |
 | `navigation-toolbar` | Buttons in map toolbar | |
 | `overlay-navigation` | Navigation map overlay | `dungeon`, `choices` |
-| `overlay-navigation-side` | Side column next to the navigation overlay (right column in text dungeons, right edge of viewport in screen dungeons) | `dungeon` |
+| `overlay-navigation-side` | Side column, 500px down the left edge of the game area in every dungeon type (panel background in text dungeons, transparent and click-through over the art in map/screen) | `dungeon` |
 | `scene-content-top` | Above scene dialogue content (text dungeons) | `sceneId` |
 | `scene-content-bottom` | Below scene choices (text dungeons) | `sceneId` |
 | `progression-container` | Progression side panel | `activeTab`, `selectedCharacter` |

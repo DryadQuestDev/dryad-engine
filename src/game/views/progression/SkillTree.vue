@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, PropType } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
-import { ARROWHEAD_SIZE } from '../../../global/global';
+import { ARROWHEAD_SIZE, Global } from '../../../global/global';
 import { getShapePath, getShapeEdgePoint, getArrowPath, ShapeType, getArrowheadPath } from '../../../utility/shapes';
 import BackgroundAsset from '../BackgroundAsset.vue';
 import SkillSlot from './SkillSlot.vue';
@@ -22,6 +22,8 @@ const game = Game.getInstance();
 
 // State
 const activeTreeId = ref<string | null>(null);
+
+const noTreesLabel = computed(() => Global.getInstance().getString('skill_tree.empty'));
 
 // Refs
 const canvasWrapperRef = ref<HTMLElement | null>(null);
@@ -330,7 +332,7 @@ watch(() => props.character, () => {
 
     <!-- No Trees Message -->
     <div v-else class="no-trees-message">
-      <p>No skill trees available for this character.</p>
+      <p>{{ noTreesLabel }}</p>
     </div>
   </div>
 </template>

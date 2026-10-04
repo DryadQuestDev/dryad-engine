@@ -107,6 +107,13 @@ function formatSigned(n: number): string {
     if (n > 0) return `+${n}`;
     return String(n);
 }
+
+// The colon lives in the locale entry, not the markup: several languages space or replace it.
+function breakdownRowLabel(name: string): string {
+    return global.getString('stat_breakdown.row_label', { name });
+}
+
+const unknownLabel = computed(() => global.getString('card.unknown', { id: props.statId }));
 </script>
 
 <template>
@@ -122,7 +129,7 @@ function formatSigned(n: number): string {
                 <template v-for="(group, gi) in breakdown" :key="gi">
                     <div v-if="group.label" class="stat-breakdown-group">{{ group.label }}</div>
                     <div v-for="row in group.rows" :key="row.key" class="stat-breakdown-row">
-                        <span class="stat-breakdown-name">{{ row.name }}:</span>
+                        <span class="stat-breakdown-name">{{ breakdownRowLabel(row.name) }}</span>
                         <span class="stat-breakdown-value" :class="row.value >= 0 ? 'positive' : 'negative'">{{ formatSigned(row.value) }}</span>
                     </div>
                 </template>
@@ -130,7 +137,7 @@ function formatSigned(n: number): string {
         </div>
     </div>
     <div v-else class="popup-inner popup-error">
-        Unknown stat: {{ statId }}
+        {{ unknownLabel }}
     </div>
 </template>
 

@@ -827,12 +827,12 @@ async function revealInFolder(path: string | null | undefined) {
 .inline-preview-wrapper {
   width: 150px;
   height: 150px;
-  border: 1px dashed var(--p-surface-300);
+  border: 1px dashed var(--editor-border);
   border-radius: var(--p-border-radius);
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--p-surface-50);
+  background-color: var(--editor-surface-sunken);
   overflow: hidden;
 }
 
@@ -904,7 +904,7 @@ async function revealInFolder(path: string | null | undefined) {
   height: 40px;
   object-fit: cover;
   border-radius: 4px;
-  border: 1px solid var(--p-surface-300);
+  border: 1px solid var(--editor-border);
   flex-shrink: 0;
 }
 
@@ -922,7 +922,7 @@ async function revealInFolder(path: string | null | undefined) {
 }
 
 .optimized-badge {
-  color: var(--p-green-600);
+  color: var(--editor-fg-success);
   font-size: 0.85rem;
   margin-left: 0.5rem;
   font-weight: 500;
@@ -932,7 +932,7 @@ async function revealInFolder(path: string | null | undefined) {
   color: var(--p-text-muted-color);
   font-size: 0.75rem;
   padding: 0.125rem 0.375rem;
-  background-color: var(--p-surface-100);
+  background-color: var(--editor-surface-sunken);
   border-radius: 0.25rem;
   white-space: nowrap;
   margin-left: auto;
@@ -964,13 +964,13 @@ async function revealInFolder(path: string | null | undefined) {
   position: sticky;
   top: 0;
   z-index: 1;
-  background-color: white;
+  background-color: var(--editor-surface);
 }
 
 .dropdown-header {
   padding: 0.5rem;
-  border-bottom: 1px solid var(--p-surface-200);
-  background-color: var(--p-surface-50);
+  border-bottom: 1px solid var(--editor-border);
+  background-color: var(--editor-surface-sunken);
 }
 
 .dropdown-clear-cache-btn {
@@ -994,7 +994,7 @@ async function revealInFolder(path: string | null | undefined) {
 }
 
 .p-float-label-variant-on > label {
-  background: var(--p-surface-ground);
+  background: var(--editor-surface);
   padding: 0 0.25rem;
 }
 </style>

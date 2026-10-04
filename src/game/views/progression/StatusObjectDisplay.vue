@@ -117,6 +117,10 @@ const abilityEntries = computed((): Array<{
     <StatusStatsDisplay v-if="hasVisibleStats" :stats="visibleStats"
       :stacks="stacks" :multiplier="multiplier" :isActive="isActive" />
 
+    <!-- Between the stat list and the ability cards: a card that can't scroll (a peek hover) still
+         shows it, where below a tall ability card it would fall off the bottom. -->
+    <slot name="after-stats" />
+
     <div v-if="abilityEntries.length" class="popup-abilities">
       <div v-for="entry in abilityEntries" :key="entry.abilityId" class="ability-entry">
         <AbilityCard :ability-id="entry.abilityId"

@@ -1,26 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { computed, watch, nextTick } from 'vue';
 import vTooltip from 'primevue/tooltip';
 import { Inventory } from '../../core/character/inventory';
 import { Item } from '../../core/character/item';
 import { TradeContext } from '../../systems/itemSystem';
-import ItemCard from '../progression/ItemCard.vue';
 import ExchangeItemSlot from './ExchangeItemSlot.vue';
 import RecipeList from './RecipeList.vue';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import gsap from 'gsap';
 import { inspectMode } from './useExchangeInspect';
+import { closePopupsByKey } from '../popups/popupStore';
 import { selectedCategory, QUEST_FILTER, QUEST_RARITY } from './useExchangeFilter';
 import { Global } from '../../../global/global';
 import { Game } from '../../game';
 
 const game = Game.getInstance();
-
-// Hover state for item cards (desktop hover + inspect-mode pin)
-const hoveredItemUid = ref<string | null>(null);
-const pinnedItemUid = ref<string | null>(null);
-const referenceElement = ref<HTMLElement | null>(null);
-const floatingElement = ref<HTMLElement | null>(null);
 
 const props = defineProps<{
   inventory: Inventory | null;
@@ -36,20 +29,6 @@ const emit = defineEmits<{
   lootAll: [];
   recipeSelect: [recipeId: string];
 }>();
-
-// Floating UI setup — the party panel sits on the left, so its cards open rightwards.
-const isPartyInventory = computed(() => !!props.isParty);
-
-const { floatingStyles } = useFloating(referenceElement, floatingElement, {
-  placement: computed(() => isPartyInventory.value ? 'right-start' : 'left-start'),
-  strategy: 'fixed',
-  middleware: [
-    offset(8),
-    flip({ padding: 8 }),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
-});
 
 // Everything this panel would show with no category tab selected — the trade-context
 // (or loot) filter only. Slot/weight stats and the overflow marker read THIS list, so
@@ -138,7 +117,10 @@ const applyLabel = computed(() => {
 // "inventory.filter.all" renames it here and on the character sheet alike.
 const allLabel = computed(() => resolveLocale('inventory.filter.all') || 'All');
 const questLabel = computed(() => resolveLocale('inventory.filter.quest') || 'Quest Items');
-const noItemsLabel = computed(() => resolveLocale('inventory.no_items') || 'No items');
+const noItemsLabel = computed(() => resolveLocale('inventory.no_items') || 'No Items');
+
+// Panel chrome, engine-owned: no game override path, so these read the engine locale directly.
+const lootAllLabel = computed(() => Global.getInstance().getString('exchange.loot_all'));
 
 // Get inventory statistics — counted before the category tab narrows the list, so the
 // Slots/Weight chips keep describing the inventory rather than the current tab.
@@ -147,83 +129,36 @@ const availableSlotsInfo = computed(() => {
   return props.inventory.getInventoryStats(modeItems.value.length);
 });
 
-function handleItemClick(item: Item, event: MouseEvent) {
-  // In inspect mode, pin the info popup instead of buying/moving
-  if (inspectMode.value) {
-    if (pinnedItemUid.value === item.uid) {
-      pinnedItemUid.value = null;
-      referenceElement.value = null;
-      return;
-    }
-    pinnedItemUid.value = item.uid;
-    hoveredItemUid.value = null;
-    const target = event.currentTarget as HTMLElement;
-    const slotWrapper = target.closest('.item-slot-wrapper') as HTMLElement | null;
-    referenceElement.value = slotWrapper || target;
-    return;
-  }
+// Label and numbers in one value, like every other "Label: value" line in the engine locale: the
+// translator owns the colon, its spacing and the order. The chip's own markup travels with it so
+// the figure keeps its own color.
+const slotsLine = computed(() => {
+  const stats = availableSlotsInfo.value;
+  if (!stats) return '';
+  return Global.getInstance().getString('exchange.stats.slots', {
+    current: stats.unequippedCount, max: stats.maxSize,
+  });
+});
 
+const weightLine = computed(() => {
+  const stats = availableSlotsInfo.value;
+  if (!stats) return '';
+  return Global.getInstance().getString('exchange.stats.weight', {
+    current: stats.currentWeight.toFixed(1), max: stats.maxWeight,
+  });
+});
+
+function handleItemClick(item: Item, event: MouseEvent) {
+  // Inspect mode: the slot's own popover pins the item card on this same click; nothing moves.
+  if (inspectMode.value) return;
   if (!props.inventory || !props.targetInventory) return;
   emit('itemClick', item, props.inventory, props.targetInventory, event);
 }
 
-function handleItemHover(item: Item | null, event?: MouseEvent) {
-  // If an item is pinned (inspect mode), hover doesn't override it
-  if (pinnedItemUid.value) return;
-
-  hoveredItemUid.value = item?.uid || null;
-
-  if (item && event) {
-    referenceElement.value = event.currentTarget as HTMLElement;
-  } else {
-    referenceElement.value = null;
-  }
-}
-
-// When the shared inspect toggle flips OFF, each ExchangeInventory instance
-// clears its own pinned popup. The toggle button itself now lives in the
-// parent OverlayExchange header.
+// Inspect off → the cards it pinned go with it, in every panel at once. A slot that leaves the
+// panel (tab switch, the other side buying it) closes its own card when it unmounts.
 watch(inspectMode, (active) => {
-  if (!active) {
-    pinnedItemUid.value = null;
-    referenceElement.value = null;
-  }
-});
-
-function handleDocumentClick(e: MouseEvent) {
-  if (!pinnedItemUid.value) return;
-  const target = e.target as HTMLElement;
-  // Clicking another item slot → its click handler will re-pin / toggle
-  if (target.closest('.item-slot-wrapper')) return;
-  // Clicking the inspect toggle → let it handle
-  if (target.closest('.inspect-toggle')) return;
-  // Otherwise clear the pinned popup but keep inspect mode on
-  pinnedItemUid.value = null;
-  referenceElement.value = null;
-}
-
-onMounted(() => {
-  document.addEventListener('click', handleDocumentClick);
-});
-onUnmounted(() => {
-  document.removeEventListener('click', handleDocumentClick);
-});
-
-// Get the currently displayed item — pinned wins over hovered.
-const hoveredItem = computed(() => {
-  const uid = pinnedItemUid.value || hoveredItemUid.value;
-  if (!uid) return null;
-  return visibleItems.value.find(item => item.uid === uid) || null;
-});
-
-// An item can leave the panel without a mouseleave — switching tab, or the other side
-// buying it. Left alone, a stale pin keeps hover popups suppressed (handleItemHover
-// early-returns while pinned) and leaves useFloating anchored to a detached node.
-watch(visibleItems, (items) => {
-  const stillShown = (uid: string | null) => !!uid && items.some(item => item.uid === uid);
-  if (!stillShown(pinnedItemUid.value)) pinnedItemUid.value = null;
-  if (!stillShown(hoveredItemUid.value)) hoveredItemUid.value = null;
-  if (!pinnedItemUid.value && !hoveredItemUid.value) referenceElement.value = null;
+  if (!active) closePopupsByKey('exchange-item:');
 });
 
 // Watch for newly crafted items and animate them
@@ -288,25 +223,19 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
           <!-- Slots info -->
           <div v-if="availableSlotsInfo.maxSize > 0" class="stat-item"
             :class="{ 'overflow': availableSlotsInfo.isOverflowing }">
-            <span class="stat-label">Slots:</span>
-            <span class="stat-value">
-              {{ availableSlotsInfo.unequippedCount }}/{{ availableSlotsInfo.maxSize }}
-            </span>
+            <span class="stat-label" v-html="slotsLine"></span>
           </div>
 
           <!-- Weight info -->
           <div v-if="availableSlotsInfo.maxWeight > 0" class="stat-item"
             :class="{ 'overflow': availableSlotsInfo.currentWeight > availableSlotsInfo.maxWeight }">
-            <span class="stat-label">Weight:</span>
-            <span class="stat-value">
-              {{ availableSlotsInfo.currentWeight.toFixed(1) }}/{{ availableSlotsInfo.maxWeight }}
-            </span>
+            <span class="stat-label" v-html="weightLine"></span>
           </div>
         </div>
       </div>
 
       <button v-if="mode === 'loot' && !isParty" class="loot-all-button" @click="emit('lootAll')">
-        Loot All
+        {{ lootAllLabel }}
       </button>
     </div>
 
@@ -347,8 +276,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
       <template v-for="(slot, index) in gridSlots" :key="slot ? slot.uid : `empty-${index}`">
         <ExchangeItemSlot v-if="slot" :item="slot" :target-inventory="targetInventory" :is-party="isParty" :mode="mode"
           :class="{ 'overflow-item': overflowUids.has(slot.uid) }"
-          @click="handleItemClick(slot, $event)" @mouseenter="handleItemHover(slot, $event)"
-          @mouseleave="handleItemHover(null)" />
+          @click="handleItemClick(slot, $event)" />
         <div v-else class="item-slot empty"></div>
       </template>
     </div>
@@ -356,8 +284,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
     <!-- Dynamic Grid (unlimited inventory) -->
     <div v-else class="inventory-grid dynamic-grid" :class="{ 'inspect-active': inspectMode }">
       <ExchangeItemSlot v-for="item in visibleItems" :key="item.uid" :item="item" :target-inventory="targetInventory"
-        :is-party="isParty" :mode="mode" @click="handleItemClick(item, $event)"
-        @mouseenter="handleItemHover(item, $event)" @mouseleave="handleItemHover(null)" />
+        :is-party="isParty" :mode="mode" @click="handleItemClick(item, $event)" />
     </div>
 
     <!-- Action Buttons -->
@@ -366,18 +293,6 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
     </div>
 
   </div>
-
-  <!-- ItemCard popup at root level (outside container) -->
-  <Teleport to="body">
-    <div v-if="hoveredItem" ref="floatingElement" class="item-card-popup-exchange" :style="{
-      ...floatingStyles,
-      zIndex: 10000,
-      pointerEvents: 'none',
-      willChange: 'transform'
-    }">
-      <ItemCard :item="hoveredItem" />
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>
@@ -508,7 +423,13 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 80px;
+  /* Matches .inventory-grid exactly — this replaces the grid when a filter matches nothing, so
+     anything shorter would collapse the panel the moment a tab came up empty. */
+  box-sizing: border-box;
+  min-height: 40vh;
+  min-height: 40dvh;
+  max-height: 40vh;
+  max-height: 40dvh;
   color: rgba(255, 255, 255, 0.4);
   font-size: 13px;
 }
@@ -548,16 +469,18 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   font-weight: 600;
 }
 
-.stat-value {
+/* :deep, because the figure's span arrives through v-html from the locale value and so carries
+   no scope attribute of its own. */
+.stat-item :deep(.stat-value) {
   color: #42b983;
   font-weight: bold;
 }
 
-.stat-item.overflow .stat-value {
+.stat-item.overflow :deep(.stat-value) {
   color: #ff453a;
 }
 
-.stat-item.stat-info .stat-value {
+.stat-item.stat-info :deep(.stat-value) {
   color: #64a0e6;
 }
 
@@ -576,6 +499,17 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   gap: 8px;
   padding: 4px;
   align-content: start;
+  /* Pinned, not capped. min and max hold the same value so the grid is exactly this tall whether
+     it holds one item or overflows — the panel, and with it the whole exchange overlay, must not
+     resize as items move between the two sides or a filter tab hides most of them. Clamps are
+     applied after flexing, so `flex: 1` above cannot stretch or shrink past this.
+     The repeated dvh line is the usual fallback for browsers without dynamic viewport units.
+     border-box so the pinned value is the OUTER height: this box carries 4px of padding and the
+     .exchange-empty that replaces it does not, and under content-box that 8px made the panel jump
+     whenever a side went empty. */
+  box-sizing: border-box;
+  min-height: 40vh;
+  min-height: 40dvh;
   max-height: 40vh;
   max-height: 40dvh;
 }

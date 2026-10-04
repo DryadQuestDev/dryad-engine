@@ -16,6 +16,7 @@ export const DungeonConfigSchema = {
   fog_shadow_coef: { type: 'number', step: 0.1, defaultValue: 1.5, tooltip: "Shadow gradient multiplier for fog edges. 1 = no gradient, higher values = softer transitions.", show: { dungeon_type: ['map'] } },
   fog_image: { type: 'file', fileType: 'image', tooltip: 'Custom fog mask image. If not set, the default image will be used.', show: { dungeon_type: ['map'] } },
   default_assets: { type: 'chooseMany', fromFile: 'assets', fromFileTypeAnd: { hide_actors: '$falsy' }, tooltip: 'Assets staged automatically when an event starts. Only assets that do not hide the scene actors are listed.' },
+  default_sounds: { type: 'chooseMany', fromFile: 'sounds', tooltip: 'Ambience that plays anywhere in this dungeon, together with the current room\'s own default sounds. Pick looping sounds: they keep playing through scenes and stop when the player leaves the dungeon.' },
   music: { type: 'chooseOne', fromFile: 'music', tooltip: 'Background music to play in this dungeon.' },
   traits: { type: 'schema', fromFile: 'dungeon_traits', fromFileType: 'custom', tooltip: 'Custom dungeon traits defined in the dungeon_traits file (General tab). E.g. level_group to share a dungeon-level snapshot between linked dungeons.' },
   actions: {

@@ -92,6 +92,10 @@ In the **Characters** tab of the editor, you'll find several forms. Each one def
 
 **When to use:** Any number that affects gameplay - combat stats, progress counters.
 
+### Stat Meta
+
+Stats can carry a **meta** data bag too – custom fields you define in the `Stat Meta` editor tab and read from your own scripts or plugins through `game.getData("character_stats", true)`. Once a field is defined, every stat shows it in its form. Plugins define fields of their own: the experience plugin's `scaling` decides how a stat grows on levelled items. A plugin may also fill in another plugin's fields on the stats it defines; the values simply sit unused when that plugin isn't installed.
+
 ---
 
 ### Character Traits
@@ -229,6 +233,18 @@ A template combines everything above into one package. It defines a character's 
 - **item_slots** - Where equipment goes (with positions)
 - **skill_trees** - Which skill trees this character can learn from
 
+**Art Manager:** Every character template, status, item template and skill slot has an **Art Manager** button beside its title. It opens the doll preview with five tabs – Layers, Attributes, Spine, Face and Offset – so a character's whole look is set in one place without hunting through the form:
+
+- **Layers** – tick skin layers on and off. Each row shows the image or animation key the layer resolves to for the current attributes, red when nothing matches, and the pencil saves and jumps to that layer in Skin Layers.
+- **Attributes** – pick values from dropdowns; the attributes watched by the selected layers come first.
+- **Spine** – add or swap the atlas and skeleton for the selected view, and click an animation or skin chip to force it in the preview.
+- **Face** – set the static face image and its precedence, and drag the purple box to position the face crop.
+- **Offset** – drag the doll to move it and scroll over it to scale, per view and per asset.
+
+A status, item or skill slot is drawn on top of a character in the game, so its layers often only resolve with that character's layers and attributes. Pick a template under **Preview on character** and the preview applies the entry over it the way the game does: the template's layers render with the entry's, and where both set an attribute the entry's value wins. The pick is remembered in this browser for every status, item and skill slot, and it is never saved. The Attributes tab then shows two columns – the entry's own values, which are saved, and the character's values, which you can change to preview a state such as `battle_state = cast`. A character value is locked wherever the entry sets that attribute: while the entry is applied, the game ignores the character's own value, so changing it with `setAttribute()` shows nothing.
+
+**Stats:** The same four forms carry a **Stats** button next to Art Manager. It opens every character stat as one grid of the usual form fields, sectioned by the Stat Groups tab with a chip per section to filter: the entity's own value is typed straight into its field, and a character template also shows what its starting statuses and default gear add and the total the character is created with. A filter box and an **Only set** toggle keep the list short, and keys that no stat defines are flagged with a remove button. The side column lists the sources (with jump buttons), edits the computed stat keys with suggestions drawn from the rest of the game, and offers three tools: compare against another entity of the same tab, copy another entity's stats, and scale every own stat by a factor.
+
 ---
 
 ## Quick Reference
@@ -236,6 +252,8 @@ A template combines everything above into one package. It defines a character's 
 | I want to... | Use this form |
 |--------------|---------------|
 | Add a number like Health or Damage | Character Stats |
+| Give the character sheet sections | Stat Groups |
+| Attach custom settings to stats | Stat Meta |
 | Store custom data like name or portrait | Character Traits |
 | Create options like mood or pose | Character Attributes |
 | Define visual pieces for appearance | Character Skin Layers |

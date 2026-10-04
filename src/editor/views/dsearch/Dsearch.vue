@@ -5,6 +5,7 @@ import { Editor } from '../../editor';
 import { Global } from '../../../global/global';
 import { SifterManager, Sifter } from '../../../utility/sifterManager';
 import { Schema } from '../../../utility/schema'; // Assuming Schema type is defined here
+import FilterPresetChips from './FilterPresetChips.vue';
 
 // PrimeVue Components
 import InputText from 'primevue/inputtext';
@@ -38,6 +39,12 @@ const props = defineProps({
   syncSharedIdFilter: {
     type: Boolean,
     default: true,
+  },
+  // Scope filter presets are saved under and listed for: the tab's unresolved file, e.g.
+  // `items/templates`. null hides the preset chips — embedded instances have no tab of their own.
+  presetScope: {
+    type: String as PropType<string | null>,
+    default: null,
   }
 });
 
@@ -81,6 +88,21 @@ const formState = reactive({
   selected: {} as Record<string, Record<string, boolean>>,
   tag: {} as Record<string, { logic: boolean; values: Record<string, boolean> }>,
 });
+
+// --- Filter presets: one session per form instance, so an embedded form (the ability picker
+// sifting ability_templates from a character template) keeps its own chips beside the tab's list ---
+const presetSession = editor.filterPresets.createSession(computed(() => props.presetScope), (preset) => {
+  const skipped = applyPresetSifter(preset.sifter);
+  if (skipped > 0) global.addNotificationId('filter_presets.partial_apply', { count: skipped });
+});
+// The tab's own list form is the one the bookmark column's flyout drives — the same instance
+// that shares the ID filter with Dbookmarks
+if (props.syncSharedIdFilter) {
+  editor.filterPresets.mainSession.value = presetSession;
+  onUnmounted(() => {
+    if (editor.filterPresets.mainSession.value === presetSession) editor.filterPresets.mainSession.value = null;
+  });
+}
 
 // --- Two-way sync with shared editor.idFilter (Dbookmarks search box) ---
 watch(() => editor.idFilter.value, (v) => {
@@ -368,6 +390,8 @@ const applySift = () => {
     }
     const filteredData = sifterManager.sift(sifter);
     emit('update:siftedData', filteredData);
+    // Plain clone: the preset session compares and persists it, and proxies do not survive IPC
+    if (props.presetScope) presetSession.currentSifter.value = JSON.parse(JSON.stringify(sifter));
 };
 
 // Debounced version of applySift triggered by form changes
@@ -482,6 +506,57 @@ watch(formState, () => {
 }, { deep: true });
 
 
+// --- Filter presets ---
+// Writes a saved sifter back into the form. Returns how many conditions named a field or
+// option this tab's schema does not have — those are skipped, the rest still applies.
+function applyPresetSifter(sifter: Sifter): number {
+  let skipped = 0;
+  clearFilters();
+  if (typeof sifter.id === 'string' && showIdField.value) formState.id = sifter.id;
+  if (typeof sifter.search === 'string') formState.search = sifter.search;
+  if (typeof sifter.key === 'string') formState.key = sifter.key;
+
+  for (const entry of sifter.range ?? []) {
+    const group = formState.range[entry.key];
+    if (!group) { skipped++; continue; }
+    group.min = typeof entry.min === 'number' ? entry.min : null;
+    group.max = typeof entry.max === 'number' ? entry.max : null;
+  }
+  for (const entry of sifter.selected ?? []) {
+    const group = formState.selected[entry.key];
+    if (!group) { skipped++; continue; }
+    for (const value of entry.values ?? []) {
+      const control = getControlName(value);
+      if (control in group) group[control] = true;
+      else skipped++;
+    }
+  }
+  for (const entry of sifter.tag ?? []) {
+    const group = formState.tag[entry.key];
+    if (!group) { skipped++; continue; }
+    group.logic = entry.logic === 'and';
+    const isStringArray = stringArraySchemaFields.value.some(field => field.path === entry.key);
+    for (const value of entry.values ?? []) {
+      const control = getControlName(value);
+      if (isStringArray) {
+        // string[] options come from the data alone — remember the raw value so a checked option
+        // no entry currently uses still renders and can be unchecked
+        const memory = stringArrayValueMemory[entry.key] ?? (stringArrayValueMemory[entry.key] = new Map<string, string>());
+        memory.set(control, String(value));
+        group.values[control] = true;
+      } else if (control in group.values) {
+        group.values[control] = true;
+      } else {
+        skipped++;
+      }
+    }
+  }
+  // applySift reads the lazily built visible option lists; with every panel still closed they
+  // are empty and the preset would sift nothing until a panel opened
+  recomputeFilterOptions();
+  return skipped;
+}
+
 // --- Clear Filters ---
 function clearFilters(): void {
   formState.id = '';
@@ -548,18 +623,24 @@ watch(isFormDirty, (newValue) => {
   emit('update:isDirty', newValue);
 }, { immediate: true });
 
-// --- Watcher to trigger clear ---
+// --- Reset: the form's own Clear filters button, and the bookmark column's icon via triggerClear ---
+// An explicit reset should also drop options that were only listed because they
+// were checked — an individual uncheck leaves them until the next rebuild, so the
+// checkbox never vanishes from under the cursor that just clicked it
+function resetFilters(): void {
+  clearFilters();
+  if (isFilterPanelOpen()) recomputeFilterOptions();
+  else optionDataStale.value = true;
+}
+
 watch(() => props.triggerClear, (newValue, oldValue) => {
   // Only trigger if the value actually changes (and is not the initial mount)
-  if (newValue !== oldValue && oldValue !== undefined) {
-    clearFilters();
-    // An explicit reset should also drop options that were only listed because they
-    // were checked — an individual uncheck leaves them until the next rebuild, so the
-    // checkbox never vanishes from under the cursor that just clicked it
-    if (isFilterPanelOpen()) recomputeFilterOptions();
-    else optionDataStale.value = true;
-  }
+  if (newValue !== oldValue && oldValue !== undefined) resetFilters();
 });
+
+// --- Toolbar above the fields: preset chips on the left, Clear filters on the right ---
+const showPresetChips = computed(() => !!props.presetScope && presetSession.hasChipRow.value);
+const showToolbar = computed(() => showPresetChips.value || isFormDirty.value);
 
 // --- Lifecycle ---
 // onUnmounted(() => {
@@ -571,6 +652,11 @@ watch(() => props.triggerClear, (newValue, oldValue) => {
 
 <template>
   <div class="dsearch-container p-fluid"> <!-- Keep p-fluid, removed mb-4 -->
+    <div v-if="showToolbar" class="dsearch-toolbar">
+      <FilterPresetChips v-if="showPresetChips" :session="presetSession" class="dsearch-toolbar-presets" />
+      <Button v-if="isFormDirty" icon="pi pi-filter-slash" :label="global.getString('clear_filters')" text size="small"
+        class="clear-filters-button" @click="resetFilters" />
+    </div>
     <div class="form-grid basic-filters-grid"> <!-- Replaced p-formgrid grid with custom grid classes -->
 
       <!-- Basic Filters -->

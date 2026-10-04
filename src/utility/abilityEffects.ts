@@ -20,8 +20,8 @@ const EFFECT_META_NUMERIC_FIELDS = ['order'] as const;
  * Already-normalized records are returned untouched, so callers can pass either shape.
  *
  * Effects authored without an `id` are keyed `'undefined'` rather than dropped — a few real
- * abilities rely on it (e.g. dryad_ane's `punch`/`heal`), and dropping them silently emptied
- * their card.
+ * abilities rely on it (basic attack/heal effects are often authored without one), and dropping
+ * them silently emptied their card.
  */
 export function normalizeAbilityEffects(effects: any): Record<string, Record<string, any>> {
     if (!effects) return {};

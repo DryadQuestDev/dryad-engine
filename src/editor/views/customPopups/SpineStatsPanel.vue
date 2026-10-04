@@ -111,8 +111,8 @@ function chipTooltip(name: string, forced: Set<string>, active: Set<string>, isD
   flex-direction: column;
   gap: 0.6rem;
   padding: 0.6rem 0.75rem;
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
 }
 
@@ -134,20 +134,20 @@ function chipTooltip(name: string, forced: Set<string>, active: Set<string>, isD
   align-items: center;
   gap: 0.35rem;
   padding: 0.2rem 0.55rem;
-  background-color: #fff;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface);
+  border: 1px solid var(--editor-border);
   border-radius: 999px;
   font-size: 0.8rem;
   line-height: 1;
 }
 
 .stat-label {
-  color: #666;
+  color: var(--editor-text-muted);
 }
 
 .stat-value {
   font-weight: 600;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .chip-list {
@@ -155,8 +155,8 @@ function chipTooltip(name: string, forced: Set<string>, active: Set<string>, isD
   flex-wrap: wrap;
   gap: 0.3rem;
   padding: 0.4rem;
-  background-color: #fff;
-  border: 1px solid #e3e3e3;
+  background-color: var(--editor-surface);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   max-height: 8rem;
   overflow-y: auto;
@@ -167,33 +167,33 @@ function chipTooltip(name: string, forced: Set<string>, active: Set<string>, isD
   align-items: center;
   gap: 0.35rem;
   padding: 0.15rem 0.5rem;
-  background-color: #f0f0f0;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: 3px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
-  color: #333;
+  color: var(--editor-text);
   user-select: none;
 }
 
 .chip.is-default {
-  background-color: #fff8e6;
-  border-color: #f0d27a;
+  background-color: var(--editor-tint-warning);
+  border-color: var(--editor-ink-amber);
   cursor: help;
 }
 
 /* Layer-driven (attributes/skin layers) — green */
 .chip.is-active {
-  background-color: #e8f5e9;
-  border-color: #81c784;
-  color: #1b5e20;
+  background-color: var(--editor-tint-success);
+  border-color: var(--editor-ink-green);
+  color: var(--editor-fg-success);
 }
 
 /* Force-toggled by the dev — yellow, wins over green and default styling */
 .chip.is-forced {
-  background-color: #fff3c4;
-  border-color: #e0b000;
-  color: #5a4500;
+  background-color: var(--editor-tint-warning);
+  border-color: var(--editor-ink-amber);
+  color: var(--editor-fg-warning);
 }
 
 .chip.clickable {
@@ -201,21 +201,21 @@ function chipTooltip(name: string, forced: Set<string>, active: Set<string>, isD
 }
 
 .chip.clickable:hover {
-  border-color: #999;
+  border-color: var(--editor-border-strong);
 }
 
 .chip.is-forced.clickable:hover {
-  border-color: #a88400;
+  border-color: var(--editor-fg-warning);
 }
 
 .chip-tag {
   padding: 0 0.3rem;
-  background-color: #f0d27a;
+  background-color: var(--editor-tint-warning);
   border-radius: 2px;
   font-family: inherit;
   font-size: 0.65rem;
   font-weight: 600;
-  color: #5a4500;
+  color: var(--editor-fg-warning);
   text-transform: uppercase;
   letter-spacing: 0.02em;
   line-height: 1.2;

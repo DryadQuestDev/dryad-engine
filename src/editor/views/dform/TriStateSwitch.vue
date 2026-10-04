@@ -70,9 +70,11 @@ const stateClass = computed(() => {
   display: inline-block;
 }
 
-/* State: undefined/null (use core value) - gray/neutral color */
+/* State: undefined/null (use core value) - gray/neutral color.
+   The --p-surface-* ramp does not invert with the dark theme, so this reads as a pale
+   blob on the dark chrome; the editor token flips with it. */
 .tri-state-switch :deep(.state-undefined .p-toggleswitch-slider) {
-  background-color: var(--p-surface-400) !important;
+  background-color: var(--editor-border-strong) !important;
 }
 
 /* State: false (override to false) - red/danger color */

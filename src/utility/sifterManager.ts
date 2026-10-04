@@ -206,12 +206,18 @@ export class SifterManager<T extends Record<string, any>> {
 
                 // Attempt conversion if not already a number
                 if (typeof objValue !== 'number') {
-                    const numValue = Number(objValue);
-                    if (isNaN(numValue)) {
-                        // If conversion fails (NaN), it's not a valid number for range check
-                         return false;
+                    // An unset property counts as 0, so a "max 0" filter still matches
+                    // templates that never authored the stat at all
+                    if (objValue === undefined || objValue === null || objValue === '') {
+                        objValue = 0;
+                    } else {
+                        const numValue = Number(objValue);
+                        if (isNaN(numValue)) {
+                            // If conversion fails (NaN), it's not a valid number for range check
+                            return false;
+                        }
+                        objValue = numValue; // Use the converted number
                     }
-                    objValue = numValue; // Use the converted number
                 }
 
                 // Now objValue is guaranteed to be a number (or the loop was exited)

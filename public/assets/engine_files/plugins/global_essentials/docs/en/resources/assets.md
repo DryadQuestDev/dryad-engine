@@ -21,7 +21,8 @@ Assets support:
 | Feature | Description |
 |---------|-------------|
 | **Positioning** | Place anywhere using x/y percentages, layer with z-index |
-| **Transforms** | Scale, rotate, flip, adjust opacity and blur |
+| **Transforms** | Scale, rotate, flip, adjust opacity |
+| **Filter effects** | Blur, brightness, contrast, saturation, sepia, hue rotation |
 | **Fit modes** | Control how assets fill their container (cover, contain, fill, etc.) |
 | **Enter transitions** | Animated appearance (fade, slide, zoom, bounce, special effects) |
 | **Exit transitions** | Animated removal with same transition options |
@@ -34,7 +35,7 @@ Assets support:
 ## Layered Images
 
 An `image` asset can stack extra plates on top of `file_image` via its `layers` list. The whole
-stack shares one wrapper, so fit mode, position, scale, rotation, opacity, blur, the scene
+stack shares one wrapper, so fit mode, position, scale, rotation, opacity, filters, the scene
 colour grade and every enter/exit/idle transition apply to the finished picture rather than to
 each plate — author the plates pre-registered at the same canvas size.
 
@@ -95,12 +96,15 @@ game.on("asset_resolve", (asset) => {
 | `{asset: "asset1, asset2"}` | Add multiple assets |
 | `{asset: "!asset_id"}` | Remove asset (with exit animation) |
 | `{asset: "asset_id(x=50, scale=2)"}` | Add with property overrides |
+| `{asset: "!asset_id(exit=fade, exit_duration=2)"}` | Remove with exit overrides |
 | `{asset: false}` | Clear all assets |
+
+Any asset field can be overridden inline, including the transition fields: `enter`, `enter_duration`, `enter_delay`, `enter_ease`, `exit`, `exit_duration`, `exit_ease`. Overrides on a staged asset update it in place.
 
 **Example - Scene with background with custom enter:**
 
 ```javascript
-{asset: "forest_bg(enter=fadeSlideLeft)"}
+{asset: "forest_bg(enter=fadeSlideLeft, enter_duration=1.5)"}
 ```
 
 **Example - Remove the asset:**
@@ -109,9 +113,15 @@ game.on("asset_resolve", (asset) => {
 {asset: "!character_portrait"}
 ```
 
+**Example - Remove with a one-off exit:**
+
+```javascript
+{asset: "!character_portrait(exit=fadeSlideLeft, exit_duration=2)"}
+```
+
 ### Default Room Assets
 
-Set `default_assets` on room templates to automatically load assets when entering a room.
+Set `default_assets` on room templates to automatically load assets when entering a room. Its neighbor `default_sounds` does the same for ambience — see ->resources.audio.
 
 ---
 
@@ -131,7 +141,9 @@ Set `default_assets` on room templates to automatically load assets when enterin
 | Event | When it fires | Parameters |
 |-------|---------------|------------|
 | `asset_render` | When an asset is staged or updated | `(asset)` |
+| `asset_exit` | When a staged asset starts leaving the stage | `(asset)` |
 | `asset_resolve` | While an asset's image layers are built, on every render path | `(asset)` |
+| `spine_event` | When a spine asset's animation passes an event key authored in the rig | `(asset, name, data)` |
 
 Use `asset_render` to modify asset properties dynamically before display.
 
@@ -143,6 +155,31 @@ game.on("asset_render", (asset) => {
     const isNight = game.getStore("world").get("time_of_day") === "night";
     asset.alpha = isNight ? 0.6 : 1;
   }
+});
+```
+
+**Example - A sound on every beat of a spine animation:** key an event named `step` in the rig's animation (in the Spine editor), then answer it.
+
+```javascript
+game.on("spine_event", (asset, name) => {
+  if (name === "step") game.playSounds("footstep");
+});
+```
+
+The event fires each loop pass at the animation's playing speed, so the sound stays on the beat at any `timescale`.
+
+---
+
+## Asset Meta
+
+Assets can carry a **meta** data bag – custom fields you define in the `Asset Meta` editor tab and read from your own scripts or plugins as `asset.meta`. Once a field is defined, every asset shows it in its form. Pair it with the events above, e.g. a `loop_sound` field that an `asset_render` listener plays and an `asset_exit` listener stops:
+
+```javascript
+game.on("asset_render", (asset) => {
+  if (asset.meta?.loop_sound) game.playSounds(asset.meta.loop_sound);
+});
+game.on("asset_exit", (asset) => {
+  if (asset.meta?.loop_sound) game.stopSounds(asset.meta.loop_sound);
 });
 ```
 
@@ -194,7 +231,9 @@ const MyComponent = vue.defineComponent({
 |--------------|---------|
 | Add background image | `{asset: "bg_forest"}` |
 | Add with animation | `{asset: "bg_forest(enter=fade)"}` |
+| Set transition length | `{asset: "bg_forest(enter=fade, enter_duration=2)"}` |
 | Remove asset | `{asset: "!bg_forest"}` |
+| Remove with animation | `{asset: "!bg_forest(exit=fade, exit_duration=2)"}` |
 | Position asset | `{asset: "bg_forest(x=80, y=20)"}` |
 | Layer assets | Set `z` field (higher = on top) |
 | Flip horizontally | Set `xscale: -1` |

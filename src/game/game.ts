@@ -3,12 +3,12 @@ import { Global } from '../global/global';
 import copy from 'fast-copy';
 import { computed, ComputedRef } from 'vue';
 
-import { DungeonSystem, DungeonLine, SceneAsset, SceneContext, ScenePlayOptions, SceneGradeState, ShadowDungeonDefinition } from './systems/dungeonSystem';
+import { DungeonSystem, DungeonLine, SceneAsset, SceneContext, ScenePlayOptions, SceneGradeState, SceneAmbientState, ShadowDungeonDefinition } from './systems/dungeonSystem';
 import { DungeonData } from './core/dungeon/dungeonData';
 import { ActionObject, AspectRenderer, LogicSystem, PoolSettings, PoolDrawResult, CollectionSettings } from './systems/logicSystem';
 import { NarrativeSystem } from './systems/narrativeSystem';
 import { CharacterSystem, StatComputerFunction, type StatGroupResolverFunction } from './systems/characterSystem';
-import { ItemSystem } from './systems/itemSystem';
+import { ItemSystem, PARTY_INVENTORY_ID } from './systems/itemSystem';
 import { CoreSystem, type EmitterMap, type CustomComponent, type SaveOptions, type SaveMigrationOptions } from './systems/coreSystem';
 import { AccoladeSystem } from './systems/accoladeSystem';
 import { gameLogger } from './utils/logger';
@@ -182,7 +182,8 @@ export class Game {
    * section), `false` (skip it), `{ only: [ids] }` or `{ skip: [ids] }`. Sections nobody mentions follow
    * `mode`: `opt-out` (default) syncs them, `opt-in` skips them.
    *
-   * The pass fires `item_migrate(item, template)` for every inventory item it visits and `save_migrated`
+   * The pass fires `item_migrate(item, template)` for every inventory item it visits,
+   * `status_migrate(character, status, previous)` for every status it recreates, and `save_migrated`
    * once at the end, before equip statuses are re-bound and resource pools put back — plugins and games
    * restore what they derive per instance there (level scaling, runtime-added choices).
    *
@@ -801,6 +802,16 @@ export class Game {
     return this.itemSystem.getInventory(id);
   }
 
+  /**
+   * Get the party's shared inventory — the main party bag every party member draws from.
+   * @returns The party inventory, or null if it has not been created yet.
+   * @example
+   * const scarves = game.getPartyInventory()?.getItemQuantity('scarf_ghost') ?? 0;
+   */
+  public getPartyInventory(): Inventory | null {
+    return this.itemSystem.getInventory(PARTY_INVENTORY_ID);
+  }
+
   public canUseItems(): boolean {
     return this.itemSystem.canUseItems();
   }
@@ -814,24 +825,35 @@ export class Game {
   // ============================================
 
   /**
-   * Play music by id, or pass `false` to fall back to the current dungeon's music.
-   * @param disableTransition - When true, switch instantly with no crossfade (default 1.0s).
+   * Play music by id, `"!"` to stop it, or `false` to fall back to the current dungeon's music.
+   * The id takes an inline tail: `forest(fade_in=3, volume=0.6, fade_out=2, shuffle=false)`.
+   * `fade_out` is how the outgoing track leaves; the rest describe the incoming one. Unset values
+   * come from the track's own fields, then the engine defaults (1 s fade-out, no fade-in).
+   * @param disableTransition - When true, switch instantly: no fade-out and no fade-in.
    */
   public setMusic(val: string | false, disableTransition: boolean = false) {
     this.coreSystem.setMusic(val, false, disableTransition);
   }
 
   /**
-   * Play sound effect(s) by id. Sounds flagged `loop` in the editor repeat their whole
-   * file sequence until stopped, or until the scene exits.
+   * Play sound effect(s) by id. Each id takes an inline tail, `rain(volume=0.4, fade_in=2, delay=0.5)`,
+   * overriding the sound's own `volume`, `fade_in`, `fade_out` and `delay` for this play. Sounds
+   * flagged `loop` in the editor repeat their whole file sequence until stopped, or until the scene exits;
+   * playing a loop that is already running leaves it running. Sounds sharing a `channel` replace each other.
+   * An audio file's path works in place of an id (`assets/.../hit.mp3`, as a `file` field with
+   * `fileType: 'audio'` stores it): that one file plays with the default settings, tail overrides apply.
    */
   public playSounds(val: string | string[]) {
     this.coreSystem.playSounds(val);
   }
 
-  /** Stop sound(s) by id, looping or not. Omit `val` to stop every sound currently playing. */
-  public stopSounds(val?: string | string[]) {
-    this.coreSystem.stopSounds(val);
+  /**
+   * Stop sound(s) by id, looping or not. Omit `val` to stop every sound currently playing.
+   * @param fadeOut - Seconds to fade instead of cutting. An id's own `(fade_out=N)` tail wins over it;
+   * with neither, the sound's `fade_out` field applies.
+   */
+  public stopSounds(val?: string | string[], fadeOut?: number) {
+    this.coreSystem.stopSounds(val, { fadeOut });
   }
 
   public setGrade(val: string | boolean | Record<string, any> | null, instant: boolean = false) {
@@ -840,6 +862,18 @@ export class Game {
 
   public getGrade(): SceneGradeState | null {
     return this.dungeonSystem.getGrade();
+  }
+
+  /**
+   * Ambient particles over the scene backgrounds: "fireflies", "motes" or "embers", with an optional
+   * density multiplier ("fireflies#0.5"). false/"none" clears. Persists across rooms and saves.
+   */
+  public setAmbient(val: string | boolean | null) {
+    this.dungeonSystem.setAmbient(val);
+  }
+
+  public getAmbient(): SceneAmbientState | null {
+    return this.dungeonSystem.getAmbient();
   }
 
   // ============================================
@@ -908,10 +942,12 @@ export class Game {
   }
 
   /**
-   * Set a per-game setting value. Persisted in save files.
+   * Set a per-game setting value. Persisted in save files. Fires `game_setting_change`.
    */
   public setGameSetting(key: string, value: any): void {
+    const oldValue = this.coreSystem.settings.value[key];
     this.coreSystem.settings.value[key] = value;
+    this.trigger('game_setting_change', key, value, oldValue);
   }
 
   // ============================================
@@ -960,6 +996,14 @@ export class Game {
 
   public registerPlaceholder(id: string, func: Function) {
     this.logicSystem.registerPlaceholder(id, func);
+  }
+
+  /**
+   * Register a `[name]…[/name]` text effect. Each wrapped letter carries `fx-<name>` for the
+   * game's CSS to style, plus the classes of the `base` effects it builds on.
+   */
+  public registerTextEffect(name: string, base: string[] = []) {
+    this.logicSystem.registerTextEffect(name, base);
   }
 
   /**

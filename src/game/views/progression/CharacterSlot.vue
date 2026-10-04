@@ -41,8 +41,10 @@ const game = Game.getInstance();
 // Uses the TALL grade def: an SVG filter region clips, and the doll's spine canvas paints far
 // outside this wrapper vertically (slot.scale plus the viewport pad), so the standard ±25%
 // region would slice heads and feet the moment a grade came up.
+// `props.grade` is the component's world-vs-chrome switch; `slot.grade` is the author's per-actor
+// opt-out ({actor: "ghost(grade=false)"}) for a character that gives off its own light.
 const scaleWrapperFilter = computed(() =>
-  (props.grade && game.dungeonSystem.gradeActive.value) ? `url(#${GRADE_FILTER_TALL_ID})` : 'none'
+  (props.grade && props.slot.grade !== false && game.dungeonSystem.gradeActive.value) ? `url(#${GRADE_FILTER_TALL_ID})` : 'none'
 );
 
 // Use animation composable
@@ -53,6 +55,8 @@ const animationControls = useCharacterAnimation({
 
 // Element refs
 const characterRef = animationControls.elementRef;
+const artWrapperRef = animationControls.artWrapperRef;
+const actionWrapperRef = animationControls.actionWrapperRef;
 const scaleWrapperRef = animationControls.scaleWrapperRef;
 const rotationWrapperRef = animationControls.rotationWrapperRef;
 const contentRef = animationControls.contentRef;
@@ -115,8 +119,8 @@ const animatedArtOffset = computed(() => {
 
 // A view swap crossfades the doll's art in place: the static doll keys its layer TransitionGroup
 // by image, so the outgoing view's images fade out while the incoming view's fade in — both
-// under THIS one wrapper transform, which is per view (dryad_tale's mc is art_scale 0.95 in the
-// default view against 1.5 in the back view). Snapping it would throw the outgoing art into the
+// under THIS one wrapper transform, which is per view (a character's art_scale routinely differs
+// between its default and back views). Snapping it would throw the outgoing art into the
 // incoming view's frame for the length of its fade, so a class turns on a CSS transform
 // transition for the same window and the wrapper eases from wherever it stood. CSS rather than
 // a gsap tween on the numbers: the tween would have to reconstruct the outgoing frame by hand
@@ -242,6 +246,25 @@ const contentTransformOrigin = computed(() => {
   return `${xanchor.value}% ${yanchor.value}%`;
 });
 
+// One-shot animations ({animate} / `anim=`): requests live on dungeonSystem, unsaved, keyed by
+// character. Directional ones read the slot's side: slots are full-width and offset by `left: x%`,
+// so the stage center is x = 0 — left of it (x < 0) lunges rightward.
+const playPendingOneShot = () => {
+  const charId = props.slot.char;
+  if (!charId) return;
+  const request = game.dungeonSystem.actorAnimRequests.value[charId];
+  if (!request) return;
+  game.dungeonSystem.consumeActorAnim(charId, request.seq);
+  animationControls.playOneShot(request.anim, {
+    duration: request.duration,
+    intensity: request.intensity,
+    side: (props.slot.x ?? 0) < 0 ? -1 : 1,
+  });
+};
+watch(() => props.slot.char ? game.dungeonSystem.actorAnimRequests.value[props.slot.char]?.seq : undefined, (seq) => {
+  if (seq !== undefined && characterRef.value) playPendingOneShot();
+});
+
 // Apply animations on mount
 onMounted(() => {
   if (characterRef.value) {
@@ -265,9 +288,12 @@ onMounted(() => {
           animationControls.startIdle();
         }, enterTime + 50);
       }
+      // A one-shot given at staging ("chimera->pos9(anim=lunge)") plays once she has arrived.
+      setTimeout(playPendingOneShot, enterTime + 50);
     } else {
       // No enter animation, start idle immediately
       animationControls.startIdle();
+      playPendingOneShot();
     }
   }
 });
@@ -325,12 +351,9 @@ watch([() => props.slot.idle, () => props.slot.idle_duration, () => props.slot.i
     const intensityChanged = newIntensity !== oldIntensity;
 
     // Restart idle if any idle property changed and idle is active
-    if ((idleChanged || durationChanged || intensityChanged) && characterRef.value && newIdle && newIdle !== 'none') {
-      animationControls.stopIdle();
-      animationControls.startIdle();
-    } else if (idleChanged && (!newIdle || newIdle === 'none')) {
-      // Stop idle if changed to none
-      animationControls.stopIdle();
+    // Ease through rest instead of snapping (a slumped actor sinks and rises, never pops).
+    if ((idleChanged || durationChanged || intensityChanged) && characterRef.value) {
+      animationControls.switchIdle();
     }
   }
 );
@@ -356,15 +379,21 @@ const onLeave = (_el: Element, done: () => void) => {
   <transition name="character-exit" @before-leave="onBeforeLeave" @leave="onLeave">
     <div ref="characterRef" class="character-slot" :style="{ zIndex: zindex }">
       <div class="character-slot-positioner">
-        <div ref="scaleWrapperRef" class="character-slot-scale-wrapper"
-          :class="{ 'view-crossfading': crossfadingView }">
-          <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper">
-            <div ref="contentRef" class="character-content">
-              <div class="character-doll-wrapper">
-                <CharacterDoll :character="character" :mirror="mirror" :enableAppear="enableAppear" :view="view"
-                  :instantLayers="instantLayers" :slotScale="scale" />
+        <!-- Art only. Idle loops (float, pulse, ghost…) animate this wrapper, so the
+             overlay, item slots and hit mask below stay still while the body moves. -->
+        <div ref="artWrapperRef" class="character-slot-art-wrapper">
+          <div ref="actionWrapperRef" class="character-slot-action-wrapper">
+          <div ref="scaleWrapperRef" class="character-slot-scale-wrapper"
+            :class="{ 'view-crossfading': crossfadingView }">
+            <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper">
+              <div ref="contentRef" class="character-content">
+                <div class="character-doll-wrapper">
+                  <CharacterDoll :character="character" :mirror="mirror" :enableAppear="enableAppear" :view="view"
+                    :instantLayers="instantLayers" :slotScale="scale" />
+                </div>
               </div>
             </div>
+          </div>
           </div>
         </div>
         <div v-if="overlaySlot" class="character-slot-overlay-wrapper">
@@ -398,6 +427,19 @@ const onLeave = (_el: Element, done: () => void) => {
   position: relative;
   height: 100%;
   width: 100%;
+}
+
+/* No transform of its own: GSAP owns this box outright, so an idle never clobbers
+   the scale wrapper's v-bind transform below. */
+.character-slot-art-wrapper {
+  position: absolute;
+  inset: 0;
+}
+
+/* One-shot animations (lunge, recoil, flash…) — its own layer so they compose with the idle loop. */
+.character-slot-action-wrapper {
+  position: absolute;
+  inset: 0;
 }
 
 .character-slot-scale-wrapper {
@@ -528,7 +570,7 @@ const onLeave = (_el: Element, done: () => void) => {
 
 /* CSS animation for jitter - more stable than GSAP for rapid movements */
 .idle-jitter {
-  animation: jitter-animation var(--jitter-duration, 0.15s) infinite;
+  animation: jitter-animation var(--jitter-duration, 0.15s) var(--jitter-delay, 0s) infinite;
   will-change: transform;
 }
 

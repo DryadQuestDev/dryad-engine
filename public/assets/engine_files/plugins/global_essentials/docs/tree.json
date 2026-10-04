@@ -11,6 +11,8 @@
     "google_docs_integration",
     "quests",
     "glossary",
+    "text_tags",
+    "grades",
     "dungeons_api"
   ],
   "characters": [

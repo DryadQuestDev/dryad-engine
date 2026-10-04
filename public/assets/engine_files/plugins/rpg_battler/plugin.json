@@ -3,7 +3,7 @@
   "name": "RPG Battler",
   "description": "Turn-based RPG battle system with player-controlled party combat",
   "author": "Nekon",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "order": 0,
   "scripts": [
     "main.mjs"
@@ -12,6 +12,14 @@
     {
       "script": "scripts/aspect-renderers.mjs",
       "css": "css/effect-colors.css"
+    }
+  ],
+  "editor_hooks": [
+    {
+      "tabs": [
+        "projectiles"
+      ],
+      "script": "scripts/editor/projectile-hooks.mjs"
     }
   ],
   "editor_popups": [
@@ -26,6 +34,15 @@
       ],
       "script": "scripts/editor/OverlayTuner.mjs",
       "css": "scripts/editor/OverlayTuner.css"
+    },
+    {
+      "id": "rpg-projectile-editor",
+      "name": "Projectile Editor",
+      "tabs": [
+        "projectiles"
+      ],
+      "script": "scripts/editor/ProjectileEditor.mjs",
+      "css": "scripts/editor/ProjectileEditor.css"
     }
   ],
   "tabs": [
@@ -51,17 +68,58 @@
         "max_enemy_units": {
           "type": "number",
           "defaultValue": 6,
-          "tooltip": "Maximum enemy-side units at any moment. Enemy summon abilities are skipped by the AI (and fizzle) at the cap."
+          "tooltip": "Maximum enemy-side units at any moment. Enemy summon abilities are skipped by the AI (and fizzle) at the cap, and a battle wave with more enemies than this is split into successive waves of at most this many."
+        },
+        "default_idle": {
+          "type": "chooseOne",
+          "options": [
+            "none",
+            "breathe",
+            "float",
+            "bounce",
+            "hop",
+            "pan",
+            "pulse",
+            "ghost",
+            "glow"
+          ],
+          "defaultValue": "none",
+          "tooltip": "Opt-in idle loop for battle slots whose character carries no battle_idle trait. none (default) = still; breathe gives static plates a ~2% chest rise from the feet. Static art only — a Spine doll animates itself and ignores this (its battle_idle trait, an explicit ask, still applies). Same battle-safe list as the trait, and the trait always wins."
+        },
+        "squash_stretch": {
+          "type": "boolean",
+          "defaultValue": false,
+          "tooltip": "Opt-in squash & stretch for static plates: a snap of crouch before the attack lunge and a stretch through it, an impact squash on hit, the self-cast wobble rocking on the feet. Static art only — a Spine doll's authored attack/hit animations are left alone."
         },
         "projectile_travel_size": {
           "type": "number",
-          "defaultValue": 48,
-          "tooltip": "On-screen size in px of the traveling projectile sprite."
+          "defaultValue": 9,
+          "tooltip": "Size of a flying projectile sprite in % of the battle viewport's height (its longer side; a frame keeps its own shape). Characters are sized the same way — a front-row enemy is about 35% — so effects keep their proportion to the bodies on any screen. Default 9. A projectile's own travel_size overrides it."
         },
         "projectile_hit_size": {
           "type": "number",
-          "defaultValue": 48,
-          "tooltip": "On-screen size in px of the hit/impact VFX."
+          "defaultValue": 18,
+          "tooltip": "Size of an impact VFX in % of the battle viewport's height (its longer side; a frame keeps its own shape). Default 18. A projectile's own hit_size overrides it."
+        },
+        "hit_juice": {
+          "type": "boolean",
+          "defaultValue": true,
+          "tooltip": "Impact juice on every damaging hit: the struck body flashes near-white and holds still for the hit-stop before it recoils, an additive burst and sparks go off at the point of contact in the effect's colour, and the screen jolts. A projectile's impact_strength scales it; a killing blow holds twice as long. Off = the plain red flash and shake."
+        },
+        "hit_stop_ms": {
+          "type": "number",
+          "defaultValue": 70,
+          "tooltip": "How long a struck body holds still in its flash before it recoils, in ms at normal battle speed (medium impact_strength; light 0.6×, heavy 1.6×). 0 = no hit-stop. Default 70."
+        },
+        "hit_sparks": {
+          "type": "number",
+          "defaultValue": 12,
+          "tooltip": "Sparks thrown off a medium impact (light 0.6×, heavy 1.6×). 0 = none. Default 12."
+        },
+        "hit_shake": {
+          "type": "number",
+          "defaultValue": 3,
+          "tooltip": "Screen jolt of a medium impact, in px on a 1080p screen (scaled to the screen; light 0.6×, heavy 1.6×). 0 = none. Default 3."
         },
         "difficulty": {
           "type": "schema",
@@ -246,7 +304,7 @@
             "sheet"
           ],
           "defaultValue": "single",
-          "tooltip": "Travel sprite format. single = one image (PNG/GIF). sheet = horizontal spritesheet animated by travel_frames/travel_fps."
+          "tooltip": "Travel sprite format. single = one image (PNG/GIF/WebP). sheet = a strip or grid animated by travel_frames/travel_fps. A frame keeps its own shape."
         },
         "travel_image": {
           "type": "file",
@@ -281,10 +339,14 @@
           },
           "tooltip": "Frames per row in the travel sheet (for grid sheets). Leave empty for a single horizontal row. A partial last row is trimmed."
         },
+        "travel_size": {
+          "type": "number",
+          "tooltip": "Travel sprite size in % of the battle viewport's height (its longer side). Empty = the Config tab's projectile_travel_size."
+        },
         "starting_rotation": {
           "type": "number",
           "defaultValue": 0,
-          "tooltip": "Degrees to correct the travel sprite's drawn orientation. Baseline 0 = the sprite points at the top."
+          "tooltip": "Degrees to correct the travel sprite's drawn orientation: 0 = drawn pointing up. A sprite drawn pointing left needs 90, pointing right -90, pointing down 180."
         },
         "speed": {
           "type": "number",
@@ -293,7 +355,7 @@
         },
         "arc": {
           "type": "boolean",
-          "tooltip": "Lob the travel sprite along an arc instead of a straight line."
+          "tooltip": "Lob the travel sprite along a parabola peaking a quarter of the distance above the straight line; the sprite turns along the curve (so draw it pointing up)."
         },
         "hit_type": {
           "type": "chooseOne",
@@ -302,7 +364,7 @@
             "sheet"
           ],
           "defaultValue": "single",
-          "tooltip": "Hit/impact VFX format. single = one image. sheet = horizontal spritesheet animated by hit_frames/hit_fps."
+          "tooltip": "Hit/impact VFX format. single = one image. sheet = a strip or grid animated by hit_frames/hit_fps. A frame keeps its own shape."
         },
         "hit_image": {
           "type": "file",
@@ -337,22 +399,387 @@
           },
           "tooltip": "Frames per row in the hit sheet (for grid sheets). Leave empty for a single horizontal row. A partial last row is trimmed."
         },
+        "hit_frame": {
+          "type": "number",
+          "show": {
+            "hit_type": [
+              "sheet"
+            ]
+          },
+          "tooltip": "The frame the impact lands on (1 = the first). An impact-only effect deals its damage there and the hit reaction plays, while the sheet plays on. Empty = the sheet's fullest frame, found when the entry is saved (the Projectile Editor outlines it on the strip)."
+        },
+        "hit_size": {
+          "type": "number",
+          "tooltip": "Impact size in % of the battle viewport's height (its longer side). Empty = the Config tab's projectile_hit_size."
+        },
+        "hit_anchor": {
+          "type": "chooseOne",
+          "options": [
+            "center",
+            "feet",
+            "head"
+          ],
+          "defaultValue": "center",
+          "tooltip": "Where the impact plays on its target: center (default); feet — the sprite's bottom edge sits on the target's sole, for ground rings and eruptions; head."
+        },
+        "impact_strength": {
+          "type": "chooseOne",
+          "options": [
+            "none",
+            "light",
+            "medium",
+            "heavy"
+          ],
+          "defaultValue": "medium",
+          "tooltip": "How hard a damaging hit of this effect lands: scales the Config tab's hit-stop, sparks and screen jolt (light 0.6×, medium 1×, heavy 1.6×), and the burst. none = no juice, the plain flash. Ally-only effects (buffs, heals) never juice."
+        },
+        "impact_color": {
+          "type": "color",
+          "tooltip": "Colour of the hit juice's burst, sparks and glow. Empty = read off the hit sprite (the travel sprite without one), after the filter, when the entry is saved; white without images."
+        },
+        "caster_animation": {
+          "type": "chooseOne",
+          "options": [
+            "melee",
+            "cast"
+          ],
+          "tooltip": "How the caster moves. melee: lunges at the target in the attack pose; the impact plays on contact, and a travel sprite launches at the lunge's peak (a throw). cast: stays in place in the cast pose. Empty: a self or ally ability casts; a hostile one lunges when this has no images and casts with a travel sprite or an impact."
+        },
         "css_class": {
           "type": "string",
-          "tooltip": "Extra CSS class on the spawned sprites (glow, scale, tint)."
+          "tooltip": "Extra CSS class(es) on the spawned sprites. Presets: vfx-add (additive blend, for glowing effects drawn on black), vfx-screen, vfx-glow (a soft white halo), vfx-spin, vfx-wobble, vfx-squash (motion for a single-image sprite; it adds to the facing rotation)."
+        },
+        "filter": {
+          "type": "string",
+          "tooltip": "CSS filter on both sprites, to reuse one sheet for several effects — e.g. hue-rotate(300deg) saturate(1.4) for a wine-red water bolt, sepia(1) saturate(1.6) brightness(0.75) for mud."
         },
         "sound": {
-          "type": "string[]",
-          "tooltip": "Sound id(s) played on launch (travel) / appear (on-target). Passed straight to game.playSounds."
+          "type": "file",
+          "fileType": "audio",
+          "tooltip": "Audio file played as the effect starts: each travel sprite's launch, a melee lunge's start, or once as an impact-only effect appears."
         },
         "hit_sound": {
-          "type": "string[]",
-          "tooltip": "Sound id(s) played on impact / land."
+          "type": "file",
+          "fileType": "audio",
+          "tooltip": "Audio file played with every impact: a landing, an impact-only effect on each target, a melee contact."
         }
       }
     }
   ],
   "data": {
+    "dev/editor_layouts": [
+      {
+        "id": "rpg_battler_ability_meta",
+        "scope": "ability_templates:meta",
+        "name": "RPG Battler ability meta",
+        "order": 10,
+        "groups": [
+          {
+            "id": "rpg_targeting",
+            "name": "Targeting",
+            "order": 30,
+            "color": "4db6ac",
+            "members": [
+              "target",
+              "projectile",
+              "school"
+            ]
+          },
+          {
+            "id": "rpg_timing",
+            "name": "Turn and timing",
+            "order": 40,
+            "color": "4fc3f7",
+            "members": [
+              "bonus_action",
+              "channel",
+              "charges",
+              "cd_on_battle_start",
+              "cd_group"
+            ]
+          },
+          {
+            "id": "rpg_conditions",
+            "name": "Conditions",
+            "order": 50,
+            "color": "90a4ae",
+            "members": [
+              "require_status_self",
+              "require_status_self_consume",
+              "caster_min_health",
+              "caster_max_health",
+              "target_min_health",
+              "target_max_health"
+            ]
+          },
+          {
+            "id": "rpg_scaling",
+            "name": "Scaling",
+            "order": 70,
+            "color": "ba68c8",
+            "members": [
+              "flat",
+              "unamplified"
+            ]
+          },
+          {
+            "id": "rpg_ai",
+            "name": "AI",
+            "order": 80,
+            "color": "a1887f",
+            "members": [
+              "base_weight"
+            ]
+          }
+        ],
+        "hints": [
+          {
+            "id": "target",
+            "pinned": true
+          },
+          {
+            "id": "projectile",
+            "pinned": true
+          },
+          {
+            "id": "charges",
+            "min": 0
+          },
+          {
+            "id": "caster_min_health",
+            "suffix": "% HP",
+            "min": 0,
+            "max": 100
+          },
+          {
+            "id": "caster_max_health",
+            "suffix": "% HP",
+            "min": 0,
+            "max": 100
+          },
+          {
+            "id": "target_min_health",
+            "suffix": "% HP",
+            "min": 0,
+            "max": 100
+          },
+          {
+            "id": "target_max_health",
+            "suffix": "% HP",
+            "min": 0,
+            "max": 100
+          }
+        ]
+      },
+      {
+        "id": "rpg_battler_ability_aspects",
+        "scope": "ability_templates:effects.aspects",
+        "name": "RPG Battler effect aspects",
+        "order": 10,
+        "groups": [
+          {
+            "id": "rpg_damage",
+            "name": "Damage",
+            "order": 10,
+            "color": "e57373",
+            "members": [
+              "damage",
+              "damage_type",
+              "crit_chance",
+              "crit_multi",
+              "accuracy",
+              "lifesteal"
+            ]
+          },
+          {
+            "id": "rpg_extra_hits",
+            "name": "Extra hits",
+            "order": 20,
+            "color": "ffb74d",
+            "members": [
+              "flurry",
+              "bounce",
+              "bounce_same",
+              "splash_count",
+              "splash_damage",
+              "splash_statuses"
+            ]
+          },
+          {
+            "id": "rpg_healing",
+            "name": "Healing",
+            "order": 30,
+            "color": "81c784",
+            "members": [
+              "healing",
+              "healing_self"
+            ]
+          },
+          {
+            "id": "rpg_statuses",
+            "name": "Statuses",
+            "order": 40,
+            "color": "ba68c8",
+            "members": [
+              "status_apply_target",
+              "status_apply_self",
+              "status_apply_allies",
+              "status_apply_enemies",
+              "status_remove_target",
+              "status_remove_self",
+              "status_remove_allies",
+              "status_remove_enemies",
+              "cleanse"
+            ]
+          },
+          {
+            "id": "rpg_conditions",
+            "name": "Conditions",
+            "order": 50,
+            "color": "90a4ae",
+            "members": [
+              "chance",
+              "require_status_target"
+            ]
+          },
+          {
+            "id": "rpg_turn",
+            "name": "Turn economy",
+            "order": 60,
+            "color": "4fc3f7",
+            "members": [
+              "free_action",
+              "cooldown_change",
+              "charges_change"
+            ]
+          },
+          {
+            "id": "rpg_summons",
+            "name": "Summons",
+            "order": 70,
+            "color": "a1887f",
+            "members": [
+              "summon",
+              "summon_status"
+            ]
+          }
+        ],
+        "hints": [
+          {
+            "id": "damage",
+            "suffix": "% power",
+            "step": 5,
+            "min": 0,
+            "default_value": "100"
+          },
+          {
+            "id": "damage_type",
+            "widget": "buttons"
+          },
+          {
+            "id": "healing",
+            "suffix": "% power",
+            "step": 5,
+            "min": 0,
+            "default_value": "100"
+          },
+          {
+            "id": "healing_self",
+            "suffix": "% power",
+            "step": 5,
+            "min": 0,
+            "default_value": "100"
+          },
+          {
+            "id": "crit_chance",
+            "suffix": "%"
+          },
+          {
+            "id": "crit_multi",
+            "suffix": "%"
+          },
+          {
+            "id": "accuracy",
+            "suffix": "%"
+          },
+          {
+            "id": "lifesteal",
+            "suffix": "%"
+          },
+          {
+            "id": "chance",
+            "suffix": "%",
+            "min": 0,
+            "max": 100,
+            "step": 5,
+            "widget": "slider",
+            "default_value": "50"
+          },
+          {
+            "id": "splash_damage",
+            "suffix": "%"
+          },
+          {
+            "id": "splash_statuses",
+            "suffix": "%"
+          },
+          {
+            "id": "status_duration_target",
+            "suffix": "turns",
+            "min": 1
+          },
+          {
+            "id": "status_duration_self",
+            "suffix": "turns",
+            "min": 1
+          },
+          {
+            "id": "status_duration_allies",
+            "suffix": "turns",
+            "min": 1
+          },
+          {
+            "id": "status_duration_enemies",
+            "suffix": "turns",
+            "min": 1
+          },
+          {
+            "id": "cooldown_change",
+            "suffix": "turns"
+          },
+          {
+            "id": "bounce",
+            "min": 0,
+            "default_value": "1"
+          },
+          {
+            "id": "flurry",
+            "min": 0,
+            "default_value": "1"
+          },
+          {
+            "id": "splash_count",
+            "min": 0,
+            "default_value": "1"
+          }
+        ]
+      },
+      {
+        "id": "rpg_battler_sheet_offense",
+        "scope": "ability_templates:sheet",
+        "name": "Offense",
+        "columns": [
+          "meta.cd",
+          "meta.target",
+          "aspect.damage",
+          "aspect.damage_type",
+          "aspect.crit_chance",
+          "aspect.accuracy",
+          "aspect.status_stacks_target",
+          "aspect.status_duration_target"
+        ]
+      }
+    ],
     "game_settings": [
       {
         "id": "rpg_battle_speed",
@@ -410,6 +837,21 @@
         "tooltip": "Vertical fine-adjust (%) for the battle overlay (health bar, tokens), measured from the slot top. Tune per character height (short/tall). Positive = down."
       },
       {
+        "id": "battle_idle",
+        "type": "chooseOne",
+        "values": [
+          "float",
+          "bounce",
+          "hop",
+          "pan",
+          "pulse",
+          "breathe",
+          "ghost",
+          "glow"
+        ],
+        "tooltip": "Looping idle animation for this character's battle slot — a bat or a ghost floats in every fight without per-battle authoring. Unset = still. Only the idles that survive a battle are offered: sway, rotate, rock, nod, lean, wave, wiggle and glitch animate the very element the lunge, hit and death tweens own, and shake, shimmy, jitter and blink are the battler's own damage vocabulary — a permanently shaking enemy makes the hit shake unreadable."
+      },
+      {
         "id": "threat",
         "type": "number",
         "tooltip": "Reward weight of this NPC. A battle's threat is the sum over its enemy party; reward systems scale defeat payouts off it."
@@ -427,12 +869,12 @@
       {
         "id": "battle_support",
         "type": "boolean",
-        "tooltip": "Support combatant: joins every battle outside the party limit (never shown in the pre-battle picker), acts in the turn order from the sidelines with a floating portrait instead of a battlefield slot, and can never be targeted or damaged. Invisible to ally-counting effects."
+        "tooltip": "Support combatant: joins every battle outside the party limit (never shown in the pre-battle picker), acts on its own in the turn order from the sidelines with a floating portrait instead of a battlefield slot, and can never be targeted or damaged. Only an explicit battle_ai: false hands it to the player. Invisible to ally-counting effects."
       },
       {
         "id": "battle_ai",
         "type": "boolean",
-        "tooltip": "If true, this player-side character acts on its own in battle – the battle AI picks its abilities and targets instead of the manual ability panel."
+        "tooltip": "If true, this player-side character acts on its own in battle – the battle AI picks its abilities and targets instead of the manual ability panel. Supports are AI-driven unless this is explicitly false."
       }
     ],
     "item_traits": [
@@ -576,7 +1018,7 @@
         "type": "chooseOne",
         "fromFile": "plugins_data/rpg_battler/projectiles",
         "order": -97.6,
-        "description": "Projectile/VFX definition (from the Projectiles tab). Leave empty for a melee cast (caster lunges). If set: a travel sprite (travel_image) flies caster→target then plays the hit VFX; a def with only a hit_image manifests the VFX at the target (no travel)."
+        "description": "Projectile/VFX definition (from the Projectiles tab), which also sets how the caster moves (its caster_animation). Leave empty for no VFX: the caster lunges at an enemy and casts on itself or an ally. If set: a travel sprite (travel_image) flies caster→target then plays the hit VFX; a def with only a hit_image manifests the VFX at the target (no travel)."
       },
       {
         "id": "chance",
@@ -1265,7 +1707,10 @@
         "order": -100,
         "color": "c0392b",
         "description": "Hit-point resource. The character is defeated when it reaches 0. The only resource stat the battler manages.",
-        "ingame_description": "Hit points. When health reaches 0, the character is defeated."
+        "ingame_description": "Hit points. When health reaches 0, the character is defeated.",
+        "meta": {
+          "scaling": "flat"
+        }
       },
       {
         "id": "power",
@@ -1275,8 +1720,12 @@
           "combat"
         ],
         "order": -99,
+        "group": "combat",
         "description": "Base scaling stat. Ability damage = effective power x (damage aspect / 100); healing scales the same way. Effective power = (power + power_bonus) x (1 + power_amplifier/100), except `unamplified` abilities which use raw power only.",
-        "ingame_description": "Base damage multiplier for abilities and healing."
+        "ingame_description": "Base damage multiplier for abilities and healing.",
+        "meta": {
+          "scaling": "flat"
+        }
       },
       {
         "id": "power_bonus",
@@ -1286,8 +1735,12 @@
           "combat"
         ],
         "order": -98.5,
+        "group": "combat",
         "description": "Flat gear-style addition to power, applied before power_amplifier – so it gets amplified too. Ignored by `unamplified` abilities (basic attack uses raw power).",
-        "ingame_description": "Flat power added before amplification. Ignored by `unamplified` abilities, so a basic attack does not benefit from it."
+        "ingame_description": "Flat power added before amplification. Ignored by `unamplified` abilities, so a basic attack does not benefit from it.",
+        "meta": {
+          "scaling": "flat"
+        }
       },
       {
         "id": "power_amplifier",
@@ -1297,8 +1750,12 @@
           "combat"
         ],
         "order": -98,
+        "group": "combat",
         "description": "Percent multiplier on (power + power_bonus): effective power = (power + power_bonus) x (1 + value/100). 100 doubles power. Ignored by `unamplified` abilities.",
-        "ingame_description": "Percentage boost applied to power for ability scaling. 100 = +100% = doubles power."
+        "ingame_description": "Percentage boost applied to power for ability scaling. 100 = +100% = doubles power.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "speed",
@@ -1308,8 +1765,12 @@
           "combat"
         ],
         "order": -98,
+        "group": "combat",
         "description": "Turn-order sort key – combatants act from highest to lowest speed each round. No other effect.",
-        "ingame_description": "Determines turn order in battle. Higher speed acts first."
+        "ingame_description": "Determines turn order in battle. Higher speed acts first.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "physical_armor",
@@ -1319,8 +1780,12 @@
           "combat"
         ],
         "order": -97,
+        "group": "combat",
         "description": "Flat amount subtracted from each physical burst hit after all multipliers. Result is floored at 1 damage; negative armor adds damage instead. DoT ticks ignore armor (they use resists).",
-        "ingame_description": "Flat reduction to physical hit damage. Always leaves at least 1 damage; negative values increase damage taken."
+        "ingame_description": "Flat reduction to physical hit damage. Always leaves at least 1 damage; negative values increase damage taken.",
+        "meta": {
+          "scaling": "flat"
+        }
       },
       {
         "id": "magical_armor",
@@ -1330,8 +1795,12 @@
           "combat"
         ],
         "order": -96,
+        "group": "combat",
         "description": "Flat amount subtracted from each magic burst hit after all multipliers. Result is floored at 1 damage; negative armor adds damage instead. DoT ticks ignore armor (they use resists).",
-        "ingame_description": "Flat reduction to magic hit damage. Always leaves at least 1 damage; negative values increase damage taken."
+        "ingame_description": "Flat reduction to magic hit damage. Always leaves at least 1 damage; negative values increase damage taken.",
+        "meta": {
+          "scaling": "flat"
+        }
       },
       {
         "id": "crit_chance",
@@ -1341,8 +1810,12 @@
           "combat"
         ],
         "order": -63,
+        "group": "combat",
         "description": "Percent chance (0-100) rolled on each damaging hit. Only rolled when above 0.",
-        "ingame_description": "Chance to critically hit (0-100%)."
+        "ingame_description": "Chance to critically hit (0-100%).",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "crit_multi",
@@ -1352,8 +1825,12 @@
           "combat"
         ],
         "order": -62,
+        "group": "combat",
         "description": "Bonus percent damage on a critical hit: damage x (1 + value/100). 50 = 1.5x total, 150 = 2.5x – this is the bonus on top, not the total multiplier.",
-        "ingame_description": "Extra damage on critical hit (%). 50 = 1.5x damage."
+        "ingame_description": "Extra damage on critical hit (%). 50 = 1.5x damage.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "dodge",
@@ -1363,8 +1840,12 @@
           "combat"
         ],
         "order": -61,
+        "group": "combat",
         "description": "Percent chance (0-100) to negate an incoming hit entirely.",
-        "ingame_description": "Chance to avoid incoming damage entirely (0-100%)."
+        "ingame_description": "Chance to avoid incoming damage entirely (0-100%).",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "accuracy",
@@ -1374,8 +1855,12 @@
           "combat"
         ],
         "order": -60,
+        "group": "combat",
         "description": "Reduces the target's effective dodge by this many points (flat), applied before the dodge cap. Negative accuracy adds to the target's dodge instead, so an attacker below 0 can miss a target that has no dodge of its own. 0 = no effect.",
-        "ingame_description": "Cuts through the target's dodge (flat %). Negative accuracy adds to their dodge instead – even a target with no dodge can be missed."
+        "ingame_description": "Cuts through the target's dodge (flat %). Negative accuracy adds to their dodge instead – even a target with no dodge can be missed.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "lifesteal",
@@ -1385,8 +1870,12 @@
           "combat"
         ],
         "order": -59,
+        "group": "combat",
         "description": "Percent of the health an ability strips from its targets that is healed back to the caster. Applies to EVERY ability the character casts; an effect's `lifesteal` aspect adds on top for that one cast. Counts only damage that reached health — a shield-absorbed hit steals nothing — and the heal is shaped by heal_amplification and heal_received_mult like any other.",
-        "ingame_description": "Heals the attacker for this % of the damage they deal."
+        "ingame_description": "Heals the attacker for this % of the damage they deal.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "resist_burn",
@@ -1396,8 +1885,12 @@
           "combat"
         ],
         "order": -95,
+        "group": "combat",
         "description": "Percent reduction applied to each burn DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
-        "ingame_description": "Reduces burn DoT damage (%). Above 100% the burn heals instead."
+        "ingame_description": "Reduces burn DoT damage (%). Above 100% the burn heals instead.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "resist_poison",
@@ -1407,8 +1900,12 @@
           "combat"
         ],
         "order": -94,
+        "group": "combat",
         "description": "Percent reduction applied to each poison DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
-        "ingame_description": "Reduces poison DoT damage (%). Above 100% the poison heals instead."
+        "ingame_description": "Reduces poison DoT damage (%). Above 100% the poison heals instead.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "resist_bleed",
@@ -1418,8 +1915,12 @@
           "combat"
         ],
         "order": -93,
+        "group": "combat",
         "description": "Percent reduction applied to each bleed DoT tick. Unclamped – above 100 the tick heals instead of damaging.",
-        "ingame_description": "Reduces bleed DoT damage (%). Above 100% the bleed heals instead."
+        "ingame_description": "Reduces bleed DoT damage (%). Above 100% the bleed heals instead.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "damage_dealt_mult",
@@ -1429,8 +1930,12 @@
           "combat"
         ],
         "order": -45,
+        "group": "combat",
         "description": "Additive percent modifier on outgoing damage. Summed with the per-missing-HP and per-ally bonuses, then damage x max(1 + total/100, 0.1).",
-        "ingame_description": "Additive % modifier to all outgoing damage."
+        "ingame_description": "Additive % modifier to all outgoing damage.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "damage_taken_mult",
@@ -1440,9 +1945,13 @@
           "combat"
         ],
         "order": -44,
+        "group": "combat",
         "reduction_is_good": true,
         "description": "Additive percent modifier on incoming damage: damage x max(1 + value/100, 0.1), applied before armor. Positive = takes more damage.",
-        "ingame_description": "Additive % modifier to all incoming damage. Positive = take more."
+        "ingame_description": "Additive % modifier to all incoming damage. Positive = take more.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "heal_amplification",
@@ -1452,8 +1961,12 @@
           "combat"
         ],
         "order": -35,
+        "group": "combat",
         "description": "Percent boost to healing this character casts – heals, self-heals, and lifesteal: healing x (1 + value/100).",
-        "ingame_description": "Multiplier for healing effects cast by this character."
+        "ingame_description": "Multiplier for healing effects cast by this character.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "heal_received_mult",
@@ -1463,8 +1976,12 @@
           "combat"
         ],
         "order": -34,
+        "group": "combat",
         "description": "Additive percent modifier on healing this character receives: healing x (1 + value/100). Positive = receives more.",
-        "ingame_description": "Additive % modifier to all incoming healing. Positive = receive more."
+        "ingame_description": "Additive % modifier to all incoming healing. Positive = receive more.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "shield",
@@ -1474,8 +1991,12 @@
           "combat"
         ],
         "order": -58,
+        "group": "combat",
         "description": "Battle-start seed for the shield status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each shield stack absorbs 1 damage before health. Seeded stacks inherit the status's own duration, so a seeded shield runs the same clock as a cast one.",
-        "ingame_description": "Starting shield stacks at battle start. Each stack absorbs 1 damage."
+        "ingame_description": "Starting shield stacks at battle start. Each stack absorbs 1 damage.",
+        "meta": {
+          "scaling": "flat"
+        }
       },
       {
         "id": "preparation",
@@ -1485,6 +2006,7 @@
           "combat"
         ],
         "order": -24,
+        "group": "combat",
         "description": "Battle-start seed for the preparation status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Preparation gates certain powerful abilities.",
         "ingame_description": "Starting preparation stacks at battle start."
       },
@@ -1496,8 +2018,12 @@
           "combat"
         ],
         "order": -40,
+        "group": "combat",
         "description": "Battle-start seed for the thorns status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each stack reflects 1 flat damage to the attacker per hit taken; stacks are not consumed, and shields do not stop the reflection. Ability-applied thorns is power-scaled; this battle-start seed is a raw stack count.",
-        "ingame_description": "Starting thorns stacks at battle start. Each stack reflects 1 damage back to the attacker per hit."
+        "ingame_description": "Starting thorns stacks at battle start. Each stack reflects 1 damage back to the attacker per hit.",
+        "meta": {
+          "scaling": "flat"
+        }
       },
       {
         "id": "damage_per_missing_health",
@@ -1507,8 +2033,12 @@
           "combat"
         ],
         "order": -43,
+        "group": "combat",
         "description": "Adds value x missing-health fraction x 100 percentage points to outgoing damage. Example: 0.5 at half health = +25% damage.",
-        "ingame_description": "% damage bonus scaled by fraction of missing HP."
+        "ingame_description": "% damage bonus scaled by fraction of missing HP.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "damage_per_ally",
@@ -1518,8 +2048,12 @@
           "combat"
         ],
         "order": -42,
+        "group": "combat",
         "description": "Adds this many percentage points to outgoing damage per living ally, excluding self.",
-        "ingame_description": "% damage bonus per alive ally."
+        "ingame_description": "% damage bonus per alive ally.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "focus_fire",
@@ -1529,8 +2063,12 @@
           "combat"
         ],
         "order": -5,
+        "group": "combat",
         "description": "Intended: attacks mark the target, and each mark raises this attacker's damage against it by this stat's value in percent. Not wired up in the plugin scripts yet – defined for future use.",
-        "ingame_description": "Marks target on attack. Each mark increases damage from this attacker by this stat's value %."
+        "ingame_description": "Marks target on attack. Each mark increases damage from this attacker by this stat's value %.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "stagger_threshold",
@@ -1540,6 +2078,7 @@
           "combat"
         ],
         "order": -30,
+        "group": "combat",
         "description": "Base stagger stacks needed to stun this character: effective threshold = ceil(base x (1 + stagger_threshold_pct/100)). 0 or below = cannot be staggered. On trigger the target is stunned and all stagger is consumed.",
         "ingame_description": "Stagger tokens needed to trigger a stun. Higher = harder to stun."
       },
@@ -1551,8 +2090,12 @@
           "combat"
         ],
         "order": -29,
+        "group": "combat",
         "description": "Percent multiplier on stagger_threshold: effective threshold = ceil(base x (1 + value/100)). Braced grants +100 while recovering from a stun.",
-        "ingame_description": "Additive % bonus to stagger threshold. Granted by Braced and similar effects."
+        "ingame_description": "Additive % bonus to stagger threshold. Granted by Braced and similar effects.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "bonus_stun_damage",
@@ -1562,8 +2105,12 @@
           "combat"
         ],
         "order": -41,
+        "group": "combat",
         "description": "Percent extra damage against staggered targets: damage x (1 + value/100). Active while the target is stunned and through the braced recovery window.",
-        "ingame_description": "Extra damage % dealt to staggered targets – while stunned and through the braced recovery."
+        "ingame_description": "Extra damage % dealt to staggered targets – while stunned and through the braced recovery.",
+        "meta": {
+          "scaling": "relative"
+        }
       },
       {
         "id": "reflect",
@@ -1573,8 +2120,17 @@
           "combat"
         ],
         "order": -39,
+        "group": "combat",
         "description": "Battle-start seed for the reflect status: a status whose meta.source is set to this stat id is applied with this many stacks when battle begins. Each stack returns 1% of the damage that reaches health back to the attacker.",
         "ingame_description": "Starting reflect stacks at battle start. Each stack returns 1% of damage taken to the attacker."
+      }
+    ],
+    "stat_groups": [
+      {
+        "id": "combat",
+        "name": "Combat",
+        "order": 20,
+        "description": "Battle numbers the rpg_battler plugin reads: power, speed, armor, crit, dodge and the rest. Injected by the plugin so every game that battles has the section; a game adds its own groups around it."
       }
     ],
     "character_statuses": [

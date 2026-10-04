@@ -25,6 +25,20 @@ const isLoading = ref(false);
 // reload would land on a slot that was never written and drop the run to the main menu.
 const savesBlocked = computed(() => game.coreSystem.isSaveDisabled());
 
+const modsTitle = computed(() => global.getString('menu.mods_manager'));
+const backupWarning = computed(() => global.getString('mods.backup_warning'));
+const noModsLabel = computed(() => global.getString('mods.empty'));
+const incompatibleLabel = computed(() => global.getString('mods.incompatible'));
+const applyLabel = computed(() => global.getString(isLoading.value ? 'mods.applying' : 'mods.set'));
+
+function authorLine(author: string | undefined): string {
+  return global.getString('manifest.by_author', { author: author || '' });
+}
+
+function versionLine(version: string | undefined): string {
+  return global.getString('manifest.version', { version: version || '' });
+}
+
 // Load available mods
 onMounted(async () => {
   const gameId = game.coreSystem.gameId;
@@ -46,7 +60,7 @@ onMounted(async () => {
     });
   } catch (error) {
     console.error('Failed to load mods:', error);
-    global.addNotification('Failed to load mods');
+    global.addNotificationId('error_mods_load_failed');
   }
 });
 
@@ -101,7 +115,7 @@ function toggleModExpanded(modId: string) {
 
 async function applyModChanges() {
   if (!game.coreSystem.gameId) {
-    global.addNotification('No game loaded');
+    global.addNotificationId('error_no_game_loaded');
     return;
   }
 
@@ -159,7 +173,7 @@ async function applyModChanges() {
     window.location.reload();
   } catch (error) {
     console.error('Failed to apply mod changes:', error);
-    global.addNotification('Failed to apply mod changes');
+    global.addNotificationId('error_mods_apply_failed');
     isLoading.value = false;
   }
 }
@@ -168,16 +182,13 @@ async function applyModChanges() {
 
 <template>
   <div :id="COMPONENT_ID" class="mod-picker">
-    <h2>Mod Manager</h2>
+    <h2>{{ modsTitle }}</h2>
 
-    <div class="warning-message">
-      <strong>Warning:</strong> Please always have a backup save file before changing mods. Incompatible mods can cause
-      unexpected game errors.
-    </div>
+    <div class="warning-message" v-html="backupWarning"></div>
 
     <div class="mods-list">
       <div v-if="availableMods.length === 0" class="no-mods">
-        No mods available for this game.
+        {{ noModsLabel }}
       </div>
       <div v-else>
         <div v-for="mod in availableMods" :key="mod.id" class="mod-item"
@@ -189,11 +200,11 @@ async function applyModChanges() {
               <div class="mod-basic-info">
                 <div class="mod-name">
                   {{ mod.name }}
-                  <span v-if="!isModCompatible(mod)" class="incompatible-badge">Incompatible</span>
+                  <span v-if="!isModCompatible(mod)" class="incompatible-badge">{{ incompatibleLabel }}</span>
                 </div>
                 <div class="mod-meta">
-                  <span v-if="mod.author">by {{ mod.author }}</span>
-                  <span v-if="mod.version">v{{ mod.version }}</span>
+                  <span v-if="mod.author">{{ authorLine(mod.author) }}</span>
+                  <span v-if="mod.version">{{ versionLine(mod.version) }}</span>
                 </div>
               </div>
             </label>
@@ -218,7 +229,7 @@ async function applyModChanges() {
     <div v-if="availableMods.length > 0" class="actions">
       <div v-if="savesBlocked" class="blocked-message">{{ global.getString('mods_save_disabled') }}</div>
       <button @click="applyModChanges" :disabled="isLoading || savesBlocked" class="apply-button">
-        {{ isLoading ? 'Applying...' : 'Set Mods' }}
+        {{ applyLabel }}
       </button>
     </div>
 

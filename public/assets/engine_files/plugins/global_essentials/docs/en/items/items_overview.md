@@ -46,6 +46,20 @@ Traits with a `chooseOne` type give a fixed option list — `rarity` (common, un
 
 ---
 
+### Shipped traits
+
+Every game starts with these item traits (from the `global_essentials` plugin):
+
+| Trait | Type | Meaning |
+|-------|------|---------|
+| name, description, image | string, rich-text, image | What the item card shows |
+| max_stack, weight, item_level | number | Stack size, encumbrance, card level badge |
+| rarity | chooseOne | Color and loot tier; `quest` also makes the item undiscardable |
+| no_discard | boolean | The player can never throw the item away — the card's Drop choice and the reward panel's trash button stay hidden (`item.isDiscardable()`). Unrelated to loot drops. |
+| book, painting, use_scene, durability | various | Readables, gallery art, use-scene hooks, wear |
+
+---
+
 ### Item Slots
 
 **What they are:** Equipment positions on characters.
@@ -121,6 +135,8 @@ A `traits.item_level` number renders as a level badge on the item card – a pur
 | `status.abilities` | power_strike |
 | `status.skin_layers` | weapon_sword |
 
+**Item Editor:** The first button beside every item template, **Item Editor**, puts one item on one screen with the game's own item card rendered live beside the form. The category is a row of chips like the inventory tabs. The traits sit in groups, with name, image, description, rarity, stack size and weight always shown and the rest added from a menu. Below them come the price per currency, choices and the recipe it teaches; the equip slots with a summary of what the equip status carries; the statuses and resources it gives on consume; and its scripts. The side column shows the item as an inventory slot and lists every inventory, recipe, character and price that uses it, each with a button that opens it. Warnings flag a missing category, ids that no longer exist, a price in something that is not a currency, and an equip status on an item with no slots.
+
 ---
 
 ### Inventories
@@ -144,6 +160,8 @@ A `traits.item_level` number renders as a level badge on the item card – a pur
 |-----------|-----------|-------------|
 | Party | `_party_inventory` | Shared inventory for all party members |
 | Character private | `_character_[characterId]` | Personal storage per character (e.g., `_character_mc`) |
+
+**Inventory Editor:** Every inventory template has an **Inventory Editor** button beside its title. On the left, the Item Templates tab's filter form, saved presets included, narrows an item pool that shows items as inventory slots, with category chips like the in-game tabs. Click an item to add one, or Shift+click to add a full stack. A badge shows how many are already in. Hovering any item shows the game's own item card, built from the template without running its `item_create` script; in the contents and the slot preview a click pins the card. On the right sit the inventory's own fields and traits, its slots and weight against `max_size` and `max_weight`, its total value per currency, the contents with quantity steppers, and a preview of the slots the game fills, counted the way it stacks items. Warnings flag a row whose item is missing (the game throws on it), a quantity of 0 (read as 1), items that take a slot per copy, duplicate rows, and an inventory that starts over its limits.
 
 ---
 

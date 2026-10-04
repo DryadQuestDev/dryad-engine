@@ -14,6 +14,26 @@ Advance the global clock by N turns (minimum 1). Ticks limited status durations 
 {turn: 5}
 ```
 
+### `timestamp`
+
+Stamp the current turn into a flag. A dotted key stamps another dungeon's flag.
+
+```js
+{timestamp: "last_rest"}
+{timestamp: "dungeon2.last_rest"}
+```
+
+## Conditions
+
+| Condition | Returns | Example |
+|---|---|---|
+| `_turns_since(flag)` | Turns elapsed since `{timestamp}` stamped the flag. A flag never stamped counts as forever ago, so a wait gate starts open | `_turns_since(last_rest) >= 5` |
+
+```js
+// Resting works again five turns after the last rest
+~Rest by the fire{if: "_turns_since(last_rest) >= 5", timestamp: "last_rest", scene: "rest"}
+```
+
 ## State
 
 | State | Type | Description |

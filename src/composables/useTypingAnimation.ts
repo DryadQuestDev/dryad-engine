@@ -6,10 +6,15 @@ interface TextNode {
   parentTags: string[];
 }
 
+/** Pacing markers emitted by logicSystem.resolveTextTags (`<span class='text-tag' data-tag=…>`). */
+type TextTagKind = 'w' | 'nw' | 'fast' | 'cps';
+
 interface HtmlNode {
   type: 'html';
   tag: string;
   isClosing: boolean;
+  textTag?: TextTagKind;
+  value?: string;
 }
 
 type ParsedNode = TextNode | HtmlNode;
@@ -17,11 +22,22 @@ type ParsedNode = TextNode | HtmlNode;
 export interface TypingAnimationOptions {
   speed: Ref<number> | number; // 0 = instant, higher = slower
   onComplete?: () => void;
+  /** The text carried a `[nw]` tag: the caller should advance on its own after `delaySeconds`. */
+  onNoWait?: (delaySeconds: number) => void;
 }
 
+const TEXT_TAG_KINDS: TextTagKind[] = ['w', 'nw', 'fast', 'cps'];
+
 export function useTypingAnimation(options: TypingAnimationOptions) {
-  const displayedText = ref('');
+  /**
+   * How many characters of the text (counted over its text nodes in document order) are revealed.
+   * Infinity = all. The consumer applies this to a DOM it rendered once, instead of re-rendering an
+   * HTML prefix on every frame — which recreated every element and restarted its CSS animations.
+   */
+  const revealedChars = ref(Infinity);
   const isAnimating = ref(false);
+  /** Parked on a `[w]` click-wait. isAnimating stays true; resume() (or skipAnimation()) continues. */
+  const isWaiting = ref(false);
 
   let animationFrameId: number | null = null;
   let currentNodes: ParsedNode[] = [];
@@ -29,6 +45,14 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
   let currentCharIndex = 0;
   let lastFrameTime = 0;
   let skipRequested = false;
+  /** Timed `[w=N]` in progress: the timestamp at which typing resumes. */
+  let pauseUntil: number | null = null;
+  /** Index of the last `[fast]` marker: everything before it appears at once. */
+  let fastIndex = -1;
+  /** Open `[cps]` overrides, innermost last. Each is a per-character delay in ms. */
+  let cpsStack: number[] = [];
+  /** Set by `[nw]` — handed to onNoWait when the text completes. */
+  let noWaitDelay: number | null = null;
 
   /**
    * Parse HTML string into nodes while preserving structure
@@ -62,11 +86,17 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
         }
         openTag += '>';
 
+        const dataTag = element.classList.contains('text-tag') ? element.getAttribute('data-tag') : null;
+        const textTag = TEXT_TAG_KINDS.includes(dataTag as TextTagKind) ? (dataTag as TextTagKind) : undefined;
+        const value = element.getAttribute('data-value') ?? undefined;
+
         tagStack.push(openTag);
         nodes.push({
           type: 'html',
           tag: openTag,
-          isClosing: false
+          isClosing: false,
+          textTag,
+          value
         });
 
         // Process children
@@ -78,7 +108,8 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
         nodes.push({
           type: 'html',
           tag: `</${tagName}>`,
-          isClosing: true
+          isClosing: true,
+          textTag
         });
         tagStack.pop();
       }
@@ -92,70 +123,85 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
   }
 
   /**
-   * Build HTML string up to current position
+   * Characters revealed so far: every text node before the cursor in full, plus the cursor's part.
    */
-  function buildDisplayedHtml(): string {
-    let html = '';
-    const openTags: string[] = [];
-
-    const maxIndex = Math.min(currentIndex, currentNodes.length - 1);
-
-    for (let i = 0; i <= maxIndex; i++) {
+  function countRevealed(): number {
+    let count = 0;
+    for (let i = 0; i < currentIndex && i < currentNodes.length; i++) {
       const node = currentNodes[i];
-
-      if (!node) continue;
-
-      if (node.type === 'html') {
-        html += node.tag;
-        if (!node.isClosing) {
-          openTags.push(node.tag);
-        } else {
-          openTags.pop();
-        }
-      } else if (node.type === 'text') {
-        // Add parent tags if this is the current node
-        if (i === currentIndex) {
-          const charsToShow = currentCharIndex;
-          const textToShow = node.content.substring(0, charsToShow);
-          html += textToShow;
-        } else {
-          html += node.content;
-        }
-      }
+      if (node.type === 'text') count += node.content.length;
     }
+    const cursor = currentNodes[currentIndex];
+    if (cursor && cursor.type === 'text') count += Math.min(currentCharIndex, cursor.content.length);
+    return count;
+  }
 
-    return html;
+  /**
+   * Per-character delay for the base speed setting.
+   * speed 20 = 100ms, speed 50 = 70ms, speed 120 = 10ms
+   */
+  function baseDelayMs(speed: number): number {
+    return Math.max(10, 120 - speed);
+  }
+
+  /**
+   * A `[cps=…]` value → per-character delay. `30` is 30 characters per second; `*2` is twice the
+   * current rate (base speed or the enclosing [cps]).
+   */
+  function cpsToDelay(value: string, enclosingDelay: number): number {
+    if (value.startsWith('*')) {
+      const factor = parseFloat(value.slice(1));
+      return factor > 0 ? enclosingDelay / factor : enclosingDelay;
+    }
+    const cps = parseFloat(value);
+    return cps > 0 ? 1000 / cps : enclosingDelay;
+  }
+
+  function currentDelayMs(speed: number): number {
+    return cpsStack.length ? cpsStack[cpsStack.length - 1] : baseDelayMs(speed);
   }
 
   /**
    * Animation loop
    */
   function animate(timestamp: number) {
-    if (!isAnimating.value) return;
+    if (!isAnimating.value || isWaiting.value) return;
 
     const speed = unref(options.speed);
 
-    // If speed is 0 or skip requested, show everything instantly
-    if (speed === 0 || skipRequested) {
-      skipRequested = false;
-      completeAnimation();
-      return;
+    // A timed [w=N] holds the loop here; a skip cuts it short.
+    if (pauseUntil !== null) {
+      if (timestamp < pauseUntil && !skipRequested) {
+        animationFrameId = requestAnimationFrame(animate);
+        return;
+      }
+      pauseUntil = null;
+      lastFrameTime = 0;
     }
 
-    // Calculate delay per character based on speed
-    // speed 20 = 50ms, speed 50 = 20ms, speed 100 = 10ms
-    const delayMs = Math.max(10, 120 - speed);
+    // Speed 0 (the "none" setting) and a skip reveal everything up to the next click-wait
+    // at once; so does the stretch before a [fast] marker.
+    const instant = speed === 0 || skipRequested || currentIndex < fastIndex;
 
-    // Calculate characters to process per frame based on speed
-    // For speeds > 120, process multiple characters at once
-    const charsPerFrame = speed > 120 ? Math.ceil(speed / 120) : 1;
+    const delayMs = currentDelayMs(speed);
 
-    if (timestamp - lastFrameTime < delayMs) {
+    if (!instant && timestamp - lastFrameTime < delayMs) {
       animationFrameId = requestAnimationFrame(animate);
       return;
     }
 
     lastFrameTime = timestamp;
+
+    // Characters per frame: one, unless the delay is shorter than a frame. The base speed keeps
+    // its original ramp (speed > 120 → several per frame); a [cps] override derives it from the delay.
+    let charsPerFrame = 1;
+    if (instant) {
+      charsPerFrame = Infinity;
+    } else if (cpsStack.length) {
+      charsPerFrame = delayMs < 16 ? Math.ceil(16 / delayMs) : 1;
+    } else if (speed > 120) {
+      charsPerFrame = Math.ceil(speed / 120);
+    }
 
     // Process multiple characters per frame for high speeds
     for (let c = 0; c < charsPerFrame; c++) {
@@ -173,8 +219,36 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
       }
 
       if (node.type === 'html') {
-        // HTML tags appear instantly
+        // HTML tags appear instantly; pacing markers steer the loop.
         currentIndex++;
+
+        if (node.textTag === 'w' && !node.isClosing) {
+          if (node.value !== undefined) {
+            // Timed wait. A skip runs straight through it.
+            if (!skipRequested) {
+              pauseUntil = timestamp + parseFloat(node.value) * 1000;
+              revealedChars.value = countRevealed();
+              animationFrameId = requestAnimationFrame(animate);
+              return;
+            }
+          } else {
+            // Click wait. A skip stops here too — the next click continues from this spot.
+            skipRequested = false;
+            isWaiting.value = true;
+            revealedChars.value = countRevealed();
+            return;
+          }
+        } else if (node.textTag === 'cps') {
+          if (node.isClosing) {
+            cpsStack.pop();
+          } else {
+            cpsStack.push(cpsToDelay(node.value ?? '', currentDelayMs(speed)));
+          }
+          // The rate changed: let the next frame pick up the new delay.
+          if (!instant) break;
+        } else if (node.textTag === 'nw' && !node.isClosing) {
+          noWaitDelay = node.value !== undefined ? parseFloat(node.value) : 0;
+        }
         // Continue to next iteration to process more
       } else if (node.type === 'text') {
         currentCharIndex++;
@@ -201,7 +275,7 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
       }
     }
 
-    displayedText.value = buildDisplayedHtml();
+    revealedChars.value = countRevealed();
 
     if (currentIndex < currentNodes.length) {
       animationFrameId = requestAnimationFrame(animate);
@@ -215,19 +289,11 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
    */
   function completeAnimation() {
     isAnimating.value = false;
+    isWaiting.value = false;
+    skipRequested = false;
+    pauseUntil = null;
     currentIndex = currentNodes.length - 1;
-
-    // Build complete HTML
-    let fullHtml = '';
-    for (const node of currentNodes) {
-      if (node.type === 'html') {
-        fullHtml += node.tag;
-      } else if (node.type === 'text') {
-        fullHtml += node.content;
-      }
-    }
-
-    displayedText.value = fullHtml;
+    revealedChars.value = Infinity;
 
     if (animationFrameId !== null) {
       cancelAnimationFrame(animationFrameId);
@@ -235,6 +301,12 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
     }
 
     options.onComplete?.();
+
+    if (noWaitDelay !== null) {
+      const delay = noWaitDelay;
+      noWaitDelay = null;
+      options.onNoWait?.(delay);
+    }
   }
 
   /**
@@ -252,13 +324,26 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
     currentCharIndex = 0;
     lastFrameTime = 0;
     skipRequested = false;
-    displayedText.value = '';
+    pauseUntil = null;
+    cpsStack = [];
+    noWaitDelay = null;
+    isWaiting.value = false;
+    revealedChars.value = 0;
+
+    fastIndex = -1;
+    let hasTextTags = false;
+    currentNodes.forEach((node, i) => {
+      if (node.type !== 'html' || !node.textTag) return;
+      hasTextTags = true;
+      if (node.textTag === 'fast' && !node.isClosing) fastIndex = i;
+    });
 
     const speed = unref(options.speed);
 
-    // If speed is 0, show instantly
-    if (speed === 0) {
-      displayedText.value = htmlContent;
+    // If speed is 0 and nothing paces the text, show instantly. With pacing tags the loop still
+    // runs: the text lands at once but [w] and [nw] keep their meaning.
+    if (speed === 0 && !hasTextTags) {
+      revealedChars.value = Infinity;
       options.onComplete?.();
       return;
     }
@@ -268,16 +353,29 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
   }
 
   /**
-   * Skip to end of animation
+   * Continue after a `[w]` click-wait.
+   */
+  function resume() {
+    if (!isWaiting.value) return;
+    isWaiting.value = false;
+    lastFrameTime = 0;
+    animationFrameId = requestAnimationFrame(animate);
+  }
+
+  /**
+   * Reveal the text up to the next `[w]` click-wait (or the end). Parked on a click-wait, it
+   * continues instead — one click means "go on" in both states.
    */
   function skipAnimation() {
-    if (isAnimating.value) {
+    if (isWaiting.value) {
+      resume();
+    } else if (isAnimating.value) {
       skipRequested = true;
     }
   }
 
   /**
-   * Reset animation state
+   * Reset animation state — the text, if any, shows in full.
    */
   function reset() {
     if (animationFrameId !== null) {
@@ -285,7 +383,12 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
       animationFrameId = null;
     }
     isAnimating.value = false;
-    displayedText.value = '';
+    isWaiting.value = false;
+    skipRequested = false;
+    pauseUntil = null;
+    cpsStack = [];
+    noWaitDelay = null;
+    revealedChars.value = Infinity;
     currentNodes = [];
     currentIndex = 0;
     currentCharIndex = 0;
@@ -299,10 +402,12 @@ export function useTypingAnimation(options: TypingAnimationOptions) {
   });
 
   return {
-    displayedText,
+    revealedChars,
     isAnimating,
+    isWaiting,
     startAnimation,
     skipAnimation,
+    resume,
     reset
   };
 }

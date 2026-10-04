@@ -16,7 +16,7 @@
     /* Vertically center items */
     padding: 5px 10px;
     /* Add some padding */
-    border-bottom: 1px solid #ccc;
+    border-bottom: 1px solid var(--editor-border);
     /* Separator line */
     gap: 5px;
     /* Spacing between items */
@@ -35,7 +35,7 @@
     display: flex;
     align-items: center;
     padding: 5px 10px;
-    border-bottom: 1px solid #ddd;
+    border-bottom: 1px solid var(--editor-border);
     min-height: 35px;
     /* Give it some default height */
     flex-shrink: 0;
@@ -61,30 +61,31 @@
 
 .create_new {
     font-weight: bold;
-    border: 1px solid #ccc;
-    background-color: #f8f8f8;
+    border: 1px solid var(--editor-border);
+    background-color: var(--editor-surface-raised);
 }
 
 .tab {
     cursor: pointer;
     padding: 10px 15px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--editor-border);
     border-bottom: none;
     margin-right: 5px;
-    background-color: #f0f0f0;
+    background-color: var(--editor-surface-sunken);
+    color: var(--editor-text);
 }
 
 .tab:hover {
-    background-color: #d8d8d8;
+    background-color: var(--editor-surface-hover);
 }
 
 .create_new:hover,
 .choose_game:hover,
 .choose_mod:hover,
 .tab:hover {
-    background-color: #e9e9e9;
+    background-color: var(--editor-surface-hover);
     /* Simple hover effect */
-    border-color: #bbb;
+    border-color: var(--editor-border-strong);
 }
 
 /* Add styles for active tab/selection if needed later */
@@ -92,10 +93,10 @@
 
 /* Add styles for the selected tab */
 .tab.selected {
-    background-color: #e0e0e0;
+    background-color: var(--editor-surface-selected);
     /* Example selected background color */
     font-weight: bold;
-    border-bottom: 2px solid blue;
+    border-bottom: 2px solid var(--editor-accent);
     /* Example selected border */
 }
 
@@ -118,4 +119,44 @@
 
 .docs-button {
     min-width: 40px;
+}
+
+.theme-button {
+    min-width: 40px;
+}
+
+/* Hover menu under a main tab - listing its subtabs for a direct jump.
+   Teleported to body (the tab row's overflow-x would clip it), so it is
+   positioned with fixed coordinates taken from the hovered tab. */
+.main_tab_menu {
+    position: fixed;
+    z-index: 1200;
+    min-width: 180px;
+    max-width: 260px;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--editor-surface-raised);
+    border: 1px solid var(--editor-border-strong);
+    border-radius: 0 4px 4px 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.main_tab_menu_item {
+    padding: 6px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    border-radius: 3px;
+    color: var(--editor-text);
+}
+
+.main_tab_menu_item:hover {
+    background-color: var(--editor-surface-hover);
+}
+
+.main_tab_menu_item.selected {
+    background-color: var(--editor-surface-selected);
+    font-weight: bold;
 }

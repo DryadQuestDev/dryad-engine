@@ -280,9 +280,12 @@ export function isAIControlled(characterId) {
   // Called from the async turn loop, which can resume after a scripted teardown.
   if (!currentRpgBattle.value) return false;
   if (getSide(characterId) === 'enemy') return true;
-  // Player-side chars with battle_ai act on their own (read live so a future
-  // berserk/charm status can flip it mid-battle by toggling the trait).
-  return !!game.getCharacter(characterId)?.getTrait('battle_ai');
+  // Read live so a future berserk/charm status can flip it mid-battle by toggling the trait.
+  const ai = game.getCharacter(characterId)?.getTrait('battle_ai');
+  // A support fights from the sidelines on its own; only an explicit battle_ai: false hands it
+  // to the player.
+  if (isSupport(characterId)) return ai !== false;
+  return !!ai;
 }
 
 /**

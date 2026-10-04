@@ -240,14 +240,14 @@ function closeDialog() {
   cursor: pointer;
   display: flex;
   padding: 8px 12px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .save_item:hover {
-  background-color: #f5f5f5;
-  border-color: #9b9b9b;
+  background-color: var(--editor-surface-hover);
+  border-color: var(--editor-border-strong);
 }
 
 .save_item_main_content {
@@ -312,7 +312,7 @@ function closeDialog() {
 
 .save_meta {
   font-size: 0.8em;
-  color: #555;
+  color: var(--editor-text-muted);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -328,7 +328,7 @@ function closeDialog() {
 .no_saves_message {
   padding: 10px;
   font-style: italic;
-  color: #888;
+  color: var(--editor-text-muted);
   text-align: center;
   flex-grow: 1;
   display: flex;

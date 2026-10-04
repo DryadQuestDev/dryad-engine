@@ -1,6 +1,7 @@
 import { jsonrepair } from 'jsonrepair';
 import type { Block, Document } from './ast';
 import { stripCodeBlocks, stripCommentLines } from './comments';
+import { META_KEY } from './meta';
 import { findBraceRanges } from './lint';
 
 export type IndexCategory = 'action' | 'flag' | 'anchor' | 'loot' | 'trade';
@@ -79,6 +80,9 @@ class IndexBuilder {
       if (!parsed) continue;
 
       for (const [key, value] of Object.entries(parsed)) {
+        // Editor-only authoring state, not an engine action — it would
+        // otherwise top the Actions index with one hit per annotated block.
+        if (key === META_KEY) continue;
         this.bump('action', key, blockIndex);
         if (key === 'flag') {
           const flags = new Set<string>();

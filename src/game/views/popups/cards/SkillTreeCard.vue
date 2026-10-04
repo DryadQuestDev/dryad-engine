@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
+import { Global } from '../../../../global/global';
 
 const showIds = computed(() => shouldShowEntityIds());
 
@@ -11,8 +12,11 @@ const props = defineProps<{
 }>();
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const tree = computed(() => game.characterSystem.skillTreesMap.get(props.treeId));
 const treeCharacter = computed(() => props.characterId ? game.getCharacter(props.characterId) : undefined);
+
+const unknownLabel = computed(() => global.getString('card.unknown', { id: props.treeId }));
 </script>
 
 <template>
@@ -27,6 +31,6 @@ const treeCharacter = computed(() => props.characterId ? game.getCharacter(props
             class="popup-description"></div>
     </div>
     <div v-else class="popup-inner popup-error">
-        Unknown tree: {{ treeId }}
+        {{ unknownLabel }}
     </div>
 </template>

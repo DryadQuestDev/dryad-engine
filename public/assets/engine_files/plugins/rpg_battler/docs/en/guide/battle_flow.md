@@ -69,7 +69,7 @@ The player can toggle zoom manually during their turn.
 
 When a battle starts:
 
-1. Enemies are spawned from templates — or, for an `is_live_instance` entry, each live character named by `live_character_ids` is fetched and healed to full
+1. Enemies are spawned from templates — or, for an `is_live_instance` entry, each live character named by `live_character_ids` is fetched as it is, wounds included (a scene can weaken a live enemy before the fight). They carry their wounds out of the fight too; the plugin never heals them, and only sets any that fell to 1 health after a victory
 2. Turn order is calculated from all combatants' speed stats
 3. Ability states are initialized (abilities flagged `cd_on_battle_start` open on cooldown for their `cd`, charges from ability meta)
 4. Statuses with `meta.source` are seeded from the named character stat (e.g., a character with `wind_mantle: 5` starts the fight with the Wind Mantle status at 5 stacks)

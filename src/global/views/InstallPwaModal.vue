@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useMobile } from '../composables/useMobile';
+import { Global } from '../global';
 
 const emit = defineEmits<{ close: [] }>();
 const { installPromptEvent, promptInstall } = useMobile();
+const global = Global.getInstance();
 
 const platform = computed<'ios' | 'android' | 'other'>(() => {
   const ua = navigator.userAgent;
@@ -14,6 +16,19 @@ const platform = computed<'ios' | 'android' | 'other'>(() => {
 
 const canPromptInstall = computed(() => !!installPromptEvent.value);
 
+const closeLabel = computed(() => global.getString('close'));
+const title = computed(() => global.getString('pwa.install_title'));
+const description = computed(() => global.getString('pwa.install_description'));
+const installLabel = computed(() => global.getString('pwa.install_button'));
+const iosTitle = computed(() => global.getString('pwa.ios_title'));
+// Steps carry <strong> around the browser's own menu wording, so they render through v-html.
+const iosSteps = computed(() => [1, 2, 3].map(step => global.getString(`pwa.ios_step_${step}`)));
+const androidTitle = computed(() => global.getString('pwa.android_title'));
+const androidSteps = computed(() => [1, 2, 3].map(step => global.getString(`pwa.android_step_${step}`)));
+const launchStep = computed(() => global.getString('pwa.launch_step'));
+const otherTitle = computed(() => global.getString('pwa.other_title'));
+const otherHint = computed(() => global.getString('pwa.other_hint'));
+
 async function handleInstall() {
   const accepted = await promptInstall();
   if (accepted) emit('close');
@@ -23,42 +38,36 @@ async function handleInstall() {
 <template>
   <div class="install-modal-backdrop" @click.self="emit('close')">
     <div class="install-modal">
-      <button class="close-btn" @click="emit('close')" aria-label="Close">×</button>
-      <h2>Install for Fullscreen</h2>
-      <p class="description">
-        To play without toolbars, add this app to your home screen.
-      </p>
+      <button class="close-btn" @click="emit('close')" :aria-label="closeLabel">×</button>
+      <h2>{{ title }}</h2>
+      <p class="description">{{ description }}</p>
 
       <div v-if="canPromptInstall" class="install-section">
         <button class="install-button" @click="handleInstall">
           <i class="pi pi-download"></i>
-          <span>Install App</span>
+          <span>{{ installLabel }}</span>
         </button>
       </div>
 
       <div v-else-if="platform === 'ios'" class="instructions">
-        <h3>iOS Safari</h3>
+        <h3>{{ iosTitle }}</h3>
         <ol>
-          <li>Tap the <strong>Share</strong> button at the bottom of Safari</li>
-          <li>Scroll down and tap <strong>Add to Home Screen</strong></li>
-          <li>Tap <strong>Add</strong> in the top-right corner</li>
-          <li>Launch from your home screen icon – no toolbars</li>
+          <li v-for="(step, index) in iosSteps" :key="index" v-html="step"></li>
+          <li>{{ launchStep }}</li>
         </ol>
       </div>
 
       <div v-else-if="platform === 'android'" class="instructions">
-        <h3>Android Chrome</h3>
+        <h3>{{ androidTitle }}</h3>
         <ol>
-          <li>Tap the <strong>three-dot menu</strong> in the top right of Chrome</li>
-          <li>Tap <strong>Add to Home screen</strong> or <strong>Install app</strong></li>
-          <li>Confirm by tapping <strong>Add</strong> or <strong>Install</strong></li>
-          <li>Launch from your home screen icon – no toolbars</li>
+          <li v-for="(step, index) in androidSteps" :key="index" v-html="step"></li>
+          <li>{{ launchStep }}</li>
         </ol>
       </div>
 
       <div v-else class="instructions">
-        <h3>Other Browsers</h3>
-        <p>Look for an "Install", "Add to Home Screen", or "Pin to Start" option in your browser menu.</p>
+        <h3>{{ otherTitle }}</h3>
+        <p>{{ otherHint }}</p>
       </div>
     </div>
   </div>

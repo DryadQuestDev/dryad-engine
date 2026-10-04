@@ -66,35 +66,22 @@ const slotTypeOptions = computed(() => {
 });
 
 
+// The preview reads skin_layers/attributes straight off the character, so on a mod it gets the
+// core entry's merged in here. Never written back: mounting must leave the item untouched, or
+// the popup wrapper reads the normalization as an unsaved edit and a Save bakes core values
+// into the mod's copy.
+const previewCharacter = computed(() => {
+  const core = coreItem.value;
+  if (!core) return localItem.value;
+  return {
+    ...localItem.value,
+    skin_layers: [...new Set([...(localItem.value.skin_layers || []), ...(core.skin_layers || [])])],
+    attributes: { ...(core.attributes || {}), ...(localItem.value.attributes || {}) },
+  };
+});
+
 // Initialize
 onMounted(() => {
-  // Merge skin_layers: combine core and mod layers
-  if (coreItem.value?.skin_layers) {
-    const coreLayers = coreItem.value.skin_layers || [];
-    const modLayers = localItem.value.skin_layers || [];
-
-    // Use Set to merge unique layers, preserving mod order first, then adding missing core layers
-    const mergedLayers = [...new Set([...modLayers, ...coreLayers])];
-    localItem.value.skin_layers = mergedLayers;
-  } else if (!localItem.value.skin_layers) {
-    localItem.value.skin_layers = [];
-  }
-
-  // Merge attributes: core attributes as defaults, mod attributes override
-  if (coreItem.value?.attributes || localItem.value.attributes) {
-    localItem.value.attributes = {
-      ...(coreItem.value?.attributes || {}),
-      ...(localItem.value.attributes || {})
-    };
-  } else if (!localItem.value.attributes) {
-    localItem.value.attributes = {};
-  }
-
-  // Ensure item_slots array exists
-  if (!localItem.value.item_slots) {
-    localItem.value.item_slots = [];
-  }
-
   // Select first slot by default if available
   if (itemSlots.value.length > 0) {
     selectedSlotIndex.value = 0;
@@ -300,7 +287,7 @@ onMounted(() => {
              .preview-container (container-type:size). -->
         <div class="character-doll-wrapper">
           <div class="character-doll">
-            <EditorCharacterPreview :character="localItem" :coreCharacter="coreItem">
+            <EditorCharacterPreview :character="previewCharacter" :coreCharacter="coreItem">
               <template #empty>
                 <p class="empty-text">⚠️ Select Character Image Layers in the <strong>skin_layers</strong> field, or
                   configure <strong>spine</strong> files.</p>
@@ -329,20 +316,20 @@ onMounted(() => {
 
 .picker-header {
   padding: 0.5rem;
-  background-color: #f5f5f5;
+  background-color: var(--editor-surface-sunken);
   border-radius: 4px;
 }
 
 .picker-header h3 {
   margin: 0 0 0.5rem 0;
   font-size: 1.1rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .hint {
   margin: 0;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--editor-text-muted);
   font-style: italic;
 }
 
@@ -359,8 +346,8 @@ onMounted(() => {
   flex-direction: column;
   gap: 1.5rem;
   padding: 1rem;
-  background-color: #f9f9f9;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-raised);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   overflow-y: auto;
   position: relative;
@@ -376,7 +363,7 @@ onMounted(() => {
 .control-group label {
   font-size: 0.9rem;
   font-weight: 500;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .slot-dropdown {
@@ -385,8 +372,8 @@ onMounted(() => {
 
 .slot-info {
   padding: 0.75rem;
-  background-color: #e3f2fd;
-  border-left: 4px solid #2196F3;
+  background-color: var(--editor-tint-info);
+  border-left: 4px solid var(--editor-ink-blue);
   border-radius: 4px;
 }
 
@@ -447,16 +434,16 @@ onMounted(() => {
 .slots-list h4 {
   margin: 0 0 0.75rem 0;
   font-size: 0.95rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .empty-message {
   padding: 1rem;
   text-align: center;
-  color: #666;
+  color: var(--editor-text-muted);
   font-size: 0.85rem;
   font-style: italic;
-  background-color: #f5f5f5;
+  background-color: var(--editor-surface-sunken);
   border-radius: 4px;
 }
 
@@ -470,8 +457,8 @@ onMounted(() => {
 
 .slot-card {
   padding: 0.75rem;
-  background-color: #fff;
-  border: 2px solid #ddd;
+  background-color: var(--editor-surface);
+  border: 2px solid var(--editor-border);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -479,19 +466,19 @@ onMounted(() => {
 
 .slot-card:hover {
   border-color: #4CAF50;
-  background-color: #f1f8f1;
+  background-color: var(--editor-tint-success);
 }
 
 .slot-card.selected {
   border-color: #FF5722;
-  background-color: #fff3e0;
+  background-color: var(--editor-tint-warning);
 }
 
 .slot-card-header {
   font-weight: 600;
   font-size: 0.9rem;
   margin-bottom: 0.5rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .slot-card-body {
@@ -499,15 +486,15 @@ onMounted(() => {
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.8rem;
-  color: #666;
+  color: var(--editor-text-muted);
   font-family: var(--font-family-mono);
 }
 
 .preview-container {
   flex: 1;
   overflow: hidden;
-  background-color: #fafafa;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-raised);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   position: relative;
   container-type: size;
@@ -528,7 +515,7 @@ onMounted(() => {
   position: absolute;
   top: 0;
   height: 100%;
-  border-left: 2px dashed rgba(0, 0, 0, 0.15);
+  border-left: 2px dashed var(--editor-border);
   pointer-events: none;
   z-index: 0;
 }
@@ -617,7 +604,7 @@ onMounted(() => {
 }
 
 .slot-selector-rect.core-slot .rect-label {
-  color: #9E9E9E;
+  color: var(--editor-text-faint);
 }
 
 .slot-selector-rect.core-slot:hover {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import type { GalleryObject } from '../../../schemas/gallerySchema';
 import type { AssetObject } from '../../../schemas/assetSchema';
 import type { CharacterTemplateObject } from '../../../schemas/characterTemplateSchema';
@@ -15,6 +16,7 @@ import FloatLabel from 'primevue/floatlabel';
 import Button from 'primevue/button';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 
 // Local component state (not serialized)
 const selectedTabType = computed(() => game.coreSystem.getState<'characters' | 'assets' | 'scenes'>('gallery_tab'));
@@ -23,6 +25,27 @@ const selectedItemId = ref<string | null>(null);
 const descriptionMinimized = ref(false);
 const expandedGalleries = ref<Set<string>>(new Set());
 const isFullscreen = ref(false);
+
+const maskedName = computed(() => global.getString('masked_name'));
+const charactersTabLabel = computed(() => global.getString('gallery.tab.characters'));
+const assetsTabLabel = computed(() => global.getString('gallery.tab.assets'));
+const scenesTabLabel = computed(() => global.getString('gallery.tab.scenes'));
+const viewLabel = computed(() => global.getString('gallery.tweaks.view'));
+const viewDefaultLabel = computed(() => global.getString('gallery.tweaks.view_default'));
+const modelLabel = computed(() => global.getString('gallery.tweaks.model'));
+const attributesLabel = computed(() => global.getString('gallery.tweaks.attributes'));
+const stylesLabel = computed(() => global.getString('gallery.tweaks.styles'));
+const skinLayersLabel = computed(() => global.getString('gallery.tweaks.skin_layers'));
+const skinsLabel = computed(() => global.getString('gallery.tweaks.skins'));
+const animationLabel = computed(() => global.getString('gallery.tweaks.animation'));
+// One key per tab rather than one sentence with the tab name spliced in: the injected word
+// would have to agree with the rest of the sentence in most languages.
+const noGalleriesLabel = computed(() => global.getString(
+  selectedTabType.value === 'assets' ? 'gallery.empty_assets' : 'gallery.empty_characters'
+));
+const noItemsLabel = computed(() => global.getString('gallery.no_items'));
+const noSelectionLabel = computed(() => global.getString('gallery.no_selection'));
+const assetUndiscoveredLabel = computed(() => global.getString('gallery.asset_undiscovered'));
 
 // Character tweaks state
 const characterTweaks = ref<Map<string, { attributes: Map<string, string>, skinLayers: Set<string>, skinLayerStyles: Map<string, string[]>, view: string, spineModel: string | null, spineSkins: string[] }>>(new Map());
@@ -54,7 +77,7 @@ const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = sele
         const isDiscovered = game.coreSystem.discoveredCharacters.has(template.id);
         items.push({
           id: template.id,
-          name: isDiscovered ? (template.gallery?.entity_name || template.id) : '???',
+          name: isDiscovered ? (template.gallery?.entity_name || template.id) : maskedName.value,
           description: isDiscovered ? (template.gallery?.entity_description || '') : '',
           isDiscovered,
           order: template.gallery?.gallery_order ?? 0
@@ -67,7 +90,7 @@ const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = sele
         const isDiscovered = game.coreSystem.discoveredAssets.has(asset.id);
         items.push({
           id: asset.id,
-          name: isDiscovered ? (asset.gallery?.entity_name || asset.id) : '???',
+          name: isDiscovered ? (asset.gallery?.entity_name || asset.id) : maskedName.value,
           description: isDiscovered ? (asset.gallery?.entity_description || '') : '',
           isDiscovered,
           order: asset.gallery?.gallery_order ?? 0
@@ -105,7 +128,7 @@ const selectedItem = computed(() => {
     return {
       type: 'character' as const,
       id: template.id,
-      name: isDiscovered ? (template.gallery?.entity_name || template.id) : '???',
+      name: isDiscovered ? (template.gallery?.entity_name || template.id) : maskedName.value,
       description: isDiscovered ? (template.gallery?.entity_description || '') : '',
       isDiscovered,
       data: template
@@ -118,7 +141,7 @@ const selectedItem = computed(() => {
     return {
       type: 'asset' as const,
       id: asset.id,
-      name: isDiscovered ? (asset.gallery?.entity_name || asset.id) : '???',
+      name: isDiscovered ? (asset.gallery?.entity_name || asset.id) : maskedName.value,
       description: isDiscovered ? (asset.gallery?.entity_description || '') : '',
       isDiscovered,
       data: asset
@@ -351,7 +374,7 @@ const getViewOptions = () => {
   const views = availableViews.value;
   if (views.length === 0) return [];
   return [
-    { label: 'Default', value: VIEW_DEFAULT },
+    { label: viewDefaultLabel.value, value: VIEW_DEFAULT },
     ...views.map(v => ({ label: v, value: v }))
   ];
 };
@@ -625,15 +648,15 @@ onMounted(() => {
       <div class="gallery-type-tabs">
         <div v-if="hasCharactersTab" class="gallery-type-tab" :class="{ 'active': selectedTabType === 'characters' }"
           @click="selectTab('characters')">
-          Characters
+          {{ charactersTabLabel }}
         </div>
         <div v-if="hasAssetsTab" class="gallery-type-tab" :class="{ 'active': selectedTabType === 'assets' }"
           @click="selectTab('assets')">
-          Assets
+          {{ assetsTabLabel }}
         </div>
         <div v-if="hasScenesTab" class="gallery-type-tab" :class="{ 'active': selectedTabType === 'scenes' }"
           @click="selectTab('scenes')">
-          Scenes
+          {{ scenesTabLabel }}
         </div>
       </div>
 
@@ -643,7 +666,7 @@ onMounted(() => {
       <!-- Gallery List (for characters and assets tabs) -->
       <div v-else class="gallery-list-content">
         <div v-if="getFilteredGalleries().length === 0" class="empty-state">
-          No {{ selectedTabType }} galleries found
+          {{ noGalleriesLabel }}
         </div>
 
         <div v-else class="custom-accordion">
@@ -677,7 +700,7 @@ onMounted(() => {
                             @update:model-value="updateView($event)" :options="getViewOptions()"
                             optionLabel="label" optionValue="value" class="w-full"
                             :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
-                          <label>View</label>
+                          <label>{{ viewLabel }}</label>
                         </FloatLabel>
                       </div>
                     </div>
@@ -691,14 +714,14 @@ onMounted(() => {
                             :options="getSpineModelOptions()"
                             optionLabel="label" optionValue="value" class="w-full"
                             :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
-                          <label>Model</label>
+                          <label>{{ modelLabel }}</label>
                         </FloatLabel>
                       </div>
                     </div>
 
                     <!-- Attributes Section -->
                     <div v-if="getAttributeOptions().size > 0" class="tweaks-section">
-                      <div class="tweaks-section-header">Attributes</div>
+                      <div class="tweaks-section-header">{{ attributesLabel }}</div>
                       <div class="tweaks-attributes-grid">
                         <div v-for="[attrKey, options] in getAttributeOptions().entries()" :key="attrKey"
                           class="tweak-field">
@@ -716,7 +739,7 @@ onMounted(() => {
                     <!-- Styles Section -->
                     <div v-if="currentCharacterTweaks && currentCharacterTweaks.skinLayerStyles.size > 0"
                       class="tweaks-section">
-                      <div class="tweaks-section-header">Styles</div>
+                      <div class="tweaks-section-header">{{ stylesLabel }}</div>
                       <div class="tweaks-styles-grid">
                         <template v-for="layerId in Array.from(currentCharacterTweaks.skinLayers)" :key="layerId">
                           <div v-if="getSkinLayerStyleOptions(layerId).length > 0" class="tweak-field">
@@ -734,7 +757,7 @@ onMounted(() => {
 
                     <!-- Skin Layers Section -->
                     <div v-if="getSkinLayerOptions().length > 0" class="tweaks-section">
-                      <div class="tweaks-section-header">Skin Layers</div>
+                      <div class="tweaks-section-header">{{ skinLayersLabel }}</div>
                       <div class="tweak-field tweak-field-full">
                         <FloatLabel variant="on">
                           <MultiSelect
@@ -742,14 +765,14 @@ onMounted(() => {
                             @update:model-value="updateSkinLayers($event)" :options="getSkinLayerOptions()"
                             optionLabel="label" optionValue="value" display="chip" class="w-full"
                             :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
-                          <label>Skin Layers</label>
+                          <label>{{ skinLayersLabel }}</label>
                         </FloatLabel>
                       </div>
                     </div>
 
                     <!-- Spine Skins Section (for spine characters) -->
                     <div v-if="getCharacterSkinOptions().length > 0" class="tweaks-section">
-                      <div class="tweaks-section-header">Skins</div>
+                      <div class="tweaks-section-header">{{ skinsLabel }}</div>
                       <div class="tweak-field tweak-field-full">
                         <FloatLabel variant="on">
                           <MultiSelect :model-value="currentCharacterTweaks?.spineSkins || []"
@@ -757,7 +780,7 @@ onMounted(() => {
                             :options="getCharacterSkinOptions()"
                             optionLabel="label" optionValue="value" display="chip" class="w-full"
                             :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
-                          <label>Skins</label>
+                          <label>{{ skinsLabel }}</label>
                         </FloatLabel>
                       </div>
                     </div>
@@ -772,28 +795,28 @@ onMounted(() => {
 
                     <!-- Animation Section -->
                     <div v-if="getAnimationOptions().length > 0" class="tweaks-section">
-                      <div class="tweaks-section-header">Animation</div>
+                      <div class="tweaks-section-header">{{ animationLabel }}</div>
                       <div class="tweak-field tweak-field-full">
                         <FloatLabel variant="on">
                           <Select :model-value="currentAssetTweaks?.animation"
                             @update:model-value="updateAssetAnimation($event)" :options="getAnimationOptions()"
                             optionLabel="label" optionValue="value" class="w-full"
                             :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
-                          <label>Animation</label>
+                          <label>{{ animationLabel }}</label>
                         </FloatLabel>
                       </div>
                     </div>
 
                     <!-- Skins Section -->
                     <div v-if="getSkinOptions().length > 0" class="tweaks-section">
-                      <div class="tweaks-section-header">Skins</div>
+                      <div class="tweaks-section-header">{{ skinsLabel }}</div>
                       <div class="tweak-field tweak-field-full">
                         <FloatLabel variant="on">
                           <MultiSelect :model-value="currentAssetTweaks?.skins || []"
                             @update:model-value="updateAssetSkins($event)" :options="getSkinOptions()"
                             optionLabel="label" optionValue="value" display="chip" class="w-full"
                             :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
-                          <label>Skins</label>
+                          <label>{{ skinsLabel }}</label>
                         </FloatLabel>
                       </div>
                     </div>
@@ -802,7 +825,7 @@ onMounted(() => {
                 </template>
 
                 <div v-if="getGalleryItems(gallery.id).length === 0" class="empty-state-small">
-                  No items in this gallery
+                  {{ noItemsLabel }}
                 </div>
               </div>
             </div>
@@ -814,7 +837,7 @@ onMounted(() => {
     <!-- Right Column: Preview Area (hidden for scenes tab) -->
     <div v-if="selectedTabType !== 'scenes'" class="gallery-preview-column">
       <div v-if="!selectedItem" class="empty-preview">
-        Select an item from the gallery to preview
+        {{ noSelectionLabel }}
       </div>
 
       <template v-else>
@@ -847,7 +870,7 @@ onMounted(() => {
           <!-- Asset Preview -->
           <template v-else-if="selectedItem.type === 'asset'">
             <div v-if="!selectedItem.isDiscovered" class="undiscovered-asset">
-              <p>This asset has not been discovered yet</p>
+              <p>{{ assetUndiscoveredLabel }}</p>
             </div>
             <div v-else class="discovered-asset" @click="toggleFullscreen" v-show="!isFullscreen">
               <BackgroundAsset v-if="previewAssetDiscovered" :key="selectedItemId ?? ''" :asset="previewAssetDiscovered" :grade="false" />

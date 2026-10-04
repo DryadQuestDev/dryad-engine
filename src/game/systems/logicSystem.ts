@@ -1,10 +1,12 @@
 import { jsonrepair } from "jsonrepair";
+import { RESERVED_TEXT_TAGS, TEXT_COLORS, TEXT_EFFECTS, TEXT_EFFECT_NAME_REGEX } from "../../utility/textTags";
 import { Choice } from "../core/content/choice";
 import { Character } from "../core/character/character";
 import { Game } from "../game";
 import type { DungeonLine } from "./dungeonSystem";
 import { computed, ComputedRef } from "vue";
 import { gameLogger } from "../utils/logger";
+import { Global } from "../../global/global";
 import { normalizeAbilityEffects, sortEffectIds } from "../../utility/abilityEffects";
 import { CustomChoiceObject } from "../../schemas/customChoiceSchema";
 import { PoolDefinitionObject } from "../../schemas/poolDefinitionSchema";
@@ -33,6 +35,12 @@ export type ActionObject = {
 export type CreateChoiceParams = {
     id: string;
     name?: string;
+    /**
+     * Locale key for an engine-authored label, resolved inside `nameComputed` instead of here.
+     * Prefer it over a pre-resolved `name` for any choice that outlives the call that built it.
+     */
+    nameKey?: string;
+    nameParams?: Record<string, string | number>;
     params?: string | Record<string, any>;
 }
 
@@ -62,6 +70,36 @@ export class LogicSystem {
 
     public registerAspectRenderer(aspectId: string, fn: AspectRenderer): void {
         this.aspectRendererRegistry.set(aspectId, fn);
+    }
+
+    /** `[name]…[/name]` effect → the classes each wrapped letter carries. Seeded with the built-ins. */
+    textEffectRegistry = new Map<string, string[]>(TEXT_EFFECTS.map(name => [name, [`fx-${name}`]]));
+
+    /**
+     * A game's own `[name]…[/name]` effect. Its letters carry `fx-<name>` — styled by the game's
+     * CSS — plus the classes of every effect in `base`, so `('void', ['spooky'])` is the spooky
+     * drift that a `.fx-void` rule recolours.
+     */
+    public registerTextEffect(name: string, base: string[] = []): void {
+        const id = name.toLowerCase();
+        if (!TEXT_EFFECT_NAME_REGEX.test(id) || RESERVED_TEXT_TAGS.includes(id) || (TEXT_EFFECTS as readonly string[]).includes(id)) {
+            gameLogger.error(`Text effect "${name}" must be a new lowercase name, not a built-in tag`);
+            return;
+        }
+        const classes: string[] = [];
+        for (const baseName of base) {
+            const baseClasses = this.textEffectRegistry.get(baseName.toLowerCase());
+            if (!baseClasses) {
+                gameLogger.error(`Text effect "${name}": unknown base effect "${baseName}"`);
+                continue;
+            }
+            classes.push(...baseClasses);
+        }
+        classes.push(`fx-${id}`);
+        if (this.textEffectRegistry.has(id)) {
+            gameLogger.overwrite(`Text effect "${id}" already exists - overwriting`);
+        }
+        this.textEffectRegistry.set(id, classes);
     }
 
     /**
@@ -117,7 +155,7 @@ export class LogicSystem {
     /**
      * Parse a `targetId->item & item & ..., targetId->!item, ...` specification into
      * a typed list of per-target add/remove operations. Pure string parsing — no
-     * characters, statuses, or game data are touched. Used by `status`, `skin_layer`,
+     * characters, statuses, or game data are touched. Used by `status`, `skin`,
      * and `item_slot` content actions, and available to plugins authoring similar
      * `caster->X & Y, caster->!Z` sugar.
      *
@@ -137,7 +175,8 @@ export class LogicSystem {
         const out: Array<{ characterId: string; items: Array<{ name: string; remove: boolean }> }> = [];
         if (typeof data !== 'string' || !data.trim()) return out;
 
-        for (const spec of data.split(',').map(s => s.trim()).filter(Boolean)) {
+        // Commas inside an item's parentheses (`poisoned(stacks = 2, duration = 3)`) stay with it.
+        for (const spec of this.getParts(data).map(s => s.trim()).filter(Boolean)) {
             const arrowIdx = spec.indexOf('->');
             if (arrowIdx === -1) {
                 gameLogger.error(`[parseTargetedSpec] missing '->' in spec: "${spec}"`);
@@ -297,7 +336,7 @@ export class LogicSystem {
      * At least one condition must be true
      */
     private _evaluateConditionStringOr(conditionString: string): boolean {
-        const conditions = conditionString.split(',').map(s => s.trim());
+        const conditions = this._splitConditions(conditionString);
 
         for (const condition of conditions) {
             if (this._evaluateSingleCondition(condition)) {
@@ -443,7 +482,16 @@ export class LogicSystem {
         }
 
         // Data-only choice params: read off the Choice, never dispatched as actions.
-        let skip = ["if", "ifOr", "active", "activeOr", "clue"];
+        let skip = ["if", "ifOr", "active", "activeOr", "clue", "no_visited", "ignore_replay"];
+        // {choices: "&hub", ignore_replay: true} — a menu that leads back into play is not offered
+        // in a gallery replay, so the replay ends with the scene instead of wandering on.
+        if (params.ignore_replay && this.game.coreSystem.getState('replay_mode')) {
+            skip = [...skip, "choices", "choices_over"];
+        }
+        // Delayed actions move the flow (enter, scene, exit, battle, loot…). They run after every
+        // other key whatever the authored order, so `{enter: "19", flag: "x = 1"}` sets the flag
+        // before room 19's events read it — the same order a paragraph gives them.
+        const delayed: [any, any][] = [];
         for (let param of Object.keys(params)) {
             if (skip.includes(param)) {
                 continue;
@@ -455,17 +503,24 @@ export class LogicSystem {
                 continue;
             }
 
-            if (skipDelayed && actionObject.eventDelayed) {
+            if (actionObject.eventDelayed) {
+                if (!skipDelayed) delayed.push([actionObject, params[param]]);
                 continue;
             }
+            this.dispatchAction(actionObject, params[param]);
+        }
+        for (const [actionObject, value] of delayed) {
+            this.dispatchAction(actionObject, value);
+        }
+    }
 
-            if (Array.isArray(params[param])) {
-                for (let item of params[param]) {
-                    actionObject.action?.(item);
-                }
-            } else {
-                actionObject.action?.(params[param]);
+    private dispatchAction(actionObject: any, value: any) {
+        if (Array.isArray(value)) {
+            for (let item of value) {
+                actionObject.action?.(item);
             }
+        } else {
+            actionObject.action?.(value);
         }
     }
 
@@ -480,10 +535,15 @@ export class LogicSystem {
             if (!gate) {
                 continue;
             }
-            let target = gate(params[param], ctx);
-            if (target) {
-                gameLogger.info(`[gate] "${param}" aborted ${ctx.sceneId} -> ${target}`);
-                return target;
+            // A repeated action arrives as an array (see resolveTextActions) — gate each
+            // value in turn, exactly as resolveActions dispatches them.
+            const values = Array.isArray(params[param]) ? params[param] : [params[param]];
+            for (const value of values) {
+                let target = gate(value, ctx);
+                if (target) {
+                    gameLogger.info(`[gate] "${param}" aborted ${ctx.sceneId} -> ${target}`);
+                    return target;
+                }
             }
         }
         return null;
@@ -585,8 +645,14 @@ export class LogicSystem {
         let { resultString, resultActions } = this.resolveTextActions(output, noExecuteActions);
         output = resultString;
 
+        // [w] [p] [nw] [fast] [cps]…[/cps] — pacing markers for the typing animation
+        output = this.resolveTextTags(output);
+
         // bold * and italic **
         output = this.resolveTextStyles(output);
+
+        // [shake]…[/shake] and the other per-character effects
+        output = this.resolveTextEffects(output);
 
         this.resolveContext = prevContext;
         return { output: output, actions: resultActions };
@@ -608,7 +674,109 @@ export class LogicSystem {
         output = this.resolveTextPlaceholders(output);
         output = this.resolveNarrativeSlots(output);
         output = this.resolveTemplate(output);
+        output = this.resolveTextTags(output);
         output = this.resolveTextStyles(output);
+        output = this.resolveTextEffects(output);
+        return output;
+    }
+
+    /**
+     * Text effects — `[shake]…[/shake]`, `[rainbow]…[/rainbow]` and friends. Every visible character
+     * inside becomes `<span class='fx-char fx-shake' style='--i:N'>c</span>`, N counting from the
+     * outermost opening tag, so the CSS keyframes can stagger per letter. Effects nest (the span
+     * carries every active class); HTML tags, entities and whitespace pass through unwrapped.
+     * An `<img>` or an empty element (an inline icon) is a glyph: it is wrapped like a letter and
+     * moves with the run. Pacing markers are empty spans too, but they stay bare.
+     *
+     * Runs last: it must see the `<b>`/`<i>` that resolveTextStyles emits rather than the `**`
+     * markers, and the typing animation still types the wrapped letters one by one because each
+     * span holds a single-character text node.
+     */
+    private resolveTextEffects(text: string): string {
+        const names = [...this.textEffectRegistry.keys()].join('|');
+        if (!new RegExp(`\\[(?:${names})\\]`, 'i').test(text)) return text;
+
+        const tokenRegex = new RegExp(`\\[(\\/?)(${names})\\]|<img\\b[^>]*>|<(\\w+)\\b[^>]*><\\/\\3>|<[^>]+>|&[#\\w]+;|[\\s\\S]`, 'giu');
+        const active: string[] = [];
+        let index = 0;
+        let output = '';
+        // A word's letters share one nowrap .fx-word: they are inline-blocks, and the browser would
+        // otherwise wrap a line between any two of them, mid-word.
+        let inWord = false;
+        const closeWord = () => {
+            if (inWord) output += '</span>';
+            inWord = false;
+        };
+        for (const match of text.matchAll(tokenRegex)) {
+            const [token, slash, name, emptyElement] = match;
+            if (name) {
+                const effect = name.toLowerCase();
+                if (slash) {
+                    const at = active.lastIndexOf(effect);
+                    if (at >= 0) active.splice(at, 1);
+                } else {
+                    if (!active.length) index = 0;
+                    active.push(effect);
+                }
+                continue;
+            }
+            const glyph = (emptyElement !== undefined || /^<img\b/i.test(token)) && !token.includes('text-tag');
+            if (!active.length || (token.startsWith('<') && !glyph) || /^\s$/u.test(token)) {
+                closeWord();
+                output += token;
+                continue;
+            }
+            if (!inWord) output += "<span class='fx-word'>";
+            inWord = true;
+            const classes = [...new Set(active.flatMap(effect => this.textEffectRegistry.get(effect) || []))].join(' ');
+            output += `<span class='fx-char ${classes}' style='--i:${index++}'>${token}</span>`;
+        }
+        closeWord();
+        return output;
+    }
+
+    /**
+     * Pacing tags — the text-tag family that shares `[br]`'s square-bracket syntax. Each becomes an
+     * empty marker `<span class='text-tag' data-tag=…>` that survives into the rendered HTML, which
+     * is what lets the typing animation (useTypingAnimation) act on it at the exact spot the author
+     * put it. A `{…}` action could never carry this: resolveTextActions cuts the block out of the
+     * line and drops its position.
+     *
+     *   [w]            wait for a click, then keep typing
+     *   [w=0.5]        wait 0.5 s, then keep typing
+     *   [p] / [p=1]    like [w], followed by a line break
+     *   [nw] / [nw=1]  no wait: advance to the next paragraph when the typing ends (after N seconds)
+     *   [fast]         everything before the tag appears at once
+     *   [cps=30]…[/cps]  type the wrapped text at 30 characters per second
+     *   [cps=*2]…[/cps]  …at twice the current speed
+     *   [color=red]…[/color], [size=1.2]…[/size]  inline styling without raw HTML
+     *   [green]…[/green], [red], [gold]…  named colours, a `.text-<name>` class a game can retune
+     *
+     * Runs after every stage that can produce text (placeholders, templates, slots) so a tag inside
+     * a `|$template|` works, and after resolveCode so a tag inside [code]…[/code] stays literal.
+     */
+    private resolveTextTags(text: string): string {
+        let output = text.replace(/\[(w|p|nw)(?:=(\d*\.?\d+))?\]/gi, (_m, tag: string, secs?: string) => {
+            const kind = tag.toLowerCase();
+            const value = secs !== undefined ? ` data-value='${secs}'` : '';
+            const span = `<span class='text-tag' data-tag='${kind === 'p' ? 'w' : kind}'${value}></span>`;
+            return kind === 'p' ? span + '<br>' : span;
+        });
+        output = output.replace(/\[fast\]/gi, "<span class='text-tag' data-tag='fast'></span>");
+        // The multiplier's `*` is written as an entity: resolveTextStyles runs next and would read a
+        // literal `*` inside the attribute as an italic marker. getAttribute() decodes it back.
+        output = output.replace(/\[cps=(\*?)(\d*\.?\d+)\]/gi, (_m, star: string, num: string) =>
+            `<span class='text-tag' data-tag='cps' data-value='${star ? '&#42;' : ''}${num}'>`);
+        output = output.replace(/\[\/cps\]/gi, '</span>');
+        // [color=#c8a2ff]…[/color] — any CSS color. [size=1.2]…[/size] — em by default; px/rem/% pass through.
+        output = output.replace(/\[color=([^\]\s'"<>]+)\]/gi, "<span style='color:$1'>");
+        output = output.replace(/\[\/color\]/gi, '</span>');
+        output = output.replace(/\[size=(\d*\.?\d+)(px|em|rem|%)?\]/gi, (_m, num: string, unit?: string) =>
+            `<span style='font-size:${num}${unit || 'em'}'>`);
+        output = output.replace(/\[\/size\]/gi, '</span>');
+        const colors = TEXT_COLORS.join('|');
+        output = output.replace(new RegExp(`\\[(${colors})\\]`, 'gi'), (_m, name: string) => `<span class='text-${name.toLowerCase()}'>`);
+        output = output.replace(new RegExp(`\\[\\/(?:${colors})\\]`, 'gi'), '</span>');
         return output;
     }
 
@@ -635,21 +803,24 @@ export class LogicSystem {
         });
     }
 
-    public resolveTalkingCharacter(text: string): string {
-        const pattern = /^(\w+):\s*(.*)$/;
-        const match = text.match(pattern);
-
-        if (match && match[2] !== undefined) {
-            // match[0] is the full string "CharacterId: some text"
-            // match[1] is "CharacterId"
-            // match[2] is "some text"
-            this.game.dungeonSystem.talkingCharacterId.value = match[1];
-            return match[2];
-        } else {
+    /**
+     * `id: text` sets the speaker. `id!: text` is a party line: it plays only while that
+     * character is in the party, and `absent` tells the caller to skip the paragraph whole.
+     */
+    public resolveTalkingCharacter(text: string): { text: string, absent: boolean } {
+        const match = text.match(/^(\w+)(!?):\s*(.*)$/);
+        if (!match) {
             this.game.dungeonSystem.talkingCharacterId.value = null;
+            return { text, absent: false };
         }
 
-        return text; // Return original text if no match
+        const [, id, bang, rest] = match;
+        if (bang && !this.game.getParty().some(c => c.id === id)) {
+            this.game.dungeonSystem.talkingCharacterId.value = null;
+            return { text: '', absent: true };
+        }
+        this.game.dungeonSystem.talkingCharacterId.value = id;
+        return { text: rest, absent: false };
     }
 
     public resolveTextStyles(text: string): string {
@@ -797,8 +968,20 @@ export class LogicSystem {
                     this.resolveActions(parsedJson, true);
                 }
 
-                // Accumulate actions
-                Object.assign(accumulatedActions, parsedJson);
+                // Accumulate actions. A paragraph can carry the same action twice — an
+                // if{} branch ending in `{asset: "pic_26"}` immediately followed by the
+                // block's own `{asset: "!fountain"}` — and Object.assign would keep only
+                // the last, silently dropping the first. Collect repeats into an array
+                // instead: resolveActions already dispatches an array as one call per
+                // item, so authoring order is preserved.
+                for (const key of Object.keys(parsedJson)) {
+                    if (!(key in accumulatedActions)) {
+                        accumulatedActions[key] = parsedJson[key];
+                        continue;
+                    }
+                    const previous = accumulatedActions[key];
+                    accumulatedActions[key] = (Array.isArray(previous) ? previous : [previous]).concat(parsedJson[key]);
+                }
 
             } catch (error) {
                 // fixJson shields `.` followed by a digit so 1.5 survives, which means a leading-dot
@@ -938,96 +1121,87 @@ export class LogicSystem {
         return this.ifLogic2(parts, str);
     }
 
-    private ifLogic2(parts: string[], str: string) {
-        // Debug: let parts = str.split("&;");
-
+    /**
+     * Walk the parts ifLogic split the paragraph into. The splitter starts a new part after
+     * EVERY balanced `{…}` group, keyword or not, so a branch body is not one part but a run
+     * of parts up to the next keyword: `else{x}{asset: "a"}Deep in the sky…` is three parts
+     * (condition, action, prose). Taking only the part right after the condition dropped the
+     * prose whenever an action block came first — the same for text before the first `if{`
+     * and after `fi{}`. So the body is streamed: every non-keyword part passes through while
+     * the current branch is live.
+     *
+     * Chain semantics are flat, as before: `if{`/`ifOr{` opens a chain or, inside an
+     * unresolved one, acts as another branch; `else{cond}` is elif, `else{}` is else; once a
+     * branch matched, every keyword until `fi{}` is skipped; text past the last branch with
+     * no `fi{}` belongs to that branch.
+     */
+    private ifLogic2(parts: string[], _str: string) {
         if (parts.length == 1) {// just a regular string with no ifs
             return parts[0];
         }
-        // Debug: console.warn(parts);
 
         let result = "";
-        let i = 0;
-
-        //check the first part
-        if (!/^(if{|else{|ifOr{)/.test(parts[0])) {
-            result += parts[0];
-            i = 1;
-        }
-
-        let cycleFinished = false;
+        let inChain = false;
+        let resolved = false;
+        let live = true;
         let or = false;
-        for (i; i < parts.length; i = i + 1) {
-            let part = parts[i];
-            if (/^(if{|else{|ifOr{)/.test(part)) {
-                if (cycleFinished) {
-                    continue;
-                }
-                if (/^(ifOr{)/.test(part)) {
+
+        for (const part of parts) {
+            if (/^fi\{/.test(part)) {
+                inChain = false;
+                resolved = false;
+                live = true;
+                continue;
+            }
+
+            if (/^(if\{|else\{|ifOr\{)/.test(part)) {
+                if (/^ifOr\{/.test(part)) {
                     or = true;
-                } else if (/^(if{)/.test(part)) {
+                } else if (/^if\{/.test(part)) {
                     or = false;
+                }
+                inChain = true;
+                if (resolved) {
+                    live = false;
+                    continue;
                 }
 
                 let conditionIsTrue: boolean;
-                let conditionArr = part.match(/(\{.*\})/);
+                const conditionArr = part.match(/(\{.*\})/);
                 if (conditionArr) {
-                    let condition = conditionArr[0];
-
-                    // Remove outer braces to get the condition string
-                    let innerContent = condition.slice(1, -1).trim();
-
-                    // Check if this is an else{} with no condition (always true)
+                    // Examples: {flag < 3}, {_selected_character = alice}, {count >= 1}
+                    const innerContent = conditionArr[0].slice(1, -1).trim();
                     if (innerContent === '') {
                         conditionIsTrue = true; // else{} always evaluates to true
+                    } else if (or) {
+                        conditionIsTrue = this.performConditionalEvaluation({ ifOr: innerContent }, false);
                     } else {
-                        // Process as string condition
-                        // Examples: {flag < 3}, {_selected_character = alice}, {count >= 1}
-                        if (or) {
-                            conditionIsTrue = this.performConditionalEvaluation({ ifOr: innerContent }, false);
-                        } else {
-                            conditionIsTrue = this.performConditionalEvaluation({ if: innerContent }, false);
-                        }
+                        conditionIsTrue = this.performConditionalEvaluation({ if: innerContent }, false);
                     }
                 } else {//for ELSE
                     conditionIsTrue = this.performConditionalEvaluation(undefined, false); // Evaluates to true
                 }
-                if (conditionIsTrue) { // Use the direct boolean result
-                    result += parts[i + 1];
-                    cycleFinished = true;
+                live = conditionIsTrue;
+                if (conditionIsTrue) {
+                    resolved = true;
                 }
-
+                continue;
             }
 
-            //check fi
-            if (i == parts.length - 1) {
-
-                break;
+            if (live || !inChain) {
+                result += part;
             }
-            if (/^fi{}$/.test(part)) {
-                let next = parts[i + 1];
-                if (!/^(if{|ifOr{)/.test(next)) {
-                    result += parts[i + 1];
-                } else {
-                    i--;
-                }
-
-
-                cycleFinished = false;
-            }
-
         }
 
-
-        // Debug: console.warn(result);
         return result;
-        // Debug: return str;
     }
 
     public createCustomChoice(customChoice: CreateChoiceParams): Choice {
         let choice = new Choice();
         choice.id = customChoice.id;
         choice.name = customChoice.name || "";
+        choice.nameKey = customChoice.nameKey;
+        choice.nameParams = customChoice.nameParams;
 
         // Handle action as either string (from schema) or object (from code)
         let params = typeof customChoice.params === 'string'
@@ -1050,8 +1224,19 @@ export class LogicSystem {
             }
         }
 
-        if (!choice.nameComputed) {
-            choice.nameComputed = computed(() => this.resolveLabel(choice.name));
+        const modifierLabel = choice.nameComputed;
+        if (modifierLabel) {
+            // A modifier built its own label from the raw `name` (allure's price tag, a stat gate's
+            // badge), so nothing has resolved its placeholders, if{} logic or text styles yet — the
+            // choice list renders nameComputed as-is. Resolve on the way out, still inside a computed,
+            // so the modifier's own reactivity (prices, resources, flags) keeps repainting the label.
+            choice.nameComputed = computed(() => this.resolveLabel(modifierLabel.value));
+        } else {
+            // The getString call lives inside the computed so the label tracks the locale map and
+            // repaints on a language switch; a key always wins over a literal name.
+            choice.nameComputed = computed(() => this.resolveLabel(
+                choice.nameKey ? Global.getInstance().getString(choice.nameKey, choice.nameParams) : choice.name
+            ));
         }
     }
 
@@ -1731,7 +1916,7 @@ export class LogicSystem {
      * Render one or more status ids as clickable popup links.
      * For each id, looks up the status definition's display name and emits
      * `<span class='lore-link' data-lore-id='ID' data-lore-kind='status' tabindex='0'>NAME</span>`.
-     * Arrays render as comma-joined links. Unknown ids fall back to raw id + warning.
+     * Arrays join with the locale's list separator. Unknown ids fall back to raw id + warning.
      */
     private resolveStatusLinks(value: any): string {
         if (value === undefined || value === null) return '';
@@ -1745,13 +1930,13 @@ export class LogicSystem {
             const name = def.name || id;
             return `<span class='lore-link' data-lore-id='${id}' data-lore-kind='status' tabindex='0'>${name}</span>`;
         };
-        if (Array.isArray(value)) return value.map((id: any) => renderOne(String(id))).join(', ');
+        if (Array.isArray(value)) return value.map((id: any) => renderOne(String(id))).join(Global.getInstance().getString('list_separator'));
         return renderOne(String(value));
     }
 
     /**
      * Resolve one or more character-template ids to their display name (`traits.name`, then
-     * `name`, then the raw id), as bold text. Arrays render comma-joined.
+     * `name`, then the raw id), as bold text. Arrays join with the locale's list separator.
      */
     private resolveCharacterName(value: any): string {
         if (value === undefined || value === null) return '';
@@ -1761,7 +1946,7 @@ export class LogicSystem {
             const name = (def && (this.getNestedValue(def, 'traits.name') || def.name)) || id;
             return `<b>${name}</b>`;
         };
-        if (Array.isArray(value)) return value.map((id: any) => one(String(id))).join(', ');
+        if (Array.isArray(value)) return value.map((id: any) => one(String(id))).join(Global.getInstance().getString('list_separator'));
         return one(String(value));
     }
 
@@ -1796,7 +1981,7 @@ export class LogicSystem {
                         if (!item) return id;
                         const name = this.getNestedValue(item, refPath) || id;
                         return linkify(id, name);
-                    }).join(', ');
+                    }).join(Global.getInstance().getString('list_separator'));
                 } else {
                     const id = String(value);
                     const item = sourceData.get(id);
@@ -1813,7 +1998,7 @@ export class LogicSystem {
             return value.map((v: any) => {
                 const localeEntry = this.game.coreSystem.localeMap?.get(String(v));
                 return localeEntry?.val || String(v);
-            }).join(', ');
+            }).join(Global.getInstance().getString('list_separator'));
         }
 
         const localeEntry = this.game.coreSystem.localeMap?.get(String(value));
@@ -1828,7 +2013,9 @@ export class LogicSystem {
         const localeEntry = this.game.coreSystem.localeMap?.get(lineId);
         let string = localeEntry?.val || `[${lineId}]`;
         for (const key in params) {
-            string = string.replaceAll(`|${key}|`, String(params[key]));
+            // Function replacement keeps $&, $1 and $$ literal – substituted values are user data
+            // (item titles, player-chosen names) and must never be read as replacement patterns.
+            string = string.replaceAll(`|${key}|`, () => String(params[key]));
         }
         return string;
     }

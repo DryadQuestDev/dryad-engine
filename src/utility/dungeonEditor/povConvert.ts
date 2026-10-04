@@ -93,8 +93,8 @@ function convertSegment(
     return { text: withWas, atSentenceStart: outState };
 }
 
-// Mirrors resolveTalkingCharacter (logicSystem.ts) — a `speaker_id: replica` line.
-const SPEAKER_RE = /^(\w+):\s*/;
+// Mirrors resolveTalkingCharacter (logicSystem.ts) — a `speaker_id: replica` (or `speaker_id!:` party) line.
+const SPEAKER_RE = /^(\w+)!?:\s*/;
 
 // A matched inline HTML pair: <tag …>…</tag>. Its inner content is the author's
 // escape hatch — wrap a literal word in any tag (<span>mine</span>) and the converter

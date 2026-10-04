@@ -330,7 +330,7 @@ const arrowConnections = computed(() => {
   gap: 1.5rem;
   align-items: center;
   padding: 0.75rem;
-  background-color: #f5f5f5;
+  background-color: var(--editor-surface-sunken);
   border-radius: 4px;
 }
 
@@ -344,7 +344,7 @@ const arrowConnections = computed(() => {
 }
 
 .size-label {
-  color: #666;
+  color: var(--editor-text-muted);
   font-size: 0.9rem;
   margin-right: 0.3rem;
   white-space: nowrap;
@@ -355,7 +355,7 @@ const arrowConnections = computed(() => {
 }
 
 .dimension-separator {
-  color: #999;
+  color: var(--editor-text-faint);
   font-weight: 600;
   padding: 0 0.3rem;
 }
@@ -367,8 +367,8 @@ const arrowConnections = computed(() => {
 .canvas-container {
   flex: 1;
   overflow: auto;
-  border: 1px solid #ccc;
-  background-color: #fafafa;
+  border: 1px solid var(--editor-border);
+  background-color: var(--editor-surface-raised);
   max-height: 65vh;
   min-height: 400px;
   position: relative;
@@ -376,7 +376,7 @@ const arrowConnections = computed(() => {
 
 .skill-tree-canvas {
   display: block;
-  background: linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%);
+  background: linear-gradient(135deg, var(--editor-surface-raised) 0%, var(--editor-surface-sunken) 100%);
   cursor: default;
   min-width: 100%;
   min-height: 100%;

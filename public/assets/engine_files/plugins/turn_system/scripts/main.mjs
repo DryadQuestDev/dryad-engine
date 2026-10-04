@@ -82,6 +82,25 @@ game.registerAction('turn', (/** @type {number} */ value) => {
     advance(value);
 });
 
+// {timestamp: "last_rest"} — stamp the current turn into a flag (a dotted key stamps another
+// dungeon's flag). Pair it with _turns_since to make something come back after a wait.
+game.registerAction('timestamp', (/** @type {string} */ value) => {
+    const key = String(value).trim();
+    if (!key) {
+        console.error('[timestamp] expects a flag name');
+        return;
+    }
+    game.setFlag(key, game.getState('turn') || 0);
+});
+
+// Condition: _turns_since(last_rest) — turns elapsed since that flag was stamped. A flag never
+// stamped (0) counts as forever ago, so a `_turns_since(x) >= 5` wait gate starts open.
+game.registerCondition('_turns_since', (/** @type {string} */ key) => {
+    const stamp = Number(game.getFlag(String(key).trim())) || 0;
+    if (!stamp) return Number.MAX_SAFE_INTEGER;
+    return (game.getState('turn') || 0) - stamp;
+});
+
 // ── Room movement ──
 
 // Each room entry costs one turn.

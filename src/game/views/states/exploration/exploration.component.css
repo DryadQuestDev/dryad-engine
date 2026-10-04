@@ -171,7 +171,7 @@
   /* Adjust as needed for overall compass size */
   transform: translate(-24%, -24%);
   /* Center the compass on the room coordinates */
-
+  z-index: 2001;
 }
 
 .compass-fade-enter-active,

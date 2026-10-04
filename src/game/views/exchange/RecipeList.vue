@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, markRaw } from 'vue';
 import { Game } from '../../game';
 import { Inventory } from '../../core/character/inventory';
 import { ItemRecipeObject } from '../../../schemas/itemRecipeSchema';
 import RecipeCard from './RecipeCard.vue';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
-import { PARTY_INVENTORY_ID } from '../../systems/itemSystem';
+import { popover as vPopover, type PopoverBinding } from '../../directives/popoverDirective';
 
 const game = Game.getInstance();
 
@@ -18,21 +17,21 @@ const emit = defineEmits<{
   recipeSelect: [recipeId: string];
 }>();
 
-// Hover state for recipe cards
-const hoveredRecipeId = ref<string | null>(null);
-const referenceElement = ref<HTMLElement | null>(null);
-const floatingElement = ref<HTMLElement | null>(null);
+const RecipeCardComp = markRaw(RecipeCard);
 
-const { floatingStyles } = useFloating(referenceElement, floatingElement, {
-  placement: 'left-start',
-  strategy: 'fixed',
-  middleware: [
-    offset(8),
-    flip({ padding: 8 }),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
-});
+// The card rides the shared popup layer, so it behaves like every other hover card: peek by
+// default, T flips it interactive (scroll it, hover its ingredient rows for their item cards).
+// The button's click is spent on selecting the recipe, so the card never pins from it.
+function recipePopover(recipe: ItemRecipeObject): PopoverBinding {
+  return {
+    component: RecipeCardComp,
+    props: { recipe, inventory: props.inventory, partyInventory: props.targetInventory },
+    disableClick: true,
+    placement: 'left-start',
+    width: 340,
+    key: `recipe:${recipe.id}`,
+  };
+}
 
 // Get available and learned recipes
 const availableRecipes = computed<ItemRecipeObject[]>(() => {
@@ -90,23 +89,6 @@ function handleRecipeClick(recipe: ItemRecipeObject) {
   emit('recipeSelect', recipe.id);
 }
 
-// Handle recipe hover
-function handleRecipeHover(recipe: ItemRecipeObject | null, event?: MouseEvent) {
-  hoveredRecipeId.value = recipe?.id || null;
-
-  if (recipe && event) {
-    referenceElement.value = event.currentTarget as HTMLElement;
-  } else {
-    referenceElement.value = null;
-  }
-}
-
-// Get the currently hovered recipe
-const hoveredRecipe = computed(() => {
-  if (!hoveredRecipeId.value) return null;
-  return availableRecipes.value.find(r => r.id === hoveredRecipeId.value) || null;
-});
-
 // Computed to safely get selected recipe ID
 const selectedRecipeId = computed(() => {
   if (!props.inventory) return null;
@@ -119,23 +101,10 @@ const selectedRecipeId = computed(() => {
     <button v-for="recipe in availableRecipes" :key="recipe.id" class="recipe-button" :class="{
       disabled: !hasEnoughIngredients(recipe),
       selected: selectedRecipeId === recipe.id
-    }" @click="handleRecipeClick(recipe)" @mouseenter="handleRecipeHover(recipe, $event)"
-      @mouseleave="handleRecipeHover(null)">
+    }" @click="handleRecipeClick(recipe)" v-popover="recipePopover(recipe)">
       <span class="recipe-button-name">{{ recipe.name || recipe.id }}</span>
     </button>
   </div>
-
-  <!-- Recipe Card popup -->
-  <Teleport to="body">
-    <div v-if="hoveredRecipe" ref="floatingElement" class="recipe-card-popup" :style="{
-      ...floatingStyles,
-      zIndex: 10000,
-      pointerEvents: 'none',
-      willChange: 'transform'
-    }">
-      <RecipeCard :recipe="hoveredRecipe" :inventory="inventory" :party-inventory="targetInventory" />
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>

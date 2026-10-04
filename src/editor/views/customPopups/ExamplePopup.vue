@@ -83,8 +83,8 @@ function exampleAction() {
 }
 
 .popup-info {
-  background-color: #e3f2fd;
-  border-left: 4px solid #2196F3;
+  background-color: var(--editor-tint-info);
+  border-left: 4px solid var(--editor-ink-blue);
   padding: 1rem;
   border-radius: 4px;
 }
@@ -94,8 +94,8 @@ function exampleAction() {
 }
 
 .item-preview {
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   padding: 1rem;
 }
@@ -104,11 +104,11 @@ function exampleAction() {
   margin-top: 0;
   margin-bottom: 0.5rem;
   font-size: 1rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .item-preview pre {
-  background-color: #fff;
+  background-color: var(--editor-surface);
   padding: 0.75rem;
   border-radius: 4px;
   overflow-x: auto;
@@ -119,8 +119,8 @@ function exampleAction() {
 }
 
 .custom-actions {
-  background-color: #fff3e0;
-  border-left: 4px solid #ff9800;
+  background-color: var(--editor-tint-warning);
+  border-left: 4px solid var(--editor-ink-orange);
   padding: 1rem;
   border-radius: 4px;
 }
@@ -129,7 +129,7 @@ function exampleAction() {
   margin-top: 0;
   margin-bottom: 1rem;
   font-size: 1rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .action-button {
@@ -148,8 +148,8 @@ function exampleAction() {
 }
 
 .instructions {
-  background-color: #f1f8e9;
-  border-left: 4px solid #8bc34a;
+  background-color: var(--editor-tint-success);
+  border-left: 4px solid var(--editor-ink-green);
   padding: 1rem;
   border-radius: 4px;
 }
@@ -158,7 +158,7 @@ function exampleAction() {
   margin-top: 0;
   margin-bottom: 0.75rem;
   font-size: 1rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .instructions ol {
@@ -173,13 +173,13 @@ function exampleAction() {
 
 .hint {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--editor-text-muted);
   font-style: italic;
   margin-top: 0.5rem;
 }
 
 code {
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: var(--editor-surface-hover);
   padding: 0.2rem 0.4rem;
   border-radius: 3px;
   font-family: var(--font-family-mono);

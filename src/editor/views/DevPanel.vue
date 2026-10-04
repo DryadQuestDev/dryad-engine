@@ -114,22 +114,22 @@ async function handleExport() {
 
 <style scoped>
 .dev-panel {
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--editor-border);
   border-radius: 6px;
   margin: 1rem 0;
-  background-color: #ffffff;
+  background-color: var(--editor-surface);
 }
 
 .panel-header {
   padding: 1rem;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--editor-border);
 }
 
 .panel-header h3 {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
-  color: #333333;
+  color: var(--editor-text);
 }
 
 .panel-content {
@@ -153,14 +153,14 @@ async function handleExport() {
   padding: 0.75rem;
   border-radius: 4px;
   font-size: 0.9rem;
-  background-color: #fff3cd;
-  border: 1px solid #ffc107;
-  color: #856404;
+  background-color: var(--editor-tint-warning);
+  border: 1px solid var(--editor-fg-warning);
+  color: var(--editor-fg-warning);
 }
 
 .warning-message i {
   font-size: 1.2rem;
-  color: #ffc107;
+  color: var(--editor-fg-warning);
 }
 
 .error-message {
@@ -170,13 +170,13 @@ async function handleExport() {
   padding: 0.75rem;
   border-radius: 4px;
   font-size: 0.9rem;
-  background-color: #f8d7da;
-  border: 1px solid #f44336;
-  color: #721c24;
+  background-color: var(--editor-tint-danger);
+  border: 1px solid var(--editor-fg-danger);
+  color: var(--editor-fg-danger);
 }
 
 .error-message i {
   font-size: 1.2rem;
-  color: #f44336;
+  color: var(--editor-fg-danger);
 }
 </style>

@@ -8,10 +8,12 @@ import { inputMatchesSearch } from './searchState';
 import type { Block, Row, TemplateBlock } from '../../../../utility/dungeonEditor/ast';
 import { newTemplate } from '../../../../utility/dungeonEditor/ast';
 import { isCommentLine } from '../../../../utility/dungeonEditor/comments';
+import { readMeta, writeMeta } from '../../../../utility/dungeonEditor/meta';
 import type { LintIssue } from '../../../../utility/dungeonEditor/lint';
 import type { QuestGroup } from '../../../../utility/dungeonEditor/quest';
 import { tagBlockDeep as tagBlock } from './uid';
 import { flashElement, type RevealRequest } from './reveal';
+import MetaStatusGrid from './MetaStatusGrid.vue';
 
 const props = defineProps<{
   group: QuestGroup;
@@ -153,7 +155,18 @@ function progressFromParams(paramsRaw: string | null | undefined): number | null
 }
 
 function setStageProgress(idx: number, value: number | null) {
-  setTemplateParams(idx, value === null ? '' : `{progress: ${value}}`);
+  const b = asTemplate(idx);
+  if (!b) return;
+  // This rewrites the whole params object, so carry the block's editor-only
+  // `__meta` across — otherwise picking a progress value silently clears a
+  // status that the popup's counters and filter still expect to find.
+  const meta = readMeta(b.paramsRaw);
+  const base = value === null ? undefined : `{progress: ${value}}`;
+  setTemplateParams(idx, writeMeta(base, meta) ?? '');
+}
+
+function setStageParams(idx: number, newParams: string | undefined) {
+  setTemplateParams(idx, newParams ?? '');
 }
 
 // id-portion helpers — split the dot-segments
@@ -407,6 +420,8 @@ function removeQuest() {
               option-label="label" option-value="value" placeholder="-" class="progress-select"
               :class="{ 'progress-select--error': paramsErrorBlocks.has(stageIdx) }"
               v-tooltip.top="paramsErrorBlocks.has(stageIdx) ? 'Stage params fail lint — see the Raw view' : ''" />
+            <MetaStatusGrid :params-raw="(blocks[stageIdx] as any)?.paramsRaw"
+              @update:params-raw="(v: string | undefined) => setStageParams(stageIdx, v)" />
             <span class="stage-full-id" :title="fullId(stageIdx)">{{ fullId(stageIdx) }}</span>
             <Button icon="pi pi-copy" severity="secondary" text rounded size="small" @click="copyFullId(stageIdx)"
               v-tooltip.top="'Copy full id'" aria-label="Copy stage id" />
@@ -443,7 +458,7 @@ function removeQuest() {
 <style scoped>
 .quest-card {
   border: 1px solid rgba(0, 131, 143, 0.45);
-  border-left: 3px solid #00838f;
+  border-left: 3px solid var(--editor-ink-teal);
   border-radius: 6px;
   background: linear-gradient(180deg, rgba(0, 188, 212, 0.06), rgba(0, 188, 212, 0.02));
   display: flex;
@@ -466,7 +481,7 @@ function removeQuest() {
   font-family: var(--font-family-mono, monospace);
   font-weight: 700;
   font-size: 1.1rem;
-  color: #00838f;
+  color: var(--editor-ink-teal);
   cursor: help;
 }
 
@@ -475,7 +490,7 @@ function removeQuest() {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #00838f;
+  color: var(--editor-ink-teal);
   font-weight: 600;
 }
 
@@ -496,7 +511,7 @@ function removeQuest() {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #00838f;
+  color: var(--editor-ink-teal);
   font-weight: 700;
   opacity: 0.85;
 }
@@ -538,13 +553,13 @@ function removeQuest() {
 }
 
 .stage-marker {
-  color: #e65100;
+  color: var(--editor-ink-orange);
   font-weight: 700;
   cursor: help;
 }
 
 .goal-marker {
-  color: #c17900;
+  color: var(--editor-ink-amber);
   font-weight: 700;
   cursor: help;
 }
@@ -568,7 +583,7 @@ function removeQuest() {
 .stage-full-id {
   font-family: var(--font-family-mono, monospace);
   font-size: 0.78rem;
-  color: #888;
+  color: var(--editor-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -633,22 +648,22 @@ function removeQuest() {
 
 .add-btn--stage {
   border-color: rgba(230, 81, 0, 0.55);
-  color: #e65100;
+  color: var(--editor-ink-orange);
 }
 
 .add-btn--stage:hover {
   background: rgba(230, 81, 0, 0.12);
-  border-color: #e65100;
+  border-color: var(--editor-ink-orange);
 }
 
 .add-btn--goal {
   border-color: rgba(193, 121, 0, 0.55);
-  color: #c17900;
+  color: var(--editor-ink-amber);
 }
 
 .add-btn--goal:hover {
   background: rgba(193, 121, 0, 0.14);
-  border-color: #c17900;
+  border-color: var(--editor-ink-amber);
 }
 
 /* Target of a lint jump (the popup flashes the `[data-block-index]` element). */

@@ -9,7 +9,7 @@ import { getMc, getDungeonLevel, dungeonScale, setGenerationLevel, inSpawnWindow
 // - Inline: a `!` choice with {loot: "^pool_entry"} / {trade: "^pool_entry"}. The engine redirects
 //   the choice's value to a placement-unique id and records each redirect on the dungeon object
 //   (getCurrentDungeon().pooledInventories); this module fills those instances on dungeon enter.
-//   Comma lists draw several entries.
+//   Comma lists draw several entries. A `title` beside the ref names the instance ("Shelf").
 // - Declared hybrid: an inventory template with `dungeon` + `pool` traits (and optionally
 //   `restock`). Authored items are stamped stock_authored so restocks preserve exactly the
 //   surviving ones — a bought signature item stays gone.
@@ -110,7 +110,10 @@ export function simulatePool(poolId, level, rolls = 20) {
 // Runs after reward.mjs's dungeon_enter_after listener (module import order), so the level snapshot for
 // this dungeon is already taken when loot instances roll.
 
-game.on('dungeon_enter_after', (/** @type {string} */ dungeonId) => {
+/** Create every missing pooled inventory of the current dungeon (declared hybrids + inline ^refs).
+ *  Idempotent — existing instances are skipped. Also called on load, so a ^ref authored into a
+ *  dungeon the save is standing in gets its instance without a re-enter. */
+export function instantiatePools(/** @type {string} */ dungeonId) {
     if (!autoScalingOn()) return;
     const dungeon = game.getCurrentDungeon();
     const group = dungeon?.traits?.level_group || dungeonId;
@@ -140,12 +143,16 @@ game.on('dungeon_enter_after', (/** @type {string} */ dungeonId) => {
         const restock = entry.type === 'trade';
         const level = restock ? mcLevel() : getDungeonLevel();
         const inventory = game.createInventory(entry.id);
+        // {loot: "^trash1", title: "Shelf"} — the placement's own name on the exchange header
+        if (entry.title) inventory.name = entry.title;
         drawPoolInto(inventory, entry.pool, level);
         record(entry.id, entry.pool, level, restock);
     }
 
     if (changed) game.setState('pooled_stock', stock);
-});
+}
+
+game.on('dungeon_enter_after', instantiatePools);
 
 // ── Trade restock on open ──
 // inventory_open fires before the overlay renders and before trade prices init, so a re-rolled

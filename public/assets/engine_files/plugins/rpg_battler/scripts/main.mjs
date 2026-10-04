@@ -2,7 +2,7 @@
 
 import { currentRpgBattle, addFloatingText, pushLog } from './rpg-battle-state.mjs';
 import { isBattleScenePauseActive, teardownBattleScenes, resetBattleScenes } from './rpg-battle-scenes.mjs';
-import { initBattleTracking, summonCombatant, summonFromTemplate, sideAtUnitCap, previewAbilityUsable, spawnEnemies } from './rpg-battle-flow.mjs';
+import { initBattleTracking, summonCombatant, summonFromTemplate, sideAtUnitCap, previewAbilityUsable, spawnEnemies, splitOverflowWaves } from './rpg-battle-flow.mjs';
 import { checkStaggerThreshold, getEffectivePower, applyDefenses, applyDamageInstance, applyHeal, applyStatusEffect, logEffect, getSide, isCharAlive, isSupport } from './rpg-battle-effects.mjs';
 import { registerAspectRenderers } from './aspect-renderers.mjs';
 import { RpgBattleScreen } from './components/RpgBattleScreen.mjs';
@@ -23,7 +23,7 @@ game.registerEmitter('battle_start');
 // Emitter: battle_end — Fired when battle ends, BEFORE pre-battle states are restored and the
 // roster is cleaned up — battle data (enemies, statuses) is still readable here, but state
 // writes get overwritten by the restore; set post-battle state in battle_closed_before instead.
-// Args: (result: 'victory' | 'defeat'). Not cancellable.
+// Args: (result: 'victory' | 'defeat', battleId: string | null). Not cancellable.
 game.registerEmitter('battle_end');
 // Emitter: battle_finished
 // Fired the moment the battle is DECIDED, before the result overlay renders — every time,
@@ -37,7 +37,7 @@ game.registerEmitter('battle_finished');
 // Fired after the battle is fully torn down: pre-battle states restored, battle statuses
 // removed, spawned enemies deleted, battle cleared. Fires before the triggering scene
 // resumes (victory only). Safe place to set post-battle game state.
-// Args: (result: 'victory' | 'defeat'). Not cancellable.
+// Args: (result: 'victory' | 'defeat', battleId: string | null). Not cancellable.
 game.registerEmitter('battle_closed_before');
 // Emitter: battle_closed_after
 // Fired at the very end of the battle, after `battle_closed_before` AND after the triggering
@@ -46,7 +46,7 @@ game.registerEmitter('battle_closed_before');
 // save taken there reloads into a re-fight of the battle just won; take it here instead.
 // A scene that chains straight into another fight has already started it by the time this fires —
 // check `rpg_battle.isActive()` if that matters.
-// Args: (result: 'victory' | 'defeat'). Not cancellable.
+// Args: (result: 'victory' | 'defeat', battleId: string | null). Not cancellable.
 game.registerEmitter('battle_closed_after');
 // Emitter: battle_turn_start — Fired at the start of a new round. Args: (turnNumber).
 game.registerEmitter('battle_turn_start');
@@ -103,6 +103,14 @@ game.registerAbilityUsabilityChecker(previewAbilityUsable);
 game.registerState('rpg_battle_log_minimized', false);
 game.registerState('rpg_ability_tabs', {});
 game.registerState('rpg_defeated_battles', []);
+game.registerState('rpg_fought_battles', []);
+// The party picker's open request and the pre-battle state snapshot are STATE, not module refs.
+// The engine saves the open-popup stack, so a save taken with the picker up reloads with the
+// popup open: a transient request would leave it rendering nothing behind a full-screen
+// input-blocking overlay, and a transient snapshot would leave Cancel unable to lift the
+// blocks the prepare step put on saves, inventory and events.
+game.registerState('rpg_party_select_request', null);
+game.registerState('rpg_pre_battle_states', null);
 
 // ── Defeated battles ──
 
@@ -135,12 +143,38 @@ game.registerAction('win', {
   },
 });
 
+// Action: set_defeated — {set_defeated: "<battleId>[, <battleId>…]"} marks battle definitions
+// defeated with no victory at all: it only records the clear (firing battle_defeated once per
+// definition) and announces nothing. For a fight that happens off-page — a golem the player never
+// meets, a foe dealt with by another route — where `win` would be a lie: no rewards popup, no
+// battle_finished, no delay. Already-defeated battles are a no-op.
+game.registerAction('set_defeated', (/** @type {string} */ value) => {
+  for (const battleId of String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean)) addDefeated(battleId);
+});
+
 /** @param {string} battleId @returns {boolean} */
 function isDefeated(battleId) {
   return (game.getState('rpg_defeated_battles') || []).includes(battleId);
 }
 
 game.registerCondition('_defeated', isDefeated);
+
+// A battle won in actual combat. `_defeated` is also true for a clear by {win} or {set_defeated}
+// (a seduction, a scripted defeat); `_fought` tells a real fight apart. Recorded once per definition.
+function addFought(battleId) {
+  const fought = game.getState('rpg_fought_battles') || [];
+  if (!fought.includes(battleId)) {
+    fought.push(battleId);
+    game.setState('rpg_fought_battles', fought);
+  }
+}
+
+/** @param {string} battleId @returns {boolean} */
+function isFought(battleId) {
+  return (game.getState('rpg_fought_battles') || []).includes(String(battleId ?? '').trim());
+}
+
+game.registerCondition('_fought', isFought);
 
 // ── Party size helpers ──
 
@@ -157,41 +191,48 @@ export function getMaxTotalUnits() {
 // Pre-battle party picker: when more eligible members exist than max_battle_units, start()
 // stashes its params here and opens the picker popup; confirmPartySelect re-enters start()
 // with the chosen roster. battle_always members are locked in, battle_ignore never appears.
-export const partySelectRequest = window.engine.vue.ref(/** @type {{ params: any, eligible: string[], locked: string[], max: number } | null} */ (null));
+const partySelectState = () => game.getState('rpg_party_select_request');
+const setPartySelectState = (request) => game.setState('rpg_party_select_request', request);
+
+export const partySelectRequest = window.engine.vue.computed(() => partySelectState());
 
 // Pre-battle state snapshot. Taken at PREPARE (the picker opening) when there is a prepare
 // step, else at battle start — saves are disabled from that moment, and endRpgBattle's normal
 // restore covers the whole span because the battle object consumes this snapshot.
-let preBattleStates = /** @type {{ disableSaves: any, blockInventory: any, gameState: any, hideEvents: any } | null} */ (null);
+const preBattleStates = () => game.getState('rpg_pre_battle_states');
+const setPreBattleStates = (snapshot) => game.setState('rpg_pre_battle_states', snapshot);
 
 function captureBattleStates() {
-  if (preBattleStates) return preBattleStates;
-  preBattleStates = {
+  const existing = preBattleStates();
+  if (existing) return existing;
+  const snapshot = {
     disableSaves: game.getState('disable_saves'),
     blockInventory: game.getState('block_party_inventory'),
     gameState: game.getState('game_state'),
     hideEvents: game.getState('hide_events'),
   };
-  return preBattleStates;
+  setPreBattleStates(snapshot);
+  return snapshot;
 }
 
 export function confirmPartySelect(/** @type {string[]} */ chosenIds) {
-  const request = partySelectRequest.value;
-  partySelectRequest.value = null;
+  const request = partySelectState();
+  setPartySelectState(null);
   game.closePopup('rpg_party_select');
   if (!request) return;
   game.getService('rpg_battle').start({ ...request.params, playerParty: chosenIds, _partySelected: true });
 }
 
 export function cancelPartySelect() {
-  partySelectRequest.value = null;
+  setPartySelectState(null);
   game.closePopup('rpg_party_select');
   // No battle will consume the snapshot — restore everything the prepare step blocked.
-  if (preBattleStates) {
-    game.setState('disable_saves', preBattleStates.disableSaves);
-    game.setState('block_party_inventory', preBattleStates.blockInventory);
-    game.setState('hide_events', preBattleStates.hideEvents);
-    preBattleStates = null;
+  const snapshot = preBattleStates();
+  if (snapshot) {
+    game.setState('disable_saves', snapshot.disableSaves);
+    game.setState('block_party_inventory', snapshot.blockInventory);
+    game.setState('hide_events', snapshot.hideEvents);
+    setPreBattleStates(null);
   }
 }
 
@@ -348,7 +389,8 @@ game.registerService('rpg_battle', {
     }
 
     // Empty/absent waves drop out — a battle with only `enemies` is simply a one-wave battle.
-    waves = (waves || []).filter(w => w?.length);
+    // An over-cap wave becomes several, so the field never holds more than max_enemy_units.
+    waves = splitOverflowWaves((waves || []).filter(w => w?.length));
 
     // No explicit background → fall back to the dungeon/room's configured default asset.
     if (!background) background = resolveSceneDefaultBackground();
@@ -408,10 +450,10 @@ game.registerService('rpg_battle', {
           game.setState('hide_events', true);
           // A COPY of params — confirmPartySelect spreads this back into start(), and the
           // caller's own object must stay untouched for the next battle.
-          partySelectRequest.value = {
+          setPartySelectState({
             params: { ...params, playerParty: roster, _supportParty: supportIds },
             eligible: [...roster], locked, max,
-          };
+          });
           game.openPopup('rpg_party_select');
           return { ok: false, reason: 'party_select_pending' };
         }
@@ -429,6 +471,8 @@ game.registerService('rpg_battle', {
     const { ids: enemyParty, spawned: spawnedEnemies } = spawnEnemies(enemyEntries);
     const turnOrder = [...playerParty, ...enemyParty];
     const playerSet = new Set(playerParty);
+
+    const prevStates = captureBattleStates();
 
     /** @type {RpgBattle} */
     const battle = {
@@ -454,13 +498,13 @@ game.registerService('rpg_battle', {
       log: [],
       backgroundAssetId: background,
       charState: {},
-      prevDisableSaves: captureBattleStates().disableSaves,
-      prevBlockInventory: captureBattleStates().blockInventory,
-      prevGameState: captureBattleStates().gameState,
-      prevHideEvents: captureBattleStates().hideEvents,
+      prevDisableSaves: prevStates.disableSaves,
+      prevBlockInventory: prevStates.blockInventory,
+      prevGameState: prevStates.gameState,
+      prevHideEvents: prevStates.hideEvents,
       prevAssets: game.getAssets(),
     };
-    preBattleStates = null; // consumed — the battle object now owns the restore values
+    setPreBattleStates(null); // consumed — the battle object now owns the restore values
 
     // Initialize charState for all combatants
     const allCombatants = [...battle.playerParty, ...battle.enemyParty];
@@ -573,12 +617,20 @@ game.registerService('rpg_battle', {
   isDefeated(battleId) {
     return isDefeated(battleId);
   },
+  /** @param {string} battleId */
+  addFought(battleId) {
+    addFought(battleId);
+  },
+  /** @param {string} battleId @returns {boolean} */
+  isFought(battleId) {
+    return isFought(battleId);
+  },
   /**
    * Base threat of a battle DEFINITION: Σ template `threat` trait × amount over the enemies of
    * EVERY wave, plus the battle's own `threat` field on top. Games price it either way — per
    * character (templates carry `threat`, the battle field adds boss stakes) or per battle
    * (templates carry none and the field holds the full value on the 1-100 design scale:
-   * vermin ~5 … chapter boss ~90-100, overflow allowed — the dryad_tale style). Every
+   * vermin ~5 … chapter boss ~90-100, overflow allowed). Every
    * threat-driven system reads this: loot budgets, XP, game-side economies (allure pricing).
    * Unscaled base value.
    * @param {string} battleId @returns {number}
@@ -823,10 +875,24 @@ game.registerService('rpg_battle', {
   },
 });
 
+// ── Fight choices ──
+// A choice that starts a battle reads as one at a glance: a crossed-swords badge before its label
+// and the `fight-choice` row class (rpg-battle.css). The badge builds on any label an earlier
+// modifier already set.
+
+/** @param {Choice} choice */
+function markFightChoice(choice) {
+  const label = choice.nameComputed;
+  choice.nameComputed = window.engine.vue.computed(() =>
+    `<span class="fight-badge"><span class="fight-icon"></span></span> ${label ? label.value : choice.name}`);
+  choice.className = 'fight-choice';
+}
+
 // ── Action: battle ──
 
 game.registerAction('battle', {
   eventDelayed: true,
+  choiceModifier: markFightChoice,
   /** @param {StartBattleActionValue} value */
   action(value) {
     if (typeof value === 'string') {
@@ -835,6 +901,20 @@ game.registerAction('battle', {
       game.getService('rpg_battle').start(value);
     }
   }
+});
+
+// ── Action: fight ──
+// ~Fight{fight: true, scene: "ambush"} — the fight badge on a choice whose battle starts later, in
+// the scene it leads to. Starts nothing itself.
+
+game.registerAction('fight', {
+  /**
+   * @param {Choice} choice
+   * @param {boolean} value
+   */
+  choiceModifier: (choice, value) => {
+    if (value) markFightChoice(choice);
+  },
 });
 
 // ── End battle ──
@@ -857,9 +937,10 @@ export function endRpgBattle(result) {
   // Track victory
   if (result === 'victory' && battle.battleId) {
     addDefeated(battle.battleId);
+    addFought(battle.battleId);
   }
 
-  game.trigger('battle_end', result);
+  game.trigger('battle_end', result, battle.battleId || null);
 
   // Remove meta.is_battle statuses from all participants (reads per-instance status.meta)
   for (const charId of [...battle.playerParty, ...battle.enemyParty]) {
@@ -876,6 +957,17 @@ export function endRpgBattle(result) {
     if (char) game.deleteCharacter(charId);
   }
 
+  // Live enemies outlive the fight, wounds and all — never healed here or at spawn, so a wound a
+  // scene dealt BEFORE the fight is part of it. The fallen come back at 1 on a win: a beaten live
+  // character is a story body from here on, and one at 0 would drop dead again on the first tick of
+  // any later fight it joins. Spawned ones were just deleted, so this only sees live ones.
+  if (result === 'victory') {
+    for (const charId of battle.enemyParty) {
+      const char = game.getCharacter(charId);
+      if (char && char.getResource('health') <= 0) char.setResource('health', 1);
+    }
+  }
+
   // Restore previous state
   game.setState('disable_saves', battle.prevDisableSaves);
   game.setState('block_party_inventory', battle.prevBlockInventory);
@@ -886,7 +978,7 @@ export function endRpgBattle(result) {
 
   currentRpgBattle.value = null;
 
-  game.trigger('battle_closed_before', result);
+  game.trigger('battle_closed_before', result, battle.battleId || null);
 
   // Resume the scene that triggered the battle only on victory — on defeat it must not
   // continue as if won; the game's battle_closed_before listener owns what happens next.
@@ -897,6 +989,6 @@ export function endRpgBattle(result) {
     game.nextScene(true);
   }
 
-  game.trigger('battle_closed_after', result);
+  game.trigger('battle_closed_after', result, battle.battleId || null);
 }
 

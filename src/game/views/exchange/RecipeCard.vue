@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, markRaw } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import { Inventory } from '../../core/character/inventory';
+import { Item } from '../../core/character/item';
 import { ItemRecipeObject } from '../../../schemas/itemRecipeSchema';
+import ItemPopupCard from '../popups/cards/ItemPopupCard.vue';
+import { popover as vPopover, type PopoverBinding } from '../../directives/popoverDirective';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 
 const props = defineProps<{
   recipe: ItemRecipeObject;
@@ -54,10 +59,45 @@ const outputItems = computed(() => {
     };
   });
 });
+
+const ingredientsLabel = computed(() => global.getString('recipe.ingredients'));
+const resultLabel = computed(() => global.getString('recipe.result'));
+
+const ItemPopupCardComp = markRaw(ItemPopupCard);
+
+// Preview items for the row cards. A recipe lists template ids, but the item card wants an Item,
+// so one is instantiated per row and kept for the card's lifetime — it belongs to no inventory,
+// so it can never be used, dropped or traded from here.
+const previewItems = new Map<string, Item>();
+function previewItem(itemId: string): Item {
+  let item = previewItems.get(itemId);
+  if (!item) {
+    item = game.createItem(itemId);
+    previewItems.set(itemId, item);
+  }
+  return item;
+}
+
+// The rows sit inside the recipe popup, so their cards nest one level deeper in the popup stack.
+// Reachable once the recipe card is interactive (T), or by clicking a row to pin the item card.
+function itemPopover(itemId: string): PopoverBinding {
+  return {
+    component: ItemPopupCardComp,
+    props: { item: previewItem(itemId), noChoices: true },
+    placement: 'left-start',
+    key: `recipe-item:${props.recipe.id}:${itemId}`,
+  };
+}
+
+// One key for name + multiplier: the "(x2)" wrapper is Latin punctuation that other
+// locales reorder or spell differently.
+function itemQuantityLabel(item: { name: string; quantity: number }): string {
+  return global.getString('recipe.item_quantity', { item: item.name, quantity: item.quantity });
+}
 </script>
 
 <template>
-  <div class="recipe-card">
+  <div class="popup-inner recipe-card">
     <div class="recipe-header">
       <h3 class="recipe-name">{{ recipe.name || recipe.id }}</h3>
     </div>
@@ -66,24 +106,23 @@ const outputItems = computed(() => {
 
     <!-- Input Items (Ingredients) -->
     <div v-if="inputItems.length > 0" class="recipe-section">
-      <h4 class="section-title">Ingredients</h4>
+      <h4 class="section-title">{{ ingredientsLabel }}</h4>
       <div class="items-list">
-        <div v-for="item in inputItems" :key="item.id" class="recipe-item" :class="{ 'ingredient-available': item.available }">
+        <div v-for="item in inputItems" :key="item.id" class="recipe-item" :class="{ 'ingredient-available': item.available }"
+          v-popover="itemPopover(item.id || '')">
           <img v-if="item.image" :src="item.image" :alt="item.name" class="item-image" />
-          <span class="item-name" :class="item.rarity ? `rarity_${item.rarity}` : ''">{{ item.name }} (x{{ item.quantity
-            }})</span>
+          <span class="item-name" :class="item.rarity ? `rarity_${item.rarity}` : ''">{{ itemQuantityLabel(item) }}</span>
         </div>
       </div>
     </div>
 
     <!-- Output Items (Result) -->
     <div v-if="outputItems.length > 0" class="recipe-section">
-      <h4 class="section-title">Result</h4>
+      <h4 class="section-title">{{ resultLabel }}</h4>
       <div class="items-list">
-        <div v-for="item in outputItems" :key="item.id" class="recipe-item">
+        <div v-for="item in outputItems" :key="item.id" class="recipe-item" v-popover="itemPopover(item.id || '')">
           <img v-if="item.image" :src="item.image" :alt="item.name" class="item-image" />
-          <span class="item-name" :class="item.rarity ? `rarity_${item.rarity}` : ''">{{ item.name }} (x{{ item.quantity
-            }})</span>
+          <span class="item-name" :class="item.rarity ? `rarity_${item.rarity}` : ''">{{ itemQuantityLabel(item) }}</span>
         </div>
       </div>
     </div>
@@ -91,16 +130,7 @@ const outputItems = computed(() => {
 </template>
 
 <style scoped>
-.recipe-card {
-  background: linear-gradient(135deg, rgba(15, 25, 40, 0.95) 0%, rgba(20, 30, 45, 0.95) 100%);
-  border: 2px solid rgba(66, 185, 131, 0.4);
-  border-radius: 8px;
-  padding: 16px;
-  min-width: 280px;
-  max-width: 350px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
+/* Chrome (background, border, shadow, width) comes from the popup shell — see PopupItem. */
 
 .recipe-header {
   margin-bottom: 12px;
@@ -153,6 +183,7 @@ const outputItems = computed(() => {
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
+  cursor: help;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;

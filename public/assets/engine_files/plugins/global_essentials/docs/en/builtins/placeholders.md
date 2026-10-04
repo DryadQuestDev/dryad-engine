@@ -10,7 +10,7 @@ Format: `|placeholderName(args)|`
 |-------------|-------------|---------|
 | `flag` | Returns the value of a flag | `You have \|flag(gold)\| gold` |
 | `property` | Returns the value of a game property | `Score: \|property(score)\|` |
-| `item` | Returns the name of an item | `You are using \|item(uid, invId)\|` |
+| `item` | Returns the name of an item, tinted by its rarity. No args = the active item | `You are using \|item(uid, invId)\|` |
 | `from` | Fetches a locale entry and resolves it through the full pipeline | `\|from(greeting_text)\|` |
 | `pick` | Like `from`, but randomly selects from numbered locale variants | `\|pick(greeting_text)\|` |
 | `stat` | Returns a character stat value. Requires `context.character` passed to `resolveString` | `\|stat(power)\|` |

@@ -905,7 +905,7 @@ watchDebounced(internalValue, (newValue, oldValue) => {
 }
 
 .schema-toggle:not(.p-toggleswitch-checked) :deep(.p-toggleswitch-slider) {
-  background: #a38516;
+  background: var(--editor-ink-amber);
 }
 
 .schema-toggle:not(.p-toggleswitch-checked):hover :deep(.p-toggleswitch-slider) {
@@ -937,8 +937,8 @@ watchDebounced(internalValue, (newValue, oldValue) => {
 .core-data-display {
   flex: 1;
   /* Core data takes less space */
-  background-color: var(--p-surface-50);
-  border: 1px solid var(--p-surface-200);
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   padding: 0.5rem;
   border-radius: var(--p-border-radius);
   font-size: 0.875rem;
@@ -1000,12 +1000,12 @@ watchDebounced(internalValue, (newValue, oldValue) => {
 
 /* Styles from Dform that apply per field */
 .unsupported-field {
-  color: var(--p-red-500);
+  color: var(--editor-fg-danger);
   font-style: italic;
 }
 
 .p-float-label-variant-on>label {
-  background: var(--p-surface-ground);
+  background: var(--editor-surface);
   padding: 0 0.25rem;
 }
 
@@ -1114,15 +1114,15 @@ watchDebounced(internalValue, (newValue, oldValue) => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background-color: var(--p-yellow-50);
-  border: 1px solid var(--p-yellow-300);
+  background-color: var(--editor-tint-warning);
+  border: 1px solid var(--editor-ink-amber);
   border-radius: var(--p-border-radius);
-  color: var(--p-yellow-700);
+  color: var(--editor-fg-warning);
   font-size: 0.875rem;
 }
 
 .incorrect-field-warning i {
-  color: var(--p-yellow-600);
+  color: var(--editor-fg-warning);
   font-size: 1rem;
 }
 
@@ -1132,6 +1132,6 @@ watchDebounced(internalValue, (newValue, oldValue) => {
 }
 
 .incorrect-field-message {
-  color: var(--p-yellow-600);
+  color: var(--editor-fg-warning);
 }
 </style>

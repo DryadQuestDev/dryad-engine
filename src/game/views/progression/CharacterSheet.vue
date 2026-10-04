@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import { showConfirm } from '../../../services/dialogService';
 import CharacterStatuses from './CharacterStatuses.vue';
 import CharacterStats from './CharacterStats.vue';
@@ -15,6 +16,16 @@ const props = defineProps<{
 }>();
 
 const game = Game.getInstance();
+const global = Global.getInstance();
+
+// Game locale first so a game can reword the dismissal in its own voice, engine locale behind it.
+// Global.getStringOr runs the same cascade but takes no params, and dismiss_confirm carries |name|.
+function line(id: string, params: Record<string, string | number> = {}): string {
+  const gameLine = game.getLine(id, params);
+  return gameLine === `[${id}]` ? global.getString(id, params) : gameLine;
+}
+
+const dismissLabel = computed(() => line('dismiss'));
 
 const hasStats = computed(() => {
   return props.character.statIds.size > 0;
@@ -31,17 +42,26 @@ const canDismiss = computed(() =>
   && !!props.character.getTrait('dismissable')
   && game.isCharacterInParty(props.character));
 
+// Dismissal hands the character's gear back to the party inventory, so it follows the same lock as
+// every item action (battles, trades). The button stays and explains itself instead of vanishing.
+const dismissBlocked = computed(() => !game.canUseItems());
+
 // traits.renameable shows the inline rename control (the same engine component games gate
 // through their own panels). Hidden in viewer contexts like dismiss.
 const canRename = computed(() => !props.viewerMode && !!props.character.getTrait('renameable'));
 
 async function onDismiss() {
+  if (dismissBlocked.value) {
+    game.showNotification(line('dismiss_blocked'));
+    return;
+  }
   const name = props.character.getName();
   const confirmed = await showConfirm({
-    message: game.getLine('dismiss_confirm', { name }),
-    header: game.getLine('dismiss'),
+    message: line('dismiss_confirm', { name }),
+    header: line('dismiss'),
   });
-  if (!confirmed) return;
+  // The lock can engage while the dialog is open.
+  if (!confirmed || dismissBlocked.value) return;
   // The shared party inventory's getEquippedItems() spans EVERY member's gear — scope to the
   // items sitting in this character's own slots (unequipItem throws on anyone else's).
   const ownItemUids = new Set(props.character.getItemSlots().map(slot => slot.itemUid).filter(uid => uid));
@@ -63,8 +83,9 @@ async function onDismiss() {
 
     <CharacterRename v-if="canRename" :character="character" />
 
-    <button v-if="canDismiss" class="dismiss-btn" @click="onDismiss">
-      <i class="pi pi-user-minus"></i> {{ game.getLine('dismiss') }}
+    <button v-if="canDismiss" class="dismiss-btn" :class="{ 'is-blocked': dismissBlocked }"
+      :title="dismissBlocked ? line('dismiss_blocked') : undefined" @click="onDismiss">
+      <i class="pi pi-user-minus"></i> {{ dismissLabel }}
     </button>
 
     <div class="stats-wrapper">
@@ -128,5 +149,16 @@ async function onDismiss() {
 .dismiss-btn:hover {
   border-color: #c08a8a;
   background: rgba(192, 138, 138, 0.1);
+}
+
+/* is-blocked, not the disabled attribute: a disabled button never dispatches the click that explains it. */
+.dismiss-btn.is-blocked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dismiss-btn.is-blocked:hover {
+  border-color: #5a4a45;
+  background: transparent;
 }
 </style>

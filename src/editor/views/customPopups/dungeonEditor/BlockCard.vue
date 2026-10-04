@@ -7,6 +7,8 @@ import Sortable from 'sortablejs';
 import RowEditor from './RowEditor.vue';
 import SceneEditor from './SceneEditor.vue';
 import RichContentEditor from './PlainEditor.vue';
+import MetaStatusGrid from './MetaStatusGrid.vue';
+import ParamsInput from './ParamsInput.vue';
 import { inputMatchesSearch } from './searchState';
 import { tagWithUid } from './uid';
 import { focusFieldAt, type RevealRequest } from './reveal';
@@ -25,6 +27,14 @@ function sceneExistsForRow(rowIndex: number): boolean {
 import type { Block, Row, SceneBlock } from '../../../../utility/dungeonEditor/ast';
 import { isCommentLine } from '../../../../utility/dungeonEditor/comments';
 import type { LintIssue } from '../../../../utility/dungeonEditor/lint';
+import { readMeta, isMetaStatus, visibleParams, mergeAuthoredParams, metaCutSpan, type BlockMeta, type MetaStatus } from '../../../../utility/dungeonEditor/meta';
+
+// Module scope, not per-instance: while the typed params are unbalanced the
+// meta cannot be written into them, and the list is virtualized, so a card can
+// unmount mid-edit and a per-instance ref would take the status with it.
+// Keyed by block index, which is stable for as long as one card is being typed
+// into. Still session-local — closing the popup mid-edit drops it.
+const heldMeta = new Map<number, BlockMeta>();
 
 type QuestKind = 'title' | 'main_stage' | 'goal' | 'goal_stage';
 
@@ -55,6 +65,37 @@ const props = withDefaults(defineProps<{
   /** Focus request aimed at this block; `null` for every other block. */
   reveal?: RevealRequest | null;
 }>(), { issues: () => [], locked: false, reveal: null });
+
+// What the params box shows: the author's own params, without the editor's
+// `__meta`. Writes merge the stored meta back in, so editing here never
+// clears the block's status.
+const authorParams = computed(() => visibleParams((props.block as any).paramsRaw));
+
+function updateParams(value: string) {
+  const meta = readMeta((props.block as any).paramsRaw) ?? heldMeta.get(props.index) ?? null;
+  const next = mergeAuthoredParams(value, meta);
+  if (meta && !readMeta(next)) heldMeta.set(props.index, meta);
+  else heldMeta.delete(props.index);
+  const b = { ...props.block } as any;
+  b.paramsRaw = next;
+  emit('update:block', props.index, b);
+}
+
+// Lint anchors are offsets into the FULL params; the box shows them without
+// `__meta`. Shift anything that sits past the removed span.
+function mapParamsOffset(offset: number | undefined): number | undefined {
+  if (offset === undefined) return undefined;
+  const cut = metaCutSpan((props.block as any).paramsRaw);
+  if (!cut) return offset;
+  const [cutStart, cutEnd] = cut;
+  if (offset <= cutStart) return offset;
+  return Math.max(cutStart, offset - (cutEnd - cutStart));
+}
+
+const metaStatus = computed<MetaStatus | null>(() => {
+  const s = readMeta((props.block as any).paramsRaw)?.status;
+  return isMetaStatus(s) ? s : null;
+});
 
 const paramsHasIssue = computed(() =>
   (props.issues ?? []).some((i) => i.field === 'paramsRaw'),
@@ -101,7 +142,7 @@ const rawTextareaRef = ref<HTMLTextAreaElement | null>(null);
 watch(() => props.reveal, (r) => {
   if (!r) return;
   nextTick(() => {
-    if (r.at.target === 'header-params') focusFieldAt(paramsInputRef.value, r.at.start, r.at.end);
+    if (r.at.target === 'header-params') focusFieldAt(paramsInputRef.value, mapParamsOffset(r.at.start), mapParamsOffset(r.at.end));
     else if (r.at.target === 'raw') focusFieldAt(rawTextareaRef.value, r.at.start, r.at.end);
   });
 });
@@ -339,6 +380,7 @@ function onSceneUpdate(newScene: SceneBlock) {
     block.kind === 'scene' && !((block as any).id ?? '').includes('~') ? 'block--scene-event' : '',
     questKind ? `block--quest-${questKind.replace('_', '-')}` : '',
     issues && issues.length ? 'block--has-issues' : '',
+    metaStatus ? `block--status-${metaStatus}` : '',
   ]">
     <div class="block-header">
       <span class="kind-badge">
@@ -351,10 +393,16 @@ function onSceneUpdate(newScene: SceneBlock) {
         <InputText :model-value="(block as any).id" @update:model-value="(v: any) => updateHeader('id', v ?? '')"
           placeholder="id" class="id-input" :disabled="locked"
           :class="{ 'input-search-hit': !!(block as any).id && inputMatchesSearch(kindSigil[block.kind] + (block as any).id) }" />
-        <InputText v-if="block.kind !== 'room'" ref="paramsInputRef" :model-value="(block as any).paramsRaw ?? ''"
-          @update:model-value="(v: any) => updateHeader('paramsRaw', v ?? '')" placeholder="{params}"
+        <ParamsInput v-if="block.kind !== 'room'" ref="paramsInputRef" :model-value="authorParams"
+          @update:model-value="(v: string) => updateParams(v)"
           class="params-input"
-          :class="{ 'params-input--error': paramsHasIssue, 'input-search-hit': inputMatchesSearch((block as any).paramsRaw) }" />
+          :class="{ 'params-input--error': paramsHasIssue, 'input-search-hit': inputMatchesSearch(authorParams) }" />
+        <!-- Not gated on `locked`: that guards structure (move / remove), and the
+             params input beside it is not gated either, so a locked block can
+             already carry `__meta` typed by hand. Gating only the click would
+             also put an unclearable floor under the "No status" count. -->
+        <MetaStatusGrid :params-raw="(block as any).paramsRaw"
+          @update:params-raw="(v: string | undefined) => updateHeader('paramsRaw', v ?? '')" />
       </template>
       <div class="block-actions">
         <Button v-if="!locked" icon="pi pi-arrow-up" severity="secondary" text rounded size="small"
@@ -412,9 +460,12 @@ function onSceneUpdate(newScene: SceneBlock) {
 
 <style scoped>
 .block-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* The status gutter (::before) anchors here. `transform` below already
+     makes this a containing block, but say so rather than depend on it. */
+  position: relative;
+  border: 1px solid var(--editor-border);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--editor-surface-hover);
   /* Force own compositor layer. Without this, moving a block (insert / drag /
      up-down arrows) leaves stale paint inside this card — icons, the Quill
      toolbar, sometimes the whole card go invisible until any unrelated style
@@ -437,63 +488,63 @@ function onSceneUpdate(newScene: SceneBlock) {
 
 .block--room .sigil {
   font-size: 1.35rem;
-  color: #f57f17;
+  color: var(--editor-ink-amber);
 }
 
 .block--room .id-input :deep(input) {
   font-size: 1.05rem;
   font-weight: 700;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--editor-surface-hover);
 }
 
 .block--encounter {
-  border-left: 3px solid #9c27b0;
+  border-left: 3px solid var(--editor-ink-purple);
 }
 
 .block--encounter-description {
-  border-left: 3px solid #f9a825;
+  border-left: 3px solid var(--editor-ink-amber);
   background: rgba(255, 213, 79, 0.08);
 }
 
 .block--scene {
-  border-left: 3px solid #81c784;
+  border-left: 3px solid var(--editor-ink-green);
 }
 
 .block--scene-event {
-  border-left: 3px solid #1976d2;
+  border-left: 3px solid var(--editor-ink-blue);
 }
 
 .block--template {
-  border-left: 3px solid #9e9e9e;
+  border-left: 3px solid var(--editor-border-strong);
 }
 
 .block--quest-title {
-  border-left: 3px solid #00838f;
+  border-left: 3px solid var(--editor-ink-teal);
   background: rgba(0, 188, 212, 0.08);
 }
 
-.block--quest-title .sigil { color: #00838f; }
+.block--quest-title .sigil { color: var(--editor-ink-teal); }
 
 .block--quest-main-stage {
-  border-left: 3px solid #e65100;
+  border-left: 3px solid var(--editor-ink-orange);
   background: rgba(255, 183, 77, 0.1);
 }
 
-.block--quest-main-stage .sigil { color: #e65100; }
+.block--quest-main-stage .sigil { color: var(--editor-ink-orange); }
 
 .block--quest-goal {
-  border-left: 3px solid #c17900;
+  border-left: 3px solid var(--editor-ink-amber);
   background: rgba(255, 235, 59, 0.12);
 }
 
-.block--quest-goal .sigil { color: #c17900; }
+.block--quest-goal .sigil { color: var(--editor-ink-amber); }
 
 .block--quest-goal-stage {
-  border-left: 3px solid #e65100;
+  border-left: 3px solid var(--editor-ink-orange);
   background: rgba(255, 183, 77, 0.1);
 }
 
-.block--quest-goal-stage .sigil { color: #e65100; }
+.block--quest-goal-stage .sigil { color: var(--editor-ink-orange); }
 
 .block--raw {
   border-left: 3px solid #888;
@@ -503,6 +554,25 @@ function onSceneUpdate(newScene: SceneBlock) {
 .block--has-issues {
   box-shadow: 0 0 0 2px rgba(211, 47, 47, 0.55), 0 1px 3px rgba(211, 47, 47, 0.15);
 }
+
+/* Author status claims the left gutter, never the ring: the ring is lint's
+   (red) and the outline is selection's (blue), so the two stay tellable
+   apart on a card that is both broken-by-the-author and failing lint. */
+.block-card[class*='block--status-']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 4px 0 0 4px;
+  pointer-events: none;
+}
+
+.block--status-todo::before { background: #d8a657; }
+.block--status-wip::before { background: #7daea3; }
+.block--status-done::before { background: #89b482; }
+.block--status-broken::before { background: #d3869b; }
 
 .lint-badge {
   display: inline-flex;
@@ -521,8 +591,7 @@ function onSceneUpdate(newScene: SceneBlock) {
   white-space: pre-line;
 }
 
-input.params-input--error,
-.params-input--error :deep(input) {
+.params-input--error {
   outline: 2px solid #d32f2f;
   outline-offset: -1px;
 }
@@ -532,8 +601,8 @@ input.params-input--error,
   gap: 0.5rem;
   align-items: center;
   padding: 0.5rem 0.75rem;
-  background: rgba(0, 0, 0, 0.15);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--editor-surface-hover);
+  border-bottom: 1px solid var(--editor-border);
 }
 
 .block--encounter .block-header {
@@ -588,27 +657,27 @@ input.params-input--error,
 }
 
 .block--room .sigil {
-  color: #f57f17;
+  color: var(--editor-ink-amber);
 }
 
 .block--encounter .sigil {
-  color: #9c27b0;
+  color: var(--editor-ink-purple);
 }
 
 .block--encounter-description .sigil {
-  color: #f57f17;
+  color: var(--editor-ink-amber);
 }
 
 .block--scene .sigil {
-  color: #81c784;
+  color: var(--editor-ink-green);
 }
 
 .block--scene-event .sigil {
-  color: #1976d2;
+  color: var(--editor-ink-blue);
 }
 
 .block--template .sigil {
-  color: #757575;
+  color: var(--editor-text-faint);
 }
 
 .sigil {
@@ -624,8 +693,8 @@ input.params-input--error,
   min-width: 120px;
 }
 
-input.params-input {
-  color: #9c27b0 !important;
+.params-input {
+  color: var(--editor-ink-purple) !important;
   font-weight: 600;
 }
 
@@ -665,7 +734,7 @@ input.params-input {
   gap: 0.25rem;
   flex-wrap: wrap;
   padding: 0.5rem 0 0.25rem;
-  border-top: 1px dashed rgba(0, 0, 0, 0.1);
+  border-top: 1px dashed var(--editor-border);
   margin-top: 0.25rem;
 }
 
@@ -710,12 +779,12 @@ input.params-input {
 
 .add-btn--choice {
   border-color: rgba(156, 39, 176, 0.5);
-  color: #7b1fa2;
+  color: var(--editor-ink-purple);
 }
 
 .add-btn--choice:hover {
   background: rgba(156, 39, 176, 0.12);
-  border-color: #7b1fa2;
+  border-color: var(--editor-ink-purple);
 }
 
 .raw-body {
@@ -727,8 +796,8 @@ input.params-input {
   max-width: 800px;
   font-family: var(--font-family-mono, monospace);
   font-size: 0.85rem;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--editor-surface-hover);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   padding: 0.5rem;
   color: inherit;

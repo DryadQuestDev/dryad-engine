@@ -16,6 +16,7 @@ import {
   showLoadGamePopup,
   showPlaytestModsPopup,
 } from './usePlaytest';
+import { editorTheme, applyEditorTheme, clearEditorTheme, toggleEditorTheme } from '../../editorTheme';
 
 const componentName = ref('EditorScreen');
 const editor = Editor.getInstance();
@@ -47,12 +48,17 @@ function handleKeyDown(event: KeyboardEvent) {
 onMounted(() => {
   console.log(`${componentName.value} component mounted.`);
 
+  // The dark palette is the editor's alone — the game and main menu bring their own.
+  applyEditorTheme();
+
   // Add keyboard shortcut listener
   window.addEventListener('keydown', handleKeyDown);
 });
 
 onUnmounted(() => {
+  clearEditorTheme();
   window.removeEventListener('keydown', handleKeyDown);
+  cancelCloseHoverMenu();
 });
 
 // Handle dropdown changes
@@ -76,14 +82,13 @@ const handleModChange = async (event: any) => {
   if (editor.selectedMod !== target) modSelectKey.value++;
 };
 
-const getSecondaryTabsForCurrentMain = computed(() => {
-  // Explicitly read reactive values at top level for proper dependency tracking
+function subtabsForMainTab(mainTabId: string) {
+  // Explicitly read reactive values for proper dependency tracking
   const dungeonConfig = editor.dungeonConfig.value;
-  const mainTab = editor.mainTab;
 
-  const currentMainTabConfig = visibleMainTabs.value.find(tab => tab.id === mainTab);
+  const mainTabConfig = visibleMainTabs.value.find(tab => tab.id === mainTabId);
 
-  let filteredSubtabs = currentMainTabConfig?.subtabs ?? [];
+  let filteredSubtabs = mainTabConfig?.subtabs ?? [];
   // filter subtabs based on dungeon config
   if (dungeonConfig) {
     filteredSubtabs = filteredSubtabs.filter(subtab =>
@@ -93,7 +98,65 @@ const getSecondaryTabsForCurrentMain = computed(() => {
   }
 
   return filteredSubtabs;
+}
+
+const getSecondaryTabsForCurrentMain = computed(() => subtabsForMainTab(editor.mainTab));
+
+// --- Main tab hover menu ---
+// The tab row scrolls (overflow-x: auto), which would clip an absolutely
+// positioned child, so the menu is teleported to body and placed from the
+// hovered tab's bounding rect.
+const hoverMenuTab = ref<string | null>(null);
+const hoverMenuPos = ref({ left: 0, top: 0 });
+let hoverMenuCloseTimer: number | undefined;
+
+const hoverMenuSubtabs = computed(() => {
+  if (!hoverMenuTab.value) return [];
+  if (!editor.selectedGame || !editor.selectedMod) return [];
+  return subtabsForMainTab(hoverMenuTab.value);
 });
+
+function openHoverMenu(tabId: string, event: MouseEvent) {
+  cancelCloseHoverMenu();
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  hoverMenuPos.value = {
+    left: Math.max(4, Math.min(rect.left, window.innerWidth - 240)),
+    top: rect.bottom,
+  };
+  hoverMenuTab.value = tabId;
+}
+
+// Delayed so the pointer can travel from the tab into the teleported menu.
+function scheduleCloseHoverMenu() {
+  cancelCloseHoverMenu();
+  hoverMenuCloseTimer = window.setTimeout(() => {
+    hoverMenuTab.value = null;
+    hoverMenuCloseTimer = undefined;
+  }, 150);
+}
+
+function cancelCloseHoverMenu() {
+  if (hoverMenuCloseTimer !== undefined) {
+    clearTimeout(hoverMenuCloseTimer);
+    hoverMenuCloseTimer = undefined;
+  }
+}
+
+function closeHoverMenu() {
+  cancelCloseHoverMenu();
+  hoverMenuTab.value = null;
+}
+
+async function selectSubtabFromMenu(subtabId: string) {
+  const tabId = hoverMenuTab.value;
+  closeHoverMenu();
+  if (!tabId) return;
+  if (editor.mainTab === tabId) {
+    await editor.setSecondaryTab(subtabId);
+  } else {
+    await editor.setMainTab(tabId, subtabId);
+  }
+}
 
 // (input) handlers now only need to set the filter when there IS a search term
 function searchGame(event: Event): void {
@@ -133,6 +196,11 @@ function searchDungeon(event: Event): void {
     <!-- <pre>{{ JSON.stringify(editor.schema.value, null, 2) }}</pre>-->
     <div class="editor_header">
       <div class="main_row tab_row">
+        <!-- Light / Dark Theme Toggle -->
+        <Button :icon="editorTheme === 'dark' ? 'pi pi-sun' : 'pi pi-moon'" @click="toggleEditorTheme"
+          v-tooltip.bottom="editorTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+          class="theme-button" text />
+
         <div class="tab main_tab" @click="global.toMainMenu">
           Exit
         </div>
@@ -179,7 +247,8 @@ function searchDungeon(event: Event): void {
 
         <!-- Main Tabs - Iterate over visibleMainTabs from component -->
         <div v-for="tab in visibleMainTabs" :key="tab.id" class="tab main_tab"
-          :class="{ 'selected': editor.mainTab === tab.id }" @click="editor.setMainTab(tab.id)" :hidden="tab.disabled">
+          :class="{ 'selected': editor.mainTab === tab.id }" @click="editor.setMainTab(tab.id)" :hidden="tab.disabled"
+          @mouseenter="openHoverMenu(tab.id, $event)" @mouseleave="scheduleCloseHoverMenu">
           {{ tab.name ?? global.getString("tab." + tab.id) }}
         </div>
 
@@ -213,6 +282,19 @@ function searchDungeon(event: Event): void {
 
     <!-- Playtest Mods Configuration Popup -->
     <PlaytestModsPopup v-model:visible="showPlaytestModsPopup" />
+
+    <!-- Main tab hover menu - jump straight to a subtab instead of the last used one -->
+    <Teleport to="body">
+      <div v-if="hoverMenuSubtabs.length" class="main_tab_menu"
+        :style="{ left: hoverMenuPos.left + 'px', top: hoverMenuPos.top + 'px' }" @mouseenter="cancelCloseHoverMenu"
+        @mouseleave="closeHoverMenu">
+        <div v-for="subtab in hoverMenuSubtabs" :key="subtab.id" class="main_tab_menu_item"
+          :class="{ 'selected': editor.mainTab === hoverMenuTab && editor.secondaryTab === subtab.id }"
+          @click="selectSubtabFromMenu(subtab.id)">
+          {{ subtab.name ?? global.getString("tab." + hoverMenuTab + "." + subtab.id) }}
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>

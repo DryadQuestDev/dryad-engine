@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 
 const game = Game.getInstance();
@@ -8,6 +9,12 @@ const dungeonSystem = game.dungeonSystem;
 const logicSystem = game.logicSystem;
 
 const COMPONENT_ID = 'quests-tab';
+
+const global = Global.getInstance();
+const questsTitle = computed(() => global.getString('progression.tab.quests'));
+const showCompletedLabel = computed(() => global.getString('quests.show_completed'));
+const emptyText = computed(() => global.getString('quests.empty'));
+const selectPromptText = computed(() => global.getString('quests.select_prompt'));
 
 // Selected quest for right panel
 const selectedQuestKey = ref<string | null>(null);
@@ -105,11 +112,11 @@ function isGoalCompleted(goalId: string): boolean {
       <!-- Left Column: Quest List -->
       <div class="quest-list-column">
         <div class="quest-list-header">
-          <h2>Quests</h2>
+          <h2>{{ questsTitle }}</h2>
           <label class="toggle-completed-label">
             <input type="checkbox" class="toggle-completed-checkbox"
               :checked="game.coreSystem.getState('is_show_completed_quests')" @change="toggleShowCompleted" />
-            <span class="toggle-completed-text">Show Completed</span>
+            <span class="toggle-completed-text">{{ showCompletedLabel }}</span>
           </label>
         </div>
 
@@ -129,7 +136,7 @@ function isGoalCompleted(goalId: string): boolean {
           </template>
 
           <div v-if="dungeonSystem.questsByDungeon.value.size === 0" class="no-quests">
-            No active quests
+            {{ emptyText }}
           </div>
         </div>
       </div>
@@ -171,7 +178,7 @@ function isGoalCompleted(goalId: string): boolean {
         </div>
 
         <div v-else class="no-quest-selected">
-          Select a quest to view details
+          {{ selectPromptText }}
         </div>
       </div>
     </div>

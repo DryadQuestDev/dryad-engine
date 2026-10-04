@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, markRaw } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import { Status } from '../../core/character/status';
 import StatusCard from '../popups/cards/StatusCard.vue';
 import { popover as vPopover } from '../../directives/popoverDirective';
@@ -81,6 +82,10 @@ const duration = computed((): number => {
 });
 
 const isStackable = computed((): boolean => !!liveInstance.value?.isStackable());
+
+const stacksLabel = computed((): string =>
+  Global.getInstance().getString('status_card.stacks', { stacks: stacks.value })
+);
 </script>
 
 <template>
@@ -95,7 +100,7 @@ const isStackable = computed((): boolean => !!liveInstance.value?.isStackable())
     <img v-if="image" :src="image" :alt="name" class="status-image" />
     <span v-else class="status-name">{{ name }}</span>
     <span v-if="isStackable && stacks > 1" class="stack-count">
-      x{{ stacks }}
+      {{ stacksLabel }}
     </span>
     <span v-if="duration > 0" class="duration-count">
       {{ Math.ceil(duration) }}

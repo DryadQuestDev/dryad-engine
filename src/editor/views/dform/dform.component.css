@@ -15,7 +15,7 @@
 }
 
 .new_item_form {
-  background-color: #f4f4f5;
+  background-color: var(--editor-surface-sunken);
   /* Slightly different background */
 }
 
@@ -26,7 +26,7 @@
 
 .new_item_form,
 .item-in-array {
-  border: 1px solid gray;
+  border: 1px solid var(--editor-border-strong);
 }
 
 .item_header .item_title {
@@ -34,7 +34,7 @@
 }
 
 .item-in-array {
-  background-color: #fafafa;
+  background-color: var(--editor-surface-raised);
 }
 
 .item-in-array .form-field-wrapper:last-child {
@@ -91,7 +91,7 @@
 }
 
 .border-surface-300 {
-  border-color: #d4d4d8;
+  border-color: var(--editor-border);
 }
 
 /* Styles for item header using standard CSS */
@@ -124,21 +124,22 @@
 }
 
 .plugin-item {
-  border: 1px solid #d4d4d8;
+  border: 1px solid var(--editor-border);
   border-radius: 6px;
   padding: 1rem;
-  background-color: #fafafa;
+  background-color: var(--editor-surface-raised);
 }
 
 .plugin-name {
-  color: #2563eb;
+  color: var(--editor-accent);
   font-size: 1rem;
   font-weight: 600;
   margin-top: 0;
 }
 
 .plugin-json-display {
-  background-color: #f4f4f5;
+  background-color: var(--editor-surface-sunken);
+  color: var(--editor-text);
   padding: 1rem;
   border-radius: 6px;
   overflow-x: auto;

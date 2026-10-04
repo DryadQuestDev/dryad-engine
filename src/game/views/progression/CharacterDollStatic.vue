@@ -34,6 +34,13 @@ const isKeepLayer = (layerId: string) => {
   return def?.mask_mode === 'keep';
 };
 
+// Layers that never fade: keep-mask carriers (above) and layers flagged `instant` — art that
+// cannot blend with another image of itself (breasts free ↔ lifted would show four nipples).
+const isNoFadeLayer = (layerId: string) => {
+  const def = Game.getInstance().characterSystem.skinLayersMap.get(layerId) as any;
+  return isKeepLayer(layerId) || !!def?.instant;
+};
+
 // Build image layers - either directly from skinLayers or via event system
 const imageLayers = computed(() => {
   // If views are requested, use view-filtered layers
@@ -48,6 +55,32 @@ const imageLayers = computed(() => {
     return props.character.imageLayersWithMeta;
   }
 });
+
+// Images that REPLACE another image of the same layer in the current update (a face swapping
+// expression, an outfit changing). A plain crossfade dips the pair to ~75% combined opacity at its
+// midpoint, so whatever sits underneath (the headless body's back hair behind a face) shows
+// through for half a second. A swap-in appears at full opacity at once and the outgoing image
+// fades out on top of it instead — see onLayerEnter. Genuinely new or removed layers still fade.
+// Keyed by the incoming image, valued by the image it replaces.
+const swapIns = ref<Map<string, string>>(new Map());
+
+// Keep a swap-in image directly BELOW the image it replaces: Vue inserts it before the next
+// layer's node, i.e. above the still-leaving predecessor, which would hide the fade-out.
+// Move the LEAVING predecessor up to just above it, never the swap-in down: a layer that enters
+// in the same update (an outfit going on while the breasts change) lands between the two, and a
+// swap-in moved down past it stays under it for good – Vue's keyed diff never reorders it back.
+// Leaving nodes are outside Vue's list, so moving one can't disturb the live stack.
+const onLayerEnter = (el: Element) => {
+  const replaced = swapIns.value.get(el.getAttribute('src') || '');
+  if (!replaced) return;
+  for (const sibling of Array.from(el.parentElement?.children || [])) {
+    if (sibling !== el && sibling.getAttribute('src') === replaced
+      && sibling.classList.contains('layer-fade-leave-active')) {
+      el.parentElement!.insertBefore(sibling, el.nextSibling);
+      break;
+    }
+  }
+};
 
 // Track which masks are "active" (delayed activation after layer enters)
 const activeMasks = ref<Set<string>>(new Set());
@@ -101,11 +134,16 @@ watch(imageLayers, (newLayers, oldLayers) => {
   const newImages = new Set(newLayers.map(l => l.image));
   const oldImages = new Set((oldLayers || []).map(l => l.image));
 
+  const oldByLayer = new Map((oldLayers || []).map(l => [l.layerId, l.image]));
+  swapIns.value = new Map(newLayers
+    .filter(l => oldByLayer.has(l.layerId) && oldByLayer.get(l.layerId) !== l.image)
+    .map(l => [l.image, oldByLayer.get(l.layerId)!]));
+
   // Find newly added layers with masks
   for (const layer of newLayers) {
     if (layer.mask && !oldImages.has(layer.image)) {
-      if (isKeepLayer(layer.layerId)) {
-        // Keep-mask layers enter without a fade (see .no-fade) — clip immediately.
+      if (isNoFadeLayer(layer.layerId)) {
+        // No-fade layers enter at full opacity (see .no-fade) — clip immediately.
         activeMasks.value.add(layer.image);
         continue;
       }
@@ -238,9 +276,11 @@ const getLayerStyle = (index: number) => {
 
 <template>
   <div class="character-doll" :class="{ 'natural-size': naturalSize }">
-    <TransitionGroup :name="instantLayers ? '' : 'layer-fade'" :appear="!instantLayers && (enableAppear || false)">
+    <TransitionGroup :name="instantLayers ? '' : 'layer-fade'" :appear="!instantLayers && (enableAppear || false)"
+      @enter="onLayerEnter">
       <img class="character-doll-image" v-for="(layer, index) of imageLayers" :key="layer.image" :src="layer.image"
-        :style="getLayerStyle(index)" :class="[getLayerClasses(layer.layerId), { 'no-fade': isKeepLayer(layer.layerId) }]"
+        :style="getLayerStyle(index)"
+        :class="[getLayerClasses(layer.layerId), { 'no-fade': isNoFadeLayer(layer.layerId), 'swap-in': swapIns.has(layer.image) }]"
         draggable="false" v-persist @load="onImageLoad" />
     </TransitionGroup>
   </div>
@@ -276,7 +316,7 @@ const getLayerStyle = (index: number) => {
   opacity: 0;
 }
 
-/* Keep-mask layers (hats, clip carriers) enter/leave instantly — transition: none makes
+/* No-fade layers (keep-mask hats/clip carriers, `instant` layers) enter/leave instantly — transition: none makes
    Vue's transition timeout 0, the enter-from override kills the one transparent frame. */
 .no-fade.layer-fade-enter-active,
 .no-fade.layer-fade-leave-active {
@@ -284,6 +324,15 @@ const getLayerStyle = (index: number) => {
 }
 
 .no-fade.layer-fade-enter-from {
+  opacity: 1;
+}
+
+/* A same-layer replacement is opaque from its first frame; only the outgoing image fades. */
+.swap-in.layer-fade-enter-active {
+  transition: none;
+}
+
+.swap-in.layer-fade-enter-from {
   opacity: 1;
 }
 

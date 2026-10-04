@@ -30,89 +30,44 @@ All built-in actions for scenes and choices.
 
 | Action | Description | Example | Delayed |
 |--------|-------------|---------|---------|
-| `music` | Play background music | `"battle_theme"` | |
-| `sound` | Play a sound effect. Sounds flagged `loop` repeat until stopped and resume after loading a save. `!id` stops that sound (looping or not); `false` stops all. A loop started in a scene ends with it; one started from a room/dungeon enter action follows the player | `"sword_slash"`, `"key_turn, door_creak"`, `"!rain"`, or `false` | |
+| `music` | Play background music. The id takes a `(prop=val)` tail overriding the track's `volume`, `fade_in`, `fade_out` (the outgoing track's) and `shuffle`. `"!"` stops the music; `false` returns to the dungeon's music | `"battle_theme"`, `"battle_theme(fade_in=3, volume=0.6)"`, `"!(fade_out=4)"`, or `false` | |
+| `sound` | Play a sound effect. The id takes a `(prop=val)` tail overriding the sound's `volume`, `fade_in`, `fade_out` and `delay`. Sounds flagged `loop` repeat until stopped and resume after loading a save. `!id` stops that sound (looping or not), over its `fade_out` or an inline one; `false` stops all. A loop started in a scene ends with it; one started from a room/dungeon enter action follows the player | `"sword_slash"`, `"rain(volume=0.4, fade_in=2)"`, `"thunder(delay=0.8)"`, `"!rain(fade_out=3)"`, or `false` | |
 | `asset` | Add, update, or remove assets(!). `false` = remove all (incl. defaults); `clear` = remove all but backdrop; `reset` = clear all + re-stage defaults. Flag an asset `bg=true` to make it a runtime backdrop preserved by `clear`/`solo`. Re-staging a visible asset glides it to the new values — see below | `"false, forest(bg=true), pic1"`, `"!bg1"`, `"clear"`, or `"reset"` | |
-| `grade` | Colour-grade the scene, actors and map art. `false` / `none` clears. `#N` sets strength | `"night"`, `"night#0.5"`, `false`, or an object | |
+| `grade` | Colour-grade the scene, actors and map art. `false` / `none` clears. `#N` sets strength. Presets and fields: ->dungeons.grades | `"night"`, `"night#0.5"`, `false`, or an object | |
+| `ambient` | Particles drifting over scene backgrounds: `fireflies`, `motes`, `embers`. `#N` sets density. `false` clears. See ->dungeons.grades | `"fireflies"`, `"embers#1.5"`, `false` | |
 | `flag` | Set flags (`=` set, `>` add, `<` subtract) | `"gold>10, count=5"` | |
 | `exit` | Exit current scene | true | ✓ |
-| `enter` | Enter a room | `"room5"` | ✓ |
+| `enter` | Enter a room in a dungeon | `"room5", "ancient_cave.room10"` | ✓ |
+| `reveal_room` | Mark rooms explored without entering them: their fog lifts and their neighbors show. No room events run. `dungeon.room` reaches another dungeon | `"3, 4"`, `"dungeon2.room3"` | |
 | `scene` | Play a scene | `"intro_scene"` | ✓ |
 | `redirect` | Redirect to a scene | `"&alt_scene"` | |
 | `choices` | Load choices from a scene | `"&choice_scene"` | |
 | `choices_over` | Load choices (override mode: hide default scene ~choices) | `"&choice_scene"` | |
+| `ignore_replay` | Beside `choices` / `choices_over`: skip that menu in a gallery replay, so the replay ends with the scene instead of leading back into play (a conversation hub) | `{choices: "&talk_hub", ignore_replay: true}` | |
 | `actor` | Add, move, or remove actors(!). `false` = remove all actors instantly; `clear` = remove all with exit animations | `"alice->center, bob->left"`, `"!alice"`, or `"false, alice->right"` | |
+| `animate` | One-shot actor animation, not saved: `lunge`, `recoil`, `hop`, `shake`, `shiver`, `nod`, `bounce`, `flash`. Same as `anim=` in `actor` props | `"chimera lunge"`, `"chimera lunge, mc recoil(intensity=1.3)"` | |
+| `screen_shake` | Shake the scene art (background + actors); dialogue stays still. One-shot | `0.5`, `true`, `{intensity: 1, duration: 0.6}` | |
+| `screen_flash` | Pulse the scene art to a colour and back to the current grade. `red`, `white` or any grade preset. One-shot | `"red"`, `"white#0.6"`, `{color: "red", duration: 0.8}` | |
 | `panel_actor` | List a character in the scene's actor panel without staging art. `!id` removes; `false` clears. Staged actors are listed automatically | `"alice"`, `"alice, bob"`, `"!alice"`, `false` | |
 | `quest` | Add quest log entry | `"main_quest.goal1.log1"` | |
 
 ### asset property glide
 
 Re-staging an asset that is already on screen glides it to the new values over `tween` seconds
-(default 0.5). Position, scale, rotation, opacity and blur glide; `z` and `fit_mode` snap. Staging an
-asset for the first time never glides — its enter transition owns how it appears.
+(default 0.5). Position, scale, rotation, opacity and the filters (`blur`, `brightness`, `contrast`,
+`saturate`, `sepia`, `hue`) glide; `z` and `fit_mode` snap. Staging an asset for the first time never
+glides — its enter transition owns how it appears.
 
 ```js
 {asset: "bg_mountain(scale = 2)"}              // grows over ~0.5s
 {asset: "bg_mountain(scale = 2, tween = 3)"}   // slow approach
 {asset: "bg_mountain(scale = 2, tween = 0)"}   // hard cut
 {asset: "bg_mountain(x = 20, alpha = 0.4)"}    // drifts and fades together
+{asset: "bg_mountain(sepia = 1, saturate = 0.5)"} // washes into a memory
 ```
 
 Spine assets are positioned by their `viewport` through the Spine renderer rather than by these
 props, so they are unaffected.
-
----
-
-### grade
-
-Grades world art — background assets, character art and the exploration map — wherever it is drawn,
-including inside battle. UI is never graded: dialogue, choices, toolbar, and in battle the health
-bars, ability panel, turn order, floating damage and log all stay at full brightness. Persists across
-rooms and saves until changed.
-
-| Preset | Look |
-|--------|------|
-| **Time of day** | |
-| `dawn` | Warm peach, gently lifted |
-| `dusk` | Warm violet, lightly dimmed |
-| `night` | Cold blue, strongly dimmed |
-| `moonlit` | Cold blue, desaturated, higher contrast |
-| `sunlit` | Bright, warm |
-| `bright` | Blown out, glaring, high contrast |
-| **Weather & place** | |
-| `overcast` | Flat grey daylight, low contrast |
-| `stormy` | Grey, heavily desaturated |
-| `foggy` | Washed pale, very low contrast |
-| `underwater` | Teal, sunk, dimmed |
-| **Elemental & magical** | |
-| `candlelit` | Warm amber, dimmed |
-| `infernal` | Furnace red-orange, high contrast |
-| `frozen` | Pale cyan, bleached |
-| `arcane` | Violet, desaturated |
-| `void` | Near-black, colourless |
-| **State of mind** | |
-| `sickly` | Green, dimmed |
-| `bloodied` | Red wash, high contrast |
-| `dream` | Bright, soft, unreal pink |
-| `nightmare` | Crushed dark, high contrast |
-| **Utility** | |
-| `memory` | Sepia flashback |
-| `noir` | Greyscale, punchy contrast |
-| `none` | Daylight |
-
-```js
-{grade: "night"}                    // full strength, ~0.8s crossfade
-{grade: "night#0.5"}                // half strength
-{grade: false}                      // fade back to daylight ("none" also works)
-{grade: {duration: 3}}              // fade back to daylight over 3s
-
-{grade: {preset: "night", amount: 0.5, duration: 2}}
-
-// Manual control. Explicit fields override the preset.
-{grade: {brightness: 0.5, saturate: 0.6, contrast: 1.06, hue: -10, tint: #16264f, tint_amount: 0.25, duration: 1.5}}
-```
-
-Numbers need a leading zero — write `0.5`, never `.5`. A hex tint may be written unquoted.
 
 ---
 
@@ -189,6 +144,7 @@ Params on a choice (`!`, `~` or `>`). These are not actions — they configure t
 | `if` / `ifOr` | Show the choice only while the condition holds | `{if: "has_key = 1"}` |
 | `active` / `activeOr` | Show the choice, but grey it out unless the condition holds | `{active: "_item_on(riko, lockpick) = true"}` |
 | `clue` | Highlight the choice until the player takes it | `{clue: true}` |
+| `no_visited` | Never mark the choice visited (it stays undimmed) — for options meant to be picked repeatedly, e.g. a sequence puzzle | `{no_visited: true}` |
 | `wip` | Mark a branch as unwritten: greys the choice out permanently and prefixes `[wip]` to its label | `{wip: true}` |
 
 ### wip
@@ -272,7 +228,10 @@ Without a `template`, `reset_character` falls back to the live character's own `
 ```js
 { create_character: { id: "custom_npc", traits: { name: "Stranger" }, stats: { health: 20 } } }
 ```
-| `status` | Apply / remove status effects per target. `&` separates items; `!` prefix removes. Flash notification only for party members | `"alice->buff1 & buff2, bob->!debuff"` | |
+
+| Action | Description | Example | Delayed |
+|--------|-------------|---------|---------|
+| `status` | Apply / remove status effects per target. `&` separates items; `!` prefix removes; `(stacks = N, duration = N)` overrides the template's values for that apply, either key alone. Flash notification only for party members | `"alice->buff1 & buff2, bob->!debuff"`, `"alice->poisoned(duration = 3)"`, `"alice->poisoned(stacks = 2, duration = 3)"` | |
 | `char` | Modify character property (`=` set, `>` add, `<` subtract) | `"alice.resource.health>10"` | |
 | | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle` | `"mc.attribute.belly=2"` | |
 | | `attribute` fallback: if the key is a skin layer id (not an attribute), `true`/`false` toggles the layer's visibility. Attribute wins on id collision | `"mc.attribute.wings=true"` | |
@@ -281,7 +240,7 @@ Without a `template`, `reset_character` falls back to the live character's own `
 | `stat` | Shortcut for `char` with `stat` type (`=` `>` `<`) | `"alice.strength > 5"` | |
 | `resource` | Shortcut for `char` with `resource` type (`=` `>` `<`) | `"alice.health > 10"` | |
 | `skin_style` | Shortcut for `char` with `skinStyle` type (`=` set, `>` add, `<` remove) | `"alice.hat = class1"` | |
-| `skin_layer` | Add / remove skin layers per target. `&` separates layers; `!` prefix removes | `"alice->armor & helmet, bob->!cloak"` | |
+| `skin` | Add / remove skin layers per target. `&` separates layers; `!` prefix removes | `"alice->armor & helmet, bob->!cloak"` | |
 | `item_slot` | Add / remove equipment slots per target. `&` separates slots; `!` prefix removes | `"alice->ring & necklace, bob->!belt"` | |
 | `ability` | Grant / remove innate abilities per target. `&` separates abilities; `!` prefix removes | `"alice->fireball & ice_bolt, bob->!punch"` | |
 | `skill` | Learn / upgrade a skill for a character. `#level` adds levels; comma-separate for several. Flash notification only for party members | `"alice.fire_magic.fireball"`, `"fire_magic.fireball#2"` | |
@@ -292,7 +251,7 @@ Party-only, the same rule `status` keeps. A first learn flashes "**Fireball** ha
 learned!"; a level gain flashes "**Fireball** has been upgraded to level 2!"; a slot already
 at `max_upgrade_level` flashes nothing. `skill` takes dot paths, never the `->` syntax below.
 
-### Targeted-spec syntax (`status`, `skin_layer`, `item_slot`, `ability`)
+### Targeted-spec syntax (`status`, `skin`, `item_slot`, `ability`)
 
 Each action takes a string of the form `targetId->item & item & ..., targetId->!item, ...`:
 
@@ -302,13 +261,13 @@ Each action takes a string of the form `targetId->item & item & ..., targetId->!
 
 ```javascript
 { status: "alice->blessed & focused, bob->!cursed" }
-{ skin_layer: "mc->armor_dirty, mc->!armor_clean" }
+{ skin: "mc->armor_dirty, mc->!armor_clean" }
 { item_slot: "alice->extra_ring, bob->!ring_3" }
 ```
 
 `status` posts a flash notification ("**Alice** has gained **Blessed**!") only when the target is
 **in the party**. Statuses set on NPCs, enemies, or a character staged before recruitment apply
-silently. `skin_layer`, `item_slot`, and `ability` never flash.
+silently. `skin`, `item_slot`, and `ability` never flash.
 
 ---
 
@@ -328,7 +287,7 @@ silently. `skin_layer`, `item_slot`, and `ability` never flash.
 | `trade` | Open trade exchange. `^pool` values work as for `loot`, with stock re-rolled when the MC's level changes | `"merchant_inventory"`, `"^merchant_basic"` | ✓ |
 | `learn_recipe` | Learn a crafting recipe (one id, or comma-separated) | `"iron_sword, steel_sword"` | |
 | `learn_recipe_item` | Learn the recipe named by the active item's `learn_recipe` field, then consume the item (notifies; "already known" if learned). Powers the auto "Learn" choice on recipe-scroll items. Discovers the item (item-card check mark) | `true` | |
-| `choose_item` | Item picker popup (pauses the scene). Pick lands in `active_item` + `chosen_item_id`; branch with `_chosen_item(id)`. `remove: true` consumes the pick; `scene` plays after; cancel resumes with `chosen_item_id` `''` | `"all"`, `"keys"`, `{tags: ["herb"], remove: true, scene: "fed"}` | ✓ |
+| `choose_item` | Item picker popup (pauses the scene). Pick lands in `active_item` + `chosen_item_id`; branch with `_chosen_item(id)`. `remove: true` consumes the pick; `scene` plays after; cancel only closes the popup, leaving the story on the choice that opened it (`chosen_item_id` `''`) | `"all"`, `"keys"`, `{tags: ["herb"], remove: true, scene: "fed"}` | ✓ |
 | `read_book` | Open the paged book reader for an item with the `book` trait (`dungeon_id.room_id.scene_id`; pages = that scene's paragraphs; Next/Previous/Read again/Close choices). Resumes at the bookmark; finishing the last page discovers the item. Powers the auto "Read" choice | `true` (active item), `"book_eilfiel"` | |
 | `read_page` / `read_close` | Internal paging actions of the book reader (its choices dispatch them) | `2` / `true` | |
 | `view_painting` | Open an item's painting scene: the registered asset named by the `painting` trait full-screen, the item description as the text (a runtime-synthesized one-paragraph scene in the current dungeon). Discovers the item. Powers the auto "View" choice | `true` (active item), `"painting_ane"` | |

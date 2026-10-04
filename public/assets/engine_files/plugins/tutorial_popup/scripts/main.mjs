@@ -8,6 +8,10 @@ const { game } = window.engine;
 console.log('tutorial_popup plugin loaded');
 
 game.registerState('tutorial_seen', []);
+// The modal's live page list and current page. Saved like any other UI state so a save taken
+// while the hint is up reloads into a hint the player can actually read and close.
+game.registerState('tutorial_session', []);
+game.registerState('tutorial_page', 0);
 
 game.registerComponent('TutorialModal', TutorialModal);
 

@@ -201,6 +201,49 @@ When writing `plugin.json` by hand, you can use the object shorthand — each ke
 
 The engine converts this to the `fileName`/`fileData` format automatically on load.
 
+**Editor layouts.** A plugin that defines ability definitions (or other definition-driven fields) can ship how the editor presents them under the `dev/editor_layouts` key: groups, colors, units and input hints. They are editor-only, the game never reads them, and a game overrides them by id. See [Abilities](../characters/abilities.md).
+
+---
+
+## Editor Save Hooks
+
+A save hook lets your plugin fill in or tidy up an entry of its own tabs as it is saved. Use one for values worked out from other fields, so the game can read them instead of computing them every session. rpg_battler uses one to store the frame each impact lands on and the effect's colour, read once from the sprite sheet.
+
+Declare it in `plugin.json`:
+
+```json
+{
+  "editor_hooks": [
+    { "tabs": ["projectiles"], "script": "scripts/editor/projectile-hooks.mjs" }
+  ]
+}
+```
+
+The script exports `beforeSave(entry, ctx)`. It may change the entry in place, and it may be `async`:
+
+```javascript
+export async function beforeSave(entry, ctx) {
+    if (entry.image) entry.image_size = await measure(entry.image);
+    else delete entry.image_size;
+}
+```
+
+| `ctx` field | What it holds |
+|-------|-------------|
+| `pluginId`, `tabId`, `file` | Your plugin, the tab, and its data file (`plugins_data/<plugin>/<tab>`) |
+| `game`, `mod` | The game and mod being edited |
+| `schema` | The tab's schema |
+| `coreEntry` | When a mod is edited, the core game's entry with the same `id` (a mod's entry may hold only the fields it changes); otherwise `null` |
+| `isNew` | `true` for an entry that is not saved yet |
+
+- **It runs on every save path.** That includes the tab form's Save button, a popup's Save, and saving before a popup jumps to another entry.
+- **It runs only on the entries a save changes.** New entries count as changed; untouched entries are not passed to it.
+- **The script is loaded on its own.** It cannot import other files by relative path. Load your plugin's other modules with `window.__editorUtils.importPluginModule(ctx.pluginId, 'scripts/my-module.mjs')`.
+- **Store computed values under keys that are not in your tab's schema.** The form deletes a schema field whose `show` condition hides it, and fields outside the schema are kept as they are.
+- **To clear a value, delete the key.** Don't set it to `null` or `""`.
+- **Leave `id`, `uid` and `order` alone.** They are checked before the hook runs.
+- **An error does not stop the save.** It shows a notification, and the entry is written as the hook left it.
+
 ---
 
 ## Service Registry

@@ -10,6 +10,7 @@ export const EntityStatSchema = {
     is_binary: { type: 'boolean', tooltip: 'Binary flag stat (0 or 1). Shows as a checkmark in UI instead of a number. Multiple sources keep it active until all removed.' },
     reduction_is_good: { type: 'boolean', tooltip: 'If true, reducing this stat is beneficial (e.g., cooldowns). If false (default), increasing is beneficial (e.g., health, damage). Used for UI coloring.' },
     order: { type: 'number', tooltip: 'Display order in the stats list (lower numbers appear first).' },
+    group: { type: 'chooseOne', fromFile: 'stat_groups', tooltip: 'Character sheet section this stat is listed under. Unset = the built-in Resources / Stats split.' },
     name: { type: 'string', tooltip: 'Display name of the stat shown to users.' },
     description: { type: 'textarea', tooltip: 'Description of what this stat represents(inside Editor).' },
     ingame_description: { type: 'htmlarea', tooltip: 'In-game description of the stat.' },
@@ -18,6 +19,7 @@ export const EntityStatSchema = {
     icon: { type: 'file', tooltip: 'Icon image for this stat. Used in ability costs and other UI elements.', fileType: 'image' },
     color: { type: 'color', show: { is_resource: [true] }, tooltip: 'Color of the stat in the UI.' },
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
+    meta: { type: 'schema', fromFile: 'stat_meta', fromFileType: 'custom', tooltip: 'Per-stat settings read by game or plugin scripts (e.g. how the stat scales on levelled items). Keys are defined in the stat_meta editor tab.' },
 } as const satisfies Schema;
 
 export type EntityStatObject = SchemaToType<typeof EntityStatSchema>;

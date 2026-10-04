@@ -139,9 +139,9 @@ character.addStatus(customStatus);
 
 ### registerStatGroupResolver(resolver)
 
-Register a function that controls which stat groups appear in the character sheet per character. The resolver receives a character and returns an array of stat tag names. The engine filters stats by those tags, sorts by `order`, and resolves group display names from locale key `group.{tag}`.
+Override the character sheet's sections per character. By default the sheet uses the **Stat Groups** tab: every stat picks a group through its `group` field, the sections appear in the group's `order` under the group's `name`, and stats without a group fall into the built-in "Resources" and "Stats" sections. Scripts read the same layout with `character.getStatsByGroup(groupId)` and `character.getStatValuesByGroup(groupId)`.
 
-Without a resolver, the character sheet defaults to two groups: "Resources" and "Stats".
+A resolver replaces that layout for cases the data cannot express, such as a section that only the main character shows. It receives a character and returns an array of stat **tag** names; the engine filters stats by those tags, sorts by `order`, and resolves the section title from locale key `group.{tag}`.
 
 ```js
 // Show combat and survival for everyone, allegiance only for MC
@@ -599,6 +599,23 @@ Get all slots where an item can be equipped.
 
 ```js
 const availableSlots = character.getAvailableSlotsForItem(sword);
+```
+
+### compareItem(item)
+
+What equipping an unequipped item would change: one entry per slot that accepts it, each against what that slot holds now. The item card's comparison table reads this.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `slot` | ItemSlot | The slot instance compared against |
+| `slotName` | string | Display name, numbered for repeated slot types ("Ring 2") |
+| `equipped` | Item \| null | What sits in the slot now; `null` when empty |
+| `stats` | Record<string, number> | Stat deltas (item minus equipped), zero deltas dropped |
+
+```js
+for (const c of character.compareItem(ring)) {
+  console.log(c.slotName, c.equipped?.getName() ?? "empty", c.stats); // Ring  Bee Ring  { crit_chance: 2, dodge: -6 }
+}
 ```
 
 ---

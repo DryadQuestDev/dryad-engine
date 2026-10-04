@@ -1,0 +1,73 @@
+/* Projectile sprites and VFX presets. The game (every css/ file auto-loads) and the editor's
+   Projectile Editor preview (ProjectileEditor.css @imports this file) both draw with these rules.
+   The rules are namespaced (.rpg-projectile, rpg-vfx-*), so loading them in the editor is safe. */
+
+/* Centred on its position by the separate `translate` property, not `transform`: spawnSprite writes
+   only the facing rotation into `transform`, so the motion presets below (which animate `rotate` /
+   `scale`) compose with it instead of overwriting it. Size is set in JS (a share of the viewport). */
+.rpg-projectile {
+  position: fixed;
+  translate: -50% -50%;
+  transform-origin: center center;
+  z-index: 11000;
+  pointer-events: none;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  filter: var(--vfx-filter, none);
+  will-change: left, top, transform;
+}
+
+/* Ground effects (hit_anchor: feet): the sprite's bottom edge sits on the anchor point. */
+.rpg-projectile-bottom {
+  translate: -50% -100%;
+}
+
+/* Spritesheet sprite: a strip/grid frame-stepped in JS (background-size + background-position set
+   per frame). The N/(N-1)-style exact per-cell positions are computed in spawnSprite. */
+.rpg-projectile-sheet {
+  background-repeat: no-repeat;
+}
+
+/* ── VFX presets: put these in a projectile's css_class ──
+   vfx-add / vfx-screen: additive or screen blending, for glowing effects drawn on black.
+   vfx-glow: a soft white halo (stacks after the def's `filter` tint).
+   vfx-spin / vfx-wobble / vfx-squash: motion for a single-image sprite (a thrown rock, a
+   wobbling vine, a squashing slime) — on `rotate` / `scale`, so they add to the facing rotation. */
+.rpg-projectile.vfx-add { mix-blend-mode: plus-lighter; }
+.rpg-projectile.vfx-screen { mix-blend-mode: screen; }
+.rpg-projectile.vfx-glow { filter: var(--vfx-filter,) drop-shadow(0 0 6px rgba(255, 255, 255, 0.55)); }
+.rpg-projectile.vfx-spin { animation: rpg-vfx-spin 0.5s linear infinite; }
+.rpg-projectile.vfx-wobble { animation: rpg-vfx-wobble 0.3s ease-in-out infinite alternate; }
+.rpg-projectile.vfx-squash { animation: rpg-vfx-squash 0.28s ease-in-out infinite alternate; }
+@keyframes rpg-vfx-spin { to { rotate: 1turn; } }
+@keyframes rpg-vfx-wobble { from { rotate: -12deg; } to { rotate: 12deg; } }
+@keyframes rpg-vfx-squash { from { scale: 1.12 0.9; } to { scale: 0.92 1.08; } }
+
+/* ── Impact juice (rpg-vfx-juice.mjs) ──
+   The burst and the sparks of a damaging hit, in the effect's colour (--juice). Placed by JS:
+   position fixed in the battle, absolute on the editor's preview stage. Additive, like light. */
+.rpg-juice-burst {
+  translate: -50% -50%;
+  z-index: 11001;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(circle,
+      #fff 0 10%,
+      var(--juice) 26%,
+      color-mix(in srgb, var(--juice) 40%, transparent) 46%,
+      transparent 68%);
+  mix-blend-mode: plus-lighter;
+}
+
+/* A streak drawn from its tail (the contact point, at its left end) to a white-hot head; JS rotates
+   it outward and throws it along that direction. */
+.rpg-juice-spark {
+  translate: 0 0;
+  transform-origin: 0 50%;
+  z-index: 11001;
+  pointer-events: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--juice) 45%, #fff);
+  mix-blend-mode: plus-lighter;
+}

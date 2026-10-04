@@ -147,8 +147,8 @@ function onItemsPerPageChange(value: number) {
 .dform-pagination {
   margin-bottom: 1.5rem;
   padding: 0.75rem;
-  background-color: #f8f9fa;
-  border: 1px solid #dee2e6;
+  background-color: var(--editor-surface-raised);
+  border: 1px solid var(--editor-border);
   border-radius: 6px;
 }
 
@@ -182,7 +182,7 @@ function onItemsPerPageChange(value: number) {
 
 .item-count {
   font-size: 0.9rem;
-  color: #6c757d;
+  color: var(--editor-text-muted);
   white-space: nowrap;
 }
 

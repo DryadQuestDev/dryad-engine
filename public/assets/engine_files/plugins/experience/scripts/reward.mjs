@@ -1,7 +1,7 @@
 /// <reference path="./dtypes.d.ts" />
 
 const { game, vue } = window.engine;
-const { ref } = vue;
+const { computed } = vue;
 
 // ═══════════════════════ Reward core ═══════════════════════
 // Module-internal home of the reward system: the plugin's own scripts/components import from here
@@ -67,10 +67,17 @@ game.on('dungeon_enter_after', (/** @type {string} */ dungeonId) => {
         game.setState('dungeon_levels', levels);
     }
 
-    // 2) Instantiate this dungeon's inventories (trait `dungeon` matches the entered dungeon id
-    // OR its level group; convention: group names are the main dungeon's id, so entry order
-    // within a group is irrelevant). Contents are created and locked HERE, not at boot and not
-    // on first open, which keeps chest contents save-scum-proof.
+    // 2) Instantiate this dungeon's inventories. Contents are created and locked HERE, not at
+    // boot and not on first open, which keeps chest contents save-scum-proof.
+    instantiateBoundInventories(dungeonId);
+});
+
+/** Create every missing plain inventory bound to the current dungeon (trait `dungeon` matches the
+ *  dungeon id OR its level group; convention: group names are the main dungeon's id, so entry
+ *  order within a group is irrelevant). Idempotent — existing instances are skipped. */
+export function instantiateBoundInventories(/** @type {string} */ dungeonId) {
+    if (!autoScalingOn()) return;
+    const group = game.getCurrentDungeon()?.traits?.level_group || dungeonId;
     for (const [id, template] of game.getData('item_inventories', true) || []) {
         const bound = template?.traits?.dungeon;
         if (!bound || (bound !== dungeonId && bound !== group)) continue;
@@ -78,7 +85,7 @@ game.on('dungeon_enter_after', (/** @type {string} */ dungeonId) => {
         if (game.getInventory(id)) continue;
         game.createInventory(id, id);
     }
-});
+}
 
 // While set, every level read (spawn windows, scaling) answers this instead of the dungeon
 // snapshot. Only the drop simulator sets it, and always inside a try/finally.
@@ -118,6 +125,32 @@ export function dungeonScale(/** @type {number} */ level) {
     if (!autoScalingOn()) return 1;
     const per = getConfig()?.power_scale_per_level ?? 0.25;
     return 1 + per * (Math.max(1, level) - 1);
+}
+
+/** Growth per level for stats whose `scaling` meta is `relative` — chances, percentages, speed:
+ *  stats measured against things enemy scaling never grows, so riding the flat curve would run them
+ *  into their caps. Slower than the flat curve, so their numbers still climb on every drop. */
+export function relativeScale(/** @type {number} */ level) {
+    if (!autoScalingOn()) return 1;
+    const per = getConfig()?.relative_scale_per_level ?? 0.08;
+    return 1 + per * (Math.max(1, level) - 1);
+}
+
+/** Stat values scaled to `level` by each stat's `scaling` meta (stat_meta, declared by this plugin):
+ *  `flat` rides the power curve, `relative` the slower relative curve, unset stays as authored.
+ *  Scaled values are rounded, like every levelled item stat. Pure — returns a new object. */
+export function scaleStats(/** @type {Record<string, number>} */ stats, /** @type {number} */ level) {
+    const defs = game.getData('character_stats', true);
+    const flat = dungeonScale(level);
+    const relative = relativeScale(level);
+    const scaled = /** @type {Record<string, number>} */ ({});
+    for (const statId in stats || {}) {
+        const curve = defs?.get(statId)?.meta?.scaling;
+        const factor = curve === 'flat' ? flat : curve === 'relative' ? relative : 1;
+        const value = stats[statId];
+        scaled[statId] = factor !== 1 && typeof value === 'number' ? Math.round(value * factor) : value;
+    }
+    return scaled;
 }
 
 /** Price growth per level for scaled equipment, independent of the power (stat) curve. Defaults to
@@ -183,8 +216,21 @@ game.on('item_equip_before', (/** @type {Item} */ item, /** @type {Character} */
 
 // ── Pending reward (display accumulator) ──
 
-const emptyReward = () => ({ items: [], resources: [], characters: [], debug: null });
-export const pendingReward = ref(emptyReward());
+const emptyReward = () => /** @type {PendingReward} */ ({ items: [], resources: [], characters: [], debug: null });
+
+// Engine STATE, not a module ref: the engine saves the open-popup stack, so a save taken while
+// `reward_popup` is up reloads with the popup open, and a transient accumulator would have left it
+// rendering an empty card. Registered here rather than in main.mjs because this module is one of
+// main.mjs's own imports and therefore runs first.
+//
+// Every write below replaces the object instead of mutating it — the state map only notifies on
+// setState.
+game.registerState('experience_pending_reward', emptyReward());
+
+const pending = () => /** @type {PendingReward} */ (game.getState('experience_pending_reward'));
+const setPending = (/** @type {PendingReward} */ value) => game.setState('experience_pending_reward', value);
+
+export const pendingReward = computed(() => pending());
 
 function rpgBattle() {
     try { return game.getService('rpg_battle'); } catch { return null; }
@@ -203,24 +249,37 @@ export function effectiveThreat(/** @type {string} */ battleId) {
  *  grants before the panel shows extend the same row (sum gained, keep the earliest from-state,
  *  advance the to-state, merge stat diffs keeping the original before values). */
 export function recordCharacterXp(/** @type {RewardCharacterEntry} */ entry) {
-    const existing = pendingReward.value.characters.find(c => c.id === entry.id);
-    if (!existing) {
-        pendingReward.value.characters.push(entry);
+    const current = pending();
+    const index = current.characters.findIndex(c => c.id === entry.id);
+    if (index < 0) {
+        setPending({ ...current, characters: [...current.characters, entry] });
         return;
     }
-    existing.gained += entry.gained;
-    existing.levelTo = entry.levelTo;
-    existing.xpTo = entry.xpTo;
+    const existing = current.characters[index];
+
+    const stats = existing.stats.map(s => ({ ...s }));
     for (const stat of entry.stats) {
-        const merged = existing.stats.find(s => s.id === stat.id);
+        const merged = stats.find(s => s.id === stat.id);
         if (merged) merged.after = stat.after;
-        else existing.stats.push(stat);
+        else stats.push({ ...stat });
     }
+
+    const items = (existing.items || []).map(i => ({ ...i }));
     for (const it of entry.items || []) {
-        const merged = existing.items?.find(i => i.id === it.id);
+        const merged = items.find(i => i.id === it.id);
         if (merged) merged.quantity += it.quantity;
-        else (existing.items ||= []).push(it);
+        else items.push({ ...it });
     }
+
+    const characters = [...current.characters];
+    characters[index] = {
+        ...existing,
+        gained: existing.gained + entry.gained,
+        levelTo: entry.levelTo,
+        xpTo: entry.xpTo,
+        stats, items,
+    };
+    setPending({ ...current, characters });
 }
 
 /** Record a resource gain for display (merged per stat id). The GAME decides which of its own
@@ -235,23 +294,29 @@ export function recordResource(/** @type {string} */ statId, /** @type {number} 
         console.error('[reward] recordResource requires a characterId:', statId, amount);
     }
     const owner = characterId || '';
-    const existing = pendingReward.value.resources.find(r => r.id === statId && r.characterId === owner);
-    if (existing) existing.amount += amount;
-    else pendingReward.value.resources.push({ id: statId, amount, characterId: owner });
+    const current = pending();
+    const index = current.resources.findIndex(r => r.id === statId && r.characterId === owner);
+    const resources = [...current.resources];
+    if (index >= 0) resources[index] = { ...resources[index], amount: resources[index].amount + amount };
+    else resources.push({ id: statId, amount, characterId: owner });
+    setPending({ ...current, resources });
 }
 
 function recordItem(/** @type {{id: string, name: string, image: string}} */ entry, /** @type {number} */ quantity) {
     // Stackable items (max_stack > 1 or unlimited) merge into one display line; unstackables
     // (equipment) keep a line per drop.
     const maxStack = game.getData('item_templates', true)?.get(entry.id)?.traits?.max_stack || 0;
+    const current = pending();
     if (maxStack > 1 || maxStack === -1) {
-        const existing = pendingReward.value.items.find(i => i.id === entry.id);
-        if (existing) {
-            existing.quantity += quantity;
+        const index = current.items.findIndex(i => i.id === entry.id);
+        if (index >= 0) {
+            const items = [...current.items];
+            items[index] = { ...items[index], quantity: items[index].quantity + quantity };
+            setPending({ ...current, items });
             return;
         }
     }
-    pendingReward.value.items.push({ ...entry, quantity, trashed: false });
+    setPending({ ...current, items: [...current.items, { ...entry, quantity, trashed: false }] });
 }
 
 // ── Trash marks ──
@@ -260,10 +325,25 @@ function recordItem(/** @type {{id: string, name: string, image: string}} */ ent
 // in clearPending (the battle overlay's Continue fires battle_closed_before; the popup's button calls it
 // directly), so that is where the marks are cashed in.
 
+/** Flip one loot line's trash mark. Addressed by POSITION, not id: an unstackable drop keeps a
+ *  line per instance, so the same id can sit on several lines. */
+export function toggleItemTrashed(/** @type {number} */ index) {
+    const current = pending();
+    const entry = current.items[index];
+    if (!entry) return;
+    const items = [...current.items];
+    items[index] = { ...entry, trashed: !entry.trashed };
+    setPending({ ...current, items });
+}
+
+export function isItemTrashed(/** @type {number} */ index) {
+    return !!pending().items[index]?.trashed;
+}
+
 /** Remove every trash-marked reward line from the party bag. Only the GRANTED quantity goes — a
  *  stack the player was already carrying keeps the rest. */
 export function commitTrashedItems() {
-    const marked = pendingReward.value.items.filter(entry => entry.trashed);
+    const marked = pending().items.filter(entry => entry.trashed);
     if (!marked.length) return;
     const partyInventory = game.getInventory('_party_inventory');
     if (!partyInventory) return;
@@ -336,18 +416,11 @@ function isScalableEquipment(/** @type {Item} */ item, /** @type {any} */ status
  *  level always give the same result — which is what lets a saved item be rebuilt at its stamped
  *  level and come out identical to a fresh drop. Returns new objects, never mutates the inputs. */
 function scaleBaseline(/** @type {any} */ statusObject, /** @type {Record<string, number>} */ price, /** @type {number} */ level) {
-    const scale = dungeonScale(level);       // power: stats + ability aspects
+    const scale = dungeonScale(level);       // power: flat stats + ability aspects
     const pScale = priceScale(level);        // value: price, own curve (2× power by default)
-    if (scale === 1 && pScale === 1) return { statusObject, price };
-    const stats = statusObject?.stats || {};
+    if (scale === 1 && pScale === 1 && relativeScale(level) === 1) return { statusObject, price };
     const modifiers = statusObject?.ability_modifiers;
-    // Percentage-natured stats (reflect, dodge, crit) are already proportional — the authored
-    // no_scale_stats list keeps them fixed while flat stats (power, thorns, armor) ride the curve.
-    const noScale = getConfig()?.no_scale_stats || [];
-    const scaledStats = /** @type {Record<string, number>} */ ({});
-    for (const statId in stats) {
-        scaledStats[statId] = noScale.includes(statId) ? stats[statId] : Math.round(stats[statId] * scale);
-    }
+    const scaledStats = scaleStats(statusObject?.stats || {}, level);
     const scaledPrice = /** @type {Record<string, number>} */ ({});
     for (const currency in price || {}) {
         scaledPrice[currency] = Math.round(price[currency] * pScale);
@@ -392,7 +465,7 @@ game.on('item_migrate', (/** @type {Item} */ item, /** @type {any} */ template) 
 
 export function clearPending() {
     commitTrashedItems();
-    pendingReward.value = emptyReward();
+    setPending(emptyReward());
 }
 
 export function openRewardPopup() {
@@ -603,12 +676,15 @@ if (game.hasPlugin('rpg_battler')) {
         const lootDebug = grantLoot(battleId, base, threat);
         const threatXp = grantThreatXp(threat);
         if (game.isDevMode()) {
-            pendingReward.value.debug = {
-                battleId, level,
-                scale: Math.round(dungeonScale(level) * 100) / 100,
-                base, threat: Math.round(threat * 100) / 100,
-                threatXp, ...lootDebug,
-            };
+            setPending({
+                ...pending(),
+                debug: {
+                    battleId, level,
+                    scale: Math.round(dungeonScale(level) * 100) / 100,
+                    base, threat: Math.round(threat * 100) / 100,
+                    threatXp, ...lootDebug,
+                },
+            });
         }
         game.trigger('reward_assemble', { source: inBattle() ? 'battle' : 'scene', battleId, threat });
         // A fought battle shows the panel in its own result overlay; a scripted win needs the

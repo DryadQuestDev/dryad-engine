@@ -6,6 +6,7 @@ import Button from 'primevue/button';
 import type { Row } from '../../../../utility/dungeonEditor/ast';
 import { inputMatchesSearch } from './searchState';
 import { flashElement, focusFieldAt, type RevealRequest } from './reveal';
+import ParamsInput from './ParamsInput.vue';
 
 const props = defineProps<{
   row: Row;
@@ -20,7 +21,7 @@ const props = defineProps<{
 }>();
 
 const rootRef = ref<HTMLElement | null>(null);
-const paramsRef = ref<InstanceType<typeof InputText> | null>(null);
+const paramsRef = ref<InstanceType<typeof ParamsInput> | null>(null);
 const codeRef = ref<InstanceType<typeof Textarea> | null>(null);
 
 watch(() => props.reveal, (r) => {
@@ -85,11 +86,10 @@ function updateField(key: string, value: any) {
           :class="{ 'input-search-hit': inputMatchesSearch(row.value) }"
         />
         <span class="angle">&gt;</span>
-        <InputText
+        <ParamsInput
           ref="paramsRef"
           :model-value="row.paramsRaw ?? ''"
-          @update:model-value="(v: any) => updateField('paramsRaw', v ? v : undefined)"
-          placeholder="{params}"
+          @update:model-value="(v: string) => updateField('paramsRaw', v ? v : undefined)"
           class="params-input"
           :class="{ 'params-input--error': paramsError, 'input-search-hit': inputMatchesSearch(row.paramsRaw) }"
         />
@@ -170,7 +170,7 @@ function updateField(key: string, value: any) {
   gap: 0.5rem;
   align-items: start;
   padding: 0.25rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--editor-border);
 }
 
 .row-left {
@@ -197,12 +197,12 @@ function updateField(key: string, value: any) {
   font-family: var(--font-family-mono, monospace);
   font-weight: 600;
   font-size: 0.95rem;
-  color: #888;
+  color: var(--editor-text-faint);
 }
 
-.sigil--choice { color: #9c27b0; }
+.sigil--choice { color: var(--editor-ink-purple); }
 .sigil--comment { color: #666; }
-.sigil--code { color: #9575cd; }
+.sigil--code { color: var(--editor-ink-violet); }
 
 .row-body {
   display: flex;
@@ -228,13 +228,12 @@ function updateField(key: string, value: any) {
   flex: 1 1 180px;
 }
 
-input.params-input {
-  color: #9c27b0 !important;
+.params-input {
+  color: var(--editor-ink-purple) !important;
   font-weight: 600;
 }
 
-input.params-input--error,
-.params-input--error :deep(input) {
+.params-input--error {
   outline: 2px solid #d32f2f;
   outline-offset: -1px;
 }
@@ -261,19 +260,19 @@ input.params-input--error,
 }
 
 .comment-input :deep(input) {
-  color: #888;
+  color: var(--editor-text-faint);
   font-style: italic;
 }
 
 .angle {
-  color: #666;
+  color: var(--editor-text-muted);
   font-family: var(--font-family-mono, monospace);
   padding: 0 0.2rem;
   align-self: center;
 }
 
 .hint {
-  color: #666;
+  color: var(--editor-text-muted);
   font-style: italic;
   font-size: 0.85rem;
   align-self: center;
@@ -286,13 +285,13 @@ input.params-input--error,
 }
 
 .row--empty {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--editor-surface-hover);
 }
 
 /* Make the disabled "insert scene" button visibly gray (overrides PrimeVue's success-tinted disabled state). */
 .insert-scene-btn--disabled :deep(.p-button-icon),
 .insert-scene-btn--disabled :deep(.pi) {
-  color: #aaa !important;
+  color: var(--editor-text-faint) !important;
 }
 
 .insert-scene-btn--disabled {

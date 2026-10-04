@@ -524,6 +524,7 @@ const stateHandlers: StateHandler[] = [
             const newEncounter: DungeonEncounterObject = {
               id: id, uid: editor.createUid(), x: context.coords.x, y: context.coords.y,
             };
+            applyDefaultScale(newEncounter);
             activeEncounters.push(newEncounter);
             //editor.notifyActiveObjectMutated()();
             return { isValid: true };
@@ -1035,6 +1036,12 @@ function isRoomSelectedForConnection(room: DungeonRoomObject): boolean {
   return selectedRoomForConnection.value?.room.id === room.id;
 }
 
+/** Stamps the bookmarks-panel default scale onto a freshly placed encounter. 1 stays implicit. */
+function applyDefaultScale(encounter: DungeonEncounterObject): void {
+  const scale = editor.map?.defaultEncounterScale.value ?? 1;
+  if (scale !== 1) encounter.scale = scale;
+}
+
 // --- Collectable placement methods ---
 function isRoomSelectedForCollectable(room: DungeonRoomObject): boolean {
   return selectedRoomForCollectable.value?.id === room.id;
@@ -1074,6 +1081,7 @@ function handleCollectableConfirm(payload: { item: string; quantity: number; reg
     y: collectablePopupCoords.value.y,
   };
   if (payload.regrow > 0) newEncounter.regrow = payload.regrow;
+  applyDefaultScale(newEncounter);
 
   modEncData.val.push(newEncounter);
   editor.hasUnsavedChanges.value = true;

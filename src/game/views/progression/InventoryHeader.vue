@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 
 const game = Game.getInstance();
 
@@ -34,18 +35,22 @@ const capacityInfo = computed(() => {
 
   return { slotsText, weightText, isOverflowing, isOverweight };
 });
+
+const headerTitle = computed(() => Global.getInstance().getString('character.tab.inventory'));
+const itemsLine = computed(() => Global.getInstance().getString('inventory.header.items', { count: capacityInfo.value?.slotsText ?? '' }));
+const weightLine = computed(() => Global.getInstance().getString('inventory.header.weight', { weight: capacityInfo.value?.weightText ?? '' }));
 </script>
 
 <template>
   <div class="inventory-header">
-    <h2>Inventory</h2>
+    <h2>{{ headerTitle }}</h2>
     <div v-if="capacityInfo" class="inventory-stats">
       <span class="stat" :class="{ 'stat-overflow': capacityInfo.isOverflowing }">
-        Items: {{ capacityInfo.slotsText }}
+        {{ itemsLine }}
       </span>
       <span v-if="inventory?.maxWeight && inventory.maxWeight > 0" class="stat"
         :class="{ 'stat-overflow': capacityInfo.isOverweight }">
-        Weight: {{ capacityInfo.weightText }}
+        {{ weightLine }}
       </span>
     </div>
   </div>

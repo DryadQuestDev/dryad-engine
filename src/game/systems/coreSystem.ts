@@ -1,4 +1,5 @@
 import { save, Skip, Populate } from '../../utility/save-system';
+import { parseAudioSpec, rampVolume, type AudioOverrides } from '../../services/audioFade';
 import { ManifestObject } from '../../schemas/manifestSchema';
 import { Global } from '../../global/global';
 import { IndexedDbSaveService, DEV_REPLAY_SCENE_KEY } from '../../services/indexeddb-save.service';
@@ -8,6 +9,7 @@ import { DebugSettingsType } from '../data/debugSettings';
 import { SettingsObject } from '../../schemas/settingsSchema';
 import { Property } from '../property';
 import { SoundObject } from '../../schemas/soundSchema';
+import { getFileExtensions } from '../../utility/schema';
 import { MusicObject } from '../../schemas/musicSchema';
 import { Character } from '../core/character/character';
 import { Status } from '../core/character/status';
@@ -29,7 +31,7 @@ export type CustomComponent = {
   id: string;
   slot: string;
   component: Component;
-  title?: string;
+  title?: string; // Tab label: a locale key when one exists, otherwise the literal text to show
   order?: number;
   props?: Record<string, any>; // Optional props
   mask?: string | boolean; // Popup slot only: backdrop. omit = default dim, false = none, or a CSS color
@@ -62,15 +64,31 @@ export type SaveOptions = {
 export type StopSoundOptions = {
   /** Leave looping sounds alone; stop only the one-shots. */
   keepLooping?: boolean;
+  /** Leave the loops started outside a scene playing — room and dungeon ambience — and stop the rest. */
+  keepMapLoops?: boolean;
+  /** Seconds to fade out, over each sound's own `fade_out`. An id's inline `(fade_out=N)` wins over both. */
+  fadeOut?: number;
 }
 
 /** One in-flight `playSounds` call: the audio elements for a sound's `files`, kept so it can be stopped. */
 export type SoundPlayback = {
   id: string;
   loop: boolean;
+  /** The sound's `channel`; '' when it has none. */
+  channel: string;
   /** Set by stopSounds. Guards the load callbacks, which fire after a stop if the files were still loading. */
   stopped: boolean;
   elements: HTMLAudioElement[];
+  /** The sound's gain 0–1; the slider multiplies onto it. */
+  gain: number;
+  /** Seconds to fade when stopped, unless the stop says otherwise. */
+  fadeOut: number;
+  /** Pending `delay` before the first file starts. */
+  delayTimer: number | null;
+  /** The running fade-in, if any. */
+  cancelRamp: (() => void) | null;
+  /** Started while a scene played: a loop like this ends with the scene; one started on the map plays on. */
+  fromScene: boolean;
 }
 
 // EmitterMap is derived from CORE_EMITTER_SIGNATURES for strict type checking.
@@ -392,15 +410,22 @@ export class CoreSystem {
   }
 
   /**
-   * Merge every registered declaration and run the pass. Called by the engine on save load;
-   * no-op when nothing was declared.
+   * Merge every registered declaration and run the pass. Called by the engine on save load.
+   * `save_migrated` fires under the same gate as the pass (an old save, or any load in dev mode)
+   * even when nothing was declared or every section is disabled.
    */
   public runRegisteredSaveMigrations(): void {
-    if (this.saveMigrations.length === 0) return;
-    const sources = this.saveMigrations.map(r => r.source).join(' + ');
-    this.migratingSave = true;
-    try { this.applySaveMigration(mergeScopes(this.saveMigrations), sources); }
-    finally { this.migratingSave = false; }
+    const game = Game.getInstance();
+    if (game.isNewGame) return;
+    if (!this.isOldSave() && !game.isDevMode()) return;
+    let fired = false;
+    if (this.saveMigrations.length > 0) {
+      const sources = this.saveMigrations.map(r => r.source).join(' + ');
+      this.migratingSave = true;
+      try { fired = this.applySaveMigration(mergeScopes(this.saveMigrations), sources); }
+      finally { this.migratingSave = false; }
+    }
+    if (!fired) this.trigger('save_migrated');
   }
 
   /**
@@ -418,16 +443,17 @@ export class CoreSystem {
    * Resource pools are never touched — snapshot at the start, restored verbatim at the end.
    * No-op for new games or when the loaded versions match the current ones —
    * except in dev mode, where it runs on every load regardless of versions.
+   * Returns whether the pass ran (and so fired `save_migrated` itself).
    */
-  private applySaveMigration(scopes: MigrationScopes, label: string): void {
+  private applySaveMigration(scopes: MigrationScopes, label: string): boolean {
     const game = Game.getInstance();
-    if (game.isNewGame) return;
+    if (game.isNewGame) return false;
     const sameVersion = !this.isOldSave();
-    if (sameVersion && !game.isDevMode()) return;
+    if (sameVersion && !game.isDevMode()) return false;
 
     if (!Object.values(scopes).some(s => s.enabled)) {
       console.log(`[save-migration] ${label}: nothing enabled, skipped`);
-      return;
+      return false;
     }
 
     const stringify = (m: Record<string, { version: string }>) =>
@@ -548,7 +574,7 @@ export class CoreSystem {
 
       // 3.7. Skin layers — the core-status set is the template-innate set (like abilities);
       // status-/item-granted layers live on their own statuses and recompute on reevaluate.
-      // Layers granted at runtime by the skin_layer action land on the core status too, so
+      // Layers granted at runtime by the skin action land on the core status too, so
       // list those to keep them.
       if (scopes.skinLayers.enabled) {
         const tplSkinLayers: string[] = (template as any).skin_layers || [];
@@ -613,22 +639,34 @@ export class CoreSystem {
 
       // 4. Status reapply — refresh stat-grants for definition-backed statuses only.
       // Live/runtime statuses (item_<uid>, plugin-spawned, hand-rolled createStatus calls) have no
-      // definition to refresh against — leave them entirely intact.
+      // definition to refresh against — leave them entirely intact. The instance list (stacks,
+      // remaining duration, source) is the save's own, like resource pools, and carries over.
       if (scopes.statuses.enabled) {
         const heldSnapshot = char.getStatuses()
           .filter(s => s.id !== '_core_status' && statusesMap.has(s.id) && scopes.statuses.allows(s.id))
-          .map(s => ({ id: s.id, stacks: s.currentStacks, image: s.image, iconSource: s.iconSource }));
-        for (const { id, stacks, image, iconSource } of heldSnapshot) {
+          .map(s => ({ id: s.id, image: s.image, iconSource: s.iconSource, previous: s }));
+        for (const { id, image, iconSource, previous } of heldSnapshot) {
           char.removeStatus(id);
           const fresh = game.createStatus(id);
+          // The definition only knows a fresh application — replaying the held instances keeps a
+          // buff's remaining turns, each multi-stack instance's own timer and its source. Through
+          // applyInstance, so a retuned max_stacks (or a single/multi-stack switch) still applies.
+          const held = previous.getInstances();
+          if (held.length) {
+            fresh._instances = [];
+            for (const inst of held) fresh.applyInstance({ stacks: inst.stacks, duration: inst.duration, source: inst.source });
+          }
           if (!fresh.iconSource && iconSource) fresh.iconSource = iconSource;
           // The pass may only restore what the definition actually declares. A status whose
           // definition carries no image was given one at runtime — a consumable's status wears the
           // icon of the item that applied it — so recreating it from the definition must not blank
           // that out. Same rule applies to any future runtime-stamped field.
           if (!fresh.image && image) fresh.image = image;
+          // Per-status hook, like item_migrate: whatever a game derived for this instance when it was
+          // applied (stats scaled to the item that granted it, a stamped meta value) is gone from the
+          // fresh copy — put it back from the instance being replaced, before its stats land.
+          this.trigger('status_migrate', char, fresh, previous);
           char.addStatus(fresh);
-          if (stacks > 1) char.addStatusStacks(id, stacks - 1);
         }
       }
     }
@@ -696,6 +734,7 @@ export class CoreSystem {
     }
 
     console.log(`[save-migration] done in ${(performance.now() - migrationStart).toFixed(1)}ms`);
+    return true;
   }
 
   /**
@@ -804,6 +843,8 @@ export class CoreSystem {
    * holds HTMLAudioElements, which JSON.stringify flattens to {}.
    */
   public loopingSoundIds: string[] = [];
+  /** The saved loops that were started on the map rather than by a scene (they outlive scenes). */
+  public mapLoopingSoundIds: string[] = [];
 
   music: string; // id from MusicMap
 
@@ -811,6 +852,16 @@ export class CoreSystem {
   private autoplayResumers: (() => void)[] = [];
   @Skip()
   private autoplayHandler: (() => void) | null = null;
+
+  /**
+   * A spec that is an audio file's path rather than a registered sound id (a `file` field with
+   * `fileType: 'audio'` stores one — e.g. a projectile's launch sound) plays as a one-file sound with
+   * the defaults. Its id is the path, so stopSounds takes the same path.
+   */
+  private fileSound(spec: string): SoundObject | undefined {
+    const ext = spec.split('.').pop()?.toLowerCase() ?? '';
+    return spec.includes('/') && getFileExtensions('audio').includes(ext) ? { uid: '', id: spec, files: [spec] } : undefined;
+  }
 
   private getSoundVolume(): number {
     return (Global.getInstance().userSettings.value.sound_volume || 0) / 100;
@@ -851,25 +902,24 @@ export class CoreSystem {
     }
   }
 
+  /**
+   * Play sound(s). Each entry is an id with an optional inline tail, `rain(volume=0.4, fade_in=2)`:
+   * `volume`, `fade_in`, `fade_out` and `delay` override the sound's own fields for this play.
+   */
   public playSounds(val: string | string[]) {
     if (!val) {
       return;
     }
 
-    let sounds: string[] = [];
-    if (typeof val === "string") {
-      sounds = val.split(",");
-    } else {
-      sounds = val;
-    }
+    const sounds = typeof val === "string" ? Game.getInstance().logicSystem.getParts(val) : val;
 
-    for (let sound of sounds) {
-      sound = sound.trim();
-      if (!sound) {
+    for (const spec of sounds) {
+      if (!spec?.trim()) {
         continue;
       }
+      const { id: sound, props } = parseAudioSpec(spec);
 
-      let compiledSound = this.soundsMap.get(sound);
+      let compiledSound = this.soundsMap.get(sound) ?? this.fileSound(sound);
       if (!compiledSound) {
         gameLogger.error(`Sound not found: ${sound}`);
         continue;
@@ -880,14 +930,45 @@ export class CoreSystem {
       }
 
       const loop = !!compiledSound.loop;
-      // Re-triggering a loop restarts it rather than stacking a second copy.
+      const random = !!compiledSound.random;
+      // A random one-shot is one file of the pool; a random loop keeps them all and draws the next pass.
+      if (random && !loop) {
+        soundUrls = [soundUrls[Math.floor(Math.random() * soundUrls.length)]];
+      }
+      const channel = compiledSound.channel || '';
+      const gain = props.volume ?? compiledSound.volume ?? 1;
+      const fadeIn = props.fade_in ?? compiledSound.fade_in ?? 0;
+      const fadeOut = props.fade_out ?? compiledSound.fade_out ?? 0;
+      const delay = props.delay ?? compiledSound.delay ?? 0;
+      // A running loop carries on instead of jumping back to the top or stacking a second copy:
+      // re-staged content and repeated room enter actions play the same id again. Only a new gain lands.
       if (loop) {
-        this.stopSounds(sound);
+        const running = this.activeSounds.find(p => p.loop && p.id === sound);
+        if (running) {
+          if (running.gain !== gain) {
+            running.cancelRamp?.();
+            running.cancelRamp = null;
+            running.gain = gain;
+            for (const audio of running.elements) {
+              audio.volume = this.getSoundVolume() * gain;
+            }
+          }
+          continue;
+        }
+      }
+      // Sounds sharing a channel replace each other, each leaving over its own fade_out.
+      if (channel) {
+        this.stopSounds(this.activeSounds.filter(p => p.channel === channel).map(p => p.id));
       }
 
       const soundElements: HTMLAudioElement[] = [];
-      const playback: SoundPlayback = { id: sound, loop, stopped: false, elements: soundElements };
+      const playback: SoundPlayback = {
+        id: sound, loop, channel, stopped: false, elements: soundElements, gain, fadeOut, delayTimer: null, cancelRamp: null,
+        fromScene: !!Game.getInstance().dungeonSystem.currentSceneId.value,
+      };
       let loadedCount = 0;
+      // The fade-in belongs to the first file that actually plays; a loop's later passes start at gain.
+      let fadeInPending = fadeIn > 0;
 
       const playNextSound = (index: number) => {
         // Stopped while still loading: pause() was a no-op, so bail before it starts unhandled.
@@ -903,8 +984,15 @@ export class CoreSystem {
         }
         const audio = soundElements[index];
         audio.currentTime = 0;
-        audio.volume = this.getSoundVolume();
-        audio.play().catch((e: any) => {
+        const target = this.getSoundVolume() * playback.gain;
+        const fadeThisStart = fadeInPending;
+        audio.volume = fadeThisStart ? 0 : target;
+        audio.play().then(() => {
+          if (fadeThisStart && !playback.stopped) {
+            fadeInPending = false;
+            playback.cancelRamp = rampVolume(audio, 0, target, fadeIn, () => { playback.cancelRamp = null; });
+          }
+        }).catch((e: any) => {
           if (e?.name === 'AbortError') {
             return;
           }
@@ -917,17 +1005,36 @@ export class CoreSystem {
         });
       };
 
+      const begin = () => {
+        playback.delayTimer = null;
+        if (playback.stopped) {
+          return;
+        }
+        gameLogger.info(`[sound] Playing sound effect: "${sound}"${loop ? ' (looping)' : ''}`);
+        playNextSound(random ? Math.floor(Math.random() * soundUrls.length) : 0);
+      };
+
+      // The file after `index`: the next in sequence, or for a random loop any OTHER file of the pool.
+      const nextIndex = (index: number) => {
+        if (!random || soundUrls.length < 2) return index + 1;
+        const n = Math.floor(Math.random() * (soundUrls.length - 1));
+        return n >= index ? n + 1 : n;
+      };
+
       // Load all sounds
       soundUrls.forEach((url, index) => {
         const audio = new Audio(`${url}`);
         // Registered once at creation — playNextSound may replay this element many times.
-        audio.addEventListener('ended', () => playNextSound(index + 1));
+        audio.addEventListener('ended', () => playNextSound(nextIndex(index)));
         audio.addEventListener('canplaythrough', () => {
           loadedCount++;
           // If all sounds are loaded, start playing
           if (loadedCount === soundUrls.length) {
-            gameLogger.info(`[sound] Playing sound effect: "${sound}"${loop ? ' (looping)' : ''}`);
-            playNextSound(0);
+            if (delay > 0) {
+              playback.delayTimer = window.setTimeout(begin, delay * 1000);
+            } else {
+              begin();
+            }
           }
         }, { once: true });
         audio.addEventListener('error', (e) => {
@@ -941,39 +1048,81 @@ export class CoreSystem {
     }
   }
 
-  /** Stop sound(s) by id, looping or not. Omit `val` to stop everything currently playing. */
+  /**
+   * Stop sound(s) by id, looping or not. Omit `val` to stop everything currently playing. An id may
+   * carry `(fade_out=N)`; otherwise `options.fadeOut`, then the sound's own `fade_out`, decides the
+   * fade. A fading sound is released at once, so the same loop can start again over its own tail.
+   */
   public stopSounds(val?: string | string[], options?: StopSoundOptions) {
-    const ids = (val === undefined || val === '')
+    const specs = (val === undefined || val === '')
       ? null // null = match everything
-      : (typeof val === "string" ? val.split(",") : val).map(s => s.trim());
+      : (typeof val === "string" ? Game.getInstance().logicSystem.getParts(val) : val).map(parseAudioSpec);
+    const inlineFade = new Map(specs?.map(spec => [spec.id, spec.props.fade_out]) ?? []);
 
     // Iterate a copy: releaseSound splices the live array.
     for (const playback of [...this.activeSounds]) {
-      if (ids && !ids.includes(playback.id)) {
+      if (specs && !inlineFade.has(playback.id)) {
         continue;
       }
       if (options?.keepLooping && playback.loop) {
         continue;
       }
+      if (options?.keepMapLoops && playback.loop && !playback.fromScene) {
+        continue;
+      }
       playback.stopped = true;
-      for (const audio of playback.elements) {
+      if (playback.delayTimer !== null) {
+        clearTimeout(playback.delayTimer);
+        playback.delayTimer = null;
+      }
+      playback.cancelRamp?.();
+      playback.cancelRamp = null;
+      const fade = inlineFade.get(playback.id) ?? options?.fadeOut ?? playback.fadeOut ?? 0;
+      const cut = (audio: HTMLAudioElement) => {
         audio.pause();
         audio.currentTime = 0;
+      };
+      for (const audio of playback.elements) {
+        if (fade > 0 && !audio.paused) {
+          rampVolume(audio, audio.volume, 0, fade, () => cut(audio));
+        } else {
+          cut(audio);
+        }
       }
       this.releaseSound(playback);
-      gameLogger.info(`[sound] Stopped sound: "${playback.id}"`);
+      gameLogger.info(`[sound] Stopped sound: "${playback.id}"${fade > 0 ? ` (fading ${fade}s)` : ''}`);
     }
   }
 
+  /**
+   * Play music by id, with an optional inline tail: `forest(fade_in=3, volume=0.6, fade_out=2)`.
+   * `fade_out` on a play is how the OUTGOING track leaves; `fade_in`, `volume` and `shuffle` are the
+   * incoming track's. Each falls back to the entity's field, then to the engine default (a 1 s
+   * fade-out, no fade-in, full gain, shuffled). `"!"` (or `"!(fade_out=N)"`) stops the music;
+   * `false` returns to the dungeon's own music.
+   */
   public setMusic(val: string | false, load: boolean = false, disableTransition: boolean = false) {
-    const fade = disableTransition ? 0 : 1.0;
+    const player = MusicPlayer.getInstance();
+    const outgoing = this.music ? this.musicMap.get(this.music) : undefined;
+    let overrides: AudioOverrides = {};
+
+    if (typeof val === 'string') {
+      const parsed = parseAudioSpec(val);
+      val = parsed.id;
+      overrides = parsed.props;
+      if (val.startsWith('!')) {
+        this.music = "";
+        player.stop({ fadeOut: disableTransition ? 0 : (overrides.fade_out ?? outgoing?.fade_out ?? 1) });
+        return;
+      }
+    }
 
     if (val === false) {
       const game = Game.getInstance();
       val = game.dungeonSystem.currentDungeon.value?.music || "";
       if (!val) {
         this.music = "";
-        MusicPlayer.getInstance().stop({ fade });
+        player.stop({ fadeOut: disableTransition ? 0 : (outgoing?.fade_out ?? 1) });
         return;
       }
     }
@@ -982,16 +1131,24 @@ export class CoreSystem {
       return;
     }
 
-    this.music = val;
-
-    const files = this.musicMap.get(val)?.files || [];
-    if (files.length === 0) {
+    const track = this.musicMap.get(val);
+    const files = track?.files || [];
+    if (!track || files.length === 0) {
       gameLogger.error(`Music album "${val}" not found. Create it in the Music tab of the engine editor.`);
       return;
     }
 
+    this.music = val;
+
     const volume = (Global.getInstance().userSettings.value.music_volume || 0) / 100;
-    MusicPlayer.getInstance().play(val, files, { fade, volume, force: load });
+    player.play(val, files, {
+      fadeOut: disableTransition ? 0 : (overrides.fade_out ?? outgoing?.fade_out ?? 1),
+      fadeIn: disableTransition ? 0 : (overrides.fade_in ?? track.fade_in ?? 0),
+      volume,
+      trackVolume: overrides.volume ?? track.volume ?? 1,
+      shuffle: overrides.shuffle ?? track.shuffle ?? true,
+      force: load,
+    });
   }
 
   // ============================================
@@ -1160,6 +1317,8 @@ export class CoreSystem {
   /**
    * Add a component to a slot. If a component with the same id already exists, it will be replaced.
    * Components with a title will be rendered as tabs, components without a title will be injected.
+   * The title is resolved as a locale key at render time (literal text that matches no key is
+   * shown as written), so a tab registered with a key follows a language switch.
    * @param cm - Component configuration with slot, id, component, optional title, order, and props
    */
   public addComponent(cm: CustomComponent): void {
@@ -1331,8 +1490,10 @@ export class CoreSystem {
   }
 
   @Skip()
-  // item_drop_render is a pure render predicate, not a game event — suppressing it would answer
-  // "yes, droppable" for protected items and show a Drop button that then refuses.
+  // item_discard_render is a pure render predicate, not a game event — suppressing it would answer
+  // "yes, droppable" for protected items and show a Drop button that then refuses. item_compare is
+  // the same kind: muted, a game's key rewrite would be skipped and the item card would misread.
+  // status_preview likewise: muted, a preview card would fall back to the template's numbers.
   // Emitters that keep firing while events are suppressed. Two families:
   //  - render/mount events: UI hooks that must still run to paint the restored screen.
   //  - entity construction: dungeons, collectable pools, characters and items are rebuilt
@@ -1342,10 +1503,10 @@ export class CoreSystem {
   //    the pass itself runs under migratingSave — these hooks exist precisely so listeners can
   //    act inside the load.
   ignoreSupressEvents: Set<string> = new Set([
-    'character_render', 'item_drop_render', 'asset_render',
+    'character_render', 'item_discard_render', 'item_compare', 'status_preview', 'asset_render', 'asset_exit',
     'dungeon_create', 'collectable_resolve',
     'character_create', 'item_create',
-    'save_load_before', 'save_migrated', 'item_migrate',
+    'save_load_before', 'save_migrated', 'item_migrate', 'status_migrate',
   ]);
 
   public trigger<K extends keyof EmitterMap>(
@@ -1498,8 +1659,9 @@ export class CoreSystem {
     watch(() => Global.getInstance().userSettings.value.sound_volume, (newVolume) => {
       const volume = (newVolume || 0) / 100;
       for (const playback of this.activeSounds) {
+        if (playback.cancelRamp) continue; // a fade-in lands on the new level by itself
         for (const audio of playback.elements) {
-          audio.volume = volume;
+          audio.volume = volume * playback.gain;
         }
       }
     });
@@ -1548,6 +1710,7 @@ export class CoreSystem {
     // Snapshot which loops are live so loadGame can restart them. Derived here from the one
     // source of truth rather than mirrored on every play/stop, so it cannot drift.
     this.loopingSoundIds = this.activeSounds.filter(p => p.loop).map(p => p.id);
+    this.mapLoopingSoundIds = this.activeSounds.filter(p => p.loop && !p.fromScene).map(p => p.id);
 
     const metaData = this.generateSaveMetaData(this.gameManifest, this.modsManifests, options);
     const gameCoreData = save(game);
@@ -1559,7 +1722,7 @@ export class CoreSystem {
       // Debug: console.log(`Saved game ${gameId} as ${saveName}:`, dataToStore);
       gameLogger.success(`Game saved: ${saveName}`);
       if (!options?.hidden && !options?.noNotification) {
-        globalService.addNotification('Game saved: ' + saveName);
+        globalService.addNotificationId('save_success_named', { name: saveName });
       }
     } catch (error) {
       const globalService = Global.getInstance();
@@ -1642,6 +1805,11 @@ export class CoreSystem {
     // started the loop, so re-firing the original action would be wrong.
     if (this.loopingSoundIds.length) {
       this.playSounds(this.loopingSoundIds);
+      // A save restores its scene before this, so every resumed loop reads as the scene's: put
+      // the map's own loops back to outliving it.
+      for (const playback of this.activeSounds) {
+        if (this.mapLoopingSoundIds.includes(playback.id)) playback.fromScene = false;
+      }
     }
 
     // Initialize selected character to first party member if not already set

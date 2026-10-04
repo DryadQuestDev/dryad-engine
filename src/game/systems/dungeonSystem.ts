@@ -30,7 +30,7 @@ import { Observable, Subscription } from 'rxjs';
 import { of, from } from 'rxjs';
 import { concatMap, delay, tap } from 'rxjs/operators';
 import { SettingsObject } from "../../schemas/settingsSchema";
-import { PARTY_INVENTORY_ID } from "./itemSystem";
+import { PARTY_INVENTORY_ID, getGameLineOrEngine } from "./itemSystem";
 import { DungeonRoom } from "../core/dungeon/dungeonRoom";
 import { Game } from "../game";
 import { DungeonFabric } from "../core/dungeon/dungeonFabric";
@@ -76,6 +76,7 @@ export type ReplaySceneObject = {
 type QueueLoc = {
   node: DungeonRoom;
   path: DungeonRoom[];
+  cost: number;
 }
 
 export type QuestObject = {
@@ -120,7 +121,7 @@ export type ResolvedAssetLayer = {
   fade?: boolean;
 }
 
-// Day-for-night colour grade applied over the scene and the map art. The tint is kept as separate
+// Day-for-night colour grade applied over the scene and the map art. Colours are kept as separate
 // r/g/b numbers because GSAP can only tween colours as a CSS property on an element, never as a
 // plain object property — and a plain object is what the crossfade tweens.
 export type SceneGrade = {
@@ -132,6 +133,34 @@ export type SceneGrade = {
   g: number;
   b: number;
   tint_amount: number;
+  // Split toning (tone curves after the matrix): dark tones lean toward the shadow colour, bright
+  // tones toward the highlight colour, mid-tones stay near neutral. Graded art only.
+  shadow_r: number;
+  shadow_g: number;
+  shadow_b: number;
+  shadow_amount: number;
+  highlight_r: number;
+  highlight_g: number;
+  highlight_b: number;
+  highlight_amount: number;
+  // Light over the scene BACKGROUNDS only (SceneLight): a soft-light sky gradient top → mid →
+  // bottom, a darkened vignette, and animated light rays. Actors and the map never get these.
+  sky_top_r: number;
+  sky_top_g: number;
+  sky_top_b: number;
+  sky_mid_r: number;
+  sky_mid_g: number;
+  sky_mid_b: number;
+  sky_bottom_r: number;
+  sky_bottom_g: number;
+  sky_bottom_b: number;
+  sky_amount: number;
+  vignette: number;
+  rays: number;
+  rays_angle: number;
+  // How much of the grade characters take, 0-1. Actors read better a little lighter than the plate
+  // behind them — still part of the scene, but their faces stay legible.
+  actor_strength: number;
 }
 
 // Fully resolved before it is stored, so the view never parses.
@@ -140,13 +169,91 @@ export type SceneGradeState = {
   duration: number;
 }
 
+/** Ambient particle kinds drawn over the scene backgrounds by SceneAmbient. */
+export const AMBIENT_KINDS = ['fireflies', 'motes', 'embers'] as const;
+export type AmbientKind = typeof AMBIENT_KINDS[number];
+
+/** Saved ambient layer: which particles, and a density multiplier (1 = the kind's default count). */
+export type SceneAmbientState = {
+  kind: AmbientKind;
+  density: number;
+}
+
 export const IDENTITY_GRADE: SceneGrade = {
-  brightness: 1, saturate: 1, contrast: 1, hue: 0, r: 0, g: 0, b: 0, tint_amount: 0
+  brightness: 1, saturate: 1, contrast: 1, hue: 0, r: 0, g: 0, b: 0, tint_amount: 0,
+  shadow_r: 0, shadow_g: 0, shadow_b: 0, shadow_amount: 0,
+  highlight_r: 255, highlight_g: 255, highlight_b: 255, highlight_amount: 0,
+  sky_top_r: 128, sky_top_g: 128, sky_top_b: 128,
+  sky_mid_r: 128, sky_mid_g: 128, sky_mid_b: 128,
+  sky_bottom_r: 128, sky_bottom_g: 128, sky_bottom_b: 128,
+  sky_amount: 0, vignette: 0, rays: 0, rays_angle: 30, actor_strength: 0.5,
 };
 
-/** Daylight — nothing to render. The tint colour is ignored while tint_amount is 0. */
+/** Fill every field a preset leaves out from the identity, so every grade can tween to every other. */
+export function fullGrade(partial: Partial<SceneGrade>): SceneGrade {
+  return { ...IDENTITY_GRADE, ...partial };
+}
+
+/** The colour fields (as opposed to amounts): strength never scales them, only their amounts. */
+export function isGradeColorKey(key: string): boolean {
+  return key === 'r' || key === 'g' || key === 'b' || /_(r|g|b)$/.test(key);
+}
+
+/** Fields strength never scales: colours, the ray angle, and the actor strength itself. */
+function keepsValueAtStrength(key: string): boolean {
+  return isGradeColorKey(key) || key === 'rays_angle' || key === 'actor_strength';
+}
+
+/** The grade at strength k (0 = daylight, 1 = the grade as given): amounts scale, colours stay. */
+export function gradeAtStrength(g: SceneGrade, k: number): SceneGrade {
+  const t = Math.max(0, Math.min(1, k));
+  const out = {} as SceneGrade;
+  for (const key of Object.keys(IDENTITY_GRADE) as (keyof SceneGrade)[]) {
+    const to = g[key] ?? IDENTITY_GRADE[key];
+    out[key] = keepsValueAtStrength(key) ? to : IDENTITY_GRADE[key] + (to - IDENTITY_GRADE[key]) * t;
+  }
+  return out;
+}
+
+/** What characters get: the grade scaled by its own actor_strength. */
+export function actorGrade(g: SceneGrade): SceneGrade {
+  return gradeAtStrength(g, g.actor_strength ?? IDENTITY_GRADE.actor_strength);
+}
+
+/** Daylight — nothing to render. A colour is ignored while its amount is 0. */
 export function isIdentityGrade(g: SceneGrade): boolean {
-  return g.brightness === 1 && g.saturate === 1 && g.contrast === 1 && g.hue === 0 && g.tint_amount === 0;
+  return g.brightness === 1 && g.saturate === 1 && g.contrast === 1 && g.hue === 0 && g.tint_amount === 0
+    && !g.shadow_amount && !g.highlight_amount && !g.sky_amount && !g.vignette && !g.rays;
+}
+
+/** True while any of the background-only light layers (sky, vignette, rays) has something to draw. */
+export function hasSceneLight(g: SceneGrade): boolean {
+  return !!(g.sky_amount || g.vignette || g.rays);
+}
+
+/**
+ * Split-toning tone curves as feFuncR/G/B tableValues, one string per channel. For a channel value
+ * x: out = x + s·(S − x)·(1 − x)² + h·(H − x)·x². Dark tones are pulled toward the shadow colour S,
+ * bright tones toward the highlight colour H, and the squared weights keep mid-tones nearly
+ * untouched — the curve shape a single linear colour matrix cannot express.
+ */
+export function toneTables(g: SceneGrade): [string, string, string] {
+  const steps = 16;
+  const sa = g.shadow_amount || 0, ha = g.highlight_amount || 0;
+  const channel = (shadow: number, highlight: number) => {
+    const S = shadow / 255, H = highlight / 255, values: string[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const x = i / steps;
+      const out = x + sa * (S - x) * (1 - x) * (1 - x) + ha * (H - x) * x * x;
+      values.push(Math.max(0, Math.min(1, out)).toFixed(4));
+    }
+    return values.join(' ');
+  };
+  return [
+    channel(g.shadow_r, g.highlight_r),
+    channel(g.shadow_g, g.highlight_g),
+    channel(g.shadow_b, g.highlight_b),
+  ];
 }
 
 // Two things learned tuning these against real art:
@@ -158,42 +265,176 @@ export function isIdentityGrade(g: SceneGrade): boolean {
 // 2. Pull `saturate` down before leaning on the tint. A source colour that keeps its saturation
 //    fights the blend, so a subtle tint over, say, a yellow-green field reads as no tint at all.
 //    Every preset here that wants a recognisable hue desaturates first.
-const GRADE_PRESETS: Record<string, SceneGrade> = {
+const RAW_GRADE_PRESETS: Record<string, Partial<SceneGrade>> = {
   none: IDENTITY_GRADE,
 
   // Light & time of day
-  dawn: { brightness: 1.05, saturate: 0.85, contrast: 0.98, hue: 4, r: 255, g: 176, b: 122, tint_amount: 0.28 },
-  dusk: { brightness: 0.82, saturate: 0.92, contrast: 1.02, hue: -6, r: 74, g: 42, b: 78, tint_amount: 0.14 },
-  night: { brightness: 0.55, saturate: 0.55, contrast: 1.06, hue: -10, r: 22, g: 38, b: 79, tint_amount: 0.24 },
-  moonlit: { brightness: 0.62, saturate: 0.45, contrast: 1.10, hue: -14, r: 29, g: 58, b: 122, tint_amount: 0.28 },
-  sunlit: { brightness: 1.18, saturate: 0.95, contrast: 1.02, hue: 3, r: 255, g: 228, b: 176, tint_amount: 0.20 },
-  bright: { brightness: 1.35, saturate: 0.60, contrast: 1.20, hue: 0, r: 255, g: 248, b: 232, tint_amount: 0.18 },
+  dawn: {
+    brightness: 1.0, saturate: 0.88, contrast: 1.0, hue: 3, r: 255, g: 190, b: 150, tint_amount: 0.1,
+    shadow_r: 70, shadow_g: 80, shadow_b: 140, shadow_amount: 0.25, highlight_r: 255, highlight_g: 200, highlight_b: 170, highlight_amount: 0.35,
+    sky_top_r: 150, sky_top_g: 165, sky_top_b: 215, sky_mid_r: 255, sky_mid_g: 175, sky_mid_b: 140, sky_bottom_r: 110, sky_bottom_g: 105, sky_bottom_b: 140, sky_amount: 0.55,
+    vignette: 0.2, rays: 0.3, rays_angle: 30,
+  },
+  // Low sun: warm amber highlights over cool violet shadows, a sky that is dark violet up top and
+  // glows at the horizon, a soft vignette and slanting rays. Brightness barely drops — dusk is a
+  // colour shift, not a dimmer.
+  dusk: {
+    brightness: 0.9, saturate: 0.92, contrast: 1.1, hue: 0, r: 255, g: 140, b: 70, tint_amount: 0.08,
+    shadow_r: 40, shadow_g: 30, shadow_b: 85, shadow_amount: 0.22,
+    highlight_r: 255, highlight_g: 175, highlight_b: 105, highlight_amount: 0.45,
+    sky_top_r: 55, sky_top_g: 40, sky_top_b: 110, sky_mid_r: 255, sky_mid_g: 125, sky_mid_b: 55,
+    sky_bottom_r: 45, sky_bottom_g: 30, sky_bottom_b: 80, sky_amount: 0.7,
+    vignette: 0.5, rays: 0.5, rays_angle: -25,
+  },
+  night: {
+    brightness: 0.6, saturate: 0.6, contrast: 1.08, hue: -8, r: 25, g: 40, b: 85, tint_amount: 0.18,
+    shadow_r: 10, shadow_g: 18, shadow_b: 50, shadow_amount: 0.35, highlight_r: 150, highlight_g: 175, highlight_b: 230, highlight_amount: 0.25,
+    sky_top_r: 20, sky_top_g: 30, sky_top_b: 70, sky_mid_r: 60, sky_mid_g: 80, sky_mid_b: 140, sky_bottom_r: 15, sky_bottom_g: 20, sky_bottom_b: 45, sky_amount: 0.6,
+    vignette: 0.6,
+  },
+  moonlit: {
+    brightness: 0.8, saturate: 0.45, contrast: 1.12, hue: -12, r: 30, g: 60, b: 125, tint_amount: 0.14,
+    shadow_r: 12, shadow_g: 22, shadow_b: 60, shadow_amount: 0.35, highlight_r: 215, highlight_g: 228, highlight_b: 255, highlight_amount: 0.55,
+    sky_top_r: 120, sky_top_g: 140, sky_top_b: 200, sky_mid_r: 60, sky_mid_g: 80, sky_mid_b: 140, sky_bottom_r: 15, sky_bottom_g: 20, sky_bottom_b: 50, sky_amount: 0.6,
+    vignette: 0.5, rays: 0.35, rays_angle: 15,
+  },
+  sunlit: {
+    brightness: 1.12, saturate: 1.0, contrast: 1.06, hue: 3, r: 255, g: 228, b: 176, tint_amount: 0.12,
+    shadow_r: 90, shadow_g: 70, shadow_b: 60, shadow_amount: 0.12, highlight_r: 255, highlight_g: 235, highlight_b: 190, highlight_amount: 0.3,
+    sky_top_r: 175, sky_top_g: 195, sky_top_b: 235, sky_mid_r: 255, sky_mid_g: 225, sky_mid_b: 170, sky_bottom_r: 140, sky_bottom_g: 120, sky_bottom_b: 95, sky_amount: 0.45,
+    vignette: 0.1, rays: 0.45, rays_angle: 25,
+  },
+  bright: {
+    brightness: 1.3, saturate: 0.65, contrast: 1.15, hue: 0, r: 255, g: 248, b: 232, tint_amount: 0.15,
+    shadow_r: 200, shadow_g: 195, shadow_b: 190, shadow_amount: 0.2, highlight_r: 255, highlight_g: 252, highlight_b: 240, highlight_amount: 0.45,
+    rays: 0.35, rays_angle: 10,
+  },
 
   // Weather & place
-  overcast: { brightness: 0.95, saturate: 0.45, contrast: 0.90, hue: 0, r: 170, g: 180, b: 192, tint_amount: 0.25 },
-  stormy: { brightness: 0.58, saturate: 0.35, contrast: 1.04, hue: 0, r: 42, g: 48, b: 56, tint_amount: 0.22 },
-  foggy: { brightness: 1.08, saturate: 0.30, contrast: 0.78, hue: 0, r: 221, g: 227, b: 232, tint_amount: 0.38 },
-  underwater: { brightness: 0.70, saturate: 0.50, contrast: 1.00, hue: -10, r: 20, g: 112, b: 126, tint_amount: 0.40 },
+  overcast: {
+    brightness: 0.94, saturate: 0.5, contrast: 0.95, hue: 0, r: 170, g: 180, b: 192, tint_amount: 0.15,
+    shadow_r: 60, shadow_g: 66, shadow_b: 78, shadow_amount: 0.2, highlight_r: 220, highlight_g: 225, highlight_b: 232, highlight_amount: 0.2,
+    sky_top_r: 175, sky_top_g: 180, sky_top_b: 190, sky_mid_r: 128, sky_mid_g: 128, sky_mid_b: 132, sky_bottom_r: 100, sky_bottom_g: 104, sky_bottom_b: 110, sky_amount: 0.4,
+    vignette: 0.25,
+  },
+  stormy: {
+    brightness: 0.6, saturate: 0.38, contrast: 1.12, hue: 0, r: 42, g: 48, b: 58, tint_amount: 0.18,
+    shadow_r: 20, shadow_g: 26, shadow_b: 38, shadow_amount: 0.35, highlight_r: 175, highlight_g: 190, highlight_b: 205, highlight_amount: 0.25,
+    sky_top_r: 30, sky_top_g: 35, sky_top_b: 50, sky_mid_r: 90, sky_mid_g: 100, sky_mid_b: 115, sky_bottom_r: 40, sky_bottom_g: 45, sky_bottom_b: 55, sky_amount: 0.65,
+    vignette: 0.55,
+  },
+  foggy: {
+    brightness: 1.06, saturate: 0.35, contrast: 0.8, hue: 0, r: 221, g: 227, b: 232, tint_amount: 0.3,
+    shadow_r: 175, shadow_g: 182, shadow_b: 190, shadow_amount: 0.35, highlight_r: 240, highlight_g: 243, highlight_b: 246, highlight_amount: 0.25,
+    sky_top_r: 150, sky_top_g: 155, sky_top_b: 160, sky_mid_r: 200, sky_mid_g: 205, sky_mid_b: 210, sky_bottom_r: 215, sky_bottom_g: 220, sky_bottom_b: 225, sky_amount: 0.6,
+  },
+  underwater: {
+    brightness: 0.72, saturate: 0.55, contrast: 1.02, hue: -10, r: 20, g: 112, b: 126, tint_amount: 0.32,
+    shadow_r: 5, shadow_g: 40, shadow_b: 60, shadow_amount: 0.35, highlight_r: 150, highlight_g: 235, highlight_b: 230, highlight_amount: 0.3,
+    sky_top_r: 120, sky_top_g: 220, sky_top_b: 220, sky_mid_r: 40, sky_mid_g: 120, sky_mid_b: 130, sky_bottom_r: 10, sky_bottom_g: 40, sky_bottom_b: 55, sky_amount: 0.6,
+    vignette: 0.45, rays: 0.45, rays_angle: 8,
+    actor_strength: 0.8
+  },
 
   // Fire, cold, magic
-  candlelit: { brightness: 0.70, saturate: 0.85, contrast: 1.05, hue: 8, r: 107, g: 58, b: 18, tint_amount: 0.20 },
-  infernal: { brightness: 0.78, saturate: 0.70, contrast: 1.15, hue: -6, r: 160, g: 28, b: 5, tint_amount: 0.40 },
-  frozen: { brightness: 1.02, saturate: 0.35, contrast: 1.06, hue: -6, r: 168, g: 220, b: 240, tint_amount: 0.32 },
-  arcane: { brightness: 0.76, saturate: 0.45, contrast: 1.08, hue: 0, r: 107, g: 46, b: 168, tint_amount: 0.40 },
-  void: { brightness: 0.40, saturate: 0.20, contrast: 1.20, hue: 0, r: 10, g: 6, b: 18, tint_amount: 0.40 },
+  candlelit: {
+    brightness: 0.72, saturate: 0.85, contrast: 1.08, hue: 6, r: 107, g: 58, b: 18, tint_amount: 0.16,
+    shadow_r: 40, shadow_g: 22, shadow_b: 15, shadow_amount: 0.3, highlight_r: 255, highlight_g: 190, highlight_b: 110, highlight_amount: 0.4,
+    vignette: 0.65,
+  },
+  infernal: {
+    brightness: 0.8, saturate: 0.75, contrast: 1.15, hue: -4, r: 160, g: 28, b: 5, tint_amount: 0.3,
+    shadow_r: 60, shadow_g: 5, shadow_b: 0, shadow_amount: 0.35, highlight_r: 255, highlight_g: 170, highlight_b: 60, highlight_amount: 0.4,
+    sky_top_r: 40, sky_top_g: 10, sky_top_b: 10, sky_mid_r: 150, sky_mid_g: 50, sky_mid_b: 20, sky_bottom_r: 255, sky_bottom_g: 120, sky_bottom_b: 40, sky_amount: 0.6,
+    vignette: 0.45,
+  },
+  frozen: {
+    brightness: 1.02, saturate: 0.38, contrast: 1.06, hue: -6, r: 168, g: 220, b: 240, tint_amount: 0.25,
+    shadow_r: 70, shadow_g: 110, shadow_b: 150, shadow_amount: 0.3, highlight_r: 230, highlight_g: 248, highlight_b: 255, highlight_amount: 0.35,
+    sky_top_r: 190, sky_top_g: 225, sky_top_b: 245, sky_mid_r: 160, sky_mid_g: 200, sky_mid_b: 225, sky_bottom_r: 120, sky_bottom_g: 150, sky_bottom_b: 175, sky_amount: 0.45,
+    vignette: 0.25,
+  },
+  arcane: {
+    brightness: 0.82, saturate: 0.55, contrast: 1.1, hue: 0, r: 107, g: 46, b: 168, tint_amount: 0.2,
+    shadow_r: 35, shadow_g: 15, shadow_b: 70, shadow_amount: 0.35, highlight_r: 230, highlight_g: 170, highlight_b: 255, highlight_amount: 0.35,
+    sky_top_r: 60, sky_top_g: 25, sky_top_b: 110, sky_mid_r: 150, sky_mid_g: 90, sky_mid_b: 220, sky_bottom_r: 40, sky_bottom_g: 20, sky_bottom_b: 80, sky_amount: 0.4,
+    vignette: 0.5,
+  },
+  void: {
+    brightness: 0.42, saturate: 0.2, contrast: 1.2, hue: 0, r: 10, g: 6, b: 18, tint_amount: 0.35,
+    shadow_r: 8, shadow_g: 4, shadow_b: 16, shadow_amount: 0.3, highlight_r: 120, highlight_g: 100, highlight_b: 150, highlight_amount: 0.15,
+    sky_top_r: 15, sky_top_g: 10, sky_top_b: 25, sky_mid_r: 40, sky_mid_g: 30, sky_mid_b: 60, sky_bottom_r: 10, sky_bottom_g: 6, sky_bottom_b: 18, sky_amount: 0.5,
+    vignette: 0.8,
+    actor_strength: 0.8
+  },
 
   // Body & mind
-  sickly: { brightness: 0.72, saturate: 0.60, contrast: 1.08, hue: 35, r: 45, g: 74, b: 30, tint_amount: 0.22 },
-  bloodied: { brightness: 0.70, saturate: 0.55, contrast: 1.12, hue: -4, r: 140, g: 16, b: 16, tint_amount: 0.42 },
-  dream: { brightness: 1.20, saturate: 0.35, contrast: 0.80, hue: 4, r: 255, g: 210, b: 238, tint_amount: 0.35 },
-  nightmare: { brightness: 0.45, saturate: 0.25, contrast: 1.32, hue: 0, r: 26, g: 13, b: 20, tint_amount: 0.35 },
+  sickly: {
+    brightness: 0.75, saturate: 0.6, contrast: 1.08, hue: 30, r: 45, g: 74, b: 30, tint_amount: 0.18,
+    shadow_r: 35, shadow_g: 45, shadow_b: 15, shadow_amount: 0.3, highlight_r: 210, highlight_g: 230, highlight_b: 120, highlight_amount: 0.3,
+    vignette: 0.5,
+  },
+  bloodied: {
+    brightness: 0.72, saturate: 0.55, contrast: 1.12, hue: -4, r: 140, g: 16, b: 16, tint_amount: 0.35,
+    shadow_r: 60, shadow_g: 0, shadow_b: 0, shadow_amount: 0.3, highlight_r: 255, highlight_g: 140, highlight_b: 140, highlight_amount: 0.2,
+    vignette: 0.7,
+  },
+  dream: {
+    brightness: 1.12, saturate: 0.5, contrast: 0.9, hue: 4, r: 255, g: 210, b: 238, tint_amount: 0.2,
+    shadow_r: 200, shadow_g: 170, shadow_b: 215, shadow_amount: 0.28, highlight_r: 255, highlight_g: 240, highlight_b: 250, highlight_amount: 0.35,
+    sky_top_r: 255, sky_top_g: 210, sky_top_b: 240, sky_mid_r: 220, sky_mid_g: 200, sky_mid_b: 240, sky_bottom_r: 200, sky_bottom_g: 190, sky_bottom_b: 230, sky_amount: 0.5,
+    rays: 0.25, rays_angle: 0,
+    actor_strength: 0.8
+  },
+  nightmare: {
+    brightness: 0.48, saturate: 0.25, contrast: 1.3, hue: 0, r: 26, g: 13, b: 20, tint_amount: 0.3,
+    shadow_r: 30, shadow_g: 0, shadow_b: 10, shadow_amount: 0.35, highlight_r: 170, highlight_g: 140, highlight_b: 150, highlight_amount: 0.15,
+    vignette: 0.85,
+    actor_strength: 0.8
+  },
 
   // Utility
-  memory: { brightness: 0.98, saturate: 0.35, contrast: 0.95, hue: 12, r: 201, g: 168, b: 120, tint_amount: 0.35 },
-  noir: { brightness: 0.95, saturate: 0.00, contrast: 1.25, hue: 0, r: 0, g: 0, b: 0, tint_amount: 0.00 },
+  memory: {
+    brightness: 0.98, saturate: 0.35, contrast: 0.95, hue: 12, r: 201, g: 168, b: 120, tint_amount: 0.3,
+    shadow_r: 80, shadow_g: 60, shadow_b: 40, shadow_amount: 0.3, highlight_r: 245, highlight_g: 230, highlight_b: 200, highlight_amount: 0.3,
+    vignette: 0.5,
+    actor_strength: 1
+  },
+  noir: {
+    brightness: 0.95, saturate: 0, contrast: 1.25, hue: 0, r: 0, g: 0, b: 0, tint_amount: 0,
+    vignette: 0.55,
+    actor_strength: 1
+  },
 };
 
 export const GRADE_FADE_DURATION = 0.8;
+
+// Colours for {screen_flash}: a short pulse on the grade matrix, then straight back to the saved
+// grade. Any grade preset name also works ("infernal", "arcane#0.6").
+const RAW_FLASH_PRESETS: Record<string, Partial<SceneGrade>> = {
+  red: { brightness: 1.05, saturate: 0.6, contrast: 1.1, hue: 0, r: 200, g: 20, b: 20, tint_amount: 0.55, actor_strength: 1 },
+  white: { brightness: 1.8, saturate: 0.4, contrast: 0.9, hue: 0, r: 255, g: 255, b: 255, tint_amount: 0.55, actor_strength: 1 },
+};
+
+const normalizePresets = (raw: Record<string, Partial<SceneGrade>>): Record<string, SceneGrade> =>
+  Object.fromEntries(Object.entries(raw).map(([id, preset]) => [id, fullGrade(preset)]));
+const GRADE_PRESETS = normalizePresets(RAW_GRADE_PRESETS);
+export const FLASH_PRESETS = normalizePresets(RAW_FLASH_PRESETS);
+
+/** A one-shot actor animation waiting for its CharacterSlot to play it. Never saved. */
+export type ActorAnimRequest = {
+  anim: string;
+  duration?: number;
+  intensity?: number;
+  seq: number;
+};
+
+/** One-shot screen effects ({screen_shake} / {screen_flash}). Never saved. */
+export type ScreenShakeRequest = { intensity: number; duration: number; seq: number };
+export type ScreenFlashRequest = { grade: SceneGrade; duration: number; seq: number };
+
+/** One-shot actor animations (`anim=` / {animate}). Everything else is a looping idle. */
+export const ONE_SHOT_ANIMS = ['lunge', 'recoil', 'hop', 'shake', 'shiver', 'nod', 'bounce', 'flash'];
 
 /** Id of the shared feColorMatrix def; art elements reference it as filter: url(#…). */
 export const GRADE_FILTER_ID = 'scene-grade';
@@ -467,6 +708,17 @@ export class DungeonSystem {
   }
 
   /**
+   * asset_exit for every staged asset a wholesale wipe or replacement is about to drop, minus the
+   * ids in `keep`. Call it BEFORE cancelAllAssetRemovals: that clears isRemoving, and an asset
+   * already mid-exit fired when its removal began.
+   */
+  private exitAssets(keep?: Set<string>): void {
+    for (const asset of this.assets.value) {
+      if (!asset.isRemoving && !keep?.has(asset.id)) this.game.trigger('asset_exit', asset);
+    }
+  }
+
+  /**
    * The image plates an asset renders, bottom first: `file_image` then everything in
    * `layers`. Resolution happens HERE rather than at stage time for two reasons — a staged
    * asset is serialized verbatim into the save (`assets` carries no `@Skip()`) and nothing
@@ -534,10 +786,18 @@ export class DungeonSystem {
         // Check if asset already exists - skip if it does (prevents duplicates).
         // A mid-exit asset is still in the array, so re-staging it here must revive it:
         // cancel the pending removal, otherwise the orphan timer deletes the backdrop
-        // moments after the content asked for it back.
+        // moments after the content asked for it back. A revival is a re-add as far as
+        // the stage is concerned — whatever replaced it is still up — so it runs the same
+        // render hook and solo sweep a fresh add would. Skipping them left a stale `solo`
+        // asset next to the revived one for good (page back, then forward within the fade).
         const existingAsset = this.assets.value.find(a => a.id === assetId);
         if (existingAsset) {
-          this.cancelScheduledAssetRemoval(existingAsset);
+          if (existingAsset.isRemoving) {
+            this.cancelScheduledAssetRemoval(existingAsset);
+            this.game.trigger('asset_render', existingAsset);
+            this.applySoloAsset(existingAsset);
+            gameLogger.info(`[addAsset] Revived exiting asset: "${assetId}"`);
+          }
           continue;
         }
 
@@ -622,6 +882,7 @@ export class DungeonSystem {
         gameLogger.warn(`[removeAsset] Asset "${assetId}" not found in scene, skipping.`);
         continue;
       }
+      if (!asset.isRemoving) this.game.trigger('asset_exit', asset);
 
       // Check if asset has exit animation
       const exitType = asset.exit;
@@ -665,11 +926,13 @@ export class DungeonSystem {
   }
 
   public setAssets(assets: SceneAsset[]): void {
+    this.exitAssets(new Set(assets.map(a => a.id)));
     this.cancelAllAssetRemovals();
     this.assets.value = [...assets];
   }
 
   public clearAssets(): void {
+    this.exitAssets();
     this.cancelAllAssetRemovals();
     this.assets.value = [];
   }
@@ -677,11 +940,75 @@ export class DungeonSystem {
   // Active colour grade, saved with the run (no @Skip, same as `assets` above). null = daylight.
   public sceneGrade: Ref<SceneGradeState | null> = ref(null);
 
+  // Ambient particles over the scene backgrounds ({ambient: "fireflies"}), saved with the run like
+  // the grade and independent of it — an indoor dusk has no fireflies. null = none.
+  public sceneAmbient: Ref<SceneAmbientState | null> = ref(null);
+
   // True while the grade is anything but daylight, including mid-fade. Art elements read this to
   // decide whether to reference the colour-matrix filter at all, so daylight costs no filter passes.
   // Presentation only — SceneGradeFilter owns it, and it is rebuilt from sceneGrade on mount.
   @Skip()
   public gradeActive: Ref<boolean> = ref(false);
+
+  // One-shot animations are events, not state: nothing here is saved, so loading a save can never
+  // replay a lunge. Actor requests are keyed by character id and consumed by that actor's slot.
+  @Skip()
+  public actorAnimRequests: Ref<Record<string, ActorAnimRequest>> = ref({});
+  // One slot per effect, not a shared one: a paragraph that shakes AND flashes (take_damage flashes)
+  // sets both in the same tick, and a watcher only ever sees the last write to a single ref.
+  @Skip()
+  public screenShakeFx: Ref<ScreenShakeRequest | null> = ref(null);
+  @Skip()
+  public screenFlashFx: Ref<ScreenFlashRequest | null> = ref(null);
+  @Skip()
+  private fxSeq = 0;
+
+  /** Play a one-shot animation on a staged actor: lunge, recoil, hop, shake, shiver, nod, bounce, flash. */
+  public playActorAnim(charId: string, anim: string, opts: { duration?: number; intensity?: number } = {}): void {
+    if (!ONE_SHOT_ANIMS.includes(anim)) {
+      gameLogger.warn(`[animate] Unknown animation "${anim}" for "${charId}". Valid: ${ONE_SHOT_ANIMS.join(', ')}`);
+      return;
+    }
+    this.actorAnimRequests.value = {
+      ...this.actorAnimRequests.value,
+      [charId]: { anim, duration: opts.duration, intensity: opts.intensity, seq: ++this.fxSeq },
+    };
+  }
+
+  /** Called by the actor's slot once it has started the animation. */
+  public consumeActorAnim(charId: string, seq: number): void {
+    const current = this.actorAnimRequests.value[charId];
+    if (!current || current.seq !== seq) return;
+    const { [charId]: _done, ...rest } = this.actorAnimRequests.value;
+    this.actorAnimRequests.value = rest;
+  }
+
+  // `anim`, `anim_duration` and `anim_intensity` ride along in actor props ("chimera(anim=lunge)")
+  // but must never land on the saved slot — strip them here and queue the one-shot instead.
+  private takeOneShotProps(charId: string, props: Record<string, any> | undefined): void {
+    if (!props || props.anim === undefined) return;
+    const anim = String(props.anim);
+    const opts = { duration: props.anim_duration, intensity: props.anim_intensity };
+    delete props.anim; delete props.anim_duration; delete props.anim_intensity;
+    if (anim && anim !== 'none') this.playActorAnim(charId, anim, opts);
+  }
+
+  /** Shake the scene art (background + actors); dialogue and UI stay still. */
+  public screenShake(intensity: number = 0.5, duration: number = 0.45): void {
+    this.screenShakeFx.value = { intensity, duration, seq: ++this.fxSeq };
+  }
+
+  /** Pulse the scene art to a colour and back to the current grade. "red", "white" or any grade preset. */
+  public screenFlash(value: string = 'red', duration: number = 0.5): void {
+    const [id, amountStr] = String(value).split('#');
+    const base = FLASH_PRESETS[id.trim()] ?? GRADE_PRESETS[id.trim()];
+    if (!base) {
+      gameLogger.warn(`[screen_flash] Unknown colour "${id.trim()}". Valid: ${[...Object.keys(FLASH_PRESETS), ...Object.keys(GRADE_PRESETS)].join(', ')}`);
+      return;
+    }
+    const amount = amountStr === undefined ? 1 : parseFloat(amountStr);
+    this.screenFlashFx.value = { grade: this.lerpGrade(IDENTITY_GRADE, base, isNaN(amount) ? 1 : amount), duration, seq: ++this.fxSeq };
+  }
 
   /**
    * Set the scene colour grade. Accepts a preset id ("night"), a preset with strength
@@ -692,6 +1019,30 @@ export class DungeonSystem {
     const resolved = this.resolveGrade(val);
     if (instant) resolved.duration = 0;
     this.sceneGrade.value = resolved;
+  }
+
+  /**
+   * Set the ambient particles over scene backgrounds: "fireflies", "motes" or "embers", with an
+   * optional density multiplier ("fireflies#0.5"). false/"none" clears. Unknown values are a no-op.
+   */
+  public setAmbient(val: string | boolean | null): void {
+    if (val === false || val === null || val === undefined || val === '' || val === 'none') {
+      this.sceneAmbient.value = null;
+      return;
+    }
+    const [kindStr, densityStr] = String(val).split('#');
+    const kind = kindStr.trim() as AmbientKind;
+    if (!AMBIENT_KINDS.includes(kind)) {
+      gameLogger.warn(`Unknown ambient "${kind}". Valid: ${AMBIENT_KINDS.join(', ')}`);
+      return;
+    }
+    const density = densityStr === undefined ? 1 : parseFloat(densityStr);
+    this.sceneAmbient.value = { kind, density: isNaN(density) ? 1 : Math.max(0, density) };
+  }
+
+  /** Null while no ambient particles are up. */
+  public getAmbient(): SceneAmbientState | null {
+    return this.sceneAmbient.value;
   }
 
   /** Null while the scene is at daylight, so callers can test it directly. */
@@ -731,13 +1082,20 @@ export class DungeonSystem {
       grade = this.lerpGrade(IDENTITY_GRADE, base, amount);
 
       // Explicit fields override the preset.
-      for (const key of ['brightness', 'saturate', 'contrast', 'hue', 'tint_amount'] as const) {
+      for (const key of ['brightness', 'saturate', 'contrast', 'hue', 'tint_amount', 'shadow_amount',
+        'highlight_amount', 'sky_amount', 'vignette', 'rays', 'rays_angle', 'actor_strength'] as const) {
         if (typeof raw[key] === 'number') grade[key] = raw[key];
       }
-      if (typeof raw.tint === 'string') {
-        const rgb = this.parseHexColor(raw.tint);
-        if (rgb) Object.assign(grade, rgb);
-        else gameLogger.warn(`Invalid grade tint "${raw.tint}" — expected a hex colour like #16264f.`);
+      // Hex colours: `tint` fills r/g/b, the others fill <name>_r/_g/_b.
+      for (const name of ['tint', 'shadow', 'highlight', 'sky_top', 'sky_mid', 'sky_bottom'] as const) {
+        if (typeof raw[name] !== 'string') continue;
+        const rgb = this.parseHexColor(raw[name]);
+        if (!rgb) {
+          gameLogger.warn(`Invalid grade ${name} "${raw[name]}" — expected a hex colour like #16264f.`);
+          continue;
+        }
+        if (name === 'tint') Object.assign(grade, rgb);
+        else Object.assign(grade, { [`${name}_r`]: rgb.r, [`${name}_g`]: rgb.g, [`${name}_b`]: rgb.b });
       }
       if (typeof raw.duration === 'number') duration = raw.duration;
     } else {
@@ -749,18 +1107,11 @@ export class DungeonSystem {
     return { grade, duration };
   }
 
-  private lerpGrade(from: SceneGrade, to: SceneGrade, t: number): SceneGrade {
-    const k = Math.max(0, Math.min(1, t));
-    const out = {} as SceneGrade;
-    for (const key of Object.keys(from) as (keyof SceneGrade)[]) {
-      out[key] = from[key] + (to[key] - from[key]) * k;
-    }
-    // The tint colour itself shouldn't wash toward black as strength drops — only its opacity does.
-    out.r = to.r;
-    out.g = to.g;
-    out.b = to.b;
-    return out;
+  private lerpGrade(_from: SceneGrade, to: SceneGrade, t: number): SceneGrade {
+    // Every caller scales from daylight; strength keeps colours, the ray angle and actor_strength.
+    return gradeAtStrength(to, t);
   }
+
 
   private parseHexColor(hex: string): { r: number, g: number, b: number } | null {
     const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex.trim());
@@ -795,6 +1146,10 @@ export class DungeonSystem {
   public currentDungeonId: Ref<string | null> = ref(null);
   // ID of the current room in the active dungeon, part of saved state
   public currentRoomId: Ref<string | null> = ref(null);
+  // The room the player was in immediately before the current one — powers the _previous_room
+  // condition (e.g. entry flavor gated on which door you came through). Saved with the game
+  // like currentRoomId (no @Skip), so it survives a reload.
+  public previousRoomId: Ref<string | null> = ref(null);
 
   // if it's the first scene in the event.
   public isRootScene: Ref<boolean> = ref(false);
@@ -854,8 +1209,10 @@ export class DungeonSystem {
   public activeDungeonId: Ref<string | null> = ref(null);
   public activeRoomId: Ref<string | null> = ref(null);
 
+  // Resolved on arrival, not at render: the log keeps these strings, and a paragraph read back
+  // later must show its |placeholders| as they stood when the flash fired.
   public addFlash(flash: string) {
-    this.cachedFlashArray.value.push(flash);
+    this.cachedFlashArray.value.push(this.game.logicSystem.resolveString(flash, true).output);
   }
 
   // assets
@@ -946,18 +1303,26 @@ export class DungeonSystem {
         anchor = parts[1];
         dungeonId = parts[0].slice(1);
       } else {
-        throw new Error(`Invalid anchor: ${value}`);
+        gameLogger.error(`resolveSceneId: invalid anchor reference "${value}" — an anchor may have at most one "." (dungeon.anchor).`);
+        return { sceneId: null, dungeonId: null };
       }
-      let lines = this.dungeonLines.get(dungeonId);
-      if (lines) {
-        for (let [id, line] of lines) {
-          if (line.anchor == anchor) {
-            return { sceneId: id, dungeonId: dungeonId };
-          }
+      const lines = dungeonId ? this.dungeonLines.get(dungeonId) : null;
+      if (!lines) {
+        // The common real failure the old "dungeon null" throw hid: a `&anchor` resolved with no
+        // active dungeon. Name the ref + active scene so it is locatable, and degrade gracefully.
+        gameLogger.error(`resolveSceneId: cannot resolve anchor "${value}" — no loaded lines for dungeon "${dungeonId ?? 'null (no active dungeon)'}" (referenced from scene "${this.currentSceneId.value ?? 'none'}").`);
+        return { sceneId: null, dungeonId: null };
+      }
+      for (const [id, line] of lines) {
+        if (line.anchor == anchor) {
+          return { sceneId: id, dungeonId: dungeonId };
         }
-      } else {
-        throw new Error(`Dungeon lines not found for dungeon ${dungeonId}`);
       }
+      // No PROSE anchor with this name — fall through to the scene-id builder below. Choice-menu
+      // anchors (`&x` before a `~choice` block) carry no `line.anchor`; they resolve via the
+      // "#<room>.&x.1.1.1" form that createChoices() understands, so falling through is REQUIRED
+      // (returning null here would break every {choices:"&x"} menu). A genuinely-missing anchor
+      // therefore fails downstream rather than here — the static ref-checker (notes/tools) catches those.
     }
 
 
@@ -1019,6 +1384,7 @@ export class DungeonSystem {
   public playScene(sceneId: string | null, dungeonId: string | null, options?: ScenePlayOptions) {
 
     this.game.setState('hide_events', false);
+    this.game.setState('hide_dialogue', false);
 
     this.cancelPathMovement();
 
@@ -1087,7 +1453,7 @@ export class DungeonSystem {
     }
 
     gameLogger.info(`[scene] Playing scene: "${sceneId}" (dungeon "${dungeonUsedId}")`);
-    let proceed = this.game.trigger('scene_play_before', sceneId, dungeonUsedId, isRootScene);
+    let proceed = this.game.trigger('scene_play_before', sceneId, dungeonUsedId, isRootScene, line.anchor ?? '');
     if (!proceed) {
       return;
     }
@@ -1104,10 +1470,13 @@ export class DungeonSystem {
     this.activeDungeonId.value = dungeonUsedId;
 
     let { output, actions } = this.game.logicSystem.resolveString(line.val, true);
-    output = this.game.logicSystem.resolveTalkingCharacter(output);
+    const talk = this.game.logicSystem.resolveTalkingCharacter(output);
+    output = talk.text;
 
-    // If paragraph resolved to empty (e.g. inline if{} produced no text), skip to next paragraph
-    if (!output.trim() && Object.keys(actions).length === 0) {
+    // Skip to the next paragraph when this one resolved to empty (e.g. inline if{} produced
+    // no text), or when it is an `id!:` party line and that character is not in the party —
+    // the latter drops its actions too.
+    if (talk.absent || (!output.trim() && Object.keys(actions).length === 0)) {
       this.playScene(this.getNextSceneId(sceneId), dungeonUsedId, options);
       return;
     }
@@ -1169,7 +1538,7 @@ export class DungeonSystem {
     // scene is committed (past gates/redirects) and about to run its own actions — the point to
     // stage default actors so they precede the scene's asset actions. isRootScene is the value
     // captured at the top, before it was reset above.
-    this.game.trigger('scene_play', sceneId, dungeonUsedId, isRootScene);
+    this.game.trigger('scene_play', sceneId, dungeonUsedId, isRootScene, line.anchor ?? '');
 
     // Dev-only rolling checkpoint: snapshot the state BEFORE this scene's actions fire, so
     // Hard Scene Reset can reload and re-enter the scene once on clean state. Fire-and-forget —
@@ -1212,7 +1581,7 @@ export class DungeonSystem {
     // force overlay-navigation overlay to be shown to show dialogue box
     this.game.coreSystem.setState('overlay_state', 'overlay-navigation');
 
-    this.game.trigger('scene_play_after', sceneId, dungeonUsedId, isRootScene);
+    this.game.trigger('scene_play_after', sceneId, dungeonUsedId, isRootScene, line.anchor ?? '');
 
 
 
@@ -1291,13 +1660,16 @@ export class DungeonSystem {
     this.panelActors.value = [];
     // Assets go all at once, so kill their pending timers too: a timer surviving the wipe
     // would fire against the next scene's array and delete a backdrop that re-used the id.
+    this.exitAssets();
     this.cancelAllAssetRemovals();
     this.assets.value = [];
 
-    // A scene's sounds die with it. Outside a scene — ordinary room movement, which runs this
-    // reset on every step — only the one-shots are cut; looping ambience from room/dungeon
-    // enter actions keeps playing.
-    this.game.coreSystem.stopSounds(undefined, { keepLooping: !hadScene });
+    // A scene's sounds die with it: its one-shots and the loops it started. Loops started on the
+    // map — room and dungeon enter actions, default_sounds, a resumed save — play on. Outside a
+    // scene (ordinary room movement, which runs this reset on every step) only one-shots are cut.
+    // default_sounds the scene silenced come back.
+    this.game.coreSystem.stopSounds(undefined, hadScene ? { keepMapLoops: true } : { keepLooping: true });
+    if (hadScene) this.syncAmbience();
 
     if (this.game.coreSystem.getState('game_state') === "exploration") {
       // reset dungeon music — guarded so a custom game_state (e.g. a battle screen
@@ -1344,6 +1716,7 @@ export class DungeonSystem {
    * the same character revives them in place, killing the exit early.
    */
   public clearActors(keepExiting: boolean = false): void {
+    this.actorAnimRequests.value = {};
     // Panel-only entries have no art and no exit animation, so there is nothing for keepExiting
     // to preserve — they go on either path.
     this.panelActors.value = [];
@@ -1392,6 +1765,7 @@ export class DungeonSystem {
     for (const slot of this.sceneSlots.value) {
       this.cancelScheduledRemoval(slot);
     }
+    this.exitAssets(new Set(ctx.assets.map(a => a.id)));
     this.cancelAllAssetRemovals();
     this.currentSceneId.value = ctx.sceneId;
     // matching animated id suppresses the scene-enter animation replay
@@ -1645,6 +2019,8 @@ export class DungeonSystem {
       return false;
     }
 
+    this.takeOneShotProps(slot.char!, slot as any);
+
     // Check if character already exists in scene
     const existingSlot = this.findSlotByChar(slot.char);
     this.resolveInheritedAnimations(slot as any, existingSlot);
@@ -1742,6 +2118,8 @@ export class DungeonSystem {
     // If character is being removed, cancel the removal
     this.cancelScheduledRemoval(existingSlot);
 
+    this.takeOneShotProps(charId, updates);
+
     // Update properties directly on the existing reactive object
     this.resolveInheritedAnimations(updates, existingSlot);
     Object.assign(existingSlot, updates);
@@ -1771,6 +2149,7 @@ export class DungeonSystem {
     }
 
     // Prepare new slot data (template + inline properties)
+    this.takeOneShotProps(charId, inlineProps);
     const newSlotData = { ...targetTemplate, ...inlineProps };
     this.resolveInheritedAnimations(newSlotData, existingSlot);
 
@@ -1908,34 +2287,33 @@ export class DungeonSystem {
       dungeonData.unlockedRooms.add(roomId);
       return true;
     }
-    this.game.showNotification(this.game.getLine('key_missing_door'));
+    this.game.showNotification(getGameLineOrEngine('key_missing_door'));
     return false;
   }
 
   // Paging choices for the book reader (reading_book state): Next / Previous / Read again / Close,
   // DQ9-style. Page N exists while the content line `#<base>.1.1.N` does.
   private createBookChoices(reading: { itemId: string; dungeonId: string; base: string; page: number }): Choice[] {
-    const global = Global.getInstance();
     const lines = this.dungeonLines.get(reading.dungeonId);
     const pageExists = (page: number) => !!lines?.get(`#${reading.base}.1.1.${page}`);
     const choices: Choice[] = [];
     if (pageExists(reading.page + 1)) {
       choices.push(this.game.logicSystem.createCustomChoice({
-        id: 'book_next', name: global.getString('book.next'), params: { read_page: reading.page + 1 },
+        id: 'book_next', nameKey: 'book.next', params: { read_page: reading.page + 1 },
       }));
     }
     if (reading.page > 1) {
       choices.push(this.game.logicSystem.createCustomChoice({
-        id: 'book_back', name: global.getString('book.back'), params: { read_page: reading.page - 1 },
+        id: 'book_back', nameKey: 'book.back', params: { read_page: reading.page - 1 },
       }));
     }
     if (!pageExists(reading.page + 1) && reading.page > 1) {
       choices.push(this.game.logicSystem.createCustomChoice({
-        id: 'book_again', name: global.getString('book.again'), params: { read_page: 1 },
+        id: 'book_again', nameKey: 'book.again', params: { read_page: 1 },
       }));
     }
     choices.push(this.game.logicSystem.createCustomChoice({
-      id: 'book_close', name: global.getString('book.close'), params: { read_close: true },
+      id: 'book_close', nameKey: 'book.close', params: { read_close: true },
     }));
     return choices;
   }
@@ -2805,6 +3183,25 @@ export class DungeonSystem {
     return true;
   }
 
+  // The default_sounds ambience playing now (saved, so loops resumed from a save are still known).
+  public ambienceIds: string[] = [];
+
+  /**
+   * Ambience: the dungeon's and the current room's default_sounds play while the player is there. Runs on
+   * every room entry and after every scene; sounds that no longer apply stop, the rest carry on.
+   */
+  public syncAmbience(): void {
+    const want = [...new Set([...(this.currentDungeon.value?.default_sounds ?? []), ...(this.currentRoom.value?.defaultSounds ?? [])])];
+    const gone = this.ambienceIds.filter(id => !want.includes(id));
+    if (gone.length) this.game.coreSystem.stopSounds(gone);
+    this.ambienceIds = want;
+    if (want.length) this.game.coreSystem.playSounds(want);
+  }
+
+  // Set by enterDungeon for the one enterRoom call it makes: the room and dungeon being left.
+  @Skip()
+  private entryFrom: { roomId: string; dungeonId: string } | null = null;
+
   // ignore types
   public enterDungeon(dungeonId: string, roomId: string) {
     //this.setGameState('Exploration');
@@ -2833,6 +3230,8 @@ export class DungeonSystem {
     // sees the player still outside.
     if (!this.game.trigger('dungeon_enter_before', dungeonId, roomId)) return;
 
+    // The ids below switch to the new dungeon before enterRoom runs; hand it the place the player left.
+    this.entryFrom = { roomId: this.currentRoomId.value || '', dungeonId: this.currentDungeonId.value || '' };
     this.currentDungeonId.value = dungeonId;
     // Directly load the dungeon. The watchEffect will see currentDungeon match activeDungeonId.
     this._loadAndSetDungeonActual(dungeonId);
@@ -2866,6 +3265,35 @@ export class DungeonSystem {
    * offset. It assumes the caller has just swapped the dungeon in reactively — see the scheduling
    * note at the centering call below.
    */
+  /**
+   * Mark rooms explored without walking into them: each one becomes visited and visible, and its
+   * neighbors visible, as an entry would leave the map. `spec` is a comma list of room ids in the
+   * current dungeon, or `dungeon.room` for another one. No room events or room_enter hooks run.
+   */
+  public revealRooms(spec: string): void {
+    for (const token of String(spec ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
+      const dot = token.indexOf('.');
+      const dungeonId = dot === -1 ? this.currentDungeonId.value! : token.slice(0, dot);
+      const roomId = dot === -1 ? token : token.slice(dot + 1);
+      const data = this.dungeonDatas.value.get(dungeonId);
+      if (!data) {
+        gameLogger.error(`[reveal_room] no dungeon data for "${dungeonId}" (${token})`);
+        continue;
+      }
+      data.addVisitedRoom(roomId);
+      data.addVisibleRoom(roomId);
+      // Neighbors are only known for the loaded dungeon; another dungeon's map fills in on entry.
+      if (dungeonId === this.currentDungeonId.value) {
+        const room = this.currentDungeon.value?.getRoomById(roomId);
+        if (!room) {
+          gameLogger.error(`[reveal_room] room "${roomId}" not found in ${dungeonId}`);
+          continue;
+        }
+        for (const neighbor of room.neighbors) data.addVisibleRoom(neighbor.id);
+      }
+    }
+  }
+
   // ignore types
   public enterRoom(roomId: string, snap = false): Boolean {
 
@@ -2874,6 +3302,9 @@ export class DungeonSystem {
 
     let dungeon = this.currentDungeon.value!;
     let room = dungeon.getRoomById(roomId)!;
+    // Where the player is coming from, for the room hooks (a cross-dungeon entry left it in entryFrom).
+    const from = this.entryFrom ?? { roomId: this.currentRoomId.value || '', dungeonId: dungeon.id };
+    this.entryFrom = null;
 
     // Key lock: auto-use the key from the party bag, or refuse entry. Runs before any
     // room_enter logic so listeners never see a refused entry. Scene-driven movement bypasses
@@ -2888,13 +3319,17 @@ export class DungeonSystem {
       this.game.logicSystem.resolveActions(room.actions.room_enter_before);
     }
 
-    let proceed = this.game.trigger('room_enter_before', roomId, dungeon.id);
+    let proceed = this.game.trigger('room_enter_before', roomId, dungeon.id, from.roomId, from.dungeonId);
     if (!proceed) {
       return false;
     }
 
     this.resetScene();
 
+    // Remember where we came from (only on an actual room change) before overwriting current.
+    if (this.currentRoomId.value && this.currentRoomId.value !== roomId) {
+      this.previousRoomId.value = this.currentRoomId.value;
+    }
     this.currentRoomId.value = roomId;
     this.usedDungeonData.value.addVisitedRoom(roomId);
     this.usedDungeonData.value.addVisibleRoom(roomId);
@@ -2927,7 +3362,8 @@ export class DungeonSystem {
     if (room.actions?.room_enter_after) {
       this.game.logicSystem.resolveActions(room.actions.room_enter_after);
     }
-    this.game.trigger('room_enter_after', roomId, dungeon.id);
+    this.game.trigger('room_enter_after', roomId, dungeon.id, from.roomId, from.dungeonId);
+    this.syncAmbience();
     gameLogger.info(`Room ${roomId} entered`);
 
     // After room_enter_after, so an `if{}` in the description reads the room's settled state.
@@ -3002,47 +3438,52 @@ export class DungeonSystem {
     }
   }
 
-  // ignore types
+  /**
+   * A room is closed while its key lock has not been turned yet. Only the lock the engine
+   * knows about counts — a script gate in room_enter_before is invisible here, and movePath
+   * simply stops when it refuses.
+   */
+  private isRoomClosed(room: DungeonRoom): boolean {
+    if (!room.key) return false;
+    const dungeonId = this.currentDungeon.value?.id;
+    const dungeonData = dungeonId ? this.dungeonDatas.value.get(dungeonId) : null;
+    return !dungeonData?.unlockedRooms.has(room.id);
+  }
+
+  /**
+   * Shortest route by room count, but a closed room on the way costs more than any detour
+   * through open ones, so the walk only tries a locked door when no open route exists. The
+   * destination itself is exempt: clicking a locked room is asking to try its door, and the
+   * enterRoom gate turns the key or refuses there. Weights are (rooms + 1) per closed step
+   * and 1 per open step, so fewer closed rooms always beats fewer steps.
+   */
   public findPath(start: DungeonRoom, end: DungeonRoom): DungeonRoom[] | null {
-
-    let visited: Set<string> = new Set();
-
-    // Initialize queue with the start node and its path
-    let queue: QueueLoc[] = [{
-      node: start,
-      path: [start]
-    }];
+    const closedStep = (this.currentDungeon.value?.rooms.size ?? 0) + 1;
+    const best: Map<string, number> = new Map([[start.id, 0]]);
+    const queue: QueueLoc[] = [{ node: start, path: [start], cost: 0 }];
 
     while (queue.length > 0) {
-      let currentItem = queue.shift();
+      queue.sort((a, b) => a.cost - b.cost);
+      const { node, path, cost } = queue.shift()!;
 
-      if (!currentItem) continue;
-
-      let { node, path } = currentItem;
-
-      // If we reach the end node, return the path
       if (node.id === end.id) {
         return path;
       }
-
-      // If we have visited this node before, skip
-      if (visited.has(node.id)) {
+      // A cheaper way here was already expanded
+      if ((best.get(node.id) ?? Infinity) < cost) {
         continue;
       }
 
-      visited.add(node.id);
-
-      for (let neighbor of node.neighbors) {
-        if (!visited.has(neighbor.id)) {
-          // For each neighbor, push to queue with extended path
-          queue.push({
-            node: neighbor,
-            path: [...path, neighbor]
-          });
+      for (const neighbor of node.neighbors) {
+        const step = neighbor.id !== end.id && this.isRoomClosed(neighbor) ? closedStep : 1;
+        const next = cost + step;
+        if (next < (best.get(neighbor.id) ?? Infinity)) {
+          best.set(neighbor.id, next);
+          queue.push({ node: neighbor, path: [...path, neighbor], cost: next });
         }
       }
     }
-    return null; // Return null if no path is found
+    return null;
   }
 
 
@@ -3127,9 +3568,9 @@ export class DungeonSystem {
 
     // Encounter coordinates are in the content space (without padding)
     // Account for padding and zoom (zoom is applied via CSS transform)
-    const encounter = this.selectedEncounter.value;
-    const targetX = (encounter.x + padding) * zoomFactor;
-    const targetY = (encounter.y + padding) * zoomFactor;
+    const center = this.selectedEncounter.value.getMapCenter();
+    const targetX = (center.x + padding) * zoomFactor;
+    const targetY = (center.y + padding) * zoomFactor;
 
     el.scrollTo({
       left: targetX - el.clientWidth / 2,
@@ -3568,6 +4009,7 @@ export class DungeonSystem {
     // replay mode doesn't inherit a grade the first one set. Instant: this is a hard context switch.
     // Leaving replay reloads the save taken just above, which restores whatever grade was live then.
     this.setGrade(false, true);
+    this.setAmbient(false);
     this.playScene(sceneId, dungeonId);
   }
 

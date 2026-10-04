@@ -158,8 +158,9 @@ function isActiveMod(modId: string): boolean {
 
 .action-btn {
   padding: 6px 12px;
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
+  color: var(--editor-text);
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.85em;
@@ -167,13 +168,13 @@ function isActiveMod(modId: string): boolean {
 }
 
 .action-btn:hover {
-  background-color: #e0e0e0;
+  background-color: var(--editor-surface-hover);
 }
 
 .mods-list {
   max-height: 350px;
   overflow-y: auto;
-  border: 1px solid #ddd;
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   padding: 10px;
 }
@@ -181,13 +182,13 @@ function isActiveMod(modId: string): boolean {
 .no-mods {
   padding: 20px;
   text-align: center;
-  color: #666;
+  color: var(--editor-text-muted);
   font-style: italic;
 }
 
 .mod-item {
   padding: 10px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--editor-border);
   transition: background-color 0.2s;
 }
 
@@ -196,12 +197,12 @@ function isActiveMod(modId: string): boolean {
 }
 
 .mod-item:hover {
-  background-color: #f8f9fa;
+  background-color: var(--editor-surface-hover);
 }
 
 .mod-item.active-mod {
-  background-color: #e8f5e9;
-  border-left: 3px solid #4caf50;
+  background-color: var(--editor-tint-success);
+  border-left: 3px solid var(--editor-fg-success);
 }
 
 .mod-label {
@@ -237,7 +238,7 @@ function isActiveMod(modId: string): boolean {
 
 .mod-meta {
   font-size: 0.8em;
-  color: #666;
+  color: var(--editor-text-muted);
   display: flex;
   gap: 12px;
 }

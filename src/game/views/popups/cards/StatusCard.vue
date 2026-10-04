@@ -2,7 +2,9 @@
 import { computed } from 'vue';
 import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
+import { Global } from '../../../../global/global';
 import StatusObjectDisplay from '../../progression/StatusObjectDisplay.vue';
+import { Item } from '../../../core/character/item';
 
 const showIds = computed(() => shouldShowEntityIds());
 
@@ -14,9 +16,13 @@ const props = defineProps<{
     // where the status isn't applied yet (the item card's "granted on consume" list).
     titleChip?: string;
     stacksOverride?: number;
+    // The item this card was opened from (a link in its description, its consume list). Handed to
+    // the status_preview emitter so a game can show the status as that item will grant it.
+    sourceItem?: Item;
 }>();
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 
 const statusDef = computed(() => {
     const map = game.getData('character_statuses', true) as Map<string, any> | undefined;
@@ -55,12 +61,33 @@ const shownStacks = computed((): number => {
     return statusLiveInstance.value?.isStackable() ? stacks.value : 1;
 });
 
+// Remaining duration. Falls back to the template's own value for the preview path (the item card's
+// "granted on consume" list), where nothing is applied yet — apply_statuses_on_consume carries no
+// duration of its own, so the template's is what the player will actually get.
+const duration = computed((): number => {
+    const live = statusLiveInstance.value;
+    if (!live) return Number(statusDef.value?.duration) || 0;
+    const idx = props.statusInstanceIndex;
+    if (idx !== undefined && live.multiStack) {
+        return live.getInstances()[idx]?.duration ?? live.duration;
+    }
+    return live.duration;
+});
+
+// Only a positive duration is a countdown: -1 is permanent and 0 is passive, and tickDuration
+// leaves both alone. Ceil because the real-time battler drains by a partial turn — the same
+// rounding StatusBrick's badge uses, or the brick and its card would disagree by a turn.
+const shownDuration = computed((): number => duration.value > 0 ? Math.ceil(duration.value) : 0);
+
 const rarity = computed((): string => statusLiveInstance.value?.rarity || '');
 
 const mergedStats = computed((): Record<string, number> => {
     const live = statusLiveInstance.value;
     const baseStats = (live?.stats ?? statusDef.value?.stats ?? {}) as Record<string, number>;
     const merged: Record<string, number> = { ...baseStats };
+    // Not applied yet: the template's numbers may not be what the player will get (a status scaled
+    // by the item that grants it), so the game may rewrite this copy first.
+    if (!live) game.trigger('status_preview', props.statusId, merged, { item: props.sourceItem, character: statusCharacter.value ?? undefined });
     const computedKeys = live?.computedStatsKeys ?? statusDef.value?.computed_stats ?? [];
     const char = statusCharacter.value;
     if (computedKeys.length && char) {
@@ -80,6 +107,10 @@ const mergedStats = computed((): Record<string, number> => {
     return merged;
 });
 
+const stacksLabel = computed(() => global.getString('status_card.stacks', { stacks: shownStacks.value }));
+
+const unknownLabel = computed(() => global.getString('card.unknown', { id: props.statusId }));
+
 const displayData = computed(() => {
     const live = statusLiveInstance.value;
     return {
@@ -96,8 +127,11 @@ const displayData = computed(() => {
             <span v-if="titleChip" class="popup-title-chip">{{ titleChip }}</span>
             <span class="popup-title" :class="rarity ? ['item-name', 'rarity_' + rarity] : []">
                 {{ title }}
-                <span v-if="shownStacks > 1" class="popup-stack-count">x{{ shownStacks }}</span>
+                <span v-if="shownStacks > 1" class="popup-stack-count">{{ stacksLabel }}</span>
                 <span v-if="showIds" class="entity-id-badge">{{ statusId }}</span>
+            </span>
+            <span v-if="shownDuration > 0" class="popup-duration">
+                <i class="pi pi-hourglass"></i>{{ shownDuration }}
             </span>
         </div>
         <div class="popup-body">
@@ -106,7 +140,7 @@ const displayData = computed(() => {
         </div>
     </div>
     <div v-else class="popup-inner popup-error">
-        Unknown status: {{ statusId }}
+        {{ unknownLabel }}
     </div>
 </template>
 
@@ -125,5 +159,31 @@ const displayData = computed(() => {
     border-radius: 6px;
     padding: 1px 6px;
     white-space: nowrap;
+}
+
+.popup-duration {
+    /* Pinned right by its own margin rather than by the header's space-between: ItemCard's inline
+       "granted on consume" list overrides the header to justify-content: flex-start. */
+    margin-left: auto;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: bold;
+    font-size: 0.9em;
+    white-space: nowrap;
+    /* The same grey as StatusBrick's .duration-count badge, so this number reads as the number on
+       the brick the card was opened from. */
+    color: #999;
+}
+
+.popup-duration .pi {
+    font-size: 0.85em;
+}
+
+/* .popup-close-overlay is absolute at top:4px right:6px and ~28px wide, and only rendered on a
+   closable (pinned) popup — where the chip would otherwise sit underneath it. */
+.popup[data-closable] .popup-duration {
+    margin-right: 26px;
 }
 </style>

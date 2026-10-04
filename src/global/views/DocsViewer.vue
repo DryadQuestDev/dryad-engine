@@ -59,6 +59,13 @@ interface DocPlugin {
   isActive: boolean;
 }
 
+// One visited page. pluginId is '' in changelog mode.
+interface HistoryEntry {
+  pluginId: string;
+  tab: string;
+  scrollTop: number;
+}
+
 // Viewer type from global state
 const viewerType = computed(() => global.openViewer.value || 'docs');
 const isChangelog = computed(() => viewerType.value === 'changelog');
@@ -77,8 +84,8 @@ const headersMap = ref<Record<string, string>>({});
 const docsActiveTab = ref('');
 const changelogActiveTab = useStorage('changelog-active-tab', '');
 
-function getDocsStorageKey(): string {
-  return `docs-active-tab-${selectedPluginId.value || 'default'}`;
+function getDocsStorageKey(pluginId = selectedPluginId.value): string {
+  return `docs-active-tab-${pluginId || 'default'}`;
 }
 
 function saveDocsActiveTab(val: string) {
@@ -118,9 +125,12 @@ const pluginLanguages = ref<string[]>([]);
 const docsLanguage = useStorage('docs-language', '');
 const isLoadingTree = ref(false);
 
-const currentLanguage = computed(() => {
-  return docsLanguage.value || global.selectedLanguage || 'en';
-});
+// Every read of a doc file goes through this, so it must name a language the docs actually ship:
+// the engine language is a UI choice and the docs of a given plugin are rarely translated as far.
+const currentLanguage = computed(() => pickBestLanguage(pluginLanguages.value, docsLanguage.value || global.selectedLanguage || 'en'));
+
+// What the 'Auto' option resolves to — the engine language when these docs have it, else English.
+const autoLanguage = computed(() => pickBestLanguage(pluginLanguages.value, global.selectedLanguage || 'en'));
 
 // Filesystem validation state
 const existingPages = ref<Set<string>>(new Set());
@@ -134,16 +144,17 @@ const showSearchResults = ref(false);
 const highlightTerm = ref('');
 const searchContainerRef = ref<HTMLElement | null>(null);
 
-// Title: plugin name for docs, locale string for changelog
+// Title: plugin name for docs, locale string for changelog.
+// The rest of this screen stays in English: it is reached only from the editor and the dev-mode
+// debug panel, so its chrome is developer surface and carries no locale keys.
 const viewerTitle = computed(() => {
   if (isChangelog.value) return global.getString('changelog') || 'Changelog';
   return selectedPlugin.value?.name || 'Documentation';
 });
 
 // Pick the best language from available languages
-function pickBestLanguage(available: string[]): string {
+function pickBestLanguage(available: string[], preferred: string): string {
   if (!available.length) return 'en';
-  const preferred = docsLanguage.value || global.selectedLanguage || 'en';
   if (available.includes(preferred)) return preferred;
   if (available.includes('en')) return 'en';
   return available[0];
@@ -252,6 +263,7 @@ async function loadChangelogTree() {
   isLoadingTree.value = true;
   currentTree.value = {};
   headersMap.value = {};
+  const tabOnEntry = activeTab.value;
 
   try {
     const basePath = 'engine_files/changelog';
@@ -316,6 +328,11 @@ async function loadChangelogTree() {
         changelogActiveTab.value = `${firstCategory}/${firstPage}`;
       }
     }
+
+    // The immediate activeTab watch already loaded a page, back when the folder listing above was
+    // still unknown and currentLanguage could only answer 'en'. Reload against the real list —
+    // unless the tab just changed, in which case that watch is about to do it anyway.
+    if (activeTab.value === tabOnEntry) await loadDocumentation();
   } catch (error) {
     console.error('Error loading changelog tree:', error);
   } finally {
@@ -336,7 +353,7 @@ async function onPluginSelected() {
   try {
     // Load available languages for this plugin
     pluginLanguages.value = await global.listFolders(plugin.basePath);
-    const lang = pickBestLanguage(pluginLanguages.value);
+    const lang = currentLanguage.value;
 
     // Load tree.json
     try {
@@ -475,6 +492,56 @@ function isTabActive(category: string, page: string): boolean {
 }
 
 // ============================================
+// History (Back / Forward)
+// ============================================
+
+const pageHistory = ref<HistoryEntry[]>([]);
+const historyIndex = ref(-1);
+let pendingScrollTop: number | null = null;
+
+const canGoBack = computed(() => historyIndex.value > 0);
+const canGoForward = computed(() => historyIndex.value < pageHistory.value.length - 1);
+
+function rememberScroll() {
+  const entry = pageHistory.value[historyIndex.value];
+  if (entry && contentContainerRef.value) entry.scrollTop = contentContainerRef.value.scrollTop;
+}
+
+// Runs on every page load. A reload of the page history already points at (a language change,
+// the double load of a plugin switch, the arrival of a Back/Forward step) adds nothing.
+function recordHistory(tab: string) {
+  const pluginId = isChangelog.value ? '' : selectedPluginId.value;
+  const current = pageHistory.value[historyIndex.value];
+  if (current && current.pluginId === pluginId && current.tab === tab) return;
+  rememberScroll();
+  pageHistory.value = [...pageHistory.value.slice(0, historyIndex.value + 1), { pluginId, tab, scrollTop: 0 }];
+  historyIndex.value = pageHistory.value.length - 1;
+}
+
+function goToHistory(index: number) {
+  const entry = pageHistory.value[index];
+  if (!entry) return;
+  rememberScroll();
+  historyIndex.value = index;
+  pendingScrollTop = entry.scrollTop;
+  if (!isChangelog.value && entry.pluginId !== selectedPluginId.value) {
+    // onPluginSelected opens the plugin on its saved tab, so point that at the entry first.
+    try { localStorage.setItem(getDocsStorageKey(entry.pluginId), entry.tab); } catch {}
+    selectedPluginId.value = entry.pluginId;
+  } else {
+    activeTab.value = entry.tab;
+  }
+}
+
+function goBack() {
+  if (canGoBack.value) goToHistory(historyIndex.value - 1);
+}
+
+function goForward() {
+  if (canGoForward.value) goToHistory(historyIndex.value + 1);
+}
+
+// ============================================
 // Content Loading
 // ============================================
 
@@ -484,6 +551,10 @@ async function loadDocumentation() {
     docContent.value = '';
     return;
   }
+
+  recordHistory(activeTab.value);
+  const restoreScrollTop = pendingScrollTop;
+  pendingScrollTop = null;
 
   isLoading.value = true;
   loadError.value = '';
@@ -501,6 +572,10 @@ async function loadDocumentation() {
     await nextTick();
     addCopyButtons();
     processCustomSyntax();
+
+    if (restoreScrollTop !== null && contentContainerRef.value) {
+      contentContainerRef.value.scrollTop = restoreScrollTop;
+    }
 
     if (highlightTerm.value) {
       highlightSearchTerm();
@@ -829,8 +904,20 @@ watch(activeTab, async () => {
   scrollSidebarToActive();
 }, { immediate: true });
 
+// The engine language feeds currentLanguage. Without this the chrome flips to the new language
+// while the rendered markdown, the nav tree and the search index stay in the old one.
+watch(currentLanguage, async () => {
+  if (isChangelog.value) {
+    await loadChangelogTree();
+  } else {
+    await onPluginSelected();
+  }
+});
+
 // Watch viewer type changes
 watch(viewerType, async (newType) => {
+  pageHistory.value = [];
+  historyIndex.value = -1;
   if (newType === 'changelog') {
     await loadChangelogTree();
   } else if (newType === 'docs') {
@@ -851,9 +938,30 @@ function handleClickOutside(event: MouseEvent) {
   }
 }
 
-function handleEscKey(event: KeyboardEvent) {
+function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     global.closeViewer();
+    return;
+  }
+  // Alt+Arrow moves by word in macOS text fields, so leave those alone.
+  if (!event.altKey || (event.target as HTMLElement | null)?.closest?.('input, textarea, select')) return;
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    goBack();
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    goForward();
+  }
+}
+
+// Mouse side buttons. preventDefault stops the web build from navigating the whole page.
+function handleMouseUp(event: MouseEvent) {
+  if (event.button === 3) {
+    event.preventDefault();
+    goBack();
+  } else if (event.button === 4) {
+    event.preventDefault();
+    goForward();
   }
 }
 
@@ -862,7 +970,8 @@ function handleEscKey(event: KeyboardEvent) {
 // ============================================
 
 onMounted(async () => {
-  window.addEventListener('keydown', handleEscKey);
+  window.addEventListener('keydown', handleKeydown);
+  window.addEventListener('mouseup', handleMouseUp);
 
   if (isChangelog.value) {
     await loadChangelogTree();
@@ -875,7 +984,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleEscKey);
+  window.removeEventListener('keydown', handleKeydown);
+  window.removeEventListener('mouseup', handleMouseUp);
 });
 </script>
 
@@ -884,6 +994,15 @@ onUnmounted(() => {
     <div class="docs-container-bg" @click="handleClickOutside">
       <div class="docs-container-content">
         <div class="docs-header">
+          <div class="history-buttons">
+            <button class="history-button" :disabled="!canGoBack" title="Back (Alt+Left)" @click="goBack">
+              <i class="pi pi-arrow-left" />
+            </button>
+            <button class="history-button" :disabled="!canGoForward" title="Forward (Alt+Right)" @click="goForward">
+              <i class="pi pi-arrow-right" />
+            </button>
+          </div>
+
           <h1 v-if="isChangelog">{{ viewerTitle }}</h1>
 
           <!-- Plugin selector (docs mode only) -->
@@ -914,7 +1033,7 @@ onUnmounted(() => {
           <!-- Language selector -->
           <div class="language-selector">
             <select v-model="docsLanguage" @change="changeDocsLanguage(docsLanguage)" class="language-select">
-              <option value="">Auto ({{ global.selectedLanguage || 'en' }})</option>
+              <option value="">Auto ({{ autoLanguage }})</option>
               <option v-for="lang in pluginLanguages" :key="lang" :value="lang">
                 {{ lang.toUpperCase() }}
               </option>
@@ -1077,6 +1196,35 @@ onUnmounted(() => {
   font-size: 1.5rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* Back / Forward */
+.history-buttons {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.history-button {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.history-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.history-button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* Plugin selector */

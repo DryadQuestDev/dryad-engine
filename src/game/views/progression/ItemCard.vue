@@ -6,6 +6,7 @@ import { Global } from '../../../global/global';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import StatusObjectDisplay from './StatusObjectDisplay.vue';
 import StatusCard from '../popups/cards/StatusCard.vue';
+import ItemCompareTable from './ItemCompareTable.vue';
 import { Item } from '../../core/character/item';
 
 // for displaying item's info on hover like name, description, stats, etc.
@@ -19,6 +20,7 @@ const showIds = computed(() => shouldShowEntityIds());
 const props = defineProps<{
   item: Item;
   characterId?: string;
+  compare?: boolean; // Show stat deltas against the character's equipped gear. Off where there is no character to compare (the editor, lore links).
 }>();
 
 // Get rarity CSS class
@@ -36,14 +38,20 @@ const itemLevel = computed(() => props.item.getTrait('item_level') || 0);
 // Discovered collectable (recipe learned / book finished / painting viewed) — card-only marker;
 // brick fallback names stay unmarked on purpose.
 const isDiscovered = computed(() => game.isItemDiscovered(props.item.id));
+const discoveredTitle = computed(() => Global.getInstance().getString('item_card.discovered'));
+
+const itemName = computed(() => props.item.getTrait('name') || Global.getInstance().getString('item_card.unnamed'));
+const levelTag = computed(() => Global.getInstance().getString('item.level_short', { level: itemLevel.value }));
 
 const itemCategory = computed(() => game.itemSystem.itemCategoriesMap.get(props.item.category));
 const categoryIcon = computed(() => itemCategory.value?.icon || '');
 const categoryName = computed(() => itemCategory.value?.singular || itemCategory.value?.name || '');
 
-// Rarity word in front of the category ("Rare Weapon"). Games can name their tiers via a
-// `rarity_<tier>` locale line; without one the raw attribute value is capitalized. Quest items
-// already carry the QUEST badge in the header, so prefixing there would say it twice.
+// Rarity word beside the category ("Rare" "Weapon"). Two chips rather than one phrase: the
+// rarity comes from a `rarity_<tier>` locale line and the category from game data, so neither can
+// inflect for the other and no join order would be right in every language. Games can name their
+// tiers via that line; without one the raw attribute value is capitalized. Quest items already
+// carry the QUEST badge in the header, so naming the tier there would say it twice.
 const rarityLabel = computed(() => {
   const rarity = String(props.item.getRarity() || '');
   if (!rarity || rarity === 'quest') return '';
@@ -64,6 +72,7 @@ const itemWeight = computed(() => {
   }
   return null;
 });
+const weightText = computed(() => Global.getInstance().getString('item_card.weight', { value: String(itemWeight.value ?? '') }));
 
 // Consume resource effects (restore/reduce), rendered as text.
 const consumeResourceEffects = computed(() => {
@@ -105,9 +114,9 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
       <div class="card-header-text">
         <div class="header-top">
           <h3 class="item-name" :class="rarityClass">
-            <span v-if="isDiscovered" class="item-discovered-check" title="Discovered">✓</span>
-            <span v-if="itemLevel > 0" class="item-level-tag">Lv {{ itemLevel }}</span>
-            {{ item.getTrait('name') || 'Item Name' }}
+            <span v-if="isDiscovered" class="item-discovered-check" :title="discoveredTitle">✓</span>
+            <span v-if="itemLevel > 0" class="item-level-tag">{{ levelTag }}</span>
+            {{ itemName }}
             <span v-if="showIds" class="entity-id-badge">{{ item.id }}</span>
           </h3>
           <span v-if="isQuest" class="quest-tag">{{ questLabel }}</span>
@@ -123,7 +132,8 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
         </div>
         <div v-if="categoryName" class="item-category-line">
           <img v-if="categoryIcon" :src="categoryIcon" :alt="categoryName" class="item-category-icon" />
-          <span class="item-category-name">{{ rarityLabel ? `${rarityLabel} ${categoryName}` : categoryName }}</span>
+          <span v-if="rarityLabel" class="item-rarity-name">{{ rarityLabel }}</span>
+          <span class="item-category-name">{{ categoryName }}</span>
         </div>
       </div>
     </div>
@@ -132,10 +142,16 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
       <!-- Game components that lead the card (before the description) — e.g. resource readouts. -->
       <CustomComponentContainer slot="item-card-top" :context="{ item }" />
 
-      <div v-script="item.getTrait('description') || ''" class="item-description"></div>
+      <!-- The item rides along as render context: a status link in the text opens its card with
+           `sourceItem`, so a game can show the status as this item will actually grant it. -->
+      <div v-script="{ html: item.getTrait('description') || '', context: { item } }" class="item-description"></div>
 
       <!-- Equip status (equip stats info) — shown first -->
-      <StatusObjectDisplay :data="item.statusObject" :character-id="characterId" />
+      <StatusObjectDisplay :data="item.statusObject" :character-id="characterId">
+        <template #after-stats>
+          <ItemCompareTable v-if="compare" :item="item" :character-id="characterId" />
+        </template>
+      </StatusObjectDisplay>
 
       <!-- Consumable: one label at the top of the green border, then resource effects + the status
            cards granted on consume (stack count lives in each card's title) -->
@@ -146,14 +162,13 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
         <div v-if="consumeStatuses.length" class="consume-statuses">
           <StatusCard v-for="(cs, i) in consumeStatuses" :key="'s' + i"
             :status-id="cs.statusId" :character-id="characterId"
-            :stacks-override="cs.stacks" />
+            :stacks-override="cs.stacks" :source-item="item" />
         </div>
       </div>
 
       <!-- Weight display (for single item) -->
       <div v-if="itemWeight !== null" class="item-weight-info">
-        <span class="weight-label">Weight:</span>
-        <span class="weight-value">{{ itemWeight }}</span>
+        <span class="weight-text">{{ weightText }}</span>
       </div>
     </div>
 
@@ -264,6 +279,7 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
   flex-shrink: 0;
 }
 
+.item-rarity-name,
 .item-category-name {
   font-size: 0.8em;
   color: #999;
@@ -364,15 +380,9 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
   border-left: 3px solid #999;
 }
 
-.weight-label {
-  color: #999;
-  font-size: 0.9em;
-  font-weight: 600;
-}
-
-.weight-value {
+.weight-text {
   color: #ccc;
   font-size: 0.9em;
-  font-weight: bold;
+  font-weight: 600;
 }
 </style>

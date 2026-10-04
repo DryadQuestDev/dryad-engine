@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { Global } from '../../global';
 
 const props = defineProps<{
   assets: string[];
@@ -7,10 +8,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
+const global = Global.getInstance();
+
 const index = ref(0);
 const total = computed(() => props.assets.length);
 const current = computed(() => props.assets[index.value]);
 const isVideo = computed(() => /\.(mp4|webm|ogg|mov)(\?|$)/i.test(current.value || ''));
+
+const closeAriaLabel = computed(() => global.getString('close'));
+const prevAriaLabel = computed(() => global.getString('screenshots.previous'));
+const nextAriaLabel = computed(() => global.getString('screenshots.next'));
+const screenshotAlt = computed(() => global.getString('screenshots.alt'));
+const counterLabel = computed(() => global.getString('screenshots.counter', { current: index.value + 1, total: total.value }));
 
 function next() {
   if (total.value === 0) return;
@@ -34,7 +43,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
 
 <template>
   <div class="screenshots-overlay" @click.self="emit('close')">
-    <button class="screenshots-overlay-close" @click="emit('close')" aria-label="Close">
+    <button class="screenshots-overlay-close" @click="emit('close')" :aria-label="closeAriaLabel">
       <i class="pi pi-times"></i>
     </button>
 
@@ -42,7 +51,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
       v-if="total > 1"
       class="screenshots-overlay-nav screenshots-overlay-nav--prev"
       @click="prev"
-      aria-label="Previous"
+      :aria-label="prevAriaLabel"
     >
       <i class="pi pi-chevron-left"></i>
     </button>
@@ -62,7 +71,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
         :key="current"
         :src="current"
         class="screenshots-overlay-media"
-        alt="Screenshot"
+        :alt="screenshotAlt"
       />
     </div>
 
@@ -70,13 +79,13 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
       v-if="total > 1"
       class="screenshots-overlay-nav screenshots-overlay-nav--next"
       @click="next"
-      aria-label="Next"
+      :aria-label="nextAriaLabel"
     >
       <i class="pi pi-chevron-right"></i>
     </button>
 
     <div v-if="total > 1" class="screenshots-overlay-count">
-      {{ index + 1 }} / {{ total }}
+      {{ counterLabel }}
     </div>
   </div>
 </template>

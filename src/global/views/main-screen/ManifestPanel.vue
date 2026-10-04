@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { ManifestObject } from '../../../schemas/manifestSchema';
 import { manifestPanelCollapsed as collapsed } from './manifestPanelState';
+import { Global } from '../../global';
 
 const props = withDefaults(defineProps<{
   manifest: ManifestObject | null;
@@ -14,23 +15,31 @@ const props = withDefaults(defineProps<{
 
 defineEmits<{ (e: 'screenshots'): void; (e: 'toggle'): void; (e: 'close'): void }>();
 
+const global = Global.getInstance();
+
 const hasScreenshots = computed(() => (props.manifest?.cover_assets || []).length > 0);
 const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.author));
+
+const collapseAriaLabel = computed(() => global.getString(collapsed.value ? 'manifest_panel.expand_description' : 'manifest_panel.collapse_description'));
+const closeAriaLabel = computed(() => global.getString('close'));
+const screenshotsAriaLabel = computed(() => global.getString('manifest_panel.screenshots'));
+const badgeLabel = computed(() => global.getString(props.active ? 'mods.active' : 'mods.inactive'));
+const badgeTitle = computed(() => global.getString(props.active ? 'mods.tooltip.deactivate' : 'mods.tooltip.activate'));
 </script>
 
 <template>
   <div v-if="manifest" class="manifest-panel" :class="{ 'manifest-panel--collapsed': collapsed }">
     <button v-if="typeof active !== 'boolean'" class="manifest-panel-collapse-btn"
       :class="{ 'manifest-panel-collapse-btn--alone': !hasScreenshots }" @click="collapsed = !collapsed"
-      :aria-label="collapsed ? 'Expand description' : 'Collapse description'">
+      :aria-label="collapseAriaLabel">
       <i :class="collapsed ? 'pi pi-chevron-down' : 'pi pi-chevron-up'"></i>
     </button>
     <button v-if="closable" class="manifest-panel-close-btn"
-      :class="{ 'manifest-panel-close-btn--alone': !hasScreenshots }" @click="$emit('close')" aria-label="Close">
+      :class="{ 'manifest-panel-close-btn--alone': !hasScreenshots }" @click="$emit('close')" :aria-label="closeAriaLabel">
       <i class="pi pi-times"></i>
     </button>
     <button v-if="hasScreenshots" class="manifest-panel-screenshots-btn" @click="$emit('screenshots')"
-      aria-label="Screenshots">
+      :aria-label="screenshotsAriaLabel">
       <i class="pi pi-images"></i>
     </button>
     <div class="manifest-panel-title-block">
@@ -38,14 +47,14 @@ const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.au
         <h1 class="manifest-panel-title">{{ manifest.name }}</h1>
         <button v-if="typeof active === 'boolean'" type="button" class="manifest-panel-badge"
           :class="active ? 'manifest-panel-badge--active' : 'manifest-panel-badge--inactive'"
-          :title="active ? 'Click to deactivate' : 'Click to activate'" @click="$emit('toggle')">
-          {{ active ? 'Active' : 'Inactive' }}
+          :title="badgeTitle" @click="$emit('toggle')">
+          {{ badgeLabel }}
         </button>
       </div>
       <div v-if="showMeta" class="manifest-panel-meta">
-        <span v-if="manifest.version">v{{ manifest.version }}</span>
+        <span v-if="manifest.version">{{ global.getString('manifest.version', { version: manifest.version }) }}</span>
         <span v-if="manifest.version && manifest.author" class="manifest-panel-meta-sep">·</span>
-        <span v-if="manifest.author">by {{ manifest.author }}</span>
+        <span v-if="manifest.author">{{ global.getString('manifest.by_author', { author: manifest.author }) }}</span>
       </div>
     </div>
     <slot />

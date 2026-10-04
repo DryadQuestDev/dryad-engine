@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue';
 import type { IndexCategory } from '../../../../utility/dungeonEditor/index';
+import type { MetaStatus } from '../../../../utility/dungeonEditor/meta';
 
 /**
  * Shared query for the dungeon content editor's in-popup search bar.
@@ -16,6 +17,24 @@ export const dungeonSearchQuery = ref('');
  * intersects both into the visible-blocks set.
  */
 export const dungeonStructuredFilter = ref<{ kind: IndexCategory; name: string } | null>(null);
+
+/**
+ * Active author-status filter. Kept separate from `dungeonStructuredFilter`
+ * rather than folded into `IndexCategory`, because status is not indexed
+ * content — it is editor-only state that never reaches the runtime, and
+ * folding it in would list it among Actions.
+ *
+ * Stacks with both the free-text search and the structured filter; the popup
+ * intersects all three.
+ */
+export const dungeonStatusFilter = ref<StatusFilter | null>(null);
+
+/**
+ * `'none'` is a filter, not a status: it selects blocks that carry no
+ * `__meta` status at all — the untriaged remainder. It is deliberately not a
+ * `MetaStatus`, because nothing is ever written to a block to mean it.
+ */
+export type StatusFilter = MetaStatus | 'none';
 
 /**
  * True when `value` contains the trimmed `dungeonSearchQuery` (case-insensitive).

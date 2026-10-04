@@ -153,7 +153,7 @@ onMounted(loadTemplates);
 
 .field-hint {
   font-size: 0.8rem;
-  color: #888;
+  color: var(--editor-text-muted);
 }
 
 .field-hint code {
@@ -163,7 +163,7 @@ onMounted(loadTemplates);
 }
 
 .field-hint.error {
-  color: #f44336;
+  color: var(--editor-fg-danger);
 }
 
 .w-full {

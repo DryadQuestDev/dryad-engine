@@ -27,6 +27,7 @@ Actor slots support:
 | **Enter transitions** | Animated appearance (fade, slide, zoom, bounce, etc.) |
 | **Exit transitions** | Animated removal with same transition options |
 | **Idle animations** | Looping animations while displayed (float, sway, pulse, etc.) |
+| **One-shot animations** | Play once and return to rest (lunge, recoil, hop, flash, etc.) |
 | **Filter effects** | Brightness, contrast, saturation, sepia, hue rotation |
 | **Anchors** | Control rotation pivot point |
 
@@ -120,11 +121,39 @@ Continuous looping animations while the character is displayed.
 | Scale | `pulse`, `breathe` |
 | Visual | `blink`, `glow`, `jitter`, `glitch` |
 | Combined | `wave` |
+| Pose | `slumped` — sinks and sags, then breathes heavily; stays until the idle changes |
+
+Switching idles eases through the rest pose instead of snapping, so a `slumped` actor sinks down and rises back up.
 
 **Example - Floating character:**
 
 ```javascript
 {actor: "ghost->center(idle=float, idle_intensity=0.8)"}
+```
+
+---
+
+## One-Shot Animations
+
+Play once, then the actor returns to rest; the idle loop keeps running underneath. One-shots are events, not state: they are never saved, and loading a save never replays them.
+
+| Animation | Motion |
+|-----------|--------|
+| `lunge` | Darts toward the stage center and back — attacks, grabs |
+| `recoil` | Knocked back away from the center, then settles — hits, shoves |
+| `hop` | One quick jump — surprise, glee |
+| `shake` | Short sideways tremor — anger, pain, struggling |
+| `shiver` | Small fast trembling — fear, cold |
+| `nod` | Dips down and back — agreement |
+| `bounce` | Squash and stretch — playful emphasis |
+| `flash` | Quick red wash on this actor only — taking a hit |
+
+`lunge` and `recoil` read the actor's side of the stage, so the same word points the right way on either side. `intensity` (default 1) and `duration` (seconds) tune any of them.
+
+```javascript
+{actor: "chimera->right(anim=lunge)"}               // stage and lunge once she has entered
+{actor: "chimera(anim=lunge)"}                      // an actor already on stage
+{animate: "chimera lunge, mc recoil(intensity=1.3)"} // several at once
 ```
 
 ---
@@ -151,7 +180,9 @@ Use `character_render` to dynamically modify `character.renderedLayers` before d
 | Move to new slot | `{actor: "my_character->other_slot"}` |
 | Update properties | `{actor: "my_character(alpha=0.5)"}` |
 | Flip horizontally | Set `mirror: true` on slot |
+| Skip the scene grade (a glowing ghost) | `{actor: "my_character->my_slot(grade=false)"}` |
 | Add looping animation | Set `idle: "float"` on slot |
+| Play an animation once | `{animate: "my_character lunge"}` or `{actor: "my_character(anim=lunge)"}` |
 | Clear all actors | `{actor: false}` |
 
 ---

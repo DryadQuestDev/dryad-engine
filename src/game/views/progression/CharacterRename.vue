@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue';
 import { Character } from '../../core/character/character';
+import { Global } from '../../../global/global';
+
+const global = Global.getInstance();
 
 const props = defineProps<{
   character: Character;
@@ -15,10 +18,21 @@ const emit = defineEmits<{
 const isEditing = ref(false);
 const editValue = ref('');
 const inputRef = ref<HTMLInputElement | null>(null);
-const errorMessage = ref('');
+// The validation failure is held as a locale key, not resolved prose, so a live language
+// switch repaints a message that is already on screen.
+const errorKey = ref('');
 
 // Computed properties
-const characterName = computed(() => props.character?.getTrait('name') || 'Unnamed');
+const characterName = computed(() => props.character?.getTrait('name') || global.getString('character.unnamed'));
+// `max` is passed unconditionally; keys that carry no |max| placeholder simply ignore it.
+const errorMessage = computed(() => errorKey.value ? global.getString(errorKey.value, { max: props.maxLength || 50 }) : '');
+
+const editTitle = computed(() => global.getString('character.rename.edit'));
+const editAriaLabel = computed(() => global.getString('character.rename.edit_aria'));
+const saveTitle = computed(() => global.getString('save'));
+const saveAriaLabel = computed(() => global.getString('character.rename.save_aria'));
+const cancelTitle = computed(() => global.getString('cancel'));
+const cancelAriaLabel = computed(() => global.getString('character.rename.cancel_aria'));
 
 // Validation
 const isValid = computed(() => {
@@ -35,7 +49,7 @@ const isValid = computed(() => {
 // Enter edit mode
 async function startEdit() {
   editValue.value = characterName.value;
-  errorMessage.value = '';
+  errorKey.value = '';
   isEditing.value = true;
 
   await nextTick();
@@ -50,9 +64,9 @@ function saveName() {
   if (!isValid.value) {
     const maxLen = props.maxLength || 50;
     if (!editValue.value.trim()) {
-      errorMessage.value = 'Name cannot be empty';
+      errorKey.value = 'character.rename.error_empty';
     } else if (editValue.value.length > maxLen) {
-      errorMessage.value = `Name too long (max ${maxLen} characters)`;
+      errorKey.value = 'character.rename.error_too_long';
     }
     return;
   }
@@ -65,13 +79,13 @@ function saveName() {
   }
 
   isEditing.value = false;
-  errorMessage.value = '';
+  errorKey.value = '';
 }
 
 // Cancel edit
 function cancelEdit() {
   isEditing.value = false;
-  errorMessage.value = '';
+  errorKey.value = '';
   editValue.value = '';
 }
 
@@ -95,8 +109,8 @@ function handleKeydown(event: KeyboardEvent) {
       <button
         class="rename-edit-btn"
         @click="startEdit"
-        title="Edit name"
-        aria-label="Edit character name"
+        :title="editTitle"
+        :aria-label="editAriaLabel"
       >
         <i class="pi pi-pen-to-square"></i>
       </button>
@@ -119,16 +133,16 @@ function handleKeydown(event: KeyboardEvent) {
           class="rename-action-btn confirm"
           @click="saveName"
           :disabled="!isValid"
-          title="Save"
-          aria-label="Save name"
+          :title="saveTitle"
+          :aria-label="saveAriaLabel"
         >
           <i class="pi pi-check"></i>
         </button>
         <button
           class="rename-action-btn cancel"
           @click="cancelEdit"
-          title="Cancel"
-          aria-label="Cancel editing"
+          :title="cancelTitle"
+          :aria-label="cancelAriaLabel"
         >
           <i class="pi pi-times"></i>
         </button>

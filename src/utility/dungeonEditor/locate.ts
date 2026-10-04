@@ -77,14 +77,18 @@ function columnLineCount(col: SceneColumn): number {
 function sceneAnchorLine(block: SceneBlock, at: IssueAnchor): number {
   if (at.rowIndex === undefined) return 0;
   let line = 1;
+  if (block.preRows !== undefined) line += lineCount(block.preRows);
   for (let r = 0; r < at.rowIndex && r < block.rows.length; r++) {
     line += 1;
+    const pre = block.rows[r].preColumns;
+    if (pre !== undefined) line += lineCount(pre);
     for (const col of block.rows[r].columns) line += columnLineCount(col);
   }
   const row = block.rows[at.rowIndex];
   if (!row) return line;
-  // The row-number line itself, then the columns before ours.
+  // The row-number line itself, its parked comments, then the columns before ours.
   line += 1;
+  if (row.preColumns !== undefined) line += lineCount(row.preColumns);
   const colIndex = at.colIndex ?? 0;
   for (let c = 0; c < colIndex && c < row.columns.length; c++) line += columnLineCount(row.columns[c]);
   const col = row.columns[colIndex];

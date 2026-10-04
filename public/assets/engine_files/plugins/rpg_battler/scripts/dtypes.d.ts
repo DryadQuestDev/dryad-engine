@@ -194,6 +194,10 @@ type RpgBattleService = {
   addDefeated(battleId: string): void;
   /** Whether a battle definition has been beaten (or otherwise marked defeated) — same check as the `_defeated` condition. */
   isDefeated(battleId: string): boolean;
+  /** Record a battle definition as won in actual combat — what the `_fought` condition checks. */
+  addFought(battleId: string): void;
+  /** Whether a battle definition was won in actual combat, not cleared by `win` / `set_defeated` — same check as `_fought`. */
+  isFought(battleId: string): boolean;
   /** Base threat of a battle definition: Σ template `threat` traits × amount across ALL waves + the battle's own `threat` field (1-100 design scale) on top. Unscaled base value. */
   getThreat(battleId: string): number;
   /** The battle definition's roster, one entry per body across every wave — the single walk of the wave / live-instance / template rules. `getRoster(id).length` is the headcount. */
@@ -280,6 +284,15 @@ interface GameEvents {
 // ── Animation ──
 
 type RpgBattleState = 'idle' | 'idle_wounded' | 'attack' | 'cast' | 'hit' | 'death';
+
+/** A damaging hit's juice (rpg-battle-anims takeJuice): strength, colour, contact point (null = the body's centre), impact size in px, hit-stop in ms at normal speed. */
+type RpgHitJuice = {
+  k: number;
+  color: string;
+  pos: { x: number; y: number } | null;
+  size: number;
+  stopMs: number;
+};
 
 // ── Action Events ──
 

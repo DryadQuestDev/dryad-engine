@@ -1,25 +1,8 @@
 /* Effect / damage-type colors moved to effect-colors.css (all css/ files auto-load
    in-game; the editor preview hook loads only that file). */
 
-/* ── Projectiles / battle VFX ── */
-
-.rpg-projectile {
-  position: fixed;
-  transform: translate(-50%, -50%);
-  transform-origin: center center;
-  z-index: 11000;
-  pointer-events: none;
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-  will-change: left, top, transform;
-}
-
-/* Spritesheet sprite: a strip/grid frame-stepped in JS (background-size + background-position set
-   per frame). The N/(N-1)-style exact per-cell positions are computed in spawnSprite. */
-.rpg-projectile-sheet {
-  background-repeat: no-repeat;
-}
+/* Projectile sprites and the VFX presets are in rpg-vfx.css, which the editor's Projectile
+   Editor loads as well, so its preview draws them with the same rules. */
 
 /* ── Battle Screen ── */
 
@@ -83,7 +66,7 @@
   position: absolute;
   inset: 0;
   container-type: size;
-  transform-origin: 20% 55%;
+  /* transform-origin: set inline from rpg-vfx-geometry's LAYOUT (the acting party member's point) */
   transition: transform 0.5s ease;
   will-change: transform;
 }
@@ -489,6 +472,26 @@
 
 .rpg-heal-flash .character-doll-wrapper {
   animation: rpg-heal-flash 0.4s ease-out forwards;
+}
+
+/* Ground shadow under a FLOATING enemy (idle float/bounce/hop) — walkers get none: they
+   don't need one, and some plates carry a shadow baked into the art. RpgBattleScreen places
+   it just under the visible sole (see groundShadowStyle there) and sizes it from the visible
+   body scale in cqh of the world camera. A GSAP ticker there shrinks + fades it with the idle
+   lift, so the body visibly hovers over it. Negative z sits under every slot row (rows are
+   z 0, -1, -2) while the camera's own stacking context keeps it above the full-screen
+   background outside. */
+.rpg-ground-shadow {
+  position: absolute;
+  z-index: -10;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center,
+      rgba(0, 0, 0, 0.7) 0%,
+      rgba(0, 0, 0, 0.38) 45%,
+      rgba(0, 0, 0, 0) 72%);
+  transform: translate(-50%, -50%);
+  will-change: transform, opacity;
 }
 
 @keyframes rpg-hit-flash {

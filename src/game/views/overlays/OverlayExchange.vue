@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, markRaw } from 'vue';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import { PARTY_INVENTORY_ID, TradeContext } from '../../systems/itemSystem';
 import { Item } from '../../core/character/item';
 import { Inventory } from '../../core/character/inventory';
 import ExchangeInventory from '../exchange/ExchangeInventory.vue';
-import ItemCard from '../progression/ItemCard.vue';
-import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
+import ItemPopupCard from '../popups/cards/ItemPopupCard.vue';
+import { popover as vPopover, type PopoverBinding } from '../../directives/popoverDirective';
 import { gameLogger } from '../../utils/logger';
 import { inspectMode, toggleInspectMode } from '../exchange/useExchangeInspect';
 import { resetExchangeFilter } from '../exchange/useExchangeFilter';
@@ -30,22 +30,24 @@ function getCurrencyName(price: Record<string, number>): string {
     return (tmpl?.traits as any)?.name || id;
 }
 
-// Currency hover state
-const hoveredCurrencyId = ref<string | null>(null);
-const hoveredCurrencyIsParty = ref(false);
-const currencyReferenceElement = ref<HTMLElement | null>(null);
-const currencyFloatingElement = ref<HTMLElement | null>(null);
+const ItemPopupCardComp = markRaw(ItemPopupCard);
 
-// Floating UI for currency ItemCard
-const { floatingStyles: currencyFloatingStyles } = useFloating(currencyReferenceElement, currencyFloatingElement, {
-  placement: computed(() => hoveredCurrencyIsParty.value ? 'top-start' : 'top-end'),
-  strategy: 'fixed',
-  middleware: [
-    offset(8),
-    shift({ padding: 8 })
-  ],
-  whileElementsMounted: autoUpdate
-});
+// A currency chip shows the currency's item card on hover, on the shared popup layer. The chip is
+// a total, not an item, so the card reads a preview item built once per currency template.
+const currencyPreviews = new Map<string, Item>();
+function currencyPopover(currencyId: string, isParty: boolean): PopoverBinding {
+  let item = currencyPreviews.get(currencyId);
+  if (!item) {
+    item = game.itemSystem.createItem(currencyId);
+    currencyPreviews.set(currencyId, item);
+  }
+  return {
+    component: ItemPopupCardComp,
+    props: { item, noChoices: true },
+    placement: isParty ? 'top-start' : 'top-end',
+    key: `exchange-currency:${currencyId}`,
+  };
+}
 
 // Quantity popup state
 const showQuantityPopup = ref(false);
@@ -99,6 +101,12 @@ const exchangeInventory = computed(() => {
 
 const mode = computed(() => game.itemSystem.exchangeState.value);
 
+const titleLabel = computed(() => global.getString(mode.value === 'loot' ? 'exchange.title.loot' : 'exchange.title.trade'));
+// An authored inventory name is content and stays as written; only the unnamed default is localized.
+const partyTitle = computed(() => partyInventory.value?.name || global.getString('exchange.party_inventory'));
+const exchangeTitle = computed(() => exchangeInventory.value?.name
+  || global.getString(mode.value === 'loot' ? 'exchange.container' : 'exchange.merchant'));
+
 // Get all unique currencies used across both inventories (in consistent order)
 const allCurrencyIds = computed(() => {
   if (mode.value !== 'trade') return [];
@@ -144,28 +152,6 @@ function getCurrencyDisplay(inventory: Inventory | null) {
 // Currency displays for both inventories
 const partyCurrencyDisplay = computed(() => getCurrencyDisplay(partyInventory.value));
 const exchangeCurrencyDisplay = computed(() => getCurrencyDisplay(exchangeInventory.value));
-
-// Get the currently hovered currency as an Item
-const hoveredCurrencyItem = computed(() => {
-  if (!hoveredCurrencyId.value) return null;
-
-  // Create a temporary item from the currency template for display purposes
-  const template = game.itemSystem.itemTemplatesMap.get(hoveredCurrencyId.value);
-  if (!template) return null;
-
-  return game.itemSystem.createItem(hoveredCurrencyId.value);
-});
-
-// Currency hover handlers
-function handleCurrencyHover(currencyId: string, event: MouseEvent) {
-  hoveredCurrencyId.value = currencyId;
-  currencyReferenceElement.value = event.currentTarget as HTMLElement;
-}
-
-function handleCurrencyLeave() {
-  hoveredCurrencyId.value = null;
-  currencyReferenceElement.value = null;
-}
 
 // Handle item click (called from both inventories)
 function handleItemClick(item: Item, source: Inventory, target: Inventory, event: MouseEvent) {
@@ -448,7 +434,7 @@ function close() {
 <template>
   <div :id="COMPONENT_ID" class="overlay-exchange overlay-hoist">
     <div class="exchange-header">
-      <h2>{{ mode === 'loot' ? 'Loot' : 'Trade' }}</h2>
+      <h2>{{ titleLabel }}</h2>
       <div class="header-actions">
         <button
           v-if="isMobile"
@@ -456,11 +442,11 @@ function close() {
           class="inspect-toggle"
           :class="{ active: inspectMode }"
           :aria-pressed="inspectMode"
-          title="Inspect mode: tap items to see details instead of buying/moving"
+          :title="global.getString('exchange.inspect.tooltip')"
           @click="toggleInspectMode"
         >
           <i class="pi pi-search"></i>
-          <span>Inspect</span>
+          <span>{{ global.getString('exchange.inspect') }}</span>
         </button>
         <button class="close-button" @click="close">✕</button>
       </div>
@@ -471,14 +457,14 @@ function close() {
         <!-- Party Currency Display (Left) -->
         <div v-if="mode === 'trade' && partyCurrencyDisplay.length > 0" class="currency-display">
           <div v-for="currency in partyCurrencyDisplay" :key="currency.id" class="currency-item"
-            @mouseenter="handleCurrencyHover(currency.id, $event)" @mouseleave="handleCurrencyLeave">
+            v-popover="currencyPopover(currency.id, true)">
             <img v-if="currency.image" :src="currency.image" :alt="currency.name" class="currency-image" />
             <span class="currency-amount">{{ currency.amount }}</span>
           </div>
         </div>
 
         <ExchangeInventory :inventory="partyInventory" :target-inventory="exchangeInventory"
-          :title="partyInventory?.name || 'Party Inventory'" :mode="mode" :is-party="true"
+          :title="partyTitle" :mode="mode" :is-party="true"
           @item-click="handleItemClick" />
       </div>
 
@@ -486,14 +472,14 @@ function close() {
         <!-- Exchange Currency Display (Right) -->
         <div v-if="mode === 'trade' && exchangeCurrencyDisplay.length > 0" class="currency-display">
           <div v-for="currency in exchangeCurrencyDisplay" :key="currency.id" class="currency-item"
-            @mouseenter="handleCurrencyHover(currency.id, $event)" @mouseleave="handleCurrencyLeave">
+            v-popover="currencyPopover(currency.id, false)">
             <img v-if="currency.image" :src="currency.image" :alt="currency.name" class="currency-image" />
             <span class="currency-amount">{{ currency.amount }}</span>
           </div>
         </div>
 
         <ExchangeInventory :inventory="exchangeInventory" :target-inventory="partyInventory"
-          :title="exchangeInventory?.name || (mode === 'loot' ? 'Container' : 'Merchant')" :mode="mode"
+          :title="exchangeTitle" :mode="mode"
           :is-party="false" @item-click="handleItemClick" @apply="handleApply" @loot-all="handleLootAll"
           @recipe-select="handleRecipeSelect" />
       </div>
@@ -502,7 +488,7 @@ function close() {
     <!-- Quantity Popup -->
     <div v-if="showQuantityPopup" class="quantity-popup-overlay" @click.self="closeQuantityPopup">
       <div class="quantity-popup">
-        <h3>Select Quantity</h3>
+        <h3>{{ global.getString('exchange.quantity.title') }}</h3>
         <div class="quantity-controls">
           <input type="range" v-model.number="selectedQuantity" :min="1" :max="maxQuantity" class="quantity-slider" />
           <input type="number" v-model.number="selectedQuantity" :min="1" :max="maxQuantity" class="quantity-input" />
@@ -518,23 +504,11 @@ function close() {
         </div>
         <div class="popup-buttons">
           <button @click="moveAllQuantity" class="move-all-button">{{ mode === 'trade' ? global.getString('buy_all') : global.getString('move_all') }}</button>
-          <button @click="confirmQuantity" class="confirm-button">Confirm</button>
-          <button @click="closeQuantityPopup" class="cancel-button">Cancel</button>
+          <button @click="confirmQuantity" class="confirm-button">{{ global.getString('confirm') }}</button>
+          <button @click="closeQuantityPopup" class="cancel-button">{{ global.getString('cancel') }}</button>
         </div>
       </div>
     </div>
-
-    <!-- Currency ItemCard popup -->
-    <Teleport to="body">
-      <div v-if="hoveredCurrencyItem" ref="currencyFloatingElement" class="currency-item-card-popup" :style="{
-        ...currencyFloatingStyles,
-        zIndex: 10001,
-        pointerEvents: 'none',
-        willChange: 'transform'
-      }">
-        <ItemCard :item="hoveredCurrencyItem" />
-      </div>
-    </Teleport>
   </div>
 </template>
 

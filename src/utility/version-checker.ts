@@ -1,3 +1,5 @@
+import { Global } from '../global/global';
+
 /**
  * Validates if a version string follows semantic versioning format (a.b.c)
  * @param version - Version string to validate
@@ -102,21 +104,16 @@ export function checkManifestCompatibility(
   const isCompatible = satisfiesMinVersion(engineVersion, manifestMinVersion);
 
   if (!isCompatible && manifestMinVersion) {
-    let warningMessage: string;
-
-    if (getString) {
-      warningMessage = getString('version_incompatible', {
-        required: manifestMinVersion,
-        current: engineVersion
-      });
-    } else {
-      // Fallback if getString is not provided
-      warningMessage = `This requires engine version ${manifestMinVersion} or higher. Your current version is ${engineVersion}. Please download the latest version to play.`;
-    }
+    // ModPicker and ModsStrip call this without a resolver; falling through to the engine's own
+    // getString keeps those call sites localized instead of pinning them to English.
+    const resolve = getString ?? ((key: string, params?: Record<string, string>) => Global.getInstance().getString(key, params));
 
     return {
       isCompatible: false,
-      warningMessage
+      warningMessage: resolve('version_incompatible', {
+        required: manifestMinVersion,
+        current: engineVersion
+      })
     };
   }
 

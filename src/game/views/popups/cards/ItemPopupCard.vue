@@ -10,6 +10,7 @@ const props = defineProps<{
     characterId?: string;
     disabled?: boolean;
     noChoices?: boolean; // Hide the item choice buttons (equip/drop/use) — for viewer contexts like station lists.
+    noCompare?: boolean; // Hide the comparison against equipped gear — for contexts with no character, like the editor.
 }>();
 
 const game = Game.getInstance();
@@ -19,7 +20,9 @@ const choices = computed(() => {
     return char?.getItemChoices(props.item) || [];
 });
 
-const hasChoices = computed(() => choices.value.length > 0 && !props.disabled && !props.noChoices);
+// Flags first: a viewer card (noChoices) never resolves a character — the editor's item preview
+// has none, and reading the selected character there throws.
+const hasChoices = computed(() => !props.noChoices && !props.disabled && choices.value.length > 0);
 </script>
 
 <template>
@@ -27,7 +30,7 @@ const hasChoices = computed(() => choices.value.length > 0 && !props.disabled &&
         <div v-if="hasChoices" class="item-choices-wrapper">
             <ItemChoices :item="item" />
         </div>
-        <ItemCard :item="item" :character-id="characterId" />
+        <ItemCard :item="item" :character-id="characterId" :compare="!noCompare" />
     </div>
 </template>
 

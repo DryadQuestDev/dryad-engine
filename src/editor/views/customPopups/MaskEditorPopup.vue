@@ -397,6 +397,7 @@ onBeforeUnmount(() => {
   height: 16px;
   margin-left: -8px;
   margin-top: -8px;
+  /* Sits on top of game art, not editor chrome — stays white in both themes. */
   background: white;
   border: 2px solid red;
   border-radius: 50%;
@@ -425,7 +426,7 @@ onBeforeUnmount(() => {
 }
 
 .no-polygon {
-  color: #888;
+  color: var(--editor-text-faint);
   font-style: italic;
 }
 
@@ -433,10 +434,10 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 2rem;
   padding: 0.5rem;
-  background: #f5f5f5;
+  background: var(--editor-surface-sunken);
   border-radius: 4px;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--editor-text-muted);
   flex-shrink: 0;
 }
 

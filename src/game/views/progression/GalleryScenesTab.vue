@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import type { ReplaySceneObject } from '../../systems/dungeonSystem';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
+
+const maskedName = computed(() => global.getString('masked_name'));
+const exitReplayLabel = computed(() => global.getString('gallery.exit_replay'));
+const noScenesLabel = computed(() => global.getString('gallery.no_scenes'));
 
 // Update unlock status for all scenes based on current dungeon data
 const data = game.dungeonSystem.getReplaySceneObject();
@@ -34,12 +40,12 @@ const isDungeonDiscovered = (dungeonId: string): boolean => {
 
 // Get display name for dungeon
 const getDungeonDisplayName = (dungeon: { id: string; name: string }): string => {
-  return isDungeonDiscovered(dungeon.id) ? dungeon.name : '???';
+  return isDungeonDiscovered(dungeon.id) ? dungeon.name : maskedName.value;
 };
 
 // Get display name for scene
 const getSceneDisplayName = (scene: { name: string; unlocked: boolean }): string => {
-  return isSceneUnlocked(scene) ? scene.name : '???';
+  return isSceneUnlocked(scene) ? scene.name : maskedName.value;
 };
 
 // Exit replay mode by loading the saved game
@@ -55,14 +61,14 @@ const exitReplayMode = () => {
     <div v-if="game.getState('replay_mode')" class="replay-mode-bar">
       <button class="exit-replay-btn" @click="exitReplayMode">
         <i class="pi pi-sign-out"></i>
-        Exit Replay Mode
+        {{ exitReplayLabel }}
       </button>
     </div>
 
     <CustomComponentContainer :slot="'replay-custom-block'" v-if="game.getState('replay_mode')" :context="{ replayMode: true, data }" />
 
     <div v-if="!data?.dungeons?.length" class="empty-state">
-      No scenes available in the gallery
+      {{ noScenesLabel }}
     </div>
 
     <div v-else class="scenes-columns">

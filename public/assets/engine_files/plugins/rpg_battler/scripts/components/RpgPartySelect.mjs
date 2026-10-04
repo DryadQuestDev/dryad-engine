@@ -15,6 +15,9 @@ export const RpgPartySelect = defineComponent({
     components: { CharacterFace },
     setup() {
         const request = partySelectRequest;
+        // Stays a local ref: a Set can't go into engine state, and it doesn't need to — the
+        // immediate watch below rebuilds a legal default pick from the (saved) request on every
+        // mount, including the one after a save is loaded with the picker still open.
         const selected = ref(/** @type {Set<string>} */ (new Set()));
 
         // Preselect locked members + fill remaining slots in party order on every new request.

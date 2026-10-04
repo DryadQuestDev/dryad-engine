@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { shouldShowEntityIds } from '../../../utils/idBadge';
 import { Game } from '../../../game';
+import { Global } from '../../../../global/global';
 import { closeAll } from '../popupStore';
 
 const showIds = computed(() => shouldShowEntityIds());
@@ -11,6 +12,7 @@ const props = defineProps<{
 }>();
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 
 const record = computed(() => game.getRecord(props.recordId));
 const summarySource = computed(() => {
@@ -29,13 +31,17 @@ function onOpenInEncyclopedia() {
     game.openEncyclopediaForRecord(props.recordId);
     closeAll();
 }
+
+const openInEncyclopediaLabel = computed(() => global.getString('record.open_in_encyclopedia'));
+
+const unknownLabel = computed(() => global.getString('card.unknown', { id: props.recordId }));
 </script>
 
 <template>
     <div v-if="record" class="popup-inner">
         <div class="popup-header">
             <button v-if="game.isRecordInEncyclopedia(recordId)" class="popup-action"
-                @click="onOpenInEncyclopedia" aria-label="Open in Encyclopedia">
+                @click="onOpenInEncyclopedia" :aria-label="openInEncyclopediaLabel">
                 <i class="pi pi-book"></i>
             </button>
             <span class="popup-title">{{ record.title }}
@@ -50,7 +56,7 @@ function onOpenInEncyclopedia() {
         </template>
     </div>
     <div v-else class="popup-inner popup-error">
-        Unknown record: {{ recordId }}
+        {{ unknownLabel }}
     </div>
 </template>
 

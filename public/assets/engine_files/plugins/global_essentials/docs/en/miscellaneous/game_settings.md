@@ -87,6 +87,19 @@ game.setGameSetting('difficulty', 'hard');
 game.setGameSetting('show_hints', false);
 ```
 
+### Reacting to changes
+
+`game.setGameSetting()` fires the `game_setting_change` emitter, and the Game Settings menu writes through it, so one listener covers both. See ->builtins.game_emitters.
+
+```js
+game.on('game_setting_change', (key, newValue, oldValue) => {
+    if (key !== 'difficulty') return;
+    // re-derive whatever the setting maps onto
+});
+```
+
+The emitter is muted for the whole save-load window, so a restored value never arrives as a change. A Vue `watch` on `game.getGameSetting(...)` is not: the restore assigns into the settings object directly, and the watch fires mid-load, before the current dungeon and the rest of the run exist. Use the emitter for anything that writes game state.
+
 ### Example: Difficulty Setting
 
 Define in the editor:

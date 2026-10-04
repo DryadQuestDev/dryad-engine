@@ -56,7 +56,9 @@ Defeat-reward and dungeon-scaling service (see the Rewards & Scaling guide).
 | `getPending()` | Reactive pending-reward object the reward panel renders (`{ items, resources, characters }` – characters carry per-member XP gains, level range, and stat diffs) |
 | `effectiveThreat(battleId)` | Battle definition's threat × the current dungeon-level scale |
 | `getDungeonLevel()` | The current dungeon's (level group's) snapshot, 1 outside dungeons |
-| `dungeonScale(level)` | Reward multiplier for a dungeon level |
+| `dungeonScale(level)` | Reward multiplier for a dungeon level; also the curve of `flat` stats |
+| `relativeScale(level)` | Multiplier for `relative` stats at a dungeon level |
+| `scaleStats(stats, level)` | A stats object scaled to a level exactly as a levelled item's (each stat's `scaling` meta); returns a new object |
 | `recordResource(statId, amount, characterId)` | Record a resource gain for the reward display (merged per stat id + recipient). A stat flagged `is_resource` renders as a bar filling toward that character's cap; anything else as a plain line |
 | `clearPending()` | Reset the pending reward. Also cashes in the panel's trash marks – any loot the player left behind is removed from the party bag here |
 | `openRewardPopup()` | Open the reward popup (guarded against double-open) |

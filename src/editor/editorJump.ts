@@ -1,5 +1,6 @@
 import { useStorage } from '@vueuse/core';
 import { Editor } from './editor';
+import { EDITOR_TABS } from './editorTabs';
 
 // Same storage object Dform reads on tab entry — vueuse syncs same-key instances
 // within the document, so a value written here is visible to Dform's tabKey
@@ -33,3 +34,21 @@ export async function jumpToEntity(mainTab: string, subTab: string, entityId: st
   // watcher that restores idFilter from storage never fires — apply directly.
   editor.idFilter.value = entityId;
 }
+
+/** Main tab that holds a subtab (`item_templates` -> `items`), or null. */
+export function mainTabOf(subTab: string): string | null {
+  for (const tab of EDITOR_TABS) {
+    if (tab.subtabs.some(sub => sub.id === subTab)) return tab.id;
+  }
+  return null;
+}
+
+/** Data file of a subtab (`inventories` -> `item_inventories`), or null. */
+export function fileOfSubtab(subTab: string): string | null {
+  for (const tab of EDITOR_TABS) {
+    const sub = tab.subtabs.find(entry => entry.id === subTab);
+    if (sub) return sub.file ?? null;
+  }
+  return null;
+}
+

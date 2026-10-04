@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 
 const props = withDefaults(defineProps<{
   stats: Record<string, number>;
@@ -31,6 +32,15 @@ const visibleStats = computed(() => {
     }, {} as Record<string, number>);
 });
 
+function statName(statId: string): string {
+  return game.characterSystem.statsMap.get(statId)?.name || statId;
+}
+
+// Same key as StatCard's breakdown rows: the colon belongs to the locale entry, not the markup.
+function statRowLabel(statId: string): string {
+  return Global.getInstance().getString('stat_breakdown.row_label', { name: statName(statId) });
+}
+
 // Check if there are any visible stats
 const hasVisibleStats = computed(() => {
   return Object.keys(visibleStats.value).length > 0;
@@ -58,10 +68,22 @@ const getStatColor = (statId: string, value: number): string => {
   return isBeneficial ? '#42b983' : '#ff453a'; // Green for good, red for bad
 };
 
-// Check if we should show a + prefix for the value
-const shouldShowPlus = (value: number): boolean => {
-  return value > 0; // Show + for all positive values
+// The sign rides along with the number rather than sitting in its own template node: it is
+// arithmetic notation, not prose, and keeping it separate only fragments the readout further.
+const signedStat = (statId: string, value: number): string => {
+  const rounded = roundStat(statId, value);
+  return rounded > 0 ? `+${rounded}` : String(rounded);
 };
+
+// One locale line covers both the multiplier and the stacks readout, so the two cannot drift.
+const multipliedText = (statId: string, value: number, factor: number = 1): string =>
+  Global.getInstance().getString('status_stats.multiplied', {
+    value: signedStat(statId, value),
+    multiplier: factor,
+    total: roundStat(statId, value * factor),
+  });
+
+const statsLabel = computed(() => Global.getInstance().getString('status_stats.stats_label'));
 
 const isBinaryStat = (statId: string): boolean => {
   return game.characterSystem.statsMap.get(statId)?.is_binary ?? false;
@@ -75,23 +97,23 @@ const getBinaryColor = (statId: string): string => {
 
 <template>
   <div v-if="hasVisibleStats" class="status-stats-display">
-    <h5 :class="{ inactive: !isActive }">Stats:</h5>
+    <h5 :class="{ inactive: !isActive }">{{ statsLabel }}</h5>
     <ul>
       <li v-for="(value, statId) in visibleStats" :key="statId" :class="{ 'binary-li': isBinaryStat(statId as string) }">
         <template v-if="isBinaryStat(statId as string)">
           <span :style="{ color: getBinaryColor(statId as string) }">&#10003;</span>
-          {{ game.characterSystem.statsMap.get(statId)?.name || statId }}
+          {{ statName(statId as string) }}
         </template>
         <template v-else>
-          {{ game.characterSystem.statsMap.get(statId)?.name || statId }}:
+          {{ statRowLabel(statId as string) }}
           <span v-if="multiplier && multiplier > 1" :style="{ color: getStatColor(statId as string, value * multiplier) }">
-            <template v-if="shouldShowPlus(value * multiplier)">+</template>{{ roundStat(statId as string, value) }} x {{ multiplier }} = {{ roundStat(statId as string, value * multiplier) }}
+            {{ multipliedText(statId as string, value, multiplier) }}
           </span>
           <span v-else-if="stacks && stacks > 1" :style="{ color: getStatColor(statId as string, value * stacks) }">
-            <template v-if="shouldShowPlus(value * stacks)">+</template>{{ roundStat(statId as string, value) }} x {{ stacks }} = {{ roundStat(statId as string, value * stacks) }}
+            {{ multipliedText(statId as string, value, stacks) }}
           </span>
           <span v-else :style="{ color: getStatColor(statId as string, value) }">
-            <template v-if="shouldShowPlus(value)">+</template>{{ roundStat(statId as string, value) }}
+            {{ signedStat(statId as string, value) }}
           </span>
         </template>
       </li>

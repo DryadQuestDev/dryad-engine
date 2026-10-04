@@ -3,7 +3,7 @@
   "name": "Experience",
   "description": "XP and leveling system. Characters with a 'level' trait gain XP and level up automatically.",
   "author": "Nekon",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "order": 1,
   "scripts": [
     "main.mjs"
@@ -30,7 +30,12 @@
         "power_scale_per_level": {
           "type": "number",
           "defaultValue": 0.25,
-          "tooltip": "Item + reward scaling per dungeon level (the power curve): effective threat = base threat \u00d7 (1 + power_scale_per_level \u00d7 (dungeon_level \u2212 1)). Also scales equipment stats and ability enhancements. (Enemy scaling is separate \u2014 see the enemy dungeon-scale curve.)"
+          "tooltip": "Item + reward scaling per dungeon level (the power curve): effective threat = base threat \u00d7 (1 + power_scale_per_level \u00d7 (dungeon_level \u2212 1)). Also scales equipment stats whose Stat Meta scaling is flat, and ability enhancements. (Enemy scaling is separate \u2014 see the enemy dungeon-scale curve.)"
+        },
+        "relative_scale_per_level": {
+          "type": "number",
+          "defaultValue": 0.08,
+          "tooltip": "Growth per dungeon level for equipment stats whose Stat Meta scaling is relative (chances, percentages, speed): 1 + relative_scale_per_level \u00d7 (dungeon_level \u2212 1). Slower than the power curve \u2014 those stats are measured against things enemy scaling never grows, so on the power curve they would run into their caps (100% dodge, 100% crit). Stats with no scaling set never grow."
         },
         "price_scale_per_level": {
           "type": "number",
@@ -187,11 +192,6 @@
             }
           }
         },
-        "no_scale_stats": {
-          "type": "chooseMany",
-          "fromFile": "character_stats",
-          "tooltip": "Stats the item level curve never multiplies. Use for percentage-natured stats that are already proportional (reflect, dodge, crit chance) \u2014 scaling those compounds instead of keeping pace. Flat stats (power, thorns, armor, health) should stay scaled."
-        },
         "gather_categories": {
           "type": "chooseMany",
           "fromFile": "item_categories",
@@ -238,6 +238,14 @@
         "uid": "xp_stat_xp_modifier"
       }
     ],
+    "stat_meta": [
+      {
+        "id": "scaling",
+        "type": "chooseOne",
+        "values": ["flat", "relative"],
+        "description": "How this stat grows on levelled equipment (experience plugin). flat: the power curve (power_scale_per_level) \u2014 for stats measured in the same units enemy scaling grows: power, armor, health, thorns, capacities. relative: the slower curve (relative_scale_per_level) \u2014 for chances, percentages and speed. Unset: never scales."
+      }
+    ],
     "character_traits": [
       {
         "id": "level",
@@ -256,7 +264,7 @@
     "locale": [
       {
         "id": "xp_level_up",
-        "val": "<span class=\"special\">|name| has reached level |level|!</span>"
+        "val": "[gold]|name| has reached level |level|![/gold]"
       },
       {
         "id": "reward_title",
@@ -292,7 +300,7 @@
       },
       {
         "id": "xp_flash",
-        "val": "<span class=\"special\">|name| has earned |amount| XP</span>"
+        "val": "[green]|name| has earned |amount| XP[/green]"
       },
       {
         "id": "equip_over_level",

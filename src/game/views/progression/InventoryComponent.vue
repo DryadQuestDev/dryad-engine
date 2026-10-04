@@ -40,6 +40,9 @@ const categories = computed(() =>
 const allLabel = computed(() => Global.getInstance().getString('inventory.filter.all'));
 const noItemsLabel = computed(() => Global.getInstance().getString('inventory.no_items'));
 const equippableLabel = computed(() => Global.getInstance().getString('inventory.filter.equippable'));
+// The toggle shows a single-letter glyph rather than the full label — an abbreviation is
+// language-specific, so it is a key of its own and not sliced off equippableLabel.
+const equippableGlyph = computed(() => Global.getInstance().getString('inventory.filter.equippable_short'));
 const questLabel = computed(() => Global.getInstance().getString('inventory.filter.quest'));
 const searchPlaceholder = computed(() => Global.getInstance().getString('inventory.search'));
 
@@ -95,7 +98,7 @@ const gridSlots = computed(() => {
         </div>
         <div class="inventory-filter-tab inventory-filter-toggle" :class="{ active: equippableOnly }"
           v-tooltip.top="equippableLabel" @click="equippableOnly = !equippableOnly">
-          E
+          {{ equippableGlyph }}
         </div>
         <div class="inventory-search-wrap">
           <input v-model="searchQuery" type="text" class="inventory-search" :placeholder="searchPlaceholder" />

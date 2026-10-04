@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
 import Savelist from '../Savelist.vue';
+import { Global } from '../../global';
 
 const props = defineProps<{
   gameId: string | null;
@@ -8,6 +9,11 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ (e: 'close'): void }>();
+
+const global = Global.getInstance();
+
+const title = computed(() => global.getString('saves'));
+const closeAriaLabel = computed(() => global.getString('close'));
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && props.open) emit('close');
@@ -21,8 +27,8 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
   <Transition name="saves-drawer">
     <aside v-if="open" class="saves-drawer-panel">
       <header class="saves-drawer-header">
-        <h2 class="saves-drawer-title">Saves</h2>
-        <button class="saves-drawer-close" @click="emit('close')" aria-label="Close">
+        <h2 class="saves-drawer-title">{{ title }}</h2>
+        <button class="saves-drawer-close" @click="emit('close')" :aria-label="closeAriaLabel">
           <i class="pi pi-times"></i>
         </button>
       </header>

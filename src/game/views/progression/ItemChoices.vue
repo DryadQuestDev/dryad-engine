@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, unref } from 'vue';
 import { Game } from '../../game';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 import { Item } from '../../core/character/item';
@@ -40,7 +40,7 @@ function handleChoiceClick(choice: Choice) {
     <!-- ItemChoices content with dynamic choices from item.getChoices() -->
     <div class="choices-list">
       <template v-for="(choice, index) in choices" :key="`${choice.id}-${index}`">
-        <button v-if="choice.isVisible.value" class="choice-button" :class="{ 'disabled': !choice.isAvailable.value }"
+        <button v-if="choice.isVisible.value" class="choice-button" :class="[unref(choice.className), { 'disabled': !choice.isAvailable.value }]"
           @click="handleChoiceClick(choice)">
           <span class="choice-text" v-script="choice.nameComputed.value"></span>
         </button>

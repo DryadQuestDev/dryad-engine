@@ -25,8 +25,11 @@ const on = game.hasState('mod_flag') && game.getState('mod_flag');
 | `actor_list_expanded` | `true` | Whether the scene actor rail's faces are expanded. The player folds them away with the eye icon on the panel itself (top-right); the panel and its icon exist only while actors are staged. Distinct from `hide_actor_list`, which removes the panel entirely |
 | `hide_actor_list` | `false` | Hide the scene actor rail (staged non-party characters, shown top-right, opposite the party list). The rail already hides itself when nothing is staged — use this to suppress it for a beat without hiding the whole event layer the way `hide_events` does |
 | `disable_ui` | `false` | Disable all UI interactions |
+| `dialogue_minimized` | `false` | The player's fold of the dialogue box (Ctrl+H, or the collapse button in the box header). The show-dialogue button brings it back. Content may set it too |
+| `hide_dialogue` | `false` | Remove the dialogue box together with its buttons, so the player cannot restore it. For staging beats where an empty box would sit over the art (`{state: "hide_dialogue=true", asset: "bg_ruins"}` on an `[nw]` paragraph). Cleared when the next scene plays. Choices hide with the box. Space and Enter still advance |
 | `block_scene_advance` | `false` | Block scene advancement clicks/keys without disabling UI |
-| `block_party_inventory` | `false` | Block access to party inventory |
+| `block_party_inventory` | `false` | Block access to party inventory and dismissing party members. The engine sets it at every scene start and clears it at every scene end, so content can't hold it |
+| `block_party_inventory_persist` | `false` | Same block, but the engine never touches it: it stays until content clears it, and it is saved. `{state: "block_party_inventory_persist=true"}` on the way into a place, `=false` on the way out |
 
 ---
 

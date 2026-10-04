@@ -99,6 +99,10 @@ export function parseText(text: string): Record<string, any>[] {
     let paramsEncounter = null;
 
     let emptyParagraph = false;
+    // A blank line inside an @encounter / $template block is a paragraph gap, as it is in
+    // scenes. It is held here and written in front of the next text line, so a run of blank
+    // lines is one gap and blank lines at the top of a block add nothing.
+    let pendingGap = false;
     for (let paragraph of vals) {
 
         //paragraph = paragraph.trim();
@@ -205,6 +209,7 @@ export function parseText(text: string): Record<string, any>[] {
                 let id = "@" + room_id + "." + scene_name;
                 arr.push({ id: id, val: "", params: paramsEncounter });
                 paramsEncounter = null; // Consume params for this encounter block
+                pendingGap = false;
                 inside = "@"; // Set context for subsequent lines
                 // fillingContent remains managed by other types or general flow
             } break;
@@ -231,11 +236,27 @@ export function parseText(text: string): Record<string, any>[] {
                 let id = "$" + scene_name;
                 arr.push({ id: id, val: "", params: params });
                 params = null; // Consume params for this template block
+                pendingGap = false;
                 inside = "$"; // Set context for subsequent lines
                 // fillingContent remains managed by other types or general flow
             } break;
 
             default: {
+
+                // A pure-action line ("{…}" only) directly after a `>` inline choice is that
+                // choice's action written on its own line — e.g. a paragraph-reformat split
+                // "«>label»{action}" across two lines. A `>` choice has no fillingContent
+                // concatenation (unlike prose), so without this the action would be emitted as a
+                // standalone empty-text paragraph that renders as a blank beat. Attach it to the
+                // choice's params instead. (Prose is unaffected: its last entry is a `#…` line,
+                // and its own trailing actions already concatenate into the paragraph's val.)
+                if (arr.length && /^\s*\{.*\}\s*$/.test(paragraph)) {
+                    const lastEntry = arr[arr.length - 1];
+                    if (lastEntry.id && lastEntry.id[0] === ">" && !lastEntry.params) {
+                        lastEntry.params = paragraph.trim();
+                        break;
+                    }
+                }
 
                 let id = "";
                 //emptyParagraph = false;
@@ -285,18 +306,17 @@ export function parseText(text: string): Record<string, any>[] {
 
                         if (targetBlock) {
                             if (emptyParagraph) {
-                                targetBlock.val += "<br>";
+                                // A single <br> here only ended the line — the gap the author
+                                // drew with the blank line never showed. A literal <br> in the
+                                // text is still the way to write a plain line break.
+                                if (targetBlock.val !== "") pendingGap = true;
                             } else {
-                                // Actual content paragraph
-                                if (targetBlock.val === "" && paragraph.trim() === "") {
-                                    // Initial val is empty, and this content line is also empty/whitespace
-                                    // Do nothing, val remains ""
-                                } else if (targetBlock.val === "") {
+                                if (targetBlock.val === "") {
                                     targetBlock.val = paragraph; // First piece of actual content
                                 } else {
-                                    // Subsequent content, append using original logic (direct concatenation)
-                                    targetBlock.val += paragraph;
+                                    targetBlock.val += (pendingGap ? "<br><br>" : "") + paragraph;
                                 }
+                                pendingGap = false;
                             }
                         } else {
                             // This case should be rare if @ and $ declarations always push a block.

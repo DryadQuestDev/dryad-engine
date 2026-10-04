@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import StatEntity from './StatEntity.vue';
 
 interface StatGroup {
@@ -16,6 +17,19 @@ const props = defineProps<{
 }>();
 
 const game = Game.getInstance();
+const global = Global.getInstance();
+
+// A data group (stat_groups tab) carries its own name. Resolver groups are stat tags, so the
+// running game names them through its own `group.<id>` line. The engine's two built-in groups
+// have `stat_group.<id>` lines to fall back on; an unnamed custom tag shows the tag itself
+// rather than a bracketed key id.
+function groupTitle(groupId: string): string {
+  const dataGroup = game.characterSystem.statGroupsMap?.get(groupId);
+  if (dataGroup?.name) return dataGroup.name;
+  const gameLine = game.getLine(`group.${groupId}`);
+  if (gameLine !== `[group.${groupId}]`) return gameLine;
+  return global.getStringOr(`stat_group.${groupId}`, groupId);
+}
 
 // Get the appropriate stats map based on debug settings
 const activeStatsMap = computed(() => {
@@ -63,19 +77,28 @@ const statGroups = computed((): StatGroup[] => {
     return buildGroupsFromTags(resolver(props.character));
   }
 
-  // Default: separate resources from regular stats
+  // Default: the game's stat_groups in their order (each stat names its group), then the
+  // stats no group claims split into the built-in Resources / Stats sections.
+  const byGroup = new Map<string, string[]>();
+  for (const groupId of game.characterSystem.statGroupsMap?.keys() ?? []) byGroup.set(groupId, []);
   const resourceIds: string[] = [];
   const regularIds: string[] = [];
   for (const [statId, stat] of activeStatsMap.value.entries()) {
-    if (props.character.hasStat(statId) || props.character.getStat(statId) !== 0) {
-      if (stat.is_resource) resourceIds.push(statId);
-      else regularIds.push(statId);
-    }
+    if (!props.character.hasStat(statId) && props.character.getStat(statId) === 0) continue;
+    const bucket = stat.group ? byGroup.get(stat.group) : undefined;
+    if (bucket) bucket.push(statId);
+    else if (stat.is_resource) resourceIds.push(statId);
+    else regularIds.push(statId);
+  }
+
+  const groups: StatGroup[] = [];
+  for (const [groupId, statIds] of byGroup) {
+    if (statIds.length === 0) continue;
+    sortStats(statIds);
+    groups.push({ id: groupId, stats: statIds });
   }
   sortStats(resourceIds);
   sortStats(regularIds);
-
-  const groups: StatGroup[] = [];
   if (resourceIds.length > 0) groups.push({ id: 'resources', stats: resourceIds });
   if (regularIds.length > 0) groups.push({ id: 'stats', stats: regularIds });
   return groups;
@@ -86,7 +109,7 @@ const statGroups = computed((): StatGroup[] => {
 <template>
   <div v-if="statGroups.length" class="character-stats">
     <div v-for="group in statGroups" :key="group.id" class="stats-section">
-      <h3 v-if="group.id && !noHeaders">{{ game.getLine('group.' + group.id) }}</h3>
+      <h3 v-if="group.id && !noHeaders">{{ groupTitle(group.id) }}</h3>
       <StatEntity v-for="statId in group.stats" :key="statId" :character="character" :statId="statId" />
     </div>
   </div>

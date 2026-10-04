@@ -104,7 +104,7 @@ Default character sheet layout with vertical sections for statuses, stats, and a
 - `character` (Character, required) - The character to display
 - `viewerMode` (boolean, optional) - Read-only embed: hides the dismiss and rename controls
 
-Stat groups are controlled via `game.registerStatGroupResolver()`. See [Character API](../characters/characters_api.md).
+Sections come from the **Stat Groups** tab (each stat's `group` field); `game.registerStatGroupResolver()` overrides them per character. See [Character API](../characters/characters_api.md).
 
 ---
 

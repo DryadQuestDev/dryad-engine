@@ -555,7 +555,7 @@ onUnmounted(() => documentManager.onTeardown());
 
 <style scoped>
 .gdoc-block {
-  border: 1px solid rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--editor-border);
   border-radius: 6px;
   background: linear-gradient(180deg, rgba(66, 133, 244, 0.06), rgba(66, 133, 244, 0.02));
   margin: 0.5rem 0 1rem;
@@ -589,7 +589,7 @@ onUnmounted(() => documentManager.onTeardown());
 
 .gdoc-block-title {
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--editor-text);
 }
 
 .gdoc-block-spacer {
@@ -597,7 +597,7 @@ onUnmounted(() => documentManager.onTeardown());
 }
 
 .gdoc-block-chevron {
-  color: #555;
+  color: var(--editor-text-muted);
   font-size: 0.85rem;
 }
 
@@ -629,32 +629,32 @@ onUnmounted(() => documentManager.onTeardown());
 }
 
 .main-tabs-nav .p-button.p-button-text {
-  color: black;
-  background-color: #e9ecef !important;
+  color: var(--editor-text);
+  background-color: var(--editor-surface-sunken) !important;
 
 }
 
 /* Active tab style for PrimeVue text buttons */
 .main-tabs-nav .p-button:not(.p-button-text) {
-  border-bottom-color: #007bff !important;
+  border-bottom-color: var(--editor-accent) !important;
   font-weight: bold;
-  background-color: #e9ecef !important;
-  color: #333 !important;
+  background-color: var(--editor-surface-hover) !important;
+  color: var(--editor-text) !important;
 }
 
 
 .config-section {
   padding: 1rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--editor-border);
   border-radius: 8px;
-  background-color: #f9f9f9;
+  background-color: var(--editor-surface-raised);
   margin-bottom: 1.5rem;
 }
 
 .tab-content-area .config-section h3 {
   margin-top: 0;
-  color: #333;
-  border-bottom: 1px solid #eee;
+  color: var(--editor-text);
+  border-bottom: 1px solid var(--editor-border);
   padding-bottom: 0.5rem;
   margin-bottom: 1rem;
 }
@@ -662,7 +662,7 @@ onUnmounted(() => documentManager.onTeardown());
 .config-section h4 {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
-  color: #555;
+  color: var(--editor-text-muted);
 }
 
 textarea,
@@ -671,7 +671,7 @@ select {
   width: 100%;
   padding: 0.5rem;
   margin-bottom: 0.5rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   box-sizing: border-box;
 }
@@ -701,38 +701,38 @@ select {
 
 
 .error-message {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+  background-color: var(--editor-tint-danger);
+  color: var(--editor-fg-danger);
+  border: 1px solid var(--editor-fg-danger);
 }
 
 .success-message {
-  background-color: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
+  background-color: var(--editor-tint-success);
+  color: var(--editor-fg-success);
+  border: 1px solid var(--editor-fg-success);
 }
 
 .info-message {
-  background-color: #d1ecf1;
-  color: #0c5460;
-  border: 1px solid #bee5eb;
+  background-color: var(--editor-tint-info);
+  color: var(--editor-fg-info);
+  border: 1px solid var(--editor-fg-info);
 }
 
 .warn-message {
-  background-color: #fff3cd;
-  color: #856404;
-  border: 1px solid #ffeeba;
+  background-color: var(--editor-tint-warning);
+  color: var(--editor-fg-warning);
+  border: 1px solid var(--editor-fg-warning);
 }
 
 .loading-message {
   font-style: italic;
-  color: #555;
+  color: var(--editor-text-muted);
   margin-bottom: 1rem;
 }
 
 .small-text {
   font-size: 0.9em;
-  color: #666;
+  color: var(--editor-text-muted);
   margin-top: 0.3rem;
 }
 
@@ -744,8 +744,8 @@ select {
 
 .oauth-app-list li,
 .user-token-list li {
-  background-color: #fff;
-  border: 1px solid #eee;
+  background-color: var(--editor-surface);
+  border: 1px solid var(--editor-border);
   padding: 0.75rem;
   margin-bottom: 0.5rem;
   border-radius: 4px;
@@ -755,7 +755,7 @@ select {
 }
 
 .oauth-app-list li.active-selection {
-  border-left: 5px solid #28a745;
+  border-left: 5px solid var(--editor-fg-success);
 }
 
 .oauth-app-list li>strong {
@@ -792,11 +792,11 @@ select {
 }
 
 .user-token-list li.active-token-import {
-  border-left: 5px solid #007bff;
+  border-left: 5px solid var(--editor-accent);
 }
 
 .user-token-list li.global-default-token .token-name {
-  color: #28a745;
+  color: var(--editor-fg-success);
 }
 
 .user-token-list li.config-default-token .token-name {
@@ -810,12 +810,12 @@ select {
 
 .token-profile-info {
   font-size: 0.9em;
-  color: #555;
+  color: var(--editor-text-muted);
 }
 
 .token-associations {
   font-size: 0.85em;
-  color: #777;
+  color: var(--editor-text-faint);
 }
 
 .global-default-indicator,
@@ -834,7 +834,7 @@ select {
 
 .active-indicator {
   font-weight: bold;
-  color: green;
+  color: var(--editor-fg-success);
   margin-left: 10px;
   font-size: 0.9em;
 }
@@ -842,8 +842,8 @@ select {
 .token-reveal-json {
   margin-top: 0.5rem;
   padding: 0.5rem;
-  background-color: #f0f0f0;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
 }
 
@@ -857,8 +857,8 @@ select {
 .document-preview {
   margin-top: 1rem;
   padding: 1rem;
-  background-color: #eef;
-  border: 1px solid #ccf;
+  background-color: var(--editor-tint-info);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   max-height: 300px;
   overflow-y: auto;
@@ -872,7 +872,7 @@ select {
 
 .clear-all-section {
   margin-top: 2rem;
-  border-top: 2px dashed #ccc;
+  border-top: 2px dashed var(--editor-border);
   padding-top: 1.5rem;
 }
 

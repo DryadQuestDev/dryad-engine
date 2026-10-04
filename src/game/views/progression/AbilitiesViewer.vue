@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import AbilityCard from './AbilityCard.vue';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 
@@ -16,6 +17,8 @@ const game = Game.getInstance();
 
 const selectedAbilityId = ref<string | null>(null);
 const activeTab = ref<string>('');
+
+const noAbilitiesLabel = computed(() => Global.getInstance().getString('abilities.none'));
 
 const grouped = computed(() => props.character.getGroupedAbilities());
 const useGroups = computed(() => grouped.value.useGroups);
@@ -66,7 +69,7 @@ function selectAbility(abilityId: string) {
     <CustomComponentContainer slot="abilities-viewer-top" :context="{ character }" />
 
     <div v-if="displayedAbilityIds.length === 0 && !useGroups" class="empty-state">
-      No abilities
+      {{ noAbilitiesLabel }}
     </div>
 
     <div v-else class="abilities-layout">

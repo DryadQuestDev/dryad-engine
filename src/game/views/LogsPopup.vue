@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, computed } from 'vue';
 import { Game } from '../game';
+import { Global } from '../../global/global';
 import { LogObject } from '../systems/dungeonSystem';
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
+
+const logsTitle = computed(() => global.getString('toolbar.logs'));
+const noLogsLabel = computed(() => global.getString('logs.empty'));
 
 const logsContentRef = ref<HTMLElement | null>(null);
 
@@ -37,14 +42,14 @@ watch(() => dungeonSystem.isLogsPopupOpen.value, async (isOpen) => {
   <div v-if="dungeonSystem.isLogsPopupOpen.value" class="logs-popup-overlay" @click.self="closePopup">
     <div class="logs-popup">
       <div class="logs-header">
-        <span class="logs-title">Logs</span>
+        <span class="logs-title">{{ logsTitle }}</span>
         <button class="close-btn" @click="closePopup">
           <i class="pi pi-times"></i>
         </button>
       </div>
       <div ref="logsContentRef" class="logs-content">
         <div v-if="dungeonSystem.logs.length === 0" class="no-logs">
-          No logs yet.
+          {{ noLogsLabel }}
         </div>
         <div v-else class="log-list">
           <div v-for="(log, index) in dungeonSystem.logs" :key="index" class="log-entry"

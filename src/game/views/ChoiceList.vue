@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, unref } from 'vue';
 import { useEventListener } from '@vueuse/core';
 import { Choice } from '../core/content/choice';
 import { Game } from '../game';
+import { Global } from '../../global/global';
 
 let game = Game.getInstance();
+const global = Global.getInstance();
+
+// The list mounts the instant the typewriter lands on the last character, beside a flash that
+// already fades in — so it fades in too. A player who turned the reveal off asked for no
+// animation at all, so the list pops for them.
+const revealsInstantly = computed(() => global.userSettings.value.typing_speed === 'none');
 
 const normalizedChoices = computed(() => {
   const rawChoices = game.dungeonSystem.relevantChoices.value;
@@ -18,7 +25,7 @@ const normalizedChoices = computed(() => {
 });
 
 const visibleChoices = computed(() => {
-  return normalizedChoices.value.filter(choice => choice?.isVisible && choice.name);
+  return normalizedChoices.value.filter(choice => choice?.isVisible && (choice.name || choice.nameKey));
 });
 
 function isChoiceVisited(choice: Choice): boolean {
@@ -72,11 +79,12 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 </script>
 
 <template>
-  <div v-if="visibleChoices.length > 0" class="choice-list" :class="game.dungeonSystem.choiceType.value">
+  <div v-if="visibleChoices.length > 0" class="choice-list"
+    :class="[game.dungeonSystem.choiceType.value, { instant: revealsInstantly }]">
     <template v-for="(choice, index) in visibleChoices" :key="choice.id">
       <div @click.stop="handleChoice(choice)" class="choice"
-        :class="{ visited: isChoiceVisited(choice), unavailable: !choice.isAvailable, clue: choice.isClue() }">
-        <span v-if="game.dungeonSystem.choiceType.value != 'encounter'">
+        :class="[unref(choice.className), { visited: isChoiceVisited(choice), unavailable: !choice.isAvailable, clue: choice.isClue() }]">
+        <span v-if="game.dungeonSystem.choiceType.value != 'encounter'" class="choice-number">
           {{ index + 1 }}.
         </span>
         <span v-script="{ html: (choice.nameComputed as unknown as string) || choice.name, resolver: false }"></span>
@@ -98,6 +106,30 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   min-height: 0;
   overflow-y: auto;
   font-family: var(--font-family-serif);
+  /* Enter only: the list is torn down synchronously when a choice is picked, so a leave
+     transition would linger over the next text. Input works from the first frame. */
+  animation: choice-list-enter 0.25s ease-out;
+}
+
+.choice-list.instant {
+  animation: none;
+}
+
+@keyframes choice-list-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .choice-list {
+    animation: none;
+  }
 }
 
 .overlay.text .choice-list {

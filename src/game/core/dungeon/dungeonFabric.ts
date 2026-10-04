@@ -1,7 +1,6 @@
 import { computed as vueComputed } from "vue";
 import { Dungeon } from "./dungeon";
 import { gameLogger } from "../../utils/logger";
-import { Global } from "../../../global/global";
 import { Game } from "../../../game/game";
 import { DungeonLine } from "../../systems/dungeonSystem";
 import { DungeonRoom } from "./dungeonRoom";
@@ -40,6 +39,7 @@ export class DungeonFabric {
 
         // Default assets apply to any dungeon type (staged at event start).
         dungeon.default_assets = this.dungeonConfig.default_assets || [];
+        dungeon.default_sounds = this.dungeonConfig.default_sounds || [];
 
         if (this.dungeonConfig.dungeon_type === 'map') {
             dungeon.padding = this.dungeonConfig.padding || 0;
@@ -128,6 +128,7 @@ export class DungeonFabric {
 
             // set default assets
             room.defaultAssets = roomObject.default_assets || [];
+            room.defaultSounds = roomObject.default_sounds || [];
 
             // set actions
             room.actions = roomObject.actions || {};
@@ -396,8 +397,9 @@ export class DungeonFabric {
         let traits = template?.traits as Record<string, any> | undefined;
 
         if (!encounter.rawContent && template) {
-            // Name in its rarity color, like everywhere else the engine names items.
-            encounter.rawContent = `<b>${game.itemSystem.getItemNameHtml(itemId)}</b>. ${traits?.description || ''}`;
+            // Only the item is recorded: DungeonEncounter words the sentence on read, because the
+            // fabric runs once per dungeon enter and would otherwise freeze it in that language.
+            encounter.collectDescriptionItemId = itemId;
         } else if (encounter.rawContent && template) {
             // Authored @ lines refer to the granted item via |title| / |description| — these are
             // not registry placeholders, they only exist on collectables. Substitute them here,
@@ -424,7 +426,7 @@ export class DungeonFabric {
             }
             encounter.choices.push(game.logicSystem.createCustomChoice({
                 id: `!${encounterId}.collect`,
-                name: Global.getInstance().getString('collect'),
+                nameKey: 'collect',
                 params: params,
             }));
         }
@@ -449,11 +451,18 @@ export class DungeonFabric {
                 let matchTitle = line.val.match(/__Default__:(.*)/);
                 if (matchTitle) {
                     let fName = matchTitle[1].split(".")[0];
-                    let partsName = fName.split("_");
-                    for (let i = 0; i < partsName.length; i++) {
-                        partsName[i] = partsName[i].charAt(0).toUpperCase() + partsName[i].slice(1);
+                    // An encounters_default id is game-authored, so its label belongs to the game's
+                    // locale. Title-casing the id is only a last resort and only ever yields English.
+                    const authored = game.getLine(`encounter_default.${fName}`);
+                    if (authored && authored !== `[encounter_default.${fName}]`) {
+                        choiceName = authored;
+                    } else {
+                        let partsName = fName.split("_");
+                        for (let i = 0; i < partsName.length; i++) {
+                            partsName[i] = partsName[i].charAt(0).toUpperCase() + partsName[i].slice(1);
+                        }
+                        choiceName = partsName.join(" ");
                     }
-                    choiceName = partsName.join(" ");
                 } else {
                     choiceName = line.val;
                 }
@@ -465,14 +474,18 @@ export class DungeonFabric {
                 // per-placement inventory id (dungeon.room.encounter.choice). The raw ref stays
                 // in dungeonLines; the redirect is also recorded on the dungeon so consumers
                 // (e.g. the experience plugin) can instantiate without re-scanning the content.
+                // A `title` beside the ref names that placement's inventory ("Shelf", "Drawers"); it is
+                // data for the instance, not an action, so it leaves the choice's params.
+                const poolTitle = typeof params.title === "string" ? params.title : undefined;
                 for (let key of ["loot", "trade"] as const) {
                     let ref = params[key];
                     if (typeof ref === "string" && ref.startsWith("^")) {
                         let instanceId = "^" + dungeonId + "." + line.id.slice(1);
                         params[key] = instanceId;
                         if (!dungeon.pooledInventories.some(entry => entry.id === instanceId)) {
-                            dungeon.pooledInventories.push({ id: instanceId, pool: ref.slice(1), type: key });
+                            dungeon.pooledInventories.push({ id: instanceId, pool: ref.slice(1), type: key, ...(poolTitle ? { title: poolTitle } : {}) });
                         }
+                        delete params.title;
                     }
                 }
 

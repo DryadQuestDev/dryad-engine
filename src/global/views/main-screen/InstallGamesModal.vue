@@ -28,17 +28,25 @@ interface ArchiveInfo {
   gameId: string;
   modId: string;
   valid: boolean;
-  error?: string;
   installed?: boolean;
   installedVersion?: string;
   parentGameExists?: boolean;
 }
 
 interface InstallResult {
-  archiveName: string;
-  type: 'game' | 'mod';
+  // The archive itself, not its resolved name: an unnamed one falls back to a localized word, and
+  // stored resolved it would sit in the success sentence in whatever language it was installed in.
+  archive: ArchiveInfo;
   folders: string[];
 }
+
+const INSTALL_ERROR_KEYS: Record<string, string> = {
+  ENOSPC: 'install.error.failed.no_space',
+  EACCES: 'install.error.failed.permission',
+  CORRUPT_ZIP: 'install.error.failed.corrupt',
+  INVALID_STRUCTURE: 'install.error.failed.invalid_structure',
+  PARENT_GAME_MISSING: 'install.error.failed.parent_missing',
+};
 
 const archives = ref<ArchiveInfo[]>([]);
 const loading = ref(false);
@@ -67,7 +75,7 @@ const groupedArchives = computed(() => {
   gameArchives.forEach(game => {
     groups.push({
       gameId: game.gameId,
-      gameName: game.name,
+      gameName: getArchiveName(game),
       gameArchive: game,
       mods: []
     });
@@ -94,6 +102,14 @@ const groupedArchives = computed(() => {
   return groups;
 });
 
+const successMessage = computed(() => {
+  const result = installResult.value;
+  if (!result) return '';
+  // A whole sentence per archive type, for the same reason as the status line above.
+  const key = result.archive.type === 'mod' ? 'install.success_message.mod' : 'install.success_message.game';
+  return global.getString(key, { name: getArchiveName(result.archive) });
+});
+
 // Methods
 async function scanArchives() {
   loading.value = true;
@@ -108,23 +124,23 @@ async function scanArchives() {
       const manifestInfo = await global.readArchiveManifest(zipFile);
 
       if (!manifestInfo.valid || !manifestInfo.type || !manifestInfo.gameId || !manifestInfo.modId) {
+        console.warn(`[InstallGamesModal] Invalid archive "${zipFile}":`, manifestInfo.error);
         // Invalid archive
         archives.value.push({
           zipFileName: zipFile,
-          name: 'Invalid Archive',
+          name: '',
           type: 'game',
           version: '0.0.0',
           gameId: '',
           modId: '',
-          valid: false,
-          error: manifestInfo.error || 'Invalid archive structure'
+          valid: false
         });
         continue;
       }
 
       const archiveInfo: ArchiveInfo = {
         zipFileName: zipFile,
-        name: manifestInfo.name || 'Unknown',
+        name: manifestInfo.name || '',
         type: manifestInfo.type,
         version: manifestInfo.version || '0.0.0',
         gameId: manifestInfo.gameId,
@@ -157,32 +173,42 @@ async function scanArchives() {
 
   } catch (error) {
     console.error('[InstallGamesModal] Error scanning archives:', error);
-    global.addNotification('Error scanning install folder');
+    global.addNotificationId('install.error.scan_failed');
   } finally {
     loading.value = false;
   }
 }
 
+function getArchiveName(archive: ArchiveInfo): string {
+  if (!archive.valid) return global.getString('install.archive.invalid_name');
+  return archive.name || global.getString('install.unknown_archive');
+}
+
 function getStatusText(archive: ArchiveInfo): string {
   if (!archive.valid) {
-    return archive.error || 'Invalid archive';
+    // Deliberately not archive.error: that string comes from the main process untranslated, and a
+    // Russian player reading "ENOENT: no such file or directory" is worse off than a generic
+    // sentence. The raw fault is logged in scanArchives for whoever is debugging the archive.
+    return global.getString('install.status.invalid');
   }
 
   if (archive.type === 'mod' && !archive.parentGameExists) {
-    return `Parent game '${archive.gameId}' not installed`;
+    return global.getString('install.status.parent_missing', { game: archive.gameId });
   }
 
   if (!archive.installed) {
-    return 'Ready to install';
+    return global.getString('install.status.ready');
   }
 
   // Check if archive version exceeds installed version
   const canInstall = satisfiesMinVersion(archive.version, archive.installedVersion || '0.0.0', false);
 
   if (canInstall) {
-    return 'Update available';
+    return global.getString('install.status.update_available');
   } else {
-    return `You already have the last version of the ${archive.type} installed`;
+    // A whole sentence per archive type: the noun is grammatically fused into it and cannot be
+    // fed in as a placeholder.
+    return global.getString(archive.type === 'mod' ? 'install.status.up_to_date.mod' : 'install.status.up_to_date.game');
   }
 }
 
@@ -240,8 +266,7 @@ async function installArchive(archive: ArchiveInfo) {
       folders.push(`games_assets/${archive.gameId}/${archive.modId}`);
 
       installResult.value = {
-        archiveName: archive.name,
-        type: archive.type,
+        archive: archive,
         folders: folders
       };
 
@@ -256,34 +281,18 @@ async function installArchive(archive: ArchiveInfo) {
     } else {
       console.error('[InstallGamesModal] Installation failed:', result.error);
 
-      // User-friendly error messages
-      let errorMessage = 'Installation failed: ';
-      switch (result.errorCode) {
-        case 'ENOSPC':
-          errorMessage += 'Not enough disk space';
-          break;
-        case 'EACCES':
-          errorMessage += 'Permission denied';
-          break;
-        case 'CORRUPT_ZIP':
-          errorMessage += 'Archive file is corrupt or invalid';
-          break;
-        case 'INVALID_STRUCTURE':
-          errorMessage += 'Invalid archive structure';
-          break;
-        case 'PARENT_GAME_MISSING':
-          errorMessage += result.error || 'Parent game not found';
-          break;
-        default:
-          errorMessage += result.error || 'Unknown error';
-      }
+      // User-friendly error messages. One whole sentence per error code, never a prefix plus a
+      // fragment: word order after "Installation failed" differs by language.
+      const key = INSTALL_ERROR_KEYS[result.errorCode || ''];
 
-      global.addNotification(errorMessage);
+      // Only mapped codes reach the player, as whole sentences. The main process wording is
+      // untranslated free text, so it belongs in the console line above and nowhere else.
+      global.addNotificationId(key || 'install.error.failed.unknown');
     }
 
   } catch (error) {
     console.error('[InstallGamesModal] Unexpected error:', error);
-    global.addNotification('Unexpected error during installation');
+    global.addNotificationId('install.error.unexpected');
   } finally {
     installing.value = false;
     installingArchive.value = null;
@@ -319,26 +328,28 @@ watch(() => props.visible, async (newVal) => {
   <div v-if="localVisible" class="popup-mask glass-popup-mask" @click.self="closeModal">
     <div class="popup-card popup-card--wide glass-popup-surface">
       <header class="popup-header">
-        <h2 class="popup-title">Install Games & Mods</h2>
-        <button v-if="!installing" class="popup-close" @click="closeModal" aria-label="Close">×</button>
+        <h2 class="popup-title">{{ global.getString('install.title') }}</h2>
+        <button v-if="!installing" class="popup-close" @click="closeModal"
+          :aria-label="global.getString('close')">×</button>
       </header>
 
       <div class="popup-body">
         <div class="modal-actions">
           <button class="refresh-button" :disabled="loading || installing" @click="scanArchives">
             <i class="pi pi-refresh" :class="{ 'pi-spin': loading }"></i>
-            Refresh
+            {{ global.getString('refresh') }}
           </button>
         </div>
 
         <div v-if="loading" class="loading-state">
           <i class="pi pi-spin pi-spinner" style="font-size: 2rem"></i>
-          <p>Scanning install folder...</p>
+          <p>{{ global.getString('install.scanning') }}</p>
         </div>
 
         <div v-else-if="archives.length === 0" class="no-archives">
-          <p>No game archives found in the install folder.</p>
-          <p class="hint">Place .zip files in: <code>assets/install/</code></p>
+          <p>{{ global.getString('install.empty') }}</p>
+          <!-- v-html: the locale value carries the inline markup this line originally rendered -->
+          <p class="hint" v-html="global.getString('install.place_zips')"></p>
         </div>
 
         <div v-else class="archives-list">
@@ -352,13 +363,13 @@ watch(() => props.visible, async (newVal) => {
               :class="{ 'installing': installingArchive === group.gameArchive.zipFileName }">
               <div class="archive-info">
                 <div class="archive-header">
-                  <h3 class="archive-name">{{ group.gameArchive.name }}</h3>
-                  <span class="archive-type type-game">Game</span>
+                  <h3 class="archive-name">{{ getArchiveName(group.gameArchive) }}</h3>
+                  <span class="archive-type type-game">{{ global.getString('install.type_game') }}</span>
                 </div>
                 <div class="archive-details">
-                  <span class="archive-version">Version: {{ group.gameArchive.version }}</span>
+                  <span class="archive-version">{{ global.getString('install.version', { version: group.gameArchive.version }) }}</span>
                   <span v-if="group.gameArchive.installed" class="installed-version">
-                    (Installed: {{ group.gameArchive.installedVersion }})
+                    {{ global.getString('install.installed_version', { version: group.gameArchive.installedVersion || '' }) }}
                   </span>
                 </div>
               </div>
@@ -369,25 +380,25 @@ watch(() => props.visible, async (newVal) => {
                 </div>
                 <button v-if="canInstall(group.gameArchive)" class="install-button" :disabled="installing"
                   @click="installArchive(group.gameArchive)">
-                  {{ group.gameArchive.installed ? 'Update' : 'Install' }}
+                  {{ global.getString(group.gameArchive.installed ? 'install.update' : 'install.install') }}
                 </button>
               </div>
             </div>
 
             <div v-if="group.mods.length > 0" class="mods-section">
-              <h4 class="mods-title">Mods:</h4>
+              <h4 class="mods-title">{{ global.getString('install.mods_label') }}</h4>
               <div v-for="mod in group.mods" :key="mod.zipFileName" class="archive-item mod-archive"
                 :class="{ 'installing': installingArchive === mod.zipFileName }">
                 <div class="archive-info">
                   <div class="archive-header">
-                    <h3 class="archive-name">{{ mod.name }}</h3>
-                    <span class="archive-type type-mod">Mod</span>
+                    <h3 class="archive-name">{{ getArchiveName(mod) }}</h3>
+                    <span class="archive-type type-mod">{{ global.getString('install.type_mod') }}</span>
                   </div>
                   <div class="archive-details">
-                    <span class="archive-game">for {{ group.gameName }}</span>
-                    <span class="archive-version">Version: {{ mod.version }}</span>
+                    <span class="archive-game">{{ global.getString('install.for_game', { game: group.gameName }) }}</span>
+                    <span class="archive-version">{{ global.getString('install.version', { version: mod.version }) }}</span>
                     <span v-if="mod.installed" class="installed-version">
-                      (Installed: {{ mod.installedVersion }})
+                      {{ global.getString('install.installed_version', { version: mod.installedVersion || '' }) }}
                     </span>
                   </div>
                 </div>
@@ -398,7 +409,7 @@ watch(() => props.visible, async (newVal) => {
                   </div>
                   <button v-if="canInstall(mod)" class="install-button" :disabled="installing"
                     @click="installArchive(mod)">
-                    {{ mod.installed ? 'Update' : 'Install' }}
+                    {{ global.getString(mod.installed ? 'install.update' : 'install.install') }}
                   </button>
                 </div>
               </div>
@@ -407,7 +418,7 @@ watch(() => props.visible, async (newVal) => {
         </div>
 
         <div v-if="installing" class="installation-progress">
-          <h4>Installing...</h4>
+          <h4>{{ global.getString('install.installing') }}</h4>
           <ProgressBar :value="installProgress" />
           <p class="current-file">{{ currentFile }}</p>
         </div>
@@ -415,7 +426,7 @@ watch(() => props.visible, async (newVal) => {
 
       <footer class="popup-footer">
         <button class="close-button" :disabled="installing" @click="closeModal">
-          {{ installing ? 'Installing...' : 'Close' }}
+          {{ global.getString(installing ? 'install.installing' : 'close') }}
         </button>
       </footer>
     </div>
@@ -425,18 +436,19 @@ watch(() => props.visible, async (newVal) => {
   <div v-if="showSuccessDialog" class="popup-mask glass-popup-mask" @click.self="showSuccessDialog = false">
     <div class="popup-card glass-popup-surface">
       <header class="popup-header">
-        <h2 class="popup-title">Installation Successful</h2>
-        <button class="popup-close" @click="showSuccessDialog = false" aria-label="Close">×</button>
+        <h2 class="popup-title">{{ global.getString('install.success_title') }}</h2>
+        <button class="popup-close" @click="showSuccessDialog = false"
+          :aria-label="global.getString('close')">×</button>
       </header>
 
       <div v-if="installResult" class="popup-body success-content">
         <div class="success-message">
           <i class="pi pi-check-circle success-icon"></i>
-          <h3>The {{ installResult.type }} "{{ installResult.archiveName }}" has been installed!</h3>
+          <h3>{{ successMessage }}</h3>
         </div>
 
         <div class="installed-folders">
-          <h4>Installed to:</h4>
+          <h4>{{ global.getString('install.installed_to') }}</h4>
           <ul>
             <li v-for="folder in installResult.folders" :key="folder">
               <code>{{ folder }}</code>
@@ -446,12 +458,13 @@ watch(() => props.visible, async (newVal) => {
 
         <div class="cleanup-hint">
           <i class="pi pi-info-circle"></i>
-          <p>You can now delete the archive from the <code>assets/install/</code> folder.</p>
+          <!-- v-html: the locale value carries the inline markup this line originally rendered -->
+          <p v-html="global.getString('install.cleanup_hint')"></p>
         </div>
       </div>
 
       <footer class="popup-footer">
-        <button class="close-button" @click="showSuccessDialog = false">OK</button>
+        <button class="close-button" @click="showSuccessDialog = false">{{ global.getString('ok') }}</button>
       </footer>
     </div>
   </div>

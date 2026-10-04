@@ -44,10 +44,10 @@ Threat comes from the rpg_battler plugin: the sum of enemy `threat` traits plus 
 
 Every loot brick carries a trash toggle under it. Loot is already in the party bag by the time the panel renders, so the toggle marks the line rather than refusing the pickup – continuing removes the marked lines again (only the granted quantity; a stack the player already carried keeps the rest). Useful with a carry-weight system, where a full bag makes junk a liability.
 
-Whether the toggle renders is the same pair of questions the item card's Drop choice asks: `item.isDroppable()` (the engine's own rule – equipped gear and anything quest-flagged, by rarity or category) and the `item_drop_render` emitter. A game adds its own protected kinds once and both UIs obey:
+Whether the toggle renders is the same pair of questions the item card's Drop choice asks: `item.isDiscardable()` (the engine's own rule – equipped gear, quest rarity and the `no_discard` trait) and the `item_discard_render` emitter. A game adds its own protected kinds once and both UIs obey:
 
 ```js
-game.on('item_drop_render', (item) => {
+game.on('item_discard_render', (item) => {
     if (item.category === 'keys') return false;
 });
 ```
@@ -56,7 +56,15 @@ game.on('item_drop_render', (item) => {
 
 Every created item (drops, chests, shops, `add_item`) whose category is in `loot_equipment_categories` and that carries equip-status stats is scaled on creation:
 
-- `status.stats` values × dungeon scale (rounded)
+- `status.stats` values, each on the curve its stat's `scaling` Stat Meta names (rounded):
+
+| `scaling` | Curve | For |
+|---|---|---|
+| `flat` | `power_scale_per_level` | stats in the units enemy scaling grows – power, armor, health, thorns, capacities |
+| `relative` | `relative_scale_per_level` (slower) | chances, percentages, speed – measured against things enemies never scale, so the power curve would run them into their caps |
+| unset | none | stats that should never grow |
+
+  The plugin declares the `scaling` field; the plugin or game that defines a stat sets it (rpg_battler ships it on its own stats).
 - `price` values × the PRICE scale – a separate curve (`price_scale_per_level`, default twice `power_scale_per_level`), so gear value climbs faster than its power and old gear sells cheap next to replacements. Set the config field equal to `power_scale_per_level` to weld value back to power
 - ability enhancements: each `ability_modifiers` entry resolves to a per-instance copy whose OPT-IN number aspects scale by the same factor. An aspect scales only when its ability definition sets the `scales` flag – rpg_battler flags its absolute `status_stacks_*` aspects; power-relative values (damage/healing %) stay flat since the caster's power already scales through stats
 - the instance is stamped with the `item_level` trait – the no-rescale guard, and the item card renders it as a level badge
@@ -93,6 +101,12 @@ Generic chests and shops can be filled from the engine's pool system (pool_defin
 
 Each placement gets its OWN inventory (the choice is redirected to a unique id, `^dungeon.room.encounter.choice`) – two chests using the same pool roll independently. Comma lists (`^chest_common,herbs`) draw several entries into one inventory. Draws use chance mode: every pool entity rolls its own `chance` and contributes `count ± delta` on success.
 
+Give the placement a name with `title` – it heads the loot or trade window instead of the generic one:
+
+```
+!search<Search>{loot: "^trash1", title: "Dusty Shelf"}
+```
+
 **Declared hybrid** – an inventory template with authored `items` plus the `pool` inventory trait (and `dungeon` to bind it). Authored items always survive restocks; pooled stock is drawn on top. Add the `restock` trait for shops.
 
 Lifecycle:
@@ -124,14 +138,15 @@ The `smith` action (eventDelayed) opens a station overlay where **unequipped, le
 - **Upgrade** – reforge an item up to the MC's level. Cost per level = the item's rarity position (common 1, uncommon 2, rare 3, …) in **smith stones**; the item is recreated through the normal `item_create` scaling path, so the result matches a fresh drop at that level. The before/after preview is a throwaway instance built the same way.
 - **Break down** – destroy an item for `floor(item_level / smith_break_divisor) × rarity cost` stones (≈ a third of what upgrading it cost). Items below the divisor refund nothing and stay ordinary sellables.
 
-The `smith_stone` item template is plugin-injected with neutral traits; a game overrides it by id to set its category, icon, and price, and provides the faucet (shop stock, loot pools, quest rewards). Keeping stones sell-proof is the game's economy call too — e.g. dryad_tale's trade script clears the player-side trade price for items flagged `no_sell`, so stones are buy-only and the gold→item→break→stones→gold loop can never close. Listeners can veto either operation through the `smith_upgrade` / `smith_break` emitters. A `smith` service exposes the same operations to game scripts.
+The `smith_stone` item template is plugin-injected with neutral traits; a game overrides it by id to set its category, icon, and price, and provides the faucet (shop stock, loot pools, quest rewards). Keeping stones sell-proof is the game's economy call too — a trade script can clear the player-side trade price for items the game flags as no-sell, so stones stay buy-only and the gold→item→break→stones→gold loop can never close. Listeners can veto either operation through the `smith_upgrade` / `smith_break` emitters. A `smith` service exposes the same operations to game scripts.
 
 ## Config reference
 
 | Key | Default | Description |
 |---|---|---|
 | `auto_scaling` | false | Master switch for everything on this page |
-| `power_scale_per_level` | 0.25 | Item + reward (power-curve) scaling per dungeon level |
+| `power_scale_per_level` | 0.25 | Item + reward (power-curve) scaling per dungeon level; the curve of `flat` stats |
+| `relative_scale_per_level` | 0.08 | Scaling per dungeon level for `relative` stats |
 | `loot_equipment_coef` | 0 | Equipment budget per point of base threat (0 = off) |
 | `loot_income_coef` | 0 | Income budget per point of effective threat (0 = off) |
 | `loot_max_items` | 3 | Item cap per roll group |

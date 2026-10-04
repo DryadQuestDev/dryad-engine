@@ -6,10 +6,32 @@ import * as Vue from "vue";
 import { ManifestObject } from "../schemas/manifestSchema";
 import { loadCharacterImages } from "../shared/utils/characterImageLoader";
 import EditorCharacterPreview from "./views/shared/EditorCharacterPreview.vue";
+import FormFieldRenderer from "./views/dform/FormFieldRenderer.vue";
 import { Editor } from "./editor";
 import { PluginObject } from "../schemas/pluginShema";
 import { jsonrepair } from "jsonrepair";
 
+
+/** What a plugin save hook (plugin.json `editor_hooks`) is told about the entry it gets. */
+export interface PluginSaveHookContext {
+    pluginId: string;
+    /** The plugin's tab id and its data file (`plugins_data/<plugin>/<tab>`). */
+    tabId: string;
+    file: string;
+    game: string;
+    mod: string;
+    schema: Schema | null;
+    /** The core game's entry of the same id when a mod is being edited (a mod's entry may be sparse), else null. */
+    coreEntry: any | null;
+    /** True when the entry is not on disk yet. */
+    isNew: boolean;
+}
+
+export interface PluginSaveHook {
+    pluginId: string;
+    script: string;
+    beforeSave: (entry: any, ctx: PluginSaveHookContext) => void | Promise<void>;
+}
 
 export class PluginManager {
 
@@ -23,6 +45,9 @@ export class PluginManager {
 
     // plugin popup IDs per subtab (e.g., "character_templates" → ["rpg-overlay-tuner"])
     private pluginPopupsByTab = new Map<string, string[]>();
+
+    // modules plugin editor scripts loaded through importPluginModule, by URL
+    private pluginModules = new Map<string, Promise<any>>();
 
     // EDITOR LOGIC
     public async processSchema(currentSchema: Schema | null, basePath: string): Promise<Schema | null> {
@@ -175,6 +200,9 @@ export class PluginManager {
         // 5. Load plugin editor popups
         await this.initPluginPopups();
 
+        // 5b. Load plugin save hooks
+        await this.initPluginSaveHooks();
+
         // 6. Reset editor-preview state — the plugin set may have changed with the
         // game/mod, so preview scripts re-register and stale scoped css is dropped
         // on the next preview open. (Aspect renderers already registered on the
@@ -254,9 +282,16 @@ export class PluginManager {
         this.pluginPopupsByTab.clear();
         const editor = Editor.getInstance();
 
-        // Expose Vue and editor utilities so plugin editor scripts can access them without bare imports
+        // Expose Vue and editor utilities so plugin editor scripts can access them without bare imports.
+        // FormFieldRenderer draws one schema field exactly as the form does; importPluginModule loads
+        // one of the plugin's own modules (see importPluginModule); readJson reads a game file by path
+        // (e.g. a single-object plugins_data config, which loadFullData's array merge skips).
         (window as any).__editorVue = Vue;
-        (window as any).__editorUtils = { loadCharacterImages, editor, EditorCharacterPreview };
+        (window as any).__editorUtils = {
+            loadCharacterImages, editor, EditorCharacterPreview, FormFieldRenderer,
+            importPluginModule: (pluginId: string, path: string) => this.importPluginModule(pluginId, path),
+            readJson: (path: string) => Global.getInstance().readJson(path),
+        };
 
         for (const plugin of this.plugins.value) {
             const popups = (plugin as any).editor_popups;
@@ -295,6 +330,67 @@ export class PluginManager {
                 }
             }
         }
+    }
+
+    // ── Save hooks (plugin.json `editor_hooks`) ──
+    // A plugin transforms entries of its own tabs as they are saved. Each entry names the plugin's
+    // `tabs` and a SELF-CONTAINED `script` (blob-imported, so relative imports don't resolve) that
+    // exports `beforeSave(entry, ctx)`: it may change the entry in place and may be async (read an
+    // image, say). Editor.saveActiveObject runs it — the one funnel of the tab form's Save and of
+    // every popup save — on each entry the save changes. Keyed by the tab's data file
+    // (`plugins_data/<plugin>/<tab>`), since subtab ids are only unique within their main tab.
+    private saveHooksByFile = new Map<string, PluginSaveHook[]>();
+
+    private async initPluginSaveHooks(): Promise<void> {
+        this.saveHooksByFile.clear();
+        for (const plugin of this.plugins.value) {
+            const hooks = (plugin as any).editor_hooks;
+            if (!Array.isArray(hooks) || hooks.length === 0) continue;
+            const pluginPath = await this.resolvePluginPath(plugin.id);
+            if (!pluginPath) continue;
+            for (const hook of hooks) {
+                if (!hook.script || !hook.tabs) continue;
+                try {
+                    const mod = await this.importPluginScript(`assets/${pluginPath}/${hook.script}`);
+                    if (typeof mod.beforeSave !== 'function') {
+                        console.error(`[PluginManager] editor_hooks script exports no beforeSave: ${hook.script} (plugin: ${plugin.id})`);
+                        continue;
+                    }
+                    for (const tabId of Array.isArray(hook.tabs) ? hook.tabs : [hook.tabs]) {
+                        const file = `plugins_data/${plugin.id}/${tabId}`;
+                        const list = this.saveHooksByFile.get(file) || [];
+                        list.push({ pluginId: plugin.id, script: hook.script, beforeSave: mod.beforeSave });
+                        this.saveHooksByFile.set(file, list);
+                    }
+                } catch (e) {
+                    console.error(`[PluginManager] Failed to load editor hook ${hook.script} from plugin '${plugin.id}':`, e);
+                }
+            }
+        }
+    }
+
+    /** The save hooks registered for a tab's data file (e.g. `plugins_data/rpg_battler/projectiles`). */
+    public getSaveHooks(file: string | undefined): PluginSaveHook[] {
+        return (file && this.saveHooksByFile.get(file)) || [];
+    }
+
+    /**
+     * Imports a module from a plugin's folder for the plugin's editor scripts (popups, previews), so
+     * editor and game can share code instead of copying it. Resolved like the plugin itself (a mod's
+     * copy overrides the global one) and cached per URL. It is blob-imported like the popup scripts,
+     * so the module must be self-contained: relative imports inside it do not resolve.
+     */
+    public async importPluginModule(pluginId: string, path: string): Promise<any> {
+        const pluginPath = await this.resolvePluginPath(pluginId);
+        if (!pluginPath) throw new Error(`[PluginManager] Plugin '${pluginId}' not found`);
+        const url = `assets/${pluginPath}/${path}`;
+        let mod = this.pluginModules.get(url);
+        if (!mod) {
+            mod = this.importPluginScript(url);
+            this.pluginModules.set(url, mod);
+            mod.catch(() => this.pluginModules.delete(url));
+        }
+        return mod;
     }
 
     /**

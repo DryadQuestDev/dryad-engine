@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { Global } from '../global';
+
+const global = Global.getInstance();
+
+const imageAlt = computed(() => global.getString('rotate_phone.alt'));
+const message = computed(() => global.getString('rotate_phone.message'));
 </script>
 
 <template>
   <div class="rotate-phone-overlay">
-    <img src="/assets/engine_assets/ui/rotate_phone.png" alt="Rotate your device" class="rotate-image" />
-    <p class="rotate-text">Please rotate your device to landscape</p>
+    <img src="/assets/engine_assets/ui/rotate_phone.png" :alt="imageAlt" class="rotate-image" />
+    <p class="rotate-text">{{ message }}</p>
   </div>
 </template>
 

@@ -55,7 +55,7 @@
         "id": "dismissable",
         "type": "boolean",
         "uid": "geDismissable",
-        "description": "If true, this character&#x27;s sheet shows a dismiss button (engine-level): confirm, unequip everything, delete the character."
+        "description": "If true, this character&#x27;s sheet shows a dismiss button (engine-level): confirm, unequip everything, delete the character. Blocked while block_party_inventory is set (battles, trades)."
       },
       {
         "id": "renameable",
@@ -133,6 +133,11 @@
         "type": "number",
         "description": "Item weight (for encumbrance)",
         "uid": "3pR7tYvW5nDx"
+      },
+      {
+        "id": "no_discard",
+        "type": "boolean",
+        "description": "The player can never throw this item away – the item card's Drop choice and the reward panel's trash button stay hidden (Item.isDiscardable()). Quest-rarity items are protected without it. Unrelated to loot drops."
       },
       {
         "id": "item_level",
@@ -260,6 +265,166 @@
         "order": -92
       }
     ],
+    "dev/editor_layouts": [
+      {
+        "id": "global_essentials_item_traits",
+        "scope": "item_templates:traits",
+        "name": "Engine item traits",
+        "order": 0,
+        "groups": [
+          {
+            "id": "look",
+            "name": "Look",
+            "order": 10,
+            "color": "64b5f6",
+            "members": [
+              "name",
+              "image",
+              "description",
+              "rarity",
+              "item_level"
+            ]
+          },
+          {
+            "id": "inventory",
+            "name": "Inventory",
+            "order": 20,
+            "color": "ffb74d",
+            "members": [
+              "max_stack",
+              "weight",
+              "no_discard"
+            ]
+          },
+          {
+            "id": "use",
+            "name": "Use",
+            "order": 30,
+            "color": "81c784",
+            "members": [
+              "use_scene",
+              "book",
+              "painting"
+            ]
+          },
+          {
+            "id": "state",
+            "name": "Instance state",
+            "order": 40,
+            "color": "90a4ae",
+            "members": [
+              "durability"
+            ]
+          }
+        ],
+        "hints": [
+          {
+            "id": "name",
+            "pinned": true
+          },
+          {
+            "id": "image",
+            "pinned": true
+          },
+          {
+            "id": "description",
+            "pinned": true
+          },
+          {
+            "id": "rarity",
+            "pinned": true
+          },
+          {
+            "id": "max_stack",
+            "pinned": true,
+            "min": -1
+          },
+          {
+            "id": "weight",
+            "pinned": true,
+            "min": 0,
+            "step": 0.1
+          },
+          {
+            "id": "item_level",
+            "min": 0
+          },
+          {
+            "id": "durability",
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": "global_essentials_ability_meta",
+        "scope": "ability_templates:meta",
+        "name": "Engine ability meta",
+        "order": 0,
+        "groups": [
+          {
+            "id": "identity",
+            "name": "Identity",
+            "order": 10,
+            "color": "64b5f6",
+            "members": [
+              "name",
+              "icon",
+              "description",
+              "group",
+              "order",
+              "is_hidden"
+            ]
+          },
+          {
+            "id": "cost",
+            "name": "Cost and cooldown",
+            "order": 20,
+            "color": "ffb74d",
+            "members": [
+              "cd",
+              "costs"
+            ]
+          },
+          {
+            "id": "availability",
+            "name": "Availability",
+            "order": 60,
+            "color": "90a4ae",
+            "members": [
+              "require_status"
+            ]
+          }
+        ],
+        "hints": [
+          {
+            "id": "name",
+            "pinned": true
+          },
+          {
+            "id": "icon",
+            "pinned": true
+          },
+          {
+            "id": "description",
+            "pinned": true
+          },
+          {
+            "id": "group",
+            "pinned": true
+          },
+          {
+            "id": "cd",
+            "pinned": true,
+            "suffix": "turns",
+            "min": 0
+          },
+          {
+            "id": "costs",
+            "pinned": true
+          }
+        ]
+      }
+    ],
     "dev/encounters_default": [
       {
         "id": "climb_down",
@@ -334,6 +499,11 @@
         "id": "dismiss_confirm",
         "val": "Are you sure you want to dismiss |name|? They will be gone for good.",
         "uid": "geDismissCnf"
+      },
+      {
+        "id": "dismiss_blocked",
+        "val": "Party members cannot be dismissed now.",
+        "uid": "geDismissBlk"
       },
       {
         "id": "key_used",

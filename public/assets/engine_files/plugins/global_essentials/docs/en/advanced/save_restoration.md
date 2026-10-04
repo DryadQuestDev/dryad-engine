@@ -97,7 +97,7 @@ Order doesn't matter — load a mod before or after another and the merged pass 
 | `itemSlots` | template slot ids | Backfill slots the character is missing and reposition the ones that exist. Slot x/y are saved per character, so this is the only way an editor reposition reaches an old save. The slot's type and its equipped item are left alone, and slots are never removed. |
 | `skillTrees` | tree ids | Backfill template trees, purge deleted ones. |
 | `learnedSkills` | skill (tree slot) ids | Rebuild learned-skill statuses from current definitions. Levels are preserved, clamped to the new max. |
-| `statuses` | status ids | Re-apply held statuses, stack counts preserved, so their grants pick up new definitions. |
+| `statuses` | status ids | Re-apply held statuses so their grants pick up new definitions. Stacks, remaining durations and sources are preserved. |
 | `itemTraits` | item trait ids | Reset every inventory item's traits to its template. Keyed by trait id, so the traits an instance owns (charges, wear) can be skipped while the rest catch up. |
 | `items` | item template ids | Rebuild every other template-owned field of each inventory item: equip-status object, price, consume payloads, slots, category, tags, actions, choices. Identity, quantity, the equipped flag and trade prices never move. |
 
@@ -121,7 +121,7 @@ Keep the lists small and well-justified. Each entry is a field where you're sayi
 Watch out for state that's written at runtime onto the core status:
 
 - **Direct `setStat` calls** outside of statuses get reset to the template value. Route persistent boosts through status grants instead, or add the stat to `stats: { skip: [...] }`.
-- **Skin layers added by the `skin_layer` action** land on the core status too, so a full `skinLayers` sync removes them. Add those layers to `skinLayers: { skip: [...] }` to keep them.
+- **Skin layers added by the `skin` action** land on the core status too, so a full `skinLayers` sync removes them. Add those layers to `skinLayers: { skip: [...] }` to keep them.
 
 ---
 
@@ -130,9 +130,10 @@ Watch out for state that's written at runtime onto the core status:
 A saved item is a snapshot of its template at creation, and `item_create` does not fire on load. So anything an `item_create` listener derived per instance — a level-scaled stat block, a choice added for items with a certain trait — is gone once the `items` section resets the item. The pass fires two emitters so that work can be redone:
 
 - `item_migrate(item, template)` — once per inventory item, right after its fields were reset, with a copy of its template.
+- `status_migrate(character, status, previous)` — once per status the `statuses` section recreates from its definition, before it is added back, with the instance it replaces. Anything set on the status when it was applied (stats scaled to an item, a stamped `meta` value) is rebuilt here.
 - `save_migrated()` — once at the end, for whole-save repairs (states, stores, flags).
 
-Both fire before the engine re-binds worn items and puts resource pools back, so an equip-status object edited in a listener is bound, and a stat moved there can't clamp a pool. They fire only when the pass actually runs: an old save, or any load in dev mode.
+They all fire before the engine re-binds worn items and puts resource pools back, so an equip-status object edited in a listener is bound, and a stat moved there can't clamp a pool. They fire on an old save, or any load in dev mode. `save_migrated` fires then even when no migration is registered.
 
 ```js
 // item_create adds the choice to fresh instances; item_migrate puts it back on saved ones.
@@ -150,13 +151,11 @@ The experience plugin does the same for level scaling: its `item_migrate` listen
 ## What this won't fix
 
 - **Characters whose template was removed** (e.g. a mod was uninstalled). Their `templateId` doesn't resolve to anything, so the pass skips them. They linger in the save with stale state but don't crash anything. You can delete them manually if needed.
-- **Anything outside characters and items** — registered states, stores and flags are yours. Do those repairs in a `save_migrated` listener (see above), which fires exactly when the pass runs:
+- **Anything outside characters and items** — registered states, stores and flags are yours. Do those repairs in a `save_migrated` listener (see above), which fires on an old save or any dev-mode load, registered migration or not:
 
 ```js
-game.registerSaveMigration('_core', {});
-
 game.on('save_migrated', () => {
-    // one-off repair the generic pass can't express
+    // repair the generic pass can't express
 });
 ```
 

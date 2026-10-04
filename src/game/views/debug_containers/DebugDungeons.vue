@@ -149,8 +149,8 @@ const addNewFlag = () => {
 .debug-info {
   margin-bottom: 1rem;
   padding: 0.5rem;
-  background: #ececec;
-  border: 1px solid #dee2e6;
+  background: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
 }
 
 .block {

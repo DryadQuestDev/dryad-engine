@@ -3,11 +3,12 @@
 const { game } = window.engine;
 
 import {
-    inBattle, effectiveThreat, getDungeonLevel, dungeonScale, enemyScale,
+    inBattle, effectiveThreat, getDungeonLevel, dungeonScale, relativeScale, scaleStats, enemyScale,
     pendingReward, recordCharacterXp, recordResource,
     clearPending, openRewardPopup, getMc, setGenerationLevel, simulateBattleLoot,
+    instantiateBoundInventories,
 } from './reward.mjs';
-import { simulatePool } from './pools.mjs';
+import { simulatePool, instantiatePools } from './pools.mjs';
 import './gather.mjs';
 import './smith.mjs';
 import './components/XpBar.mjs';
@@ -145,6 +146,9 @@ game.on('character_resource_change', (/** @type {Character} */ character, /** @t
             }
         }
 
+        // The trait is written before the emitter fires, so a listener reading getTrait('level')
+        // sees the level it is being told about.
+        character.setTrait('level', level);
         game.trigger('character_level_up', character, level);
     }
 
@@ -166,7 +170,6 @@ game.on('character_resource_change', (/** @type {Character} */ character, /** @t
         });
     }
 
-    character.setTrait('level', level);
     character.setStat('xp', threshold);
     character.setResource('xp', xp);
 });
@@ -219,7 +222,8 @@ game.registerService('xp', {
 });
 
 game.registerService('reward', {
-    /** Reactive pending-reward accumulator the RewardPanel renders. */
+    /** Reactive pending-reward accumulator the RewardPanel renders. Read-only view over the
+     *  `experience_pending_reward` state — record through the service, never assign `.value`. */
     getPending() { return pendingReward; },
     /** @param {string} battleId @returns {number} battle-definition threat × dungeon-level scale */
     effectiveThreat,
@@ -227,6 +231,11 @@ game.registerService('reward', {
     getDungeonLevel,
     /** @param {number} level @returns {number} reward multiplier for a dungeon level */
     dungeonScale,
+    /** @param {number} level @returns {number} multiplier for `relative`-scaling stats at a dungeon level */
+    relativeScale,
+    /** Stats scaled to a level exactly as a levelled item's are (each stat's `scaling` meta).
+     *  @param {Record<string, number>} stats @param {number} level @returns {Record<string, number>} */
+    scaleStats,
     /** @param {number} level @returns {number} enemy health/power multiplier for a dungeon level */
     enemyScale,
     /** Override the level equipment is created at (item_create). Pass a level, then null to clear.
@@ -243,6 +252,16 @@ game.registerService('reward', {
     /** Dry-run a pool draw at a level. Same drawPoolInto a container uses; grants nothing.
      *  @param {string} poolId @param {number} level @param {number} [rolls] */
     simulatePool,
+});
+
+// Dungeon inventories are instantiated on dungeon enter, so a chest or ^pool ref authored into the
+// dungeon a save is standing in would have no inventory until a re-enter ("not found" on open).
+// Fill the missing ones on load; both passes skip existing instances, so rolled loot stays locked.
+game.on('save_migrated', () => {
+    const dungeonId = game.getCurrentDungeonId();
+    if (!dungeonId) return;
+    instantiateBoundInventories(dungeonId);
+    instantiatePools(dungeonId);
 });
 
 // ── Conditions ──

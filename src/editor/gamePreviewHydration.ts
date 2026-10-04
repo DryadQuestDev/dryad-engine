@@ -1,5 +1,7 @@
+import { reactive } from 'vue';
 import { Game } from '../game/game';
 import { Global } from '../global/global';
+import { Item } from '../game/core/character/item';
 import { Editor } from './editor';
 
 /**
@@ -111,3 +113,49 @@ export async function hydrateAbilityPreview(): Promise<AbilityPreviewData> {
 
   return { templates, definitions, groups, stats, statuses, characterTemplates, itemTemplates, skillSlots };
 }
+
+/**
+ * Ability hydration plus the item slots the game's item card reads: templates, traits,
+ * categories and equip slots. Same rules as hydrateAbilityPreview — pure data assignment.
+ */
+export async function hydrateItemPreview(): Promise<AbilityPreviewData> {
+  const preview = await hydrateAbilityPreview();
+  const editor = Editor.getInstance();
+  const game = Game.getInstance();
+  const load = (file: string) => editor.loadFullData(file).catch(() => [] as any[]);
+  const [traits, categories, slots] = await Promise.all([load('item_traits'), load('item_categories'), load('item_slots')]);
+
+  game.itemSystem.itemTemplatesMap = toMap(preview.itemTemplates);
+  game.itemSystem.itemTraitsMap = toMap(traits);
+  game.itemSystem.itemCategoriesMap = toMap(categories);
+  game.itemSystem.itemSlotsMap = toMap(slots);
+
+  const registry = game.coreSystem.dataRegistry;
+  registry.set('item_traits', toMap(traits));
+  registry.set('item_categories', toMap(categories));
+  registry.set('item_slots', toMap(slots));
+  return preview;
+}
+
+/**
+ * A live Item built from a hydrated template, for the item card: ItemSystem.createItem minus its
+ * side effects — the template's `item_create` script never runs and no `item_create` event fires.
+ * Returns null when no template has the id.
+ */
+export function createPreviewItem(itemId: string): Item | null {
+  const template = Game.getInstance().itemSystem.itemTemplatesMap.get(itemId);
+  return template ? createPreviewItemFrom(template) : null;
+}
+
+/** Same, from a template object the caller holds — an item editor's unsaved copy. */
+export function createPreviewItemFrom(template: any): Item {
+  const game = Game.getInstance();
+  const obj = JSON.parse(JSON.stringify(template ?? {}));
+  const item = reactive(new Item()) as Item;
+  item.uid = `editor_preview_${obj.id ?? 'unsaved'}`;
+  item.id = obj.id ?? '';
+  item.traits = obj.traits || {};
+  game.itemSystem.applyTemplateFields(item, obj);
+  return item;
+}
+

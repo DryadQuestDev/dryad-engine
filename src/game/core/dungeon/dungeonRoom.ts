@@ -50,6 +50,7 @@ export class DungeonRoom {
     public events: DungeonEvent[] = [];
 
     public defaultAssets: string[] = [];
+    public defaultSounds: string[] = [];
 
     // Lock: entering needs this item (auto-used from the party bag; keyConsume spends it).
     public key: string = "";

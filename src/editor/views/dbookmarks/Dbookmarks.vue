@@ -9,6 +9,8 @@ import { Global } from '../../../global/global';
 import InputSwitch from 'primevue/inputswitch';
 import InputNumber from 'primevue/inputnumber';
 import InputText from 'primevue/inputtext';
+import Popover from 'primevue/popover';
+import { describeSifter, type FilterPreset } from '../../filterPresets';
 
 const editor = Editor.getInstance();
 const global = Global.getInstance();
@@ -157,6 +159,9 @@ const currentSubtabName = computed(() => {
   return currentSubtab?.name ?? global.getString("tab." + editor.mainTab + "." + editor.secondaryTab);
 });
 
+// Default scale only applies to encounters, so the input rides along with that subtab
+const isEncountersTab = computed(() => editor.secondaryTab === 'encounters');
+
 // Computed property for new item id
 const newItemId = computed(() => {
   return editor.newItem.value?.id || '';
@@ -181,6 +186,48 @@ function onIdSearchInput(value: string | undefined) {
 function clearIdSearch() {
   editor.idFilter.value = '';
   emit('id-search-input', ''); // reset any pending autoselect from just-typed text
+}
+
+// --- Filter presets flyout (hover over the Filters bookmark) ---
+// Mirrors the session the tab's own filter form registered; an embedded form (a popup) has its own
+const flyoutPresets = computed(() => editor.filterPresets.mainSession.value?.presets.value ?? []);
+const flyoutActivePresetId = computed(() => editor.filterPresets.mainSession.value?.activePresetId.value ?? null);
+function isInheritedPreset(preset: FilterPreset): boolean {
+  return !editor.filterPresets.isWritable(preset);
+}
+const presetPopover = ref<InstanceType<typeof Popover> | null>(null);
+const presetPopoverVisible = ref(false);
+let presetOpenTimer: ReturnType<typeof setTimeout> | null = null;
+let presetCloseTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelPresetTimers() {
+  if (presetOpenTimer) { clearTimeout(presetOpenTimer); presetOpenTimer = null; }
+  if (presetCloseTimer) { clearTimeout(presetCloseTimer); presetCloseTimer = null; }
+}
+
+function onFiltersEnter(event: MouseEvent) {
+  cancelPresetTimers();
+  if (presetPopoverVisible.value || flyoutPresets.value.length === 0) return;
+  // currentTarget is gone by the time the timer fires — hand the popover the element itself
+  const target = event.currentTarget;
+  presetOpenTimer = setTimeout(() => {
+    presetOpenTimer = null;
+    presetPopover.value?.show(event, target);
+  }, 150);
+}
+
+// Shared by the bookmark and the flyout: a grace period lets the pointer travel between them
+function onFiltersLeave() {
+  cancelPresetTimers();
+  presetCloseTimer = setTimeout(() => {
+    presetCloseTimer = null;
+    presetPopover.value?.hide();
+  }, 250);
+}
+
+function applyPreset(preset: FilterPreset) {
+  editor.filterPresets.mainSession.value?.apply(preset);
+  presetPopover.value?.hide();
 }
 
 </script>
@@ -216,14 +263,24 @@ function clearIdSearch() {
           </div>
 
           <div class="map_options">
-            <div class="map_option p-float-label">
-              <FloatLabel variant="on">
-                <InputNumber v-if="editor.map.zoomFactor" v-model="editor.map.zoomFactor.value"
-                  inputId="zoomFactorInput" mode="decimal" :minFractionDigits="1" :step="0.1" :min="0.1" :max="5"
-                  :show-buttons="true" :inputStyle="{ width: '90px' }" />
-                <label for="zoomFactorInput">Zoom: </label>
-              </FloatLabel>
-
+            <div class="map_option map_option_row">
+              <div class="p-float-label">
+                <FloatLabel variant="on">
+                  <InputNumber v-if="editor.map.zoomFactor" v-model="editor.map.zoomFactor.value"
+                    inputId="zoomFactorInput" mode="decimal" :minFractionDigits="1" :step="0.1" :min="0.1" :max="5"
+                    :show-buttons="true" :inputStyle="{ width: '90px' }" />
+                  <label for="zoomFactorInput">Zoom: </label>
+                </FloatLabel>
+              </div>
+              <div class="p-float-label" v-if="isEncountersTab"
+                v-tooltip.bottom="'Scale stamped onto every newly placed encounter, so a batch of same-sized props drops in without resizing each one. Existing encounters keep their own scale, and any encounter can still be resized afterwards.'">
+                <FloatLabel variant="on">
+                  <InputNumber v-if="editor.map.defaultEncounterScale" v-model="editor.map.defaultEncounterScale.value"
+                    inputId="defaultEncounterScaleInput" mode="decimal" :minFractionDigits="1" :step="0.1" :min="0.1"
+                    :max="10" :show-buttons="true" :inputStyle="{ width: '90px' }" />
+                  <label for="defaultEncounterScaleInput">Default scale: </label>
+                </FloatLabel>
+              </div>
             </div>
             <div class="map_option">
               <div class="action-icons" v-if="editor.map.activeState">
@@ -250,13 +307,26 @@ function clearIdSearch() {
         New {{ editor.title.value }}
       </div>
       <div class="bookmark_item bookmark_title filters-bookmark" :class="{ active: activeBookmarkId === 'filters' }"
-        @click="scrollToBookmark('filters')">
+        @click="scrollToBookmark('filters')" @mouseenter="onFiltersEnter" @mouseleave="onFiltersLeave">
         <!-- Icon first -->
         <i v-if="props.isFilterActive" class="pi pi-filter-slash clear-filter-icon"
           style="cursor: pointer; margin-right: 0.5em; font-size: 0.9em; vertical-align: middle;"
           aria-label="Clear Filters" @click.stop="emit('clear-requested')"></i>
         <span>Filters</span>
+        <i v-if="flyoutPresets.length > 0" class="pi pi-bookmark preset-indicator"
+          :title="global.getString('filter_presets.title')"></i>
       </div>
+      <Popover ref="presetPopover" @show="presetPopoverVisible = true" @hide="presetPopoverVisible = false">
+        <div class="preset-flyout" @mouseenter="cancelPresetTimers" @mouseleave="onFiltersLeave">
+          <div class="preset-flyout-title">{{ global.getString('filter_presets.title') }}</div>
+          <button v-for="preset in flyoutPresets" :key="preset.id" type="button" class="preset-flyout-item"
+            :class="{ 'preset-flyout-item--active': flyoutActivePresetId === preset.id }"
+            :title="describeSifter(preset.sifter)" @click="applyPreset(preset)">
+            <i v-if="isInheritedPreset(preset)" class="pi pi-lock preset-flyout-lock"></i>
+            <span class="preset-flyout-name">{{ preset.name }}</span>
+          </button>
+        </div>
+      </Popover>
       <hr>
       <!-- Dynamic bookmarks for items (grouped by page if pagination is active) -->
       <template v-if="props.items && props.items.length > 0">

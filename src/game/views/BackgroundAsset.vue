@@ -78,9 +78,19 @@ const yscale = computed(() => props.asset.yscale ?? scale.value);
 const rotation = computed(() => props.asset.rotation ?? 0);
 const alpha = computed(() => props.asset.alpha ?? 1);
 const blur = computed(() => props.asset.blur ?? 0);
+const brightness = computed(() => props.asset.brightness ?? 1);
+const contrast = computed(() => props.asset.contrast ?? 1);
+const saturate = computed(() => props.asset.saturate ?? 1);
+const sepia = computed(() => props.asset.sepia ?? 0);
+const hue = computed(() => props.asset.hue ?? 0);
 
 const zindex = computed(() => props.asset.z ?? 0);
 const fitMode = computed(() => props.asset.fit_mode ?? 'fill');
+
+// Spine-only, and deliberately NOT fit_mode: that one defaults to 'fill' here while its schema says
+// 'none', so reusing it would silently stretch every existing spine asset. Unset = 'contain' = the
+// 16:9 letterbox every scene was framed against.
+const aspectFit = computed(() => props.asset.aspect_fit ?? 'contain');
 
 // Re-staging a visible asset ({asset: "bg_mountain(scale = 2)"}) mutates the same object in place, so
 // the props change under a component that never remounts — which is why it used to snap. These refs
@@ -93,6 +103,11 @@ const shownYScale = ref(yscale.value);
 const shownRotation = ref(rotation.value);
 const shownAlpha = ref(alpha.value);
 const shownBlur = ref(blur.value);
+const shownBrightness = ref(brightness.value);
+const shownContrast = ref(contrast.value);
+const shownSaturate = ref(saturate.value);
+const shownSepia = ref(sepia.value);
+const shownHue = ref(hue.value);
 
 const tweenDuration = computed(() => props.asset.tween ?? 0.5);
 const tweenEase = computed(() => props.asset.tween_ease ?? 'power2.out');
@@ -102,8 +117,8 @@ let propTween: gsap.core.Timeline | null = null;
 // Fires only on change, so a freshly staged asset paints its values directly and its enter
 // transition owns how it appears — nothing glides up from a default.
 watch(
-  [xpos, ypos, xscale, yscale, rotation, alpha, blur],
-  ([nx, ny, nxs, nys, nrot, nalpha, nblur]) => {
+  [xpos, ypos, xscale, yscale, rotation, alpha, blur, brightness, contrast, saturate, sepia, hue],
+  ([nx, ny, nxs, nys, nrot, nalpha, nblur, nbright, ncontrast, nsat, nsepia, nhue]) => {
     propTween?.kill();
     propTween = null;
 
@@ -112,6 +127,8 @@ watch(
       shownX.value = nx; shownY.value = ny;
       shownXScale.value = nxs; shownYScale.value = nys;
       shownRotation.value = nrot; shownAlpha.value = nalpha; shownBlur.value = nblur;
+      shownBrightness.value = nbright; shownContrast.value = ncontrast; shownSaturate.value = nsat;
+      shownSepia.value = nsepia; shownHue.value = nhue;
       return;
     }
 
@@ -125,7 +142,12 @@ watch(
       .to(shownYScale, { value: nys, duration, ease }, 0)
       .to(shownRotation, { value: nrot, duration, ease }, 0)
       .to(shownAlpha, { value: nalpha, duration, ease }, 0)
-      .to(shownBlur, { value: nblur, duration, ease }, 0);
+      .to(shownBlur, { value: nblur, duration, ease }, 0)
+      .to(shownBrightness, { value: nbright, duration, ease }, 0)
+      .to(shownContrast, { value: ncontrast, duration, ease }, 0)
+      .to(shownSaturate, { value: nsat, duration, ease }, 0)
+      .to(shownSepia, { value: nsepia, duration, ease }, 0)
+      .to(shownHue, { value: nhue, duration, ease }, 0);
   },
   { flush: 'post' }
 );
@@ -155,12 +177,17 @@ const cssTransform = computed(() => {
   return transforms.join(' ');
 });
 
-// CSS filter: the asset's own blur, plus the scene colour grade when one is up. Blur is rebuilt from
-// a tweened number rather than transitioned in CSS — a CSS transition here would try to interpolate
-// the grade's url(#…) term, which isn't interpolable.
+// CSS filter: the asset's own filters (same set and order as CharacterSlot), plus the scene colour
+// grade when one is up. Each term is rebuilt from a tweened number rather than transitioned in CSS —
+// a CSS transition here would try to interpolate the grade's url(#…) term, which isn't interpolable.
 const cssFilter = computed(() => {
   const parts: string[] = [];
   if (shownBlur.value > 0) parts.push(`blur(${shownBlur.value}px)`);
+  if (shownBrightness.value !== 1) parts.push(`brightness(${shownBrightness.value})`);
+  if (shownContrast.value !== 1) parts.push(`contrast(${shownContrast.value})`);
+  if (shownSaturate.value !== 1) parts.push(`saturate(${shownSaturate.value})`);
+  if (shownSepia.value > 0) parts.push(`sepia(${shownSepia.value})`);
+  if (shownHue.value !== 0) parts.push(`hue-rotate(${shownHue.value}deg)`);
   if (props.grade && game.dungeonSystem.gradeActive.value) parts.push(`url(#${GRADE_FILTER_ID})`);
   return parts.length > 0 ? parts.join(' ') : 'none';
 });
@@ -1325,7 +1352,7 @@ watch([idleAnimation, idleDuration, idleIntensity],
         <img v-for="(plate, i) of layerPlates" :key="plate.fade ? plate.file : i" :src="plate.file"
           :class="plate.classes" class="background-asset-layer" alt="" v-persist @load="onLayerLoad" />
       </TransitionGroup>
-      <img v-else-if="isImageAsset" :src="assetPath" class="background-asset" alt="Background" />
+      <img v-else-if="isImageAsset" :src="assetPath" class="background-asset" alt="" />
       <video v-else-if="isVideoAsset" ref="videoRef" :src="assetPath" class="background-asset" autoplay loop
         playsinline />
     </div>
@@ -1336,7 +1363,7 @@ watch([idleAnimation, idleDuration, idleIntensity],
          .spine-aspect-wrapper, whose overflow:hidden would clip a slide or a zoom-out, and INSIDE
          .spine-aspect-outer, which is the cqh container the renderer positions the canvas against. -->
     <div ref="assetElementRef" class="spine-animation-wrapper">
-      <div class="spine-aspect-wrapper">
+      <div class="spine-aspect-wrapper" :class="`aspect-fit-${aspectFit}`">
         <SpineAsset :asset="asset" @spine-loaded="onSpineLoaded" />
       </div>
     </div>
@@ -1438,24 +1465,57 @@ watch([idleAnimation, idleDuration, idleIntensity],
   will-change: transform, opacity;
 }
 
+/* The spine's authored 16:9 frame. This box IS the crop: the renderer sizes its canvas buffer from
+   this element's offsetWidth/offsetHeight, so anything outside is never rasterised at all and the
+   overflow below is only belt-and-braces. Sizing it is therefore the ONLY way to change the crop.
+   `aspect_fit` picks how it is fitted; all three agree exactly at 16/9, so no framed scene moves. */
 .spine-aspect-wrapper {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   aspect-ratio: 16 / 9;
-  width: 100%;
-  height: auto;
-  max-height: 100%;
   overflow: hidden;
 }
 
+/* contain (default) — letterbox the frame inside the screen. Nothing outside the 16:9 composition
+   can ever appear, at the cost of bars where the screen is the wider one. */
+.spine-aspect-wrapper.aspect-fit-contain {
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+}
+
 @container (min-aspect-ratio: 16/9) {
-  .spine-aspect-wrapper {
+  .spine-aspect-wrapper.aspect-fit-contain {
     width: auto;
     height: 100%;
     max-width: 100%;
   }
+}
+
+/* cover — grow the frame past the screen edges so it always fills. The skeleton is scaled from this
+   element's height, so box and art grow together: the left/right framing comes out identical to
+   contain and only the top/bottom crop tightens. Still cannot reveal anything outside the frame. */
+.spine-aspect-wrapper.aspect-fit-cover {
+  width: 100%;
+  height: auto;
+}
+
+@container (max-aspect-ratio: 16/9) {
+  .spine-aspect-wrapper.aspect-fit-cover {
+    width: auto;
+    height: 100%;
+  }
+}
+
+/* full — the frame matches the screen. The art does NOT grow with it (skeleton scale follows height
+   only), so a wider screen widens the visible window in skeleton units and shows whatever the rig
+   holds beyond its 16:9 composition. Most rigs hold nothing there, which reads as blank margins. */
+.spine-aspect-wrapper.aspect-fit-full {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
 }
 
 /* CSS animation for jitter - more stable than GSAP for rapid movements */

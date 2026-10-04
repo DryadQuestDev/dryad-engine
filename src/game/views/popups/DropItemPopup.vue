@@ -4,7 +4,7 @@ import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import { PARTY_INVENTORY_ID } from '../../systems/itemSystem';
 
-// Modal confirm for discarding an item, opened by the drop_item action (pending = { itemUid,
+// Modal confirm for discarding an item, opened by the discard_item action (pending = { itemUid,
 // characterId } in state). A stackable item gets a quantity slider; a single item is a plain
 // confirm. Read from game state — the popup slot passes no props.
 const game = Game.getInstance();
@@ -24,11 +24,11 @@ watch(item, (it) => { quantity.value = it?.quantity ?? 1; }, { immediate: true }
 const message = computed(() => {
   if (!item.value) return '';
   const nameHtml = game.itemSystem.getItemNameHtml(item.value);
-  return game.logicSystem.resolveString(global.getString('item_drop_confirm', { item: nameHtml })).output;
+  return game.logicSystem.resolveString(global.getString('item_discard_confirm', { item: nameHtml })).output;
 });
 
-const discardLabel = computed(() => global.getString('drop_item'));
-const cancelLabel = computed(() => global.getString('dungeon_editor.cancel'));
+const discardLabel = computed(() => global.getString('discard_item'));
+const cancelLabel = computed(() => global.getString('cancel'));
 
 function close() {
   game.closePopup('drop_item_popup');
@@ -42,14 +42,17 @@ function confirm() {
   const nameHtml = game.itemSystem.getItemNameHtml(it);
   // Silent on veto: a listener that blocks a drop knows why, so it owns the message (a scene, a
   // custom notification, or nothing at all). The engine only closes the popup.
-  if (!game.trigger('item_drop_before', it, char)) {
+  if (!game.trigger('item_discard_before', it, char)) {
     close();
     return;
   }
   inv.reduceItemQuantity(it, dropCount, char);
-  game.showNotification(game.logicSystem.resolveString(
-    global.getString('item_dropped', { item: dropCount > 1 ? `${nameHtml} x${dropCount}` : nameHtml })
-  ).output);
+  // Two entries rather than one with an empty |quantity|: the count's place in the sentence is the
+  // translator's to choose, and a language that inflects the noun needs the plural phrasing whole.
+  const dropped = dropCount > 1
+    ? global.getString('item_discarded_quantity', { item: nameHtml, quantity: dropCount })
+    : global.getString('item_discarded', { item: nameHtml });
+  game.showNotification(game.logicSystem.resolveString(dropped).output);
   close();
 }
 </script>

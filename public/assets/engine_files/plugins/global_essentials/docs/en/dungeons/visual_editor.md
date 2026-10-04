@@ -1,6 +1,6 @@
 # Visual Editor
 
-The **Visual Editor** is the recommended way to author dungeons in Dryad Engine. It's an in-editor popup that turns DryadScript's line-based markup into editable block cards. No external setup required.
+The **Visual Editor** is the recommended way to author dungeons in Dryad Engine. It's an in-editor popup that turns DryadScript's line-based markup into editable block cards.
 
 ## Opening the editor
 

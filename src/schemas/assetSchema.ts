@@ -10,7 +10,7 @@ export const AssetSchema = {
 
     // File fields (conditional based on type)
     file_image: { type: 'file', fileType: 'image', tooltip: 'Path to an image file.', show: { type: ['image'] } },
-    layers: { type: 'file[]', fileType: 'image', tooltip: 'Extra image layers stacked on top of the base image, in order. Every layer shares the asset\'s fit mode, position, scale, opacity and blur — author them pre-registered at the same canvas size. Listeners on the asset_resolve emitter may filter this list or swap an entry for { file, classes } to add css classes to one layer.', show: { type: ['image'] } },
+    layers: { type: 'file[]', fileType: 'image', tooltip: 'Extra image layers stacked on top of the base image, in order. Every layer shares the asset\'s fit mode, position, scale, opacity and filters — author them pre-registered at the same canvas size. Listeners on the asset_resolve emitter may filter this list or swap an entry for { file, classes } to add css classes to one layer.', show: { type: ['image'] } },
     file_video: { type: 'file', fileType: 'video', tooltip: 'Path to a video file.', show: { type: ['video'] } },
     file_spine_atlas: { type: 'file', fileType: 'atlas', tooltip: 'Path to Spine atlas file (.atlas).', show: { type: ['spine'] } },
     file_spine_skeleton: { type: 'file', fileType: 'spine_skeleton', tooltip: 'Path to Spine skeleton file (.json or .skel binary).', show: { type: ['spine'] } },
@@ -23,6 +23,7 @@ export const AssetSchema = {
         }
     },
     tags: { type: 'string[]', tooltip: 'Used for categorizing and filtering.' },
+    meta: { type: 'schema', fromFile: 'asset_meta', fromFileType: 'custom', tooltip: 'Per-asset settings read by game or plugin scripts (e.g. a sound the asset plays while it is staged). Keys are defined in the asset_meta editor tab.' },
     // Fit mode
     fit_mode: {
         type: 'chooseOne',
@@ -94,18 +95,30 @@ export const AssetSchema = {
             zoom: { type: 'number', tooltip: 'Scale multiplier. 1 = auto-fit, >1 = zoom in, <1 = zoom out.', defaultValue: 1, step: 0.05 },
         }
     },
+    aspect_fit: {
+        type: 'chooseOne',
+        tooltip: 'How the spine\'s 16:9 frame is fitted when the screen is not 16:9. Contain = letterbox the frame, never showing anything outside it. Cover = grow the frame past the screen edges so it always fills (same left/right framing as contain, crops more off the top and bottom). Full = the frame matches the screen, revealing whatever the rig has outside its 16:9 composition (blank space, unless the art was authored wider). All three are identical on a 16:9 screen.',
+        options: ['contain', 'cover', 'full'],
+        defaultValue: 'contain',
+        show: { type: ['spine'] }
+    },
     // spine specific properties end
 
     // Rotation and effects
     rotation: { type: 'number', tooltip: 'Rotation angle in degrees. 0 = no rotation, 90 = 90° clockwise, -90 = 90° counter-clockwise.', defaultValue: 0, step: 1 },
     alpha: { type: 'number', tooltip: 'Opacity/transparency (0.0-1.0). 0 = fully transparent, 1 = fully opaque.', defaultValue: 1, step: 0.1 },
     blur: { type: 'number', tooltip: 'Blur amount in pixels. 0 = no blur. Higher values create depth-of-field effects.', defaultValue: 0, step: 1, show: { type: ['image', 'video'] } },
+    brightness: { type: 'number', tooltip: 'Brightness multiplier. 1 = as authored, 0 = black, 2 = twice as bright.', defaultValue: 1, step: 0.1, show: { type: ['image', 'video'] } },
+    contrast: { type: 'number', tooltip: 'Contrast multiplier. 1 = as authored, 0 = flat grey, 2 = doubled.', defaultValue: 1, step: 0.1, show: { type: ['image', 'video'] } },
+    saturate: { type: 'number', tooltip: 'Saturation multiplier. 1 = as authored, 0 = grayscale, 2 = oversaturated.', defaultValue: 1, step: 0.1, show: { type: ['image', 'video'] } },
+    sepia: { type: 'number', tooltip: 'Sepia tone (0-1). 0 = none, 1 = fully sepia.', defaultValue: 0, step: 0.1, show: { type: ['image', 'video'] } },
+    hue: { type: 'number', tooltip: 'Hue rotation in degrees (-180 to 180). 0 = as authored.', defaultValue: 0, step: 1, show: { type: ['image', 'video'] } },
 
 
     // Property tween — how an already-visible asset moves to new values
     tween: {
         type: 'number',
-        tooltip: 'Seconds taken to glide to new values when this asset is re-staged with changes, e.g. {asset: "bg_mountain(scale = 2)"}. Applies to position, scale, rotation, opacity and blur; z and fit mode always snap. 0 = snap. Has no effect the first time an asset is staged — the enter transition owns that.',
+        tooltip: 'Seconds taken to glide to new values when this asset is re-staged with changes, e.g. {asset: "bg_mountain(scale = 2)"}. Applies to position, scale, rotation, opacity and the filters (blur, brightness, contrast, saturate, sepia, hue); z and fit mode always snap. 0 = snap. Has no effect the first time an asset is staged — the enter transition owns that.',
         defaultValue: 0.5,
         step: 0.1,
         show: { type: ['image', 'video'] }

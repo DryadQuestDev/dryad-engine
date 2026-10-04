@@ -117,13 +117,13 @@ defineExpose({ toggle });
   text-transform: uppercase;
   font-size: 0.78rem;
   letter-spacing: 0.05em;
-  color: #555;
+  color: var(--editor-text-muted);
 }
 
 .index-popover-count {
   font-size: 0.75rem;
-  color: #888;
-  background: rgba(0, 0, 0, 0.06);
+  color: var(--editor-text-faint);
+  background: var(--editor-surface-hover);
   padding: 0.05rem 0.45rem;
   border-radius: 10px;
   font-family: var(--font-family-mono, monospace);
@@ -134,7 +134,7 @@ defineExpose({ toggle });
 }
 
 .index-popover-empty {
-  color: #888;
+  color: var(--editor-text-faint);
   font-style: italic;
   padding: 0.4rem 0.2rem;
   font-size: 0.85rem;
@@ -186,10 +186,10 @@ defineExpose({ toggle });
 
 .index-popover-item-count {
   flex: 0 0 auto;
-  color: #777;
+  color: var(--editor-text-faint);
   font-size: 0.78rem;
   font-family: var(--font-family-mono, monospace);
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--editor-surface-hover);
   padding: 0.05rem 0.4rem;
   border-radius: 10px;
 }

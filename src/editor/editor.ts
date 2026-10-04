@@ -8,12 +8,14 @@ import { debounceTime, switchMap, startWith, catchError, map, tap } from 'rxjs/o
 import { ref, reactive, Ref, watch, nextTick, computed, Component } from "vue";
 import { getImageDimensions, parseText } from "../utility/functions";
 import { stripHighlights } from "../utility/dungeonEditor/stripHighlights";
+import { stripMeta } from "../utility/dungeonEditor/meta";
 import { DevEncountersDefaultObject, DevEncountersDefaultSchema } from "../schemas/devEncountersDefaultSchema";
 import ShortUniqueId from 'short-unique-id';
 import { EDITOR_TABS, EditorTab, registerEditorCustomComponents } from "./editorTabs";
 import { PluginManager } from "./pluginManager";
 import { DungeonConfigObject } from "../schemas/dungeonConfigSchema";
 import { showConfirm, showAlert } from "../services/dialogService";
+import { FilterPresetManager, FILTER_PRESETS_FILE } from "./filterPresets";
 import { DevSettingsObject } from "../schemas/devSettings";
 import { jsonrepair } from 'jsonrepair';
 
@@ -58,10 +60,14 @@ export class Editor {
   private static instance: Editor;
   private global: Global;
   public pluginManager: PluginManager;
+  public filterPresets: FilterPresetManager;
   test: string = "editor test";
   public map: EditorMap;
 
   public devSettings: Ref<DevSettingsObject | null> = ref(null);
+  // _core's asset_folders, merged into a mod's file search at runtime. Never written into the
+  // mod's own dev_settings — asset_folders also drives export, and a mod must not bundle _core.
+  private coreAssetFolders: string[] = [];
 
   // Single localStorage key for the entire state
   private readonly EDITOR_STATE_KEY = 'dryadEditor_state';
@@ -81,6 +87,12 @@ export class Editor {
   private switchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   public hasUnsavedChanges: Ref<boolean> = ref(false); // Flag to track explicit changes
+
+  // The loaded tab's entries as they are on disk (JSON by entryKey), taken at load and refreshed by
+  // every write, for a tab with plugin save hooks only: a hook runs on the entries a save changes.
+  private savedEntries = new Map<string, string>();
+  // The save in progress: saves run one at a time (see saveActiveObject).
+  private saving: Promise<boolean> | null = null;
 
   // --- File Search Properties ---
   private fileSearchSubject = new Subject<FileSearchCriteria>();
@@ -121,6 +133,7 @@ export class Editor {
   private constructor() {
     this.global = Global.getInstance();
     this.pluginManager = new PluginManager();
+    this.filterPresets = new FilterPresetManager(this);
 
 
     // Assign the instance *before* potentially creating dependents like EditorMap
@@ -188,6 +201,21 @@ export class Editor {
   public async fetchDevSettings(): Promise<void> {
     const devSettings = await this.global.readJson(`games_files/${this.selectedGame}/${this.selectedMod}/dev/dev_settings.json`) as DevSettingsObject;
     this.devSettings.value = devSettings;
+
+    this.coreAssetFolders = [];
+    if (this.selectedMod && this.selectedMod !== '_core') {
+      const core = await this.global.readJson(`games_files/${this.selectedGame}/_core/dev/dev_settings.json`) as DevSettingsObject | null;
+      this.coreAssetFolders = core?.asset_folders ?? [`${this.selectedGame}/_core`];
+    }
+  }
+
+  /** Folders the narrowed file search covers: the mod's own, _core's (when editing a mod) and the active plugins'. */
+  public getSearchAssetFolders(): string[] {
+    const folders = new Set([...(this.devSettings.value?.asset_folders ?? []), ...this.coreAssetFolders]);
+    for (const plugin of this.pluginManager.plugins.value) {
+      for (const f of plugin.asset_folders ?? []) folders.add(f);
+    }
+    return [...folders];
   }
 
 
@@ -526,6 +554,7 @@ export class Editor {
     // this.saveState();
 
     await this.fetchDevSettings();
+    await this.filterPresets.load();
     this.clearFileCache();
 
 
@@ -534,17 +563,8 @@ export class Editor {
     //this.loadState();
     await this.pluginManager.initActivePlugins(this.state.selectedGame ?? '', this.state.selectedMod ?? '');
 
-    // Merge active plugin asset_folders into devSettings for file search
-    if (this.devSettings.value) {
-      const folders = new Set(this.devSettings.value.asset_folders || []);
-      for (const plugin of this.pluginManager.plugins.value) {
-        if (plugin.asset_folders && Array.isArray(plugin.asset_folders)) {
-          for (const f of plugin.asset_folders) folders.add(f);
-        }
-      }
-      (this.devSettings.value as any).asset_folders = [...folders];
-      this.clearFileCache();
-    }
+    // Plugins may add asset_folders, so the file cache built before they loaded is stale
+    this.clearFileCache();
 
     // Restore plugin-specific tab states after plugins are initialized
     this.restorePluginTabStates();
@@ -614,7 +634,11 @@ export class Editor {
     return true;
   }
 
-  public async setMainTab(tab: string): Promise<void> {
+  /**
+   * Switch the main tab. `subtab` jumps straight to that subtab instead of
+   * restoring the one last used on this tab (the main tab's hover menu passes it).
+   */
+  public async setMainTab(tab: string, subtab?: string): Promise<void> {
 
     if (!(await this.isProceedUnsavedChanges())) {
       return;
@@ -633,7 +657,7 @@ export class Editor {
     this.state.selectedMainTab = tab;
     this.saveState();
 
-    this.setSecondaryTab(this.state.selectedSubTabs[tab]);
+    this.setSecondaryTab(subtab ?? this.state.selectedSubTabs[tab]);
 
 
   }
@@ -901,6 +925,7 @@ export class Editor {
     }
 
     this.activeObject.value = file;
+    this.savedEntries = this.pluginManager.getSaveHooks(settings?.file).length ? Editor.entriesByKey(file) : new Map();
     // Stamp the dungeon captured at load start, not the live selection — a
     // stale load stamping the CURRENT selection is exactly what let the
     // stale-save guard pass while activeObject held another dungeon's config.
@@ -1124,6 +1149,12 @@ export class Editor {
       const newObjectWithDefaults = {}; // Create a temporary, non-reactive object
       // Populate this temporary object using the recursive function
       this.applyDefaultValuesRecursive(newObjectWithDefaults, this.schema.value);
+      // Encounters carry a per-editor default scale, chosen next to the map zoom
+      // and kept in localStorage. 1 stays implicit, like a hand-placed encounter.
+      if (this.secondaryTab === 'encounters') {
+        const scale = this.map?.defaultEncounterScale.value ?? 1;
+        if (scale !== 1) (newObjectWithDefaults as Record<string, any>).scale = scale;
+      }
       // Assign the fully populated object to the ref.
       // This triggers reactivity once, with the complete data.
       this.newItem.value = newObjectWithDefaults;
@@ -1137,30 +1168,91 @@ export class Editor {
 
   }
 
-  public async saveActiveObject(opts?: { silent?: boolean }) {
+  /**
+   * Save the active tab. Saves run one at a time: a plugin save hook awaits (an image read), its
+   * changes flag the object dirty and re-enable the Save button mid-save, and a second click must
+   * not write beside the first. Resolves true when the tab was written.
+   */
+  public async saveActiveObject(opts?: { silent?: boolean }): Promise<boolean> {
+    while (this.saving) await this.saving;
+    this.saving = this.saveActiveObjectNow(opts);
+    try {
+      return await this.saving;
+    } finally {
+      this.saving = null;
+    }
+  }
+
+  /** An entry's key in savedEntries: its uid (its id without one); a single-object tab is ''. */
+  private static entryKey(entry: any): string {
+    return String(entry?.uid ?? entry?.id ?? '');
+  }
+
+  /** Each entry of a tab's data as JSON, by entryKey. */
+  private static entriesByKey(obj: any): Map<string, string> {
+    const out = new Map<string, string>();
+    if (Array.isArray(obj)) {
+      for (const entry of obj) if (entry && typeof entry === 'object') out.set(Editor.entryKey(entry), JSON.stringify(entry));
+    } else if (obj && typeof obj === 'object') {
+      out.set('', JSON.stringify(obj));
+    }
+    return out;
+  }
+
+  /**
+   * Run the plugin save hooks of a tab's data file (plugin.json `editor_hooks`) on each entry of
+   * `obj` that differs from what is on disk — new, or changed by this save — so a hook runs once
+   * per changed entry whichever form or popup changed it. A failing hook is reported and the save
+   * goes on with the entry as the hook left it.
+   */
+  private async runSaveHooks(file: string, obj: any, onDisk: Map<string, string>, ctx: { game: string; mod: string; schema: Schema | null; coreObject: any }) {
+    const hooks = this.pluginManager.getSaveHooks(file);
+    if (!hooks.length) return;
+    const isArray = Array.isArray(obj);
+    for (const entry of isArray ? obj : [obj]) {
+      if (!entry || typeof entry !== 'object') continue;
+      const key = isArray ? Editor.entryKey(entry) : '';
+      if (onDisk.get(key) === JSON.stringify(entry)) continue;
+      const coreEntry = Array.isArray(ctx.coreObject) ? ctx.coreObject.find((c: any) => c?.id === entry.id) ?? null
+        : !isArray && ctx.coreObject && typeof ctx.coreObject === 'object' ? ctx.coreObject : null;
+      for (const hook of hooks) {
+        try {
+          await hook.beforeSave(entry, {
+            pluginId: hook.pluginId, tabId: file.split('/').pop() ?? '', file, game: ctx.game, mod: ctx.mod,
+            schema: ctx.schema, coreEntry, isNew: !onDisk.has(key),
+          });
+        } catch (e) {
+          console.error(`[Editor] Save hook ${hook.script} (plugin ${hook.pluginId}) failed on '${entry.id ?? key}':`, e);
+          this.global.addNotification(`Save hook of plugin '${hook.pluginId}' failed on '${entry.id ?? key}': ${(e as Error)?.message ?? e}`);
+        }
+      }
+    }
+  }
+
+  private async saveActiveObjectNow(opts?: { silent?: boolean }): Promise<boolean> {
     const silent = opts?.silent ?? false;
     // Check if this is the plugins tab
     const settings = this.getAllTabs().find(tab => tab.id === this.mainTab)?.subtabs.find(subtab => subtab.id === this.secondaryTab);
     if (settings?.isPlugins && this.selectedGame && this.selectedMod) {
       await this.savePluginsTab();
-      return;
+      return true;
     }
 
     if (!this.filePath) {
       console.error("[Editor] Cannot save: No file path defined.");
-      return;
+      return false;
     }
     if (!this.activeObject.value) {
       console.warn("[Editor] Nothing to save.");
-      return;
+      return false;
     }
     if (!this.hasUnsavedChanges.value) {
       console.warn("[Editor] No unsaved changes.");
-      return;
+      return false;
     }
 
     if (this.isLoadingActiveObject) {
-      return;
+      return false;
     }
 
     if (this.mainTab === 'dungeons' && this.activeObjectDungeon !== this.selectedDungeon) {
@@ -1170,7 +1262,7 @@ export class Editor {
           selected: this.selectedDungeon ?? '',
         });
       }
-      return;
+      return false;
     }
 
     if (this.isArray.value) {
@@ -1191,14 +1283,14 @@ export class Editor {
     const validationResult = this.validateItemId(null, true);
     if (!validationResult.isValid) {
       this.global.addNotificationId(validationResult.message ?? 'invalid_id');
-      return;
+      return false;
     }
     this.clearEmptyValues();
     if (this.create) {
       const validationCreate = this.validateItemId(this.activeObject.value.id, false);
       if (!validationCreate.isValid) {
         await showAlert(validationCreate.message ?? 'invalid_id', 'Invalid ID');
-        return;
+        return false;
       }
     }
 
@@ -1212,19 +1304,19 @@ export class Editor {
     if (this.create && this.global.isWebSite) {
       this.global.addNotification('Creating content is not available in the web demo. Download the app to edit games.');
       this.create = null;
-      return;
+      return false;
     }
 
     switch (this.create) {
       case 'game':
         await this.createGame();
-        return
+        return true;
       case 'mod':
         await this.createMod();
-        return;
+        return true;
       case 'dungeon':
         await this.createDungeon();
-        return;
+        return true;
     }
 
     if (this.mainTab === 'dungeons' && this.secondaryTab === 'config' && !this.create) {
@@ -1233,7 +1325,7 @@ export class Editor {
           id: this.activeObject.value?.id ?? '',
           folder: this.selectedDungeon ?? '',
         });
-        return;
+        return false;
       }
     }
 
@@ -1246,6 +1338,9 @@ export class Editor {
     const saveExternals = this.getExternalFileFields();
     const isDungeonConfigSave = this.mainTab === 'dungeons' && this.secondaryTab === 'config';
     const isManifestSave = this.mainTab === 'general' && this.secondaryTab === 'manifest';
+    const saveFile = settings?.file ?? '';
+    const saveOnDisk = this.savedEntries;
+    const saveHookCtx = { game: selected_game, mod: selected_mod, schema: this.schema.value, coreObject: this.coreObject.value };
 
     try {
 
@@ -1276,13 +1371,25 @@ export class Editor {
 
       if (this.global.isWebSite) {
         this.global.addNotification('Saving is not available in the web demo. Download the app to edit games.');
-        return;
+        return false;
       }
+
+      // Plugin save hooks (plugin.json `editor_hooks`) on the entries this save changes: after the
+      // validation and the sort, before the write, whichever form or popup made the change.
+      const hooked = this.pluginManager.getSaveHooks(saveFile).length > 0;
+      if (hooked) await this.runSaveHooks(saveFile, saveObject, saveOnDisk, saveHookCtx);
+      const written = hooked ? Editor.entriesByKey(saveObject) : null;
 
       console.log(`[Editor] Saving tab: ${this.secondaryTab}`);
       console.log(`[Editor] Saving active object to: ${saveFilePath}`);
       await this.writeActiveObjectWithExternals(saveFilePath, saveObject, saveExternals);
       this.hasUnsavedChanges.value = false;
+      if (written) {
+        saveOnDisk.clear();
+        written.forEach((json, key) => saveOnDisk.set(key, json));
+      }
+      // The Dev → Filter Presets tab edits the file the preset chips read from
+      if (settings?.file === FILTER_PRESETS_FILE) await this.filterPresets.load();
       if (isDungeonConfigSave) {
         //console.log("saving config");
         await this.saveConfig(selected_game, selected_mod, selected_dungeon, saveObject);
@@ -1293,9 +1400,11 @@ export class Editor {
       }
 
       if (!silent) this.global.addNotificationId("save_success");
+      return true;
     } catch (error) {
       console.error(`[Editor] Failed to save file: ${saveFilePath}`, error);
       this.global.addNotificationId("save_error");
+      return false;
     }
   }
 
@@ -1399,7 +1508,10 @@ export class Editor {
     // parse and save the content
     let content = savedConfig.dungeon_content;
 
-    let parsedContent = parseText(stripHighlights(content));
+    // `__meta` is editor-only authoring state. It must not reach the runtime:
+    // `^` is absent from parseText's brace-strip list, so an un-stripped room
+    // param becomes part of `room_id` and renames every id beneath it.
+    let parsedContent = parseText(stripMeta(stripHighlights(content)));
     let path = `games_files/${selected_game}/${selected_mod}/dungeons/${selected_dungeon}/content_parsed.json`;
 
 
@@ -1514,7 +1626,8 @@ export class Editor {
       const devSettingsPath = `games_files/${gameId}/_core/dev/dev_settings.json`;
       const defaultDevSettings = {
         uid: `${gameId}_core_dev_settings`,
-        asset_folders: [`${gameId}/_core`]
+        asset_folders: [`${gameId}/_core`],
+        narrow_file_search: true
       };
       console.log(`[WriteJson] ${devSettingsPath}`);
       await this.global.writeJson(devSettingsPath, defaultDevSettings);
@@ -1620,12 +1733,14 @@ export class Editor {
       if (devSettingsExists) {
         const devSettings = await this.global.readJson(devSettingsPath);
         devSettings.asset_folders = [`${gameId}/_core`];
+        devSettings.narrow_file_search = true;
         await this.global.writeJson(devSettingsPath, devSettings);
       } else {
         await this.global.createDir(`games_files/${gameId}/_core/dev`);
         await this.global.writeJson(devSettingsPath, {
           uid: `${gameId}_core_dev_settings`,
-          asset_folders: [`${gameId}/_core`]
+          asset_folders: [`${gameId}/_core`],
+          narrow_file_search: true
         });
       }
 
@@ -1677,7 +1792,8 @@ export class Editor {
       const devSettingsPath = `games_files/${gameId}/${modId}/dev/dev_settings.json`;
       const defaultDevSettings = {
         uid: `${gameId}_${modId}_dev_settings`,
-        asset_folders: [`${gameId}/${modId}`]
+        asset_folders: [`${gameId}/${modId}`],
+        narrow_file_search: true
       };
       console.log(`[WriteJson] ${devSettingsPath}`);
       await this.global.writeJson(devSettingsPath, defaultDevSettings);
@@ -1859,9 +1975,9 @@ export class Editor {
             //console.log(`[Editor File Search] Caching files for type: ${data.fileType}`);
             // Fetch all files (might need adjustment based on Global service capability)
             // Apply devSettings filters if narrow_file_search is enabled
-            // Convert Vue Proxy to plain array to avoid IPC serialization errors
-            const assetFolders = (this.devSettings.value?.narrow_file_search && this.devSettings.value?.asset_folders)
-              ? [...this.devSettings.value.asset_folders] // Spread to plain array
+            // getSearchAssetFolders returns a plain array, so it is safe to send over IPC
+            const assetFolders = this.devSettings.value?.narrow_file_search
+              ? this.getSearchAssetFolders()
               : undefined;
             const ignoreEngineAssets = this.devSettings.value?.ignore_engine_assets;
 

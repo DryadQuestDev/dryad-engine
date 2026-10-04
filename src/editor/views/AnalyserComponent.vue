@@ -135,12 +135,10 @@ watch(
 
 .warning {
   padding: 0.75rem;
-  border: 1px solid #ffc107;
-  /* Amber color for warning */
+  border: 1px solid var(--editor-fg-warning);
   border-radius: 4px;
-  background-color: #fff3cd;
-  /* Light amber background */
-  color: #856404;
+  background-color: var(--editor-tint-warning);
+  color: var(--editor-fg-warning);
   /* Dark amber text */
 }
 
@@ -149,9 +147,9 @@ watch(
   flex-direction: column;
   gap: 0.5rem;
   padding: 1rem;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--editor-border);
   border-radius: 6px;
-  background-color: #fff;
+  background-color: var(--editor-surface);
 }
 
 .block .warning {
@@ -169,9 +167,9 @@ watch(
 
 .item {
   padding: 0.5rem;
-  border: 1px solid #eee;
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
-  background-color: #fdfdfd;
+  background-color: var(--editor-surface-raised);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -190,12 +188,10 @@ watch(
 
 .success {
   padding: 0.75rem;
-  border: 1px solid #28a745;
-  /* Green color for success */
+  border: 1px solid var(--editor-fg-success);
   border-radius: 4px;
-  background-color: #d4edda;
-  /* Light green background */
-  color: #155724;
+  background-color: var(--editor-tint-success);
+  color: var(--editor-fg-success);
   /* Dark green text */
   font-weight: bold;
 }

@@ -1,0 +1,20 @@
+$dungeon_name
+My Dungeon Name
+^1
+@description
+Room1 Description
+
+@encounter1
+!choice1
+Test Encounter
+
+#encounter1~choice1
+1
+%
+Test interaction
+^2
+@description
+Room2 Description
+^3
+@description
+Room3 Description

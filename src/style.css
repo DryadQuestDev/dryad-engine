@@ -115,6 +115,102 @@ p {
 
 /* --- End Floating Tooltip Styles --- */
 
+/* EDITOR THEME TOKENS
+   The editor chrome reads these instead of literal grays so the dark-mode toggle only
+   has to flip one class on <html> (src/editor/editorTheme.ts). PrimeVue's own components
+   flip off the same `.editor-dark` selector via the theme options in main.ts.
+   The game and main menu never carry the class — they are dark by their own CSS. */
+:root {
+  --editor-surface: #ffffff;
+  --editor-surface-raised: #fafafa;
+  --editor-surface-sunken: #f4f4f5;
+  --editor-surface-hover: #e9e9e9;
+  --editor-surface-selected: #e0e0e0;
+  --editor-border: #d4d4d8;
+  --editor-border-strong: #a1a1aa;
+  --editor-text: #27272a;
+  --editor-text-muted: #5f6969;
+  --editor-text-faint: #8b93a3;
+  --editor-accent: #3b82f6;
+  --editor-accent-hover: #2563eb;
+  --editor-accent-contrast: #ffffff;
+  /* Status tints: pale washes in light mode, translucent glows in dark so they sit on
+     whatever surface they land on. Pair each with the matching --editor-fg-* text color. */
+  --editor-tint-info: #dbeafe;
+  --editor-tint-success: #dcfce7;
+  --editor-tint-warning: #fef3c7;
+  --editor-tint-danger: #fee2e2;
+  --editor-fg-info: #1d4ed8;
+  --editor-fg-success: #15803d;
+  --editor-fg-warning: #b45309;
+  --editor-fg-danger: #b91c1c;
+  --editor-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --editor-shadow-strong: 0 8px 24px rgba(0, 0, 0, 0.25);
+
+  /* Category inks — the hues the dungeon/content editors use to tell rooms from
+     encounters from scenes. Dark mode lifts each one so it still reads as itself. */
+  --editor-ink-purple: #9c27b0;
+  --editor-ink-orange: #e65100;
+  --editor-ink-amber: #c17900;
+  --editor-ink-blue: #1976d2;
+  --editor-ink-teal: #00838f;
+  --editor-ink-green: #2e7d32;
+  --editor-ink-red: #b71c1c;
+  --editor-ink-pink: #880e4f;
+  --editor-ink-brown: #6d4c41;
+  --editor-ink-violet: #6a1b9a;
+}
+
+/* Usually on <html> (the editor), but any element may carry it to theme just its own
+   subtree — the game's dev panel does that, since the game around it stays untouched. */
+.editor-dark {
+  /* Tells the browser to paint scrollbars, native inputs and form controls dark. */
+  color-scheme: dark;
+
+  --editor-surface: #18181b;
+  --editor-surface-raised: #202024;
+  --editor-surface-sunken: #121214;
+  --editor-surface-hover: #27272a;
+  --editor-surface-selected: #35353c;
+  --editor-border: #3f3f46;
+  --editor-border-strong: #52525b;
+  --editor-text: #e4e4e7;
+  --editor-text-muted: #a1a1aa;
+  --editor-text-faint: #8b93a3;
+  --editor-accent: #60a5fa;
+  --editor-accent-hover: #93c5fd;
+  --editor-accent-contrast: #09090b;
+  --editor-tint-info: rgba(96, 165, 250, 0.18);
+  --editor-tint-success: rgba(74, 222, 128, 0.16);
+  --editor-tint-warning: rgba(251, 191, 36, 0.16);
+  --editor-tint-danger: rgba(248, 113, 113, 0.16);
+  --editor-fg-info: #93c5fd;
+  --editor-fg-success: #86efac;
+  --editor-fg-warning: #fcd34d;
+  --editor-fg-danger: #fca5a5;
+  --editor-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --editor-shadow-strong: 0 10px 28px rgba(0, 0, 0, 0.7);
+
+  --editor-ink-purple: #ce93d8;
+  --editor-ink-orange: #ffb74d;
+  --editor-ink-amber: #ffd54f;
+  --editor-ink-blue: #64b5f6;
+  --editor-ink-teal: #4dd0e1;
+  --editor-ink-green: #81c784;
+  --editor-ink-red: #ef9a9a;
+  --editor-ink-pink: #f48fb1;
+  --editor-ink-brown: #bcaaa4;
+  --editor-ink-violet: #b39ddb;
+}
+
+/* The editor's own page surface. Scoped to the class so the game keeps its own
+   background when the editor is not on screen. */
+html.editor-dark,
+html.editor-dark body {
+  background-color: var(--editor-surface);
+  color: var(--editor-text);
+}
+
 /* EDITOR STYLES */
 .p-tooltip {
   z-index: 9999 !important;
@@ -166,19 +262,19 @@ p {
 }
 
 .dform label {
-  color: #5f6969;
+  color: var(--editor-text-muted);
 }
 
 .dform .drag-handle {
   cursor: move;
-  background-color: var(--p-surface-200);
+  background-color: var(--editor-surface-hover);
   /* Add a subtle default background */
   transition: background-color 0.2s;
   /* Smooth transition on hover */
 }
 
 .dform .drag-handle:not(:disabled):hover {
-  background-color: var(--p-surface-300);
+  background-color: var(--editor-surface-selected);
   /* Slightly darker background on hover */
 }
 
@@ -194,15 +290,13 @@ p {
 
 /* Accordion Custom Styles */
 .editor-document .p-accordion {
-  background-color: #f3f3f3;
-  /* User preferred color */
+  background-color: var(--editor-surface-sunken);
   padding: 0.75rem 1rem;
   /* Standardized padding */
-  border: 1px solid #686464;
-  /* Complementary border (PowderBlue) */
+  border: 1px solid var(--editor-border-strong);
   border-radius: 4px;
   text-decoration: none;
-  color: #333;
+  color: var(--editor-text);
   /* Ensure text is readable */
   transition: background-color 0.2s ease;
   margin-bottom: 15px;
@@ -216,14 +310,14 @@ p {
 
 /* Styles for Color Picker when no color is selected */
 .field-container .color-is-null .p-colorpicker-preview {
-  background-image: linear-gradient(45deg, #ccc 25%, transparent 25%),
-    linear-gradient(-45deg, #ccc 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #ccc 75%),
-    linear-gradient(-45deg, transparent 75%, #ccc 75%) !important;
+  background-image: linear-gradient(45deg, var(--editor-border-strong) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--editor-border-strong) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--editor-border-strong) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--editor-border-strong) 75%) !important;
   background-size: 8px 8px !important;
   background-position: 0 0, 0 4px, 4px -4px, -4px 0px !important;
   /* Ensure the text (e.g., 'ffffff') inside is less prominent */
-  color: #aaa !important;
+  color: var(--editor-text-faint) !important;
 }
 
 /* Custom PrimeVue STYLES */
@@ -412,10 +506,10 @@ p {
 }
 
 .output_code {
-  background-color: #f0f0f0;
+  background-color: var(--editor-surface-sunken);
   padding: 2px 4px;
   border-radius: 4px;
-  color: #333;
+  color: var(--editor-text);
 }
 
 /* GAME STYLES */
@@ -461,8 +555,34 @@ span.lore-link:focus-visible,
   filter: brightness(1.2);
 }
 
-.flash-content .special {
-  color: #17ff32;
+/* `[green]…[/green]` and the other named colour tags (utility/textTags.ts TEXT_COLORS): shades
+   that read on the dark text panels. Overridable from game/plugin CSS. */
+.text-green {
+  color: #4ade80;
+}
+
+.text-red {
+  color: #f87171;
+}
+
+.text-gold {
+  color: #fbbf24;
+}
+
+.text-pink {
+  color: #f472b6;
+}
+
+.text-purple {
+  color: #c084fc;
+}
+
+.text-blue {
+  color: #60a5fa;
+}
+
+.text-grey {
+  color: #9ca3af;
 }
 
 .flash-content .flash-small {
@@ -489,6 +609,167 @@ span.lore-link:focus-visible,
   color: #c95500;
   font-weight: bold;
 }
+
+/* TEXT EFFECTS START
+   `[shake]…[/shake]` and friends — resolveTextEffects wraps each visible character in .fx-char
+   with --i (its index in the run), so the keyframes below stagger per letter through negative
+   animation-delay. Overridable from game/plugin CSS. Add an effect: a `.fx-<name>` rule here
+   plus the name in utility/textTags.ts TEXT_EFFECTS. A game adds its own through
+   game.registerTextEffect. */
+.fx-word {
+  white-space: nowrap;
+}
+
+.fx-char {
+  display: inline-block;
+  white-space: pre;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.fx-shake {
+  animation-name: fx-shake;
+  animation-duration: 0.35s;
+  animation-timing-function: steps(1);
+  animation-delay: calc(var(--i, 0) * -0.137s);
+}
+
+@keyframes fx-shake {
+  0% { translate: 0 0; }
+  20% { translate: 1px -1px; }
+  40% { translate: -1px 1px; }
+  60% { translate: 1px 1px; }
+  80% { translate: -1px -1px; }
+  100% { translate: 0 0; }
+}
+
+.fx-wave {
+  animation-name: fx-wave;
+  animation-duration: 1.2s;
+  animation-delay: calc(var(--i, 0) * -0.08s);
+}
+
+@keyframes fx-wave {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -0.25em; }
+}
+
+.fx-bounce {
+  animation-name: fx-bounce;
+  animation-duration: 0.9s;
+  animation-delay: calc(var(--i, 0) * -0.06s);
+}
+
+@keyframes fx-bounce {
+  0%, 40%, 100% { translate: 0 0; animation-timing-function: ease-out; }
+  20% { translate: 0 -0.45em; animation-timing-function: ease-in; }
+}
+
+.fx-pulse {
+  animation-name: fx-pulse;
+  animation-duration: 1s;
+  animation-delay: calc(var(--i, 0) * -0.05s);
+}
+
+@keyframes fx-pulse {
+  0%, 100% { scale: 1; }
+  50% { scale: 1.18; }
+}
+
+.fx-rainbow {
+  animation-name: fx-rainbow;
+  animation-duration: 2s;
+  animation-timing-function: linear;
+  animation-delay: calc(var(--i, 0) * -0.1s);
+}
+
+@keyframes fx-rainbow {
+  0% { color: hsl(0 90% 62%); }
+  17% { color: hsl(60 90% 55%); }
+  33% { color: hsl(120 80% 55%); }
+  50% { color: hsl(180 90% 55%); }
+  67% { color: hsl(240 90% 68%); }
+  83% { color: hsl(300 90% 65%); }
+  100% { color: hsl(360 90% 62%); }
+}
+
+.fx-glow {
+  animation-name: fx-glow;
+  animation-duration: 1.6s;
+  animation-delay: calc(var(--i, 0) * -0.07s);
+}
+
+@keyframes fx-glow {
+  0%, 100% { text-shadow: 0 0 2px currentColor; filter: brightness(1); }
+  50% { text-shadow: 0 0 6px currentColor, 0 0 14px currentColor; filter: brightness(1.35); }
+}
+
+.fx-spooky {
+  animation-name: fx-spooky;
+  animation-duration: 3.2s;
+  animation-delay: calc(var(--i, 0) * -0.23s);
+  text-shadow: 0 0 6px rgba(120, 255, 160, 0.7);
+}
+
+@keyframes fx-spooky {
+  0%, 100% { translate: 0 0; rotate: 0deg; opacity: 1; filter: blur(0); }
+  25% { translate: 0 -0.12em; rotate: -3deg; opacity: 0.55; filter: blur(0.4px); }
+  50% { translate: 0 0.06em; rotate: 2deg; opacity: 0.9; filter: blur(0); }
+  75% { translate: 0 -0.08em; rotate: -1deg; opacity: 0.4; filter: blur(0.6px); }
+}
+
+.fx-flicker {
+  animation-name: fx-flicker;
+  animation-duration: 2.4s;
+  animation-timing-function: steps(1);
+  animation-delay: calc(var(--i, 0) * -0.31s);
+}
+
+@keyframes fx-flicker {
+  0%, 100% { opacity: 1; }
+  7% { opacity: 0.25; }
+  9% { opacity: 1; }
+  22% { opacity: 0.85; }
+  26% { opacity: 0.15; }
+  29% { opacity: 1; }
+  58% { opacity: 0.6; }
+  61% { opacity: 1; }
+  80% { opacity: 0.3; }
+  83% { opacity: 1; }
+}
+
+.fx-blur {
+  filter: blur(1.5px);
+}
+
+.fx-glitch {
+  animation-name: fx-glitch;
+  animation-duration: 1.6s;
+  animation-timing-function: steps(1);
+  animation-delay: calc(var(--i, 0) * -0.21s);
+}
+
+@keyframes fx-glitch {
+  0%, 100% { translate: 0 0; skew: 0deg; text-shadow: none; }
+  6% { translate: 1px 0; skew: -12deg; text-shadow: -2px 0 #ff2bd6, 2px 0 #2bf0ff; }
+  9% { translate: -1px 0; skew: 8deg; text-shadow: 2px 0 #ff2bd6, -2px 0 #2bf0ff; }
+  12% { translate: 0 0; skew: 0deg; text-shadow: none; }
+  61% { translate: -2px 0; skew: 10deg; text-shadow: 2px 0 #ff2bd6, -2px 0 #2bf0ff; }
+  64% { translate: 0 0; skew: 0deg; text-shadow: none; }
+}
+
+/* The invisible layout ghost and the backlog carry the same spans; neither should burn frames. */
+.dialogue-ghost .fx-char,
+.log-text .fx-char {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-char {
+    animation: none;
+  }
+}
+/* TEXT EFFECTS END */
 
 .game-body-content a {
   color: #5fb3ff;
@@ -601,6 +882,14 @@ span.lore-link:focus-visible,
   :root {
     --ui-tray-reserved-left: 185px;
   }
+}
+
+/* The overlay-navigation-side column: same strip in every dungeon type, so a game's side panel
+   sits in one place. Global because the column is teleported to .overlay-wrapper while the event
+   layer that offsets itself past it lives in .overlay. */
+:root {
+  --overlay-side-width: 500px;
+  --overlay-side-gap: 20px;
 }
 
 /* Item Slot Shared Styles */

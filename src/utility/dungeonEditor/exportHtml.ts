@@ -1,4 +1,5 @@
 import type { Block, Document, EncounterBlock, SceneBlock, TemplateBlock } from './ast';
+import { isMetaLayout, readMeta, stripMeta, visibleParams } from './meta';
 
 const HIGHLIGHT_SPAN_RE = /<span\s+class=["']hl-[\w-]+["']>([\s\S]*?)<\/span>/gi;
 
@@ -219,8 +220,17 @@ function headerCellStyle(bg: string): string {
   return `background-color:${bg};padding:4px 8px`;
 }
 
-function tableOpen(): string {
-  return '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;border:1px solid #ccc;margin:4px 0;width:500px;table-layout:fixed">';
+const TABLE_WIDTH = 500;
+/**
+ * Width of a side-by-side lane. A pasted document cannot scroll the way the
+ * editor's strip does, so the table grows with the lane count instead of
+ * dividing the stock width — at a third of 500px the prose came out as a
+ * column of two or three words per line.
+ */
+const LANE_WIDTH = 250;
+
+function tableOpen(width: number = TABLE_WIDTH): string {
+  return `<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;border:1px solid #ccc;margin:4px 0;width:${width}px;table-layout:fixed">`;
 }
 
 function h3(text: string): string {
@@ -250,7 +260,7 @@ function encounterBg(id: string): string {
 }
 
 function encounterToHtml(block: EncounterBlock): string {
-  const header = highlightTokens('@' + block.id + (block.paramsRaw ?? ''));
+  const header = highlightTokens('@' + block.id + visibleParams(block.paramsRaw));
   const rows: string[] = [];
   rows.push(`<tr><td style="${headerCellStyle(encounterBg(block.id))}">${h3(header)}</td></tr>`);
 
@@ -259,7 +269,7 @@ function encounterToHtml(block: EncounterBlock): string {
     if (row.kind === 'choice') {
       const choice = '!' + row.name
         + (row.value !== undefined ? '<' + row.value + '>' : '')
-        + (row.paramsRaw ?? '');
+        + visibleParams(row.paramsRaw);
       rows.push(`<tr><td style="font-weight:bold;padding:4px 8px">${highlightTokens(choice)}</td></tr>`);
     } else if (row.kind === 'text') {
       textParts.push(row.text);
@@ -275,21 +285,40 @@ function encounterToHtml(block: EncounterBlock): string {
 }
 
 function sceneToHtml(block: SceneBlock): string {
-  const header = highlightTokens('#' + block.id + (block.paramsRaw ?? ''));
+  const header = highlightTokens('#' + block.id + visibleParams(block.paramsRaw));
   const parts: string[] = [];
   parts.push(`${tableOpen()}<tr><td style="${headerCellStyle(COLOR_SCENE)}">${h3(header)}</td></tr></table>`);
   block.rows.forEach((row, idx) => {
     const n = idx + 1;
-    // Top-to-bottom layout: one <tr> for the row number, then one <tr> per
-    // column underneath (mirrors the Apps-Script `sceneRow` template).
-    const trs: string[] = [];
-    trs.push(`<tr><td style="text-align:center;padding:4px">${n}</td></tr>`);
-    for (const col of row.columns) {
+    const cells = row.columns.map((col) => {
       const prefix = col.kind === '%'
         ? '%'
-        : '~' + (col.name ?? '') + (col.paramsRaw ?? '');
+        : '~' + (col.name ?? '') + visibleParams(col.paramsRaw);
       const body = col.content ? `<br>${cellContent(col.content)}` : '';
-      trs.push(`<tr><td style="padding:4px 8px"><strong>${highlightTokens(prefix)}</strong>${body}</td></tr>`);
+      return `<strong>${highlightTokens(prefix)}</strong>${body}`;
+    });
+
+    // Side-by-side, the way the row reads in the editor: one <tr> of cells
+    // with the row number spanning them. This is the default — only a row
+    // the author flagged `layout:"rows"` falls through to the stacked path,
+    // along with any single-column row, which renders identically either way.
+    if (!isMetaLayout(readMeta(row.paramsRaw)?.layout) && cells.length > 1) {
+      const width = Math.max(TABLE_WIDTH, LANE_WIDTH * cells.length);
+      const tds = cells
+        .map((cell) => `<td style="padding:4px 8px;vertical-align:top">${cell}</td>`)
+        .join('');
+      parts.push(
+        `${tableOpen(width)}<tr><td colspan="${cells.length}" style="text-align:center;padding:4px">${n}</td></tr>`
+        + `<tr>${tds}</tr></table>`,
+      );
+      return;
+    }
+
+    // Top-to-bottom: one <tr> for the row number, then one <tr> per column
+    // underneath (mirrors the Apps-Script `sceneRow` template).
+    const trs: string[] = [`<tr><td style="text-align:center;padding:4px">${n}</td></tr>`];
+    for (const cell of cells) {
+      trs.push(`<tr><td style="padding:4px 8px">${cell}</td></tr>`);
     }
     parts.push(`${tableOpen()}${trs.join('')}</table>`);
   });
@@ -297,7 +326,7 @@ function sceneToHtml(block: SceneBlock): string {
 }
 
 function templateToHtml(block: TemplateBlock): string {
-  const header = highlightTokens('$' + block.id + (block.paramsRaw ?? ''));
+  const header = highlightTokens('$' + block.id + visibleParams(block.paramsRaw));
   const rows: string[] = [];
   rows.push(`<tr><td style="${headerCellStyle(templateBg(block.id))}">${h3(header)}</td></tr>`);
   const text = block.rows
@@ -310,7 +339,7 @@ function templateToHtml(block: TemplateBlock): string {
 }
 
 function roomToHtml(block: { id: string; paramsRaw?: string }): string {
-  const header = esc('^' + block.id + (block.paramsRaw ?? ''));
+  const header = esc('^' + block.id + visibleParams(block.paramsRaw));
   return `<h2 style="font-weight:bold;margin:12px 0 4px 0">${header}</h2>`;
 }
 
@@ -329,5 +358,7 @@ export function exportDocumentAsHtml(doc: Document): string {
 }
 
 export function exportDocumentAsText(serialized: string): string {
-  return stripHighlightSpans(serialized);
+  // `__meta` is editor bookkeeping, not script — the same reason the params
+  // box hides it. Stripped in the same order as the save path.
+  return stripMeta(stripHighlightSpans(serialized));
 }

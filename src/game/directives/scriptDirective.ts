@@ -29,9 +29,11 @@ import ItemCard from '../views/progression/ItemCard.vue';
  *   <div v-script="{ html, resolver: false }" />                          // already resolved upstream
  *   <div v-script="{ html, navMode: true, onNavigate: handler }" />       // encyclopedia
  *   <div v-script="{ html, disabled: typingAnim.isAnimating.value }" />   // suppress hover/click
+ *   <div v-script="{ html: null }" />                                     // host owns innerHTML; delegation only
  */
 export type ScriptDirectiveValue = string | {
-    html: string;
+    /** The HTML to render. `null`: the host writes the element's content itself and only wants the lore-link delegation. */
+    html: string | null;
     resolver?: boolean;
     /**
      * Resolve context passed through to `resolveString` as its third argument. Use this
@@ -53,7 +55,7 @@ const HANDLERS = Symbol('de-script-handlers');
 const LAST_HTML = Symbol('de-script-last-html');
 
 type NormalizedOpts = {
-    html: string;
+    html: string | null;
     resolver: boolean;
     context?: Record<string, any>;
     navMode: boolean;
@@ -74,7 +76,7 @@ registerLoreKindCard('status', {
     component: markRaw(StatusCard),
     mapProps: (id, ctx) => {
         const character = ctx?.character as { id: string } | undefined;
-        return { statusId: id, characterId: character?.id };
+        return { statusId: id, characterId: character?.id, sourceItem: ctx?.item };
     },
     closable: true,
 });
@@ -90,7 +92,7 @@ function normalize(value: ScriptDirectiveValue | undefined): NormalizedOpts {
         return { html: value, resolver: true, navMode: false, disabled: false };
     }
     return {
-        html: value?.html ?? '',
+        html: value?.html === null ? null : (value?.html ?? ''),
         resolver: value?.resolver !== false,
         context: value?.context,
         navMode: value?.navMode === true,
@@ -102,6 +104,10 @@ function normalize(value: ScriptDirectiveValue | undefined): NormalizedOpts {
 function applyBinding(el: HTMLElement, value: ScriptDirectiveValue | undefined) {
     const opts = normalize(value);
     (el as any)[OPTS] = opts;
+
+    if (opts.html === null) {
+        return;
+    }
 
     if (!opts.resolver && (el as any)[LAST_HTML] === opts.html) {
         return;

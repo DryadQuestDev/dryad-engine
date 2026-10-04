@@ -10,6 +10,7 @@ import Button from 'primevue/button';
 import Slider from 'primevue/slider';
 import Select from 'primevue/select';
 import MultiSelect from 'primevue/multiselect';
+import Checkbox from 'primevue/checkbox';
 
 const props = defineProps<EditorCustomPopupProps>();
 const emit = defineEmits<{ 'update:item': [item: any] }>();
@@ -113,6 +114,27 @@ onMounted(() => {
   if (localItem.value.blur === undefined && coreItem.value?.blur !== undefined) {
     localItem.value.blur = coreItem.value.blur;
   }
+  if (localItem.value.brightness === undefined && coreItem.value?.brightness !== undefined) {
+    localItem.value.brightness = coreItem.value.brightness;
+  }
+  if (localItem.value.contrast === undefined && coreItem.value?.contrast !== undefined) {
+    localItem.value.contrast = coreItem.value.contrast;
+  }
+  if (localItem.value.saturate === undefined && coreItem.value?.saturate !== undefined) {
+    localItem.value.saturate = coreItem.value.saturate;
+  }
+  if (localItem.value.sepia === undefined && coreItem.value?.sepia !== undefined) {
+    localItem.value.sepia = coreItem.value.sepia;
+  }
+  if (localItem.value.hue === undefined && coreItem.value?.hue !== undefined) {
+    localItem.value.hue = coreItem.value.hue;
+  }
+  if (localItem.value.tween === undefined && coreItem.value?.tween !== undefined) {
+    localItem.value.tween = coreItem.value.tween;
+  }
+  if (localItem.value.timescale === undefined && coreItem.value?.timescale !== undefined) {
+    localItem.value.timescale = coreItem.value.timescale;
+  }
 
   // Initialize enter animation properties with core defaults
   if (localItem.value.enter_duration === undefined && coreItem.value?.enter_duration !== undefined) {
@@ -139,7 +161,9 @@ const enterOptions = AssetSchema.enter.options;
 const exitOptions = AssetSchema.exit.options;
 const idleOptions = AssetSchema.idle.options;
 const easeOptions = AssetSchema.enter_ease.options;
+const tweenEaseOptions = AssetSchema.tween_ease.options;
 const fitModeOptions = AssetSchema.fit_mode.options;
+const aspectFitOptions = AssetSchema.aspect_fit.options;
 
 // Animation handlers - use component key to trigger remount
 function handlePlayEnter() {
@@ -290,6 +314,15 @@ onBeforeUnmount(() => {
 
       <!-- Right: Controls Panel -->
       <div class="controls-section">
+        <div class="control-group identity">
+          <h4><code>{{ localItem.id }}</code><span v-if="localItem.gallery?.entity_name" class="identity-name">{{ localItem.gallery.entity_name }}</span></h4>
+          <p class="hint">
+            Everything below is the asset's default. Content can override any field live, transitions and
+            filters included: <code>{asset: "{{ localItem.id }}(x=30, blur=2, enter_delay=1.5)"}</code>.
+            On an asset already on screen the same line updates it in place, gliding over its tween.
+          </p>
+        </div>
+
         <!-- Spine Animation & Skins Picker -->
         <div class="control-group" v-if="isSpineAsset && spineStats">
           <h4>Spine Playback</h4>
@@ -298,17 +331,37 @@ onBeforeUnmount(() => {
             <span><span class="count-label">Slots</span> {{ spineStats.slots }}</span>
           </div>
           <div class="control-item">
-            <label>Animation</label>
+            <label>Animation <code class="prop-key">animation</code></label>
             <Select :modelValue="localItem.animation ?? null"
               @update:modelValue="(v) => { localItem.animation = v ?? undefined; }" :options="spineStats.animations"
               placeholder="No animation" showClear class="animation-dropdown" />
           </div>
           <div class="control-item">
-            <label>Skins</label>
+            <label>Skins <code class="prop-key">skins</code></label>
             <MultiSelect :modelValue="localItem.skins ?? []"
               @update:modelValue="(v) => { localItem.skins = (v as string[]).length > 0 ? v as string[] : undefined; }"
               :options="spineStats.skins" placeholder="Default skin" :showToggleAll="false" display="chip"
               class="animation-dropdown" />
+          </div>
+          <div class="control-item checkbox-item">
+            <Checkbox :modelValue="localItem.loop ?? true"
+              @update:modelValue="(v) => { localItem.loop = v; }" inputId="spineLoop" binary />
+            <label for="spineLoop">Loop animation
+              <span v-if="coreItem && localItem.loop === undefined" class="core-value-indicator">
+                (core: {{ coreItem.loop ?? true }})
+              </span>
+             <code class="prop-key">loop</code></label>
+          </div>
+          <div class="control-item-with-core">
+            <div class="control-label-row">
+              <label>Timescale: {{ (localItem.timescale ?? 1).toFixed(2) }}x <code class="prop-key">timescale</code></label>
+              <span v-if="coreItem && localItem.timescale === undefined" class="core-value-indicator">
+                (core: {{ (coreItem.timescale ?? 1).toFixed(2) }}x)
+              </span>
+            </div>
+            <Slider :modelValue="localItem.timescale ?? 1"
+              @update:modelValue="(v) => localItem.timescale = Array.isArray(v) ? v[0] : v" :min="0" :max="3"
+              :step="0.05" />
           </div>
         </div>
 
@@ -330,6 +383,15 @@ onBeforeUnmount(() => {
             <Slider :modelValue="spineViewport.zoom" @update:modelValue="(v) => updateViewport('zoom', v)" :min="0.1"
               :max="5" :step="0.01" />
           </div>
+          <div class="control-item">
+            <label>Aspect Fit <code class="prop-key">aspect_fit</code></label>
+            <Select :modelValue="localItem.aspect_fit ?? null"
+              @update:modelValue="(v) => { localItem.aspect_fit = v ?? undefined; }" :options="aspectFitOptions"
+              placeholder="contain (default)" showClear class="animation-dropdown" />
+            <span class="control-note">Off-16:9 screens only. Contain letterboxes the frame, cover grows it to fill
+              (crops top/bottom), full matches the screen (can expose blank space beside the art). This preview is
+              locked to 16:9, where all three are identical.</span>
+          </div>
         </div>
 
         <!-- Animation Controls -->
@@ -339,7 +401,7 @@ onBeforeUnmount(() => {
             <!-- Enter Animation -->
             <div class="animation-group">
               <div class="animation-select-item">
-                <label><strong>Enter:</strong></label>
+                <label><strong>Enter:</strong> <code class="prop-key">enter</code></label>
                 <Select v-model="localItem.enter" :options="enterOptions" placeholder="Select enter animation"
                   class="animation-dropdown" />
               </div>
@@ -348,7 +410,7 @@ onBeforeUnmount(() => {
               <div v-if="localItem.enter && localItem.enter !== 'none'" class="animation-properties">
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Duration: {{ (localItem.enter_duration ?? 0.5).toFixed(2) }}s</label>
+                    <label>Duration: {{ (localItem.enter_duration ?? 0.5).toFixed(2) }}s <code class="prop-key">enter_duration</code></label>
                     <span v-if="coreItem && localItem.enter_duration === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.enter_duration ?? 0.5).toFixed(2) }}s)
                     </span>
@@ -359,7 +421,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Delay: {{ (localItem.enter_delay ?? 0).toFixed(2) }}s</label>
+                    <label>Delay: {{ (localItem.enter_delay ?? 0).toFixed(2) }}s <code class="prop-key">enter_delay</code></label>
                     <span v-if="coreItem && localItem.enter_delay === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.enter_delay ?? 0).toFixed(2) }}s)
                     </span>
@@ -373,7 +435,7 @@ onBeforeUnmount(() => {
                     <span v-if="coreItem && localItem.enter_ease === undefined" class="core-value-indicator">
                       (core: {{ coreItem.enter_ease ?? 'power2' }})
                     </span>
-                  </label>
+                   <code class="prop-key">enter_ease</code></label>
                   <Select v-model="localItem.enter_ease" :options="easeOptions" placeholder="Select ease"
                     class="animation-dropdown" />
                 </div>
@@ -383,7 +445,7 @@ onBeforeUnmount(() => {
             <!-- Exit Animation -->
             <div class="animation-group">
               <div class="animation-select-item">
-                <label><strong>Exit:</strong></label>
+                <label><strong>Exit:</strong> <code class="prop-key">exit</code></label>
                 <Select v-model="localItem.exit" :options="exitOptions" placeholder="Select exit animation"
                   class="animation-dropdown" />
               </div>
@@ -392,7 +454,7 @@ onBeforeUnmount(() => {
               <div v-if="localItem.exit && localItem.exit !== 'none'" class="animation-properties">
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Duration: {{ (localItem.exit_duration ?? 0.5).toFixed(2) }}s</label>
+                    <label>Duration: {{ (localItem.exit_duration ?? 0.5).toFixed(2) }}s <code class="prop-key">exit_duration</code></label>
                     <span v-if="coreItem && localItem.exit_duration === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.exit_duration ?? 0.5).toFixed(2) }}s)
                     </span>
@@ -406,7 +468,7 @@ onBeforeUnmount(() => {
                     <span v-if="coreItem && localItem.exit_ease === undefined" class="core-value-indicator">
                       (core: {{ coreItem.exit_ease ?? 'power2' }})
                     </span>
-                  </label>
+                   <code class="prop-key">exit_ease</code></label>
                   <Select v-model="localItem.exit_ease" :options="easeOptions" placeholder="Select ease"
                     class="animation-dropdown" />
                 </div>
@@ -416,7 +478,7 @@ onBeforeUnmount(() => {
             <!-- Idle Animation -->
             <div class="animation-group">
               <div class="animation-select-item">
-                <label><strong>Idle:</strong></label>
+                <label><strong>Idle:</strong> <code class="prop-key">idle</code></label>
                 <Select v-model="localItem.idle" :options="idleOptions" placeholder="Select idle animation"
                   class="animation-dropdown" />
               </div>
@@ -428,7 +490,7 @@ onBeforeUnmount(() => {
               <div v-if="localItem.idle && localItem.idle !== 'none'" class="animation-properties">
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Duration: {{ (localItem.idle_duration ?? 3).toFixed(2) }}s</label>
+                    <label>Duration: {{ (localItem.idle_duration ?? 3).toFixed(2) }}s <code class="prop-key">idle_duration</code></label>
                     <span v-if="coreItem && localItem.idle_duration === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.idle_duration ?? 3).toFixed(2) }}s)
                     </span>
@@ -439,7 +501,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Intensity: {{ (localItem.idle_intensity ?? 0.5).toFixed(2) }}</label>
+                    <label>Intensity: {{ (localItem.idle_intensity ?? 0.5).toFixed(2) }} <code class="prop-key">idle_intensity</code></label>
                     <span v-if="coreItem && localItem.idle_intensity === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.idle_intensity ?? 0.5).toFixed(2) }})
                     </span>
@@ -458,7 +520,7 @@ onBeforeUnmount(() => {
           <h4>Position</h4>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>X: {{ animatedX.toFixed(1) }}%</label>
+              <label>X: {{ animatedX.toFixed(1) }}% <code class="prop-key">x</code></label>
               <span v-if="coreItem && localItem.x === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.x ?? 0).toFixed(1) }}%)
               </span>
@@ -469,7 +531,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Y: {{ animatedY.toFixed(1) }}%</label>
+              <label>Y: {{ animatedY.toFixed(1) }}% <code class="prop-key">y</code></label>
               <span v-if="coreItem && localItem.y === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.y ?? 0).toFixed(1) }}%)
               </span>
@@ -480,7 +542,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Z: {{ localItem.z ?? 0 }}</label>
+              <label>Z: {{ localItem.z ?? 0 }} <code class="prop-key">z</code></label>
               <span v-if="coreItem && localItem.z === undefined" class="core-value-indicator">
                 (core: {{ coreItem.z ?? 0 }})
               </span>
@@ -498,13 +560,13 @@ onBeforeUnmount(() => {
               <span v-if="coreItem && localItem.fit_mode === undefined" class="core-value-indicator">
                 (core: {{ coreItem.fit_mode ?? 'none' }})
               </span>
-            </label>
+             <code class="prop-key">fit_mode</code></label>
             <Select v-model="localItem.fit_mode" :options="fitModeOptions" placeholder="Select fit mode"
               class="animation-dropdown" />
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Scale: {{ localItem.scale?.toFixed(2) ?? 1 }}</label>
+              <label>Scale: {{ localItem.scale?.toFixed(2) ?? 1 }} <code class="prop-key">scale</code></label>
               <span v-if="coreItem && localItem.scale === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.scale ?? 1).toFixed(2) }})
               </span>
@@ -515,7 +577,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>X Scale: {{ localItem.xscale?.toFixed(2) ?? (localItem.scale ?? 1) }}</label>
+              <label>X Scale: {{ localItem.xscale?.toFixed(2) ?? (localItem.scale ?? 1) }} <code class="prop-key">xscale</code></label>
               <span v-if="coreItem && localItem.xscale === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.xscale ?? coreItem.scale ?? 1).toFixed(2) }})
               </span>
@@ -526,7 +588,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Y Scale: {{ localItem.yscale?.toFixed(2) ?? (localItem.scale ?? 1) }}</label>
+              <label>Y Scale: {{ localItem.yscale?.toFixed(2) ?? (localItem.scale ?? 1) }} <code class="prop-key">yscale</code></label>
               <span v-if="coreItem && localItem.yscale === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.yscale ?? coreItem.scale ?? 1).toFixed(2) }})
               </span>
@@ -537,7 +599,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Rotation: {{ localItem.rotation ?? 0 }}°</label>
+              <label>Rotation: {{ localItem.rotation ?? 0 }}° <code class="prop-key">rotation</code></label>
               <span v-if="coreItem && localItem.rotation === undefined" class="core-value-indicator">
                 (core: {{ coreItem.rotation ?? 0 }}°)
               </span>
@@ -548,7 +610,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Alpha: {{ localItem.alpha?.toFixed(2) ?? 1 }}</label>
+              <label>Alpha: {{ localItem.alpha?.toFixed(2) ?? 1 }} <code class="prop-key">alpha</code></label>
               <span v-if="coreItem && localItem.alpha === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.alpha ?? 1).toFixed(2) }})
               </span>
@@ -564,7 +626,7 @@ onBeforeUnmount(() => {
           <h4>Filters</h4>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Blur: {{ localItem.blur ?? 0 }}px</label>
+              <label>Blur: {{ localItem.blur ?? 0 }}px <code class="prop-key">blur</code></label>
               <span v-if="coreItem && localItem.blur === undefined" class="core-value-indicator">
                 (core: {{ coreItem.blur ?? 0 }}px)
               </span>
@@ -572,6 +634,90 @@ onBeforeUnmount(() => {
             <Slider :modelValue="localItem.blur ?? 0"
               @update:modelValue="(v) => localItem.blur = Array.isArray(v) ? v[0] : v" :min="0" :max="20" :step="1" />
           </div>
+          <div class="control-item-with-core">
+            <div class="control-label-row">
+              <label>Brightness: {{ (localItem.brightness ?? 1).toFixed(2) }} <code class="prop-key">brightness</code></label>
+              <span v-if="coreItem && localItem.brightness === undefined" class="core-value-indicator">
+                (core: {{ (coreItem.brightness ?? 1).toFixed(2) }})
+              </span>
+            </div>
+            <Slider :modelValue="localItem.brightness ?? 1"
+              @update:modelValue="(v) => localItem.brightness = Array.isArray(v) ? v[0] : v" :min="0" :max="2"
+              :step="0.01" />
+          </div>
+          <div class="control-item-with-core">
+            <div class="control-label-row">
+              <label>Contrast: {{ (localItem.contrast ?? 1).toFixed(2) }} <code class="prop-key">contrast</code></label>
+              <span v-if="coreItem && localItem.contrast === undefined" class="core-value-indicator">
+                (core: {{ (coreItem.contrast ?? 1).toFixed(2) }})
+              </span>
+            </div>
+            <Slider :modelValue="localItem.contrast ?? 1"
+              @update:modelValue="(v) => localItem.contrast = Array.isArray(v) ? v[0] : v" :min="0" :max="2"
+              :step="0.01" />
+          </div>
+          <div class="control-item-with-core">
+            <div class="control-label-row">
+              <label>Saturate: {{ (localItem.saturate ?? 1).toFixed(2) }} <code class="prop-key">saturate</code></label>
+              <span v-if="coreItem && localItem.saturate === undefined" class="core-value-indicator">
+                (core: {{ (coreItem.saturate ?? 1).toFixed(2) }})
+              </span>
+            </div>
+            <Slider :modelValue="localItem.saturate ?? 1"
+              @update:modelValue="(v) => localItem.saturate = Array.isArray(v) ? v[0] : v" :min="0" :max="2"
+              :step="0.01" />
+          </div>
+          <div class="control-item-with-core">
+            <div class="control-label-row">
+              <label>Sepia: {{ (localItem.sepia ?? 0).toFixed(2) }} <code class="prop-key">sepia</code></label>
+              <span v-if="coreItem && localItem.sepia === undefined" class="core-value-indicator">
+                (core: {{ (coreItem.sepia ?? 0).toFixed(2) }})
+              </span>
+            </div>
+            <Slider :modelValue="localItem.sepia ?? 0"
+              @update:modelValue="(v) => localItem.sepia = Array.isArray(v) ? v[0] : v" :min="0" :max="1"
+              :step="0.01" />
+          </div>
+          <div class="control-item-with-core">
+            <div class="control-label-row">
+              <label>Hue: {{ localItem.hue ?? 0 }}° <code class="prop-key">hue</code></label>
+              <span v-if="coreItem && localItem.hue === undefined" class="core-value-indicator">
+                (core: {{ coreItem.hue ?? 0 }}°)
+              </span>
+            </div>
+            <Slider :modelValue="localItem.hue ?? 0"
+              @update:modelValue="(v) => localItem.hue = Array.isArray(v) ? v[0] : v" :min="-180" :max="180"
+              :step="1" />
+          </div>
+        </div>
+
+        <!-- Tween Controls -->
+        <div class="control-group" v-if="isImageAsset || isVideoAsset">
+          <h4>Re-stage Tween</h4>
+          <div class="control-item-with-core">
+            <div class="control-label-row">
+              <label>Tween: {{ (localItem.tween ?? 0.5).toFixed(2) }}s <code class="prop-key">tween</code></label>
+              <span v-if="coreItem && localItem.tween === undefined" class="core-value-indicator">
+                (core: {{ (coreItem.tween ?? 0.5).toFixed(2) }}s)
+              </span>
+            </div>
+            <Slider :modelValue="localItem.tween ?? 0.5"
+              @update:modelValue="(v) => localItem.tween = Array.isArray(v) ? v[0] : v" :min="0" :max="5"
+              :step="0.1" />
+          </div>
+          <div class="control-item">
+            <label>Tween Ease:
+              <span v-if="coreItem && localItem.tween_ease === undefined" class="core-value-indicator">
+                (core: {{ coreItem.tween_ease ?? 'power2.out' }})
+              </span>
+             <code class="prop-key">tween_ease</code></label>
+            <Select :modelValue="localItem.tween_ease ?? null"
+              @update:modelValue="(v) => { localItem.tween_ease = v ?? undefined; }" :options="tweenEaseOptions"
+              placeholder="power2.out (default)" showClear class="animation-dropdown" />
+          </div>
+          <span class="control-note">How an already-staged asset glides to new values when re-staged with
+            changes, e.g. <code>bg(scale = 2)</code>. Covers position, scale, rotation, alpha and every filter; z and
+            fit mode snap. 0 = snap. The sliders above glide the preview the same way.</span>
         </div>
 
       </div>
@@ -610,16 +756,16 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem;
-  background-color: #f5f5f5;
+  background-color: var(--editor-surface-sunken);
   border-radius: 4px 4px 0 0;
-  border: 1px solid #ddd;
+  border: 1px solid var(--editor-border);
   border-bottom: none;
 }
 
 .preview-header h3 {
   margin: 0;
   font-size: 1rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .preview-canvas-container {
@@ -627,7 +773,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
   background-color: #2a2a2a;
-  border: 1px solid #ddd;
+  border: 1px solid var(--editor-border);
   border-radius: 0 0 4px 4px;
   container-type: size;
   display: flex;
@@ -694,7 +840,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 100%;
   height: 100%;
-  color: #999;
+  color: var(--editor-text-faint);
   font-size: 1rem;
 }
 
@@ -707,8 +853,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 1.5rem;
   padding: 1rem;
-  background-color: #f9f9f9;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-raised);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -720,24 +866,52 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
 }
 
+.control-group.identity h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.identity-name {
+  font-weight: normal;
+  color: var(--editor-text-muted);
+}
+
+.hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--editor-text-muted);
+  font-style: italic;
+}
+
+.hint code,
+.identity h4 code {
+  font-style: normal;
+  font-size: 0.9em;
+  background: var(--editor-surface-hover);
+  padding: 0 0.25em;
+  border-radius: 3px;
+}
+
 .control-group h4 {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
-  color: #333;
+  color: var(--editor-text);
   padding-bottom: 0.5rem;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid var(--editor-border);
 }
 
 .spine-counts {
   display: flex;
   gap: 1rem;
   font-size: 0.8rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .spine-counts .count-label {
-  color: #666;
+  color: var(--editor-text-muted);
   margin-right: 0.25rem;
 }
 
@@ -752,8 +926,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
 }
 
@@ -778,7 +952,7 @@ onBeforeUnmount(() => {
 
 .animation-select-item label {
   font-size: 0.85rem;
-  color: #555;
+  color: var(--editor-text-muted);
 }
 
 .animation-dropdown {
@@ -791,7 +965,7 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
   margin-top: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--editor-border);
 }
 
 .control-item {
@@ -800,10 +974,34 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 
+.prop-key {
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.75em;
+  font-weight: normal;
+  font-style: normal;
+  color: var(--editor-text);
+  background: var(--editor-surface-hover);
+  padding: 0 0.3em;
+  border-radius: 3px;
+  margin-inline-start: 0.35em;
+  vertical-align: middle;
+}
+
 .control-item label {
   font-size: 0.85rem;
   font-weight: 500;
-  color: #555;
+  color: var(--editor-text-muted);
+}
+
+.control-note {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--editor-text-faint);
+}
+
+.checkbox-item {
+  flex-direction: row;
+  align-items: center;
 }
 
 /* Core value indicators for mod support */

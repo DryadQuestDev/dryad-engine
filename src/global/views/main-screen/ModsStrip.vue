@@ -19,6 +19,10 @@ const global = Global.getInstance();
 
 const hasMods = computed(() => props.mods.length > 0);
 
+const availableModsLabel = computed(() => global.getString('mods.available'));
+const activateTitle = computed(() => global.getString('mods.activate'));
+const deactivateTitle = computed(() => global.getString('mods.deactivate'));
+
 function isModActive(mod: ManifestObject): boolean {
   return props.activeMods.some(m => m.id === mod.id);
 }
@@ -60,7 +64,7 @@ function selectMod(mod: ManifestObject) {
   <div v-if="hasMods" class="mods-strip">
     <div class="mods-strip-header">
       <i class="pi pi-box"></i>
-      <span class="mods-strip-label">Available Mods</span>
+      <span class="mods-strip-label">{{ availableModsLabel }}</span>
       <span class="mods-strip-count">{{ mods.length }}</span>
     </div>
     <div class="mods-strip-chips">
@@ -70,7 +74,7 @@ function selectMod(mod: ManifestObject) {
         disabled: !isModCompatible(mod)
       }">
         <button type="button" class="mods-strip-check" :class="{ on: isModActive(mod) }" :disabled="!isModCompatible(mod)"
-          :title="isModActive(mod) ? 'Deactivate' : 'Activate'" :aria-pressed="isModActive(mod)" @click="toggleMod(mod)">
+          :title="isModActive(mod) ? deactivateTitle : activateTitle" :aria-pressed="isModActive(mod)" @click="toggleMod(mod)">
           <i v-if="isModActive(mod)" class="pi pi-check"></i>
         </button>
         <button type="button" class="mods-strip-name" :title="!isModCompatible(mod) ? getModWarning(mod) : mod.name"

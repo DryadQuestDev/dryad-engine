@@ -21,7 +21,12 @@ type Card = {
 
 type CardFilter = 'all' | 'earned' | 'locked';
 
-const L = (id: string) => system.line(id);
+/** system.line() plus |placeholder| substitution - line() resolves the text only. */
+const L = (id: string, params: Record<string, string | number> = {}) => {
+  let text = system.line(id);
+  for (const key in params) text = text.replaceAll(`|${key}|`, () => String(params[key]));
+  return text;
+};
 type GroupSection = { id: string; name: string; cards: Card[]; earned: number };
 
 function tierColor(tierId: string | undefined): string {
@@ -65,7 +70,7 @@ const sections = computed<GroupSection[]>(() => {
   }
   // accolades pointing at no (or an unknown) group still render, at the end
   for (const [groupId, groupCards] of byGroup) {
-    result.push({ id: groupId || 'other', name: groupId || 'Other', cards: groupCards, earned: groupCards.filter(c => c.earned).length });
+    result.push({ id: groupId || 'other', name: groupId || L('accolades.group_other'), cards: groupCards, earned: groupCards.filter(c => c.earned).length });
   }
   return result;
 });
@@ -114,6 +119,15 @@ const earnedPoints = computed(() => system.getEarnedPoints());
 const totalPoints = computed(() => system.getTotalPoints());
 const percent = computed(() => (totalCount.value ? Math.round((earnedCount.value / totalCount.value) * 100) : 0));
 
+// Whole sentences, markup included: the separator, the percent sign and the fraction order are all
+// the translator's to move, which they cannot be while the template glues the fragments together.
+const summaryEarned = computed(() => L('accolades.summary_earned', {
+  earned: earnedCount.value, total: totalCount.value, percent: percent.value,
+}));
+const summaryPoints = computed(() => L('accolades.summary_points', {
+  earned: earnedPoints.value, total: totalPoints.value,
+}));
+
 const ladder = computed(() => {
   return [...system.tiers.values()]
     .sort((a, b) => (a.order || 0) - (b.order || 0))
@@ -133,8 +147,8 @@ function barWidth(progress: { current: number; target: number }): string {
   <div class="accolades-tab">
     <div class="head">
       <div class="summary">
-        <span class="count"><b>{{ earnedCount }}</b> / {{ totalCount }} {{ L('accolades.earned') }} · {{ percent }}%</span>
-        <span v-if="totalPoints" class="points"><b>{{ earnedPoints }}</b> / {{ totalPoints }} {{ L('accolades.points') }}</span>
+        <span class="count" v-html="summaryEarned"></span>
+        <span v-if="totalPoints" class="points" v-html="summaryPoints"></span>
       </div>
       <div class="ladder">
         <span v-for="rung in ladder" :key="rung.id" class="rung">
@@ -179,7 +193,7 @@ function barWidth(progress: { current: number; target: number }): string {
         >
           <div class="medallion">{{ card.earned ? '✓' : card.masked ? '?' : '✦' }}</div>
           <div class="body">
-            <div class="name">{{ card.masked ? '? ? ?' : card.def.name }}</div>
+            <div class="name">{{ card.masked ? L('masked_name') : card.def.name }}</div>
             <div class="desc">{{ card.masked ? L('accolades.hidden') : card.def.description }}</div>
             <div v-if="card.earned || card.progress || card.points" class="foot">
               <span v-if="card.earned" class="done">{{ L('accolades.completed') }}</span>
@@ -218,7 +232,7 @@ function barWidth(progress: { current: number; target: number }): string {
 .summary { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
 
 .count { font-size: 1rem; color: rgba(255, 255, 255, 0.85); }
-.count b { color: rgba(255, 255, 255, 1); font-size: 1.2rem; }
+.count :deep(b) { color: rgba(255, 255, 255, 1); font-size: 1.2rem; }
 
 .points {
   font-size: 0.8rem;
@@ -226,7 +240,7 @@ function barWidth(progress: { current: number; target: number }): string {
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
 }
-.points b { color: rgba(255, 255, 255, 0.9); font-size: 1rem; }
+.points :deep(b) { color: rgba(255, 255, 255, 0.9); font-size: 1rem; }
 
 /* Grey while locked: a saturated tier colour anywhere inside a card body now means earned. */
 .pts {

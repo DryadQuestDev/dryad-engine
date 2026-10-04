@@ -6,6 +6,7 @@ import { Editor } from "./editor";
 import { getImageDimensions } from "../utility/functions";
 import { mergeById, mergeObjectArraySequentially } from "../functions/mergeById";
 import { ref, Ref, reactive } from "vue";
+import { useStorage } from "@vueuse/core";
 
 
 // Represents a connection line between two rooms
@@ -88,6 +89,9 @@ export class EditorMap {
     public room_size_halfed = this.room_size / 2;
 
     zoomFactor: Ref<number> = ref(1);
+    // Scale stamped onto newly placed encounters. Persisted in localStorage, so it
+    // survives map reloads (unlike zoomFactor, which init() resets).
+    defaultEncounterScale = useStorage('editor-map-default-encounter-scale', 1);
     widthBackground: number = 0;
     heightBackground: number = 0;
 

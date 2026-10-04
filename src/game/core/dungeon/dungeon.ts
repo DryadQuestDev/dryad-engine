@@ -19,6 +19,7 @@ export class Dungeon {
     public fog_shadow_coef!: number;
     public fog_image!: string;
     public default_assets!: string[];
+    public default_sounds: string[] = [];
 
     // init
     widthBackground: number = 0;
@@ -43,7 +44,7 @@ export class Dungeon {
     // ^pool refs found on this dungeon's choices during build: the placement-unique inventory id
     // each choice was redirected to, plus the raw pool ref and whether it was a loot or trade
     // action. Consumers instantiate these without re-scanning the parsed content.
-    public pooledInventories: { id: string; pool: string; type: 'loot' | 'trade' }[] = [];
+    public pooledInventories: { id: string; pool: string; type: 'loot' | 'trade'; title?: string }[] = [];
 
     public getRoomById(id: string): DungeonRoom | null {
         if (!id) {

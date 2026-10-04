@@ -16,6 +16,7 @@ export const CharacterSceneSlotSchema = {
     alpha: { type: 'number', tooltip: 'Opacity (0.0 = transparent, 1.0 = opaque).', defaultValue: 1, step: 0.1 },
     blur: { type: 'number', tooltip: 'Blur effect in pixels.', defaultValue: 0, step: 1 },
     mirror: { type: 'boolean', tooltip: 'Flip character horizontally.' },
+    grade: { type: 'boolean', defaultValue: true, tooltip: 'Apply the scene colour grade to this actor. Turn off for a character that gives off its own light – a ghost, a fire spirit – so a night grade leaves it glowing.' },
 
     // Enter Transition Properties
     enter: {
@@ -69,11 +70,11 @@ export const CharacterSceneSlotSchema = {
         defaultValue: 'inherit',
         options: [
             'inherit', 'none', 'blink', 'bounce', 'breathe', 'float', 'ghost', 'glitch', 'glow', 'hop', 'jitter', 'lean',
-            'nod', 'pan', 'pulse', 'rock', 'rotate', 'shake', 'shimmy', 'sway', 'wave', 'wiggle'
+            'nod', 'pan', 'pulse', 'rock', 'rotate', 'shake', 'shimmy', 'slumped', 'sway', 'wave', 'wiggle'
         ]
     },
-    idle_duration: { type: 'number', tooltip: 'Duration of one loop cycle in seconds.', defaultValue: 0, step: 0.1, show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'ghost', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch'] } },
-    idle_intensity: { type: 'number', tooltip: 'Loop animation intensity (0.0 = subtle, 1.0 = strong).', defaultValue: 0, step: 0.1, show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'ghost', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch'] } },
+    idle_duration: { type: 'number', tooltip: 'Duration of one loop cycle in seconds.', defaultValue: 0, step: 0.1, show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'ghost', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch', 'slumped'] } },
+    idle_intensity: { type: 'number', tooltip: 'Loop animation intensity (0.0 = subtle, 1.0 = strong).', defaultValue: 0, step: 0.1, show: { idle: ['float', 'sway', 'pulse', 'rotate', 'breathe', 'ghost', 'shake', 'pan', 'bounce', 'hop', 'rock', 'nod', 'lean', 'shimmy', 'wave', 'jitter', 'blink', 'glow', 'wiggle', 'glitch', 'slumped'] } },
 
     // Filter Effects
     brightness: { type: 'number', tooltip: 'Brightness adjustment (1.0 = normal).', defaultValue: 1, step: 0.1 },

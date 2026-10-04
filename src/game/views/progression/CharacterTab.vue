@@ -35,6 +35,12 @@ function selectTab(tabId: string) {
   game.coreSystem.setState('progression_sub_state', tabId);
 }
 
+// Registry titles are stored as locale keys so they follow a language switch; a game or plugin
+// that registered a literal title falls through getStringOr and keeps that literal.
+function tabTitle(title?: string): string {
+  return title ? global.getStringOr(title, title) : '';
+}
+
 </script>
 
 <template>
@@ -51,7 +57,7 @@ function selectTab(tabId: string) {
         <div class="tabs">
           <div class="tab" v-for="tab of tabs" :key="tab.id" @click="selectTab(tab.id)"
             :class="{ 'active-tab': game.coreSystem.getState('progression_sub_state') === tab.id }">
-            {{ tab.title }}
+            {{ tabTitle(tab.title) }}
           </div>
         </div>
         <div class="tab-content" v-if="activeTabPayload">

@@ -2,6 +2,7 @@
 import { computed, markRaw, PropType } from 'vue';
 import { Character } from '../../core/character/character';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import { getShapePath, ShapeType } from '../../../utility/shapes';
 import { useSkillParams, isSkillVisible } from './useSkillParams';
 import SkillCard from '../popups/cards/SkillCard.vue';
@@ -48,6 +49,10 @@ const learnedLevel = computed(() => {
   );
   return learned?.level || 0;
 });
+
+const levelLabel = computed(() =>
+  Global.getInstance().getString('item.level_short', { level: learnedLevel.value })
+);
 
 // Check if skill is learnable (at least one parent has level >= 1 and is visible)
 const isLearnable = computed(() => {
@@ -159,7 +164,7 @@ const slotClasses = computed(() => ({
     <!-- Level Indicator (only show if max level > 1) -->
     <text v-if="learnedLevel > 0 && (skill.max_upgrade_level || 1) > 1" class="level-indicator" :x="skillSize / 2"
       :y="skillSize / 2 + 15" text-anchor="middle">
-      Lv {{ learnedLevel }}
+      {{ levelLabel }}
     </text>
   </g>
 </template>

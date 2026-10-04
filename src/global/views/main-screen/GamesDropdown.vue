@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ManifestObject } from '../../../schemas/manifestSchema';
+import { Global } from '../../global';
 
 const props = defineProps<{
   games: ManifestObject[];
@@ -11,13 +12,17 @@ const emit = defineEmits<{
   (e: 'select-game', game: ManifestObject): void;
 }>();
 
+const global = Global.getInstance();
+
 const open = ref(false);
 const rootRef = ref<HTMLElement | null>(null);
 
 const triggerLabel = computed(() => {
-  if (!props.selectedGame) return 'Choose game';
-  return props.selectedGame.name || props.selectedGame.id || 'Untitled';
+  if (!props.selectedGame) return global.getString('main_screen.choose_game');
+  return props.selectedGame.name || props.selectedGame.id || global.getString('main_screen.untitled_game');
 });
+
+const noGamesLabel = computed(() => global.getString('games_dropdown.no_games'));
 
 function pickGame(game: ManifestObject) {
   emit('select-game', game);
@@ -54,7 +59,7 @@ onUnmounted(() => {
 
     <div v-if="open" class="games-dropdown-panel">
       <div v-if="games.length === 0" class="games-dropdown-empty">
-        No games installed.
+        {{ noGamesLabel }}
       </div>
       <div v-else class="games-dropdown-games">
         <button
@@ -67,7 +72,7 @@ onUnmounted(() => {
         >
           <div class="games-dropdown-game-info">
             <span class="games-dropdown-game-name">{{ game.name }}</span>
-            <span v-if="game.version" class="games-dropdown-game-version">v{{ game.version }}</span>
+            <span v-if="game.version" class="games-dropdown-game-version">{{ global.getString('manifest.version', { version: game.version }) }}</span>
           </div>
           <i v-if="game.id === selectedGame?.id" class="pi pi-check games-dropdown-game-check"></i>
         </button>

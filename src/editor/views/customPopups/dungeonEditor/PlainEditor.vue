@@ -10,6 +10,7 @@ import {
   HL_BG, HL_COLORS, modelToInnerOffset, parseModelValue, serializeModelValue, shiftHighlight,
   type Highlight, type HighlightColor,
 } from './highlightMarkup';
+import { RESERVED_TEXT_TAGS, TEXT_TAG_REGEX_SOURCE } from '../../../../utility/textTags';
 import type { IndexCategory } from '../../../../utility/dungeonEditor/index';
 
 const editorSettings = useStorage<{ autoCurlyQuotes?: boolean; autoEnDash?: boolean }>('dungeonEditor_settings', {});
@@ -80,14 +81,35 @@ function findAnchorRanges(text: string): Array<[number, number]> {
   return ranges;
 }
 
-function findBrRanges(text: string): Array<[number, number]> {
+// `[br]`, `[code]`, `[w]`, `[p=1]`, `[cps=*2]`… — layout and pacing tags (utility/textTags.ts).
+function findTextTagRanges(text: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
-  const re = /\[br\]/gi;
+  const re = new RegExp(TEXT_TAG_REGEX_SOURCE, 'gi');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     ranges.push([m.index, m.index + m[0].length]);
   }
   return ranges;
+}
+
+// `[shake]` … `[/shake]` — only the tags; the wrapped prose keeps its own color. Any `[name]` whose
+// `[/name]` is in the same text counts, so a game's own effects light up too and a stray bracket
+// stays plain. Layout and pacing tags keep their own color.
+function findEffectTagRanges(text: string): Array<[number, number]> {
+  const tags: Array<{ start: number; end: number; name: string }> = [];
+  const opened = new Set<string>();
+  const closed = new Set<string>();
+  const re = /\[(\/?)([a-z][a-z0-9_-]*)\]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const name = m[2].toLowerCase();
+    if (RESERVED_TEXT_TAGS.includes(name)) continue;
+    (m[1] ? closed : opened).add(name);
+    tags.push({ start: m.index, end: m.index + m[0].length, name });
+  }
+  return tags
+    .filter(tag => opened.has(tag.name) && closed.has(tag.name))
+    .map((tag): [number, number] => [tag.start, tag.end]);
 }
 
 function findPlaceholderRanges(text: string): Array<[number, number]> {
@@ -192,6 +214,10 @@ function findStructuredRanges(text: string, kind: IndexCategory, name: string): 
 function findEmphasisRanges(text: string): { double: Array<[number, number]>; single: Array<[number, number]> } {
   const double: Array<[number, number]> = [];
   const single: Array<[number, number]> = [];
+  // Mask text tags first: the `*` in `[cps=*3]` is a multiplier, not an italic marker.
+  for (const [s, e] of findTextTagRanges(text)) {
+    text = text.slice(0, s) + ' '.repeat(e - s) + text.slice(e);
+  }
   const doubleRe = /\*\*([^*\n]+?)\*\*/g;
   let m: RegExpExecArray | null;
   while ((m = doubleRe.exec(text)) !== null) {
@@ -228,19 +254,26 @@ function findStateRanges(text: string): { altered: Array<[number, number]>; init
 
 // Per-token visual style strings (paint into the overlay).
 //
-// IMPORTANT: never use `font-weight` or `font-style` here. They change glyph
-// metrics → the overlay's chars no longer pixel-align with the textarea's
-// (which is locked to regular weight + upright), so the caret drifts off
-// the visible text. Use `text-shadow` for faux-bold instead — it only
-// affects paint, not layout.
+// IMPORTANT: paint-only properties here (color, background, text-shadow,
+// text-decoration). Anything that changes the font — `font-style`,
+// `font-weight`, `font-variant`… — starts a new shaping run in the overlay,
+// while the textarea shapes the line as one run. Kerning and contextual
+// alternates then differ at the boundary (Inter swaps `*` for the 2px wider
+// `asterisk.case` before a capital — an italic `Word` in `*Word*` cut the
+// `*` off from the `W`, so only the textarea got the wide glyph), the
+// textarea wraps a word earlier, and the caret sits a word away from the
+// painted text for the rest of the paragraph. Faux-bold is a `text-shadow`,
+// emphasis is a color.
 const FAUX_BOLD = 'text-shadow:0.03em 0 0 currentColor';
-const STYLE_BRACE = `color:#9c27b0;${FAUX_BOLD}`;
-const STYLE_ANCHOR = `color:#6a1b9a;${FAUX_BOLD}`;
-const STYLE_BR = `color:#00838f;${FAUX_BOLD};background:rgba(0,188,212,0.16);padding:0 2px;border-radius:2px`;
-const STYLE_PLACEHOLDER = `color:#2e7d32;${FAUX_BOLD}`;
-const STYLE_RECORD = `color:#1565c0;${FAUX_BOLD}`;
-const STYLE_COMMENT = 'color:#888;font-style:italic';
-const STYLE_CHOICE = `color:#c62828;${FAUX_BOLD}`;
+const STYLE_EMPHASIS = 'color:var(--editor-ink-brown)';
+const STYLE_BRACE = `color:var(--editor-ink-purple);${FAUX_BOLD}`;
+const STYLE_ANCHOR = `color:var(--editor-ink-violet);${FAUX_BOLD}`;
+const STYLE_TEXT_TAG = `color:var(--editor-ink-teal);${FAUX_BOLD}`;
+const STYLE_EFFECT_TAG = `color:var(--editor-ink-orange);${FAUX_BOLD}`;
+const STYLE_PLACEHOLDER = `color:var(--editor-ink-green);${FAUX_BOLD}`;
+const STYLE_RECORD = `color:var(--editor-ink-blue);${FAUX_BOLD}`;
+const STYLE_COMMENT = 'color:var(--editor-text-faint)';
+const STYLE_CHOICE = `color:var(--editor-ink-red);${FAUX_BOLD}`;
 const STYLE_SEARCH = 'background:#fff59d;color:#000';
 const STYLE_INITIAL = `color:#a100ff;${FAUX_BOLD}`;
 const STYLE_ALTERED = `color:#c95500;${FAUX_BOLD}`;
@@ -298,7 +331,8 @@ function renderOverlay(
   setTok(STYLE_INITIAL, stateRanges.initial);
   setTok(STYLE_BRACE, findBalancedBraces(text));
   setTok(STYLE_ANCHOR, findAnchorRanges(text));
-  setTok(STYLE_BR, findBrRanges(text));
+  setTok(STYLE_TEXT_TAG, findTextTagRanges(text));
+  setTok(STYLE_EFFECT_TAG, findEffectTagRanges(text));
   setTok(STYLE_PLACEHOLDER, findPlaceholderRanges(text));
   setTok(STYLE_RECORD, findRecordRanges(text));
   setTok(STYLE_COMMENT, findCommentRanges(text));
@@ -309,11 +343,8 @@ function renderOverlay(
   if (sf?.name) setTok(STYLE_SEARCH, findStructuredRanges(text, sf.kind, sf.name));
 
   const { double, single } = findEmphasisRanges(text);
-  // Faux-bold via text-shadow — `font-weight` would change glyph widths and
-  // drift the caret. Italic stays as `font-style:italic` because italic
-  // glyphs have near-identical advance widths in most fonts.
-  //
-  // Standard markdown: `**text**` → bold, `*text*` → italic.
+  // Standard markdown: `**text**` → bold (faux, text-shadow), `*text*` →
+  // italic (painted as a color — see the style constants above).
   // Markers (`*` / `**`) are EXCLUDED from the styled range so the asterisks
   // render in regular weight. Bolding them via text-shadow made the ink
   // bleed onto adjacent tall glyphs (capital letters), so `*Word*` looked
@@ -325,7 +356,7 @@ function renderOverlay(
   }
   for (const [s, e] of single) {
     if (e - s < 3) continue; // need at least `*x*`
-    for (let i = s + 1; i < e - 1 && i < len; i++) emStyle[i] = 'font-style:italic';
+    for (let i = s + 1; i < e - 1 && i < len; i++) emStyle[i] = STYLE_EMPHASIS;
   }
 
   let out = '';
@@ -348,7 +379,7 @@ function renderOverlay(
     const chunk = escHtml(text.slice(i, j));
     const parts: string[] = [];
     if (t) parts.push(t);
-    if (eS) parts.push(eS);
+    if (eS && !t) parts.push(eS);  // token color wins over emphasis color
     if (sS && !t) parts.push(sS);  // token bold wins; emph bold otherwise
     if (h) parts.push(`background-color:${h}`);
     if (im) parts.push(STYLE_ISSUE);
@@ -761,7 +792,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0;
   margin: 0;
   padding: 0.4rem 0.6rem;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--editor-border);
   border-radius: 3px;
   box-sizing: border-box;
   white-space: pre-wrap;
@@ -774,8 +805,8 @@ onBeforeUnmount(() => {
 .plain-overlay {
   position: relative;
   margin: 0;
-  background: #ffffff;
-  color: #1f2937;
+  background: var(--editor-surface);
+  color: var(--editor-text);
   pointer-events: none;
   min-height: calc(1.5em + 0.8rem + 2px);
   /* Reset <pre> defaults */
@@ -790,14 +821,14 @@ onBeforeUnmount(() => {
   resize: none;
   background: transparent;
   color: transparent;
-  caret-color: #1f2937;
+  caret-color: var(--editor-text);
   outline: none;
   overflow: hidden;
   border-color: transparent;
 }
 
 .plain-editor .plain-input::placeholder {
-  color: rgba(80, 80, 80, 0.5);
+  color: var(--editor-text-faint);
 }
 
 .plain-editor .plain-input::selection {
@@ -808,7 +839,7 @@ onBeforeUnmount(() => {
 .plain-placeholder {
   white-space: pre-wrap;
   padding: 0.4rem 0.6rem;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--editor-border);
   border-radius: 3px;
   box-sizing: border-box;
   cursor: text;
@@ -816,8 +847,8 @@ onBeforeUnmount(() => {
   font-size: 0.95rem;
   line-height: 1.5;
   min-height: calc(1.5em + 0.8rem + 2px);
-  color: #6b7280;
-  background: #ffffff;
+  color: var(--editor-text-muted);
+  background: var(--editor-surface);
 }
 </style>
 
@@ -850,7 +881,7 @@ onBeforeUnmount(() => {
   width: 1.1rem;
   height: 1.1rem;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--editor-border);
   border-radius: 3px;
   cursor: pointer;
   transition: transform 0.08s ease;
@@ -887,11 +918,11 @@ onBeforeUnmount(() => {
   min-width: 1.4rem;
   height: 1.4rem;
   padding: 0 0.35rem;
-  background: #eee;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: 3px;
   cursor: pointer;
-  color: #000;
+  color: var(--editor-text);
   font-family: inherit;
   font-size: 0.8rem;
   line-height: 1;
@@ -902,7 +933,7 @@ onBeforeUnmount(() => {
 }
 
 .hl-format:hover {
-  background: #fff;
+  background: var(--editor-surface);
 }
 
 .hl-format--bold {
@@ -918,6 +949,6 @@ onBeforeUnmount(() => {
   width: 1px;
   align-self: stretch;
   margin: 0.1rem 0.15rem;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--editor-surface-hover);
 }
 </style>

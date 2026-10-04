@@ -28,6 +28,17 @@ export type FinalAbility = {
 
 export type FinalAbilities = Record<string, FinalAbility>;
 
+/** One slot instance an unequipped item could go into, and what equipping it there changes. */
+export type ItemComparison = {
+  slot: ItemSlot;
+  /** Display name, numbered when the character has several slots of one type ("Ring 2"). */
+  slotName: string;
+  /** What sits in the slot now; null when it is empty. */
+  equipped: Item | null;
+  /** Stat deltas (item minus equipped), zero deltas dropped. Keys the item gains come first. */
+  stats: Record<string, number>;
+};
+
 /** Character trait (global essentials plugin) naming the view a staged scene actor renders with. */
 const SCENE_VIEW_TRAIT = 'scene_view';
 
@@ -472,12 +483,12 @@ export class Character {
 
     if (trait.is_persistent === true) {
       let templateTrait = this.getTemplateTrait(key);
-      if (templateTrait) {
+      if (templateTrait !== undefined && templateTrait !== null) {
         return templateTrait;
       }
     }
 
-    return this.traits[key] || null;
+    return this.traits[key] ?? null;
   }
 
   public setTrait(key: string, value: any): void {
@@ -497,7 +508,7 @@ export class Character {
       throw new Error(`Character Trait ${key} does not exist`);
     }
 
-    return this.traits[key] || null;
+    return this.traits[key] ?? null;
   }
 
   // retrieve trait from the template
@@ -1596,6 +1607,45 @@ export class Character {
   }
 
   /**
+   * Stat ids of one character-sheet group (a `stat_groups` entry) that this character carries,
+   * in stat `order`. A stat counts when a status defines it or a computer gives it a non-zero
+   * value — the same rule the sheet uses. Pass `_ungrouped` for stats with no group, and
+   * `_resources` / `_stats` for the built-in split of those.
+   * @param groupId - The stat group id
+   * @param includeHidden - Also return `is_hidden` stats (default false)
+   * @example
+   * for (const statId of character.getStatsByGroup('combat')) {
+   *   console.log(statId, character.getStat(statId));
+   * }
+   */
+  public getStatsByGroup(groupId: string, includeHidden = false): string[] {
+    const statsMap = Game.getInstance().characterSystem.statsMap;
+    const out: { id: string; order: number }[] = [];
+    for (const [statId, stat] of statsMap) {
+      if (!includeHidden && stat.is_hidden) continue;
+      const group = stat.group || '';
+      const matches = group ? group === groupId
+        : groupId === '_ungrouped' || (groupId === '_resources' ? !!stat.is_resource : groupId === '_stats' ? !stat.is_resource : false);
+      if (!matches) continue;
+      if (!this.hasStat(statId) && this.getStat(statId) === 0) continue;
+      out.push({ id: statId, order: stat.order || 0 });
+    }
+    out.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    return out.map(s => s.id);
+  }
+
+  /**
+   * Values of one stat group as `{ statId: value }`, same membership as getStatsByGroup.
+   * @example
+   * const combat = character.getStatValuesByGroup('combat'); // { power: 40, speed: 105, ... }
+   */
+  public getStatValuesByGroup(groupId: string, includeHidden = false): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const statId of this.getStatsByGroup(groupId, includeHidden)) out[statId] = this.getStat(statId);
+    return out;
+  }
+
+  /**
    * Get a stat's computed value directly as a number.
    * Works reactively in Vue templates and computed properties.
    * @param name - The stat name
@@ -1873,6 +1923,60 @@ export class Character {
     gameLogger.info(`[equip] Unequipped "${equippedItem?.id ?? itemUid}" from "${this.id}"`);
   }
 
+  /**
+   * What equipping an item would change, one entry per slot instance that accepts it (in the
+   * character's slot order), each against whatever that slot holds now. Compares the two items'
+   * own stats — the numbers their item cards show — times the stacks each would hold. Empty for an
+   * equipped item or one no slot accepts. The `item_compare` emitter can rewrite both sides first.
+   */
+  public compareItem(item: Item): ItemComparison[] {
+    if (item.isEquipped) return [];
+    const game = Game.getInstance();
+    const slots = this.getAvailableSlotsForItem(item);
+    const labels = this.getSlotLabels(slots);
+
+    return slots.map((slot, i) => {
+      // Straight from the slot, not getItemInSlot(slot.id): a template slot may leave its instance
+      // id blank, and several blank ids would all resolve to the first of them.
+      const equipped = slot.itemUid ? this.getPartyInventory()?.getItemByUid(slot.itemUid) || null : null;
+      const sides = {
+        item: { ...(item.statusObject?.stats || {}) } as Record<string, number>,
+        equipped: { ...(equipped?.statusObject?.stats || {}) } as Record<string, number>,
+      };
+      game.trigger('item_compare', item, equipped, slot, this, sides);
+
+      // Same stack count equipSlot gives the equip status: the quantity, cut to the slot's cap.
+      const cap = slot.getSlotObject()?.max_stack;
+      const itemStacks = cap && cap > 0 ? Math.min(item.quantity, cap) : item.quantity;
+      const equippedStacks = equipped?.quantity || 0;
+
+      const stats: Record<string, number> = {};
+      for (const statId of new Set([...Object.keys(sides.item), ...Object.keys(sides.equipped)])) {
+        const gained = typeof sides.item[statId] === 'number' ? sides.item[statId] * itemStacks : 0;
+        const lost = typeof sides.equipped[statId] === 'number' ? sides.equipped[statId] * equippedStacks : 0;
+        if (gained !== lost) stats[statId] = gained - lost;
+      }
+      return { slot, slotName: labels[i].name, equipped, stats };
+    });
+  }
+
+  /** Display names for a list of slot instances, numbering the types that occur more than once. */
+  private getSlotLabels(slots: ItemSlot[]): { name: string; index: number }[] {
+    const counts = new Map<string, number>();
+    for (const slot of slots) counts.set(slot.slotId, (counts.get(slot.slotId) || 0) + 1);
+
+    const seen = new Map<string, number>();
+    return slots.map(slot => {
+      const index = seen.get(slot.slotId) || 0;
+      seen.set(slot.slotId, index + 1);
+      const base = slot.getSlotObject().name || slot.slotId;
+      const name = (counts.get(slot.slotId) || 1) > 1
+        ? Global.getInstance().getString("item_slot.numbered", { slot: base, number: index + 1 })
+        : base;
+      return { name, index };
+    });
+  }
+
   // ignore types
   public getItemChoices(item: Item): Choice[] {
     const choices: Choice[] = [];
@@ -1953,29 +2057,14 @@ export class Character {
     // to equip item choices
     if (!item.isEquipped) {
       let slots = this.getAvailableSlotsForItem(item);
+      const labels = this.getSlotLabels(slots);
 
-      // Count occurrences of each slot id
-      const slotIdCounts = new Map<string, number>();
-      const slotIdIndexes = new Map<string, number>();
-
-      for (let slot of slots) {
-        slotIdCounts.set(slot.slotId, (slotIdCounts.get(slot.slotId) || 0) + 1);
-      }
-
-      for (let slot of slots) {
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
         let slotObject = slot.getSlotObject();
         const choiceId = "equip_item_" + slotObject.id;
-
-        // Only add index if there are multiple slots with the same id
-        const count = slotIdCounts.get(slot.slotId) || 1;
-        let slotName = slotObject.name || slot.slotId;
-        let slotIndex = 0;
-        if (count > 1) {
-          slotIndex = (slotIdIndexes.get(slot.slotId) || 0);
-          const currentIndex = slotIndex + 1;
-          slotIdIndexes.set(slot.slotId, currentIndex);
-          slotName += " " + currentIndex;
-        }
+        const slotName = labels[i].name;
+        const slotIndex = labels[i].index;
 
         const choiceName = Global.getInstance().getString("equip_item_in_slot", { slot: slotName });
         const params = {
@@ -2010,15 +2099,15 @@ export class Character {
       choices.push(choice);
     }
 
-    // drop choice — permanently discard the item. Gated on the engine's own rule (isDroppable:
-    // equipped gear, quest items) plus the game's item_drop_render veto for its own protected kinds
-    // — the same pair the reward panel's trash button checks. The drop_item action then confirms
-    // and fires the cancellable item_drop_before emitter.
-    if (item.isDroppable() && Game.getInstance().trigger('item_drop_render', item, this)) {
+    // drop choice — permanently discard the item. Gated on the engine's own rule (isDiscardable:
+    // equipped gear, quest items) plus the game's item_discard_render veto for its own protected kinds
+    // — the same pair the reward panel's trash button checks. The discard_item action then confirms
+    // and fires the cancellable item_discard_before emitter.
+    if (item.isDiscardable() && Game.getInstance().trigger('item_discard_render', item, this)) {
       let choice = Game.getInstance().logicSystem.createCustomChoice({
-        id: "drop_item",
-        name: Global.getInstance().getString("drop_item"),
-        params: { drop_item: { itemUid: item.uid, characterId: this.id } },
+        id: "discard_item",
+        name: Global.getInstance().getString("discard_item"),
+        params: { discard_item: { itemUid: item.uid, characterId: this.id } },
       });
       choices.push(choice);
     }
@@ -2038,7 +2127,7 @@ export class Character {
   }
 
   public getName(): string {
-    return this.getTrait('name') || "undefined";
+    return this.getTrait('name') || Global.getInstance().getString('character.unnamed');
   }
 
 

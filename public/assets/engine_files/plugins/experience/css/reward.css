@@ -5,8 +5,8 @@
     flex-direction: column;
     gap: 12px;
     padding: 14px 18px;
-    min-width: 320px;
-    max-width: 460px;
+    width: 23em;
+    max-width: 100%;
     text-align: center;
 }
 

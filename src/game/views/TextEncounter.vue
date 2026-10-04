@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, unref } from 'vue';
 import { Game } from '../game';
 import { DungeonEncounter } from '../core/dungeon/dungeonEncounter';
 import TextMap from './TextMap.vue';
@@ -53,7 +53,7 @@ function getEncounterContent(encounter: DungeonEncounter): string {
 
 
 function getEncounterVisibleChoices(encounter: DungeonEncounter) {
-  return encounter.choices.filter(choice => choice?.isVisible && choice.name);
+  return encounter.choices.filter(choice => choice?.isVisible && (choice.name || choice.nameKey));
 }
 
 function handleEncounterChoice(choice: any) {
@@ -95,7 +95,7 @@ function navigateToNeighbor(neighborRoom: any) {
           v-script="{ html: getEncounterContent(encounter), resolver: false }"></div>
         <div v-if="getEncounterVisibleChoices(encounter).length > 0" class="text-dungeon-encounter-choices">
           <div v-for="choice in getEncounterVisibleChoices(encounter)" :key="choice.id" class="text-dungeon-choice"
-            :class="{ unavailable: !choice.isAvailable, clue: choice.isClue() }"
+            :class="[unref(choice.className), { unavailable: !choice.isAvailable, clue: choice.isClue() }]"
             @click.stop="handleEncounterChoice(choice)">
             <span v-script="{ html: (choice.nameComputed as unknown as string) || choice.name, resolver: false }"></span>
           </div>

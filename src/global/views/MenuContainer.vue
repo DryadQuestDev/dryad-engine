@@ -5,17 +5,22 @@ import { Game } from '../../game/game';
 import { Global } from '../global';
 import Savelist from './Savelist.vue';
 import Gform from './forms/Gform.vue';
-import { MenuOptions } from '../menuOptions';
 import ModPicker from './ModPicker.vue';
 import CustomComponentContainer from '../../game/views/CustomComponentContainer.vue';
 
 const game = Game.getInstance();
 const global = Global.getInstance();
 
+// Game settings go through the API so game_setting_change fires; a direct write into the ref would not.
+const setGameSetting = (key: string, value: any) => game.setGameSetting(key, value);
+
 // Consume the requested initial tab (game.openMenu('saves') etc.); the component is
 // v-if-mounted fresh on every open, so setup reruns and the reset keeps later opens on 'main'.
 const menuState = ref(global.menuInitialState.value);
 global.menuInitialState.value = 'main';
+// A game script can open straight into the settings panel via game.openMenu('engine_settings'),
+// which never runs setMenuState, so the language list is requested here too.
+if (menuState.value === 'engine_settings') global.ensureLanguagesDiscovered();
 
 const isGameRunning = global.engineState.value === 'game';
 
@@ -38,6 +43,10 @@ function handleClickOutside(event: MouseEvent) {
 
 function setMenuState(state: string) {
   menuState.value = state;
+  // The language dropdown needs every shipped locale file's own name, so the folder is listed and
+  // read here rather than at boot. Idempotent, and the panel renders before it resolves: until it
+  // does the list holds English and the current language, and the rest appear when it lands.
+  if (state === 'engine_settings') global.ensureLanguagesDiscovered();
 }
 </script>
 
@@ -51,7 +60,8 @@ function setMenuState(state: string) {
         <CustomComponentContainer :slot="'menu-before'" :context="{ menuState }" />
 
         <ul v-if="menuState === 'main'">
-          <!-- Dev Mode Indicator and Toggle -->
+          <!-- Dev Mode Indicator and Toggle. Literal English on purpose: no shipped player build
+               renders this block, so its wording is not a translator's to carry. -->
           <div v-if="isDevMode" class="dev-mode-section">
             <div class="dev-mode-indicator">
               <span class="dev-badge">DEV</span>
@@ -65,33 +75,32 @@ function setMenuState(state: string) {
             </div>
           </div>
 
-          <li v-if="isGameRunning" @click="setMenuState('saves')">Saves</li>
-          <li @click="setMenuState('engine_settings')">Engine Settings</li>
+          <li v-if="isGameRunning" @click="setMenuState('saves')">{{ global.getString('menu.saves') }}</li>
+          <li @click="setMenuState('engine_settings')">{{ global.getString('menu.engine_settings') }}</li>
           <li v-if="isGameRunning && game.coreSystem.gameSettingsSchema.length > 0"
-            @click="setMenuState('game_settings')">Game
-            Settings</li>
+            @click="setMenuState('game_settings')">{{ global.getString('menu.game_settings') }}</li>
           <li v-if="isGameRunning" :class="{ 'menu-disabled': savesBlocked }"
             @click="savesBlocked || setMenuState('mod_picker')">
-            Mods Manager
+            {{ global.getString('menu.mods_manager') }}
             <span v-if="savesBlocked" class="menu-disabled-hint">{{ global.getString('mods_save_disabled') }}</span>
           </li>
-          <li v-if="isGameRunning" @click="global.toMainMenu">Main Menu</li>
-          <li @click="global.toggleMenu">Close</li>
+          <li v-if="isGameRunning" @click="global.toMainMenu">{{ global.getString('menu.main_menu') }}</li>
+          <li @click="global.toggleMenu">{{ global.getString('menu.close') }}</li>
         </ul>
         <ul v-if="menuState === 'saves'">
-          <li @click="setMenuState('main')">Back</li>
+          <li @click="setMenuState('main')">{{ global.getString('menu.back') }}</li>
           <Savelist :game-id="game.coreSystem.gameId" :is-from-game="true" />
         </ul>
         <ul v-if="menuState === 'engine_settings'">
-          <li @click="setMenuState('main')">Back</li>
-          <Gform :schema="MenuOptions" :values="global.userSettings" />
+          <li @click="setMenuState('main')">{{ global.getString('menu.back') }}</li>
+          <Gform :schema="global.menuOptions.value" :values="global.userSettings" />
         </ul>
         <ul v-if="menuState === 'game_settings'">
-          <li @click="setMenuState('main')">Back</li>
-          <Gform :schema="game.coreSystem.gameSettingsSchema" :values="game.coreSystem.settings" />
+          <li @click="setMenuState('main')">{{ global.getString('menu.back') }}</li>
+          <Gform :schema="game.coreSystem.gameSettingsSchema" :values="game.coreSystem.settings" :setter="setGameSetting" />
         </ul>
         <ul v-if="menuState === 'mod_picker'">
-          <li @click="setMenuState('main')">Back</li>
+          <li @click="setMenuState('main')">{{ global.getString('menu.back') }}</li>
           <ModPicker />
         </ul>
         <CustomComponentContainer :slot="'menu-after'" :context="{ menuState }" />

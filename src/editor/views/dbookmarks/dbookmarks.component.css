@@ -29,12 +29,12 @@
     top: 50%;
     transform: translateY(-50%);
     cursor: pointer;
-    color: #6c757d;
+    color: var(--editor-text-muted);
     font-size: 0.85em;
 }
 
 .id-search-clear:hover {
-    color: #333333;
+    color: var(--editor-text);
 }
 
 .dbookmarks button {
@@ -47,7 +47,7 @@
     min-height: 0; /* Important for flex overflow */
     margin-top: 15px;
     overflow-y: auto;
-    border-top: 1px solid var(--surface-d);
+    border-top: 1px solid var(--editor-border);
 }
 
 
@@ -60,16 +60,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
 
-    color: #333333;
+    color: var(--editor-text);
 }
 
 .bookmark_title:hover {
-    background-color: #dbeafe;
+    background-color: var(--editor-tint-info);
 }
 
 .bookmark_title.active {
-    background-color: #3b82f6;
-    color: #ffffff;
+    background-color: var(--editor-accent);
+    color: var(--editor-accent-contrast);
     font-weight: bold;
 }
 
@@ -77,13 +77,24 @@
     padding: 5px 0px;
 }
 
+.map_options .map_option+.map_option {
+    margin-top: 10px;
+}
+
+.map_options .map_option_row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 .map-state-description {
     padding: 10px;
     margin-bottom: 8px;
-    border: 1px solid rgb(163, 163, 163);
+    border: 1px solid var(--editor-border-strong);
     border-radius: 4px;
     font-size: 0.9em;
-    background-color: rgb(236, 236, 236);
+    background-color: var(--editor-surface-sunken);
 }
 
 .action-icons {
@@ -103,7 +114,7 @@
 }
 
 .action-icon-btn:not(.active-state) {
-    color: #000000 !important;
+    color: var(--editor-text) !important;
 }
 
 .action-icon-btn.active-state {
@@ -117,28 +128,99 @@
     text-align: center;
     font-weight: 600;
     font-size: 0.85em;
-    color: #6c757d;
-    background-color: #f0f0f0;
+    color: var(--editor-text-muted);
+    background-color: var(--editor-surface-sunken);
     border-radius: 4px;
-    border-top: 1px solid #d4d4d8;
-    border-bottom: 1px solid #d4d4d8;
+    border-top: 1px solid var(--editor-border);
+    border-bottom: 1px solid var(--editor-border);
     transition: all 0.2s ease;
     cursor: pointer;
 }
 
 .page-divider:hover {
-    background-color: #e5e7eb;
-    border-color: #9ca3af;
+    background-color: var(--editor-surface-hover);
+    border-color: var(--editor-border-strong);
 }
 
 .page-divider.current-page {
-    background-color: #565656;
-    color: #ffffff;
+    background-color: var(--editor-surface-selected);
+    color: var(--editor-text);
     font-weight: 700;
-    border-color: #212121;
+    border-color: var(--editor-border-strong);
 }
 
 .page-divider.current-page:hover {
-    background-color: #404040;
-    border-color: #000000;
+    background-color: var(--editor-surface-hover);
+    border-color: var(--editor-border-strong);
+}
+
+/* Filter presets: indicator on the Filters bookmark and the hover flyout listing them */
+.filters-bookmark {
+    display: flex;
+    align-items: center;
+}
+
+.filters-bookmark .preset-indicator {
+    margin-left: auto;
+    font-size: 0.8em;
+    opacity: 0.55;
+}
+
+.preset-flyout {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 12rem;
+    max-width: 20rem;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.preset-flyout-title {
+    padding: 2px 8px 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--editor-text-muted);
+}
+
+.preset-flyout-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--editor-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.preset-flyout-item:hover {
+    background-color: var(--editor-tint-info);
+}
+
+.preset-flyout-item--active {
+    background-color: var(--editor-accent);
+    color: var(--editor-accent-contrast);
+    font-weight: bold;
+}
+
+.preset-flyout-item--active:hover {
+    background-color: var(--editor-accent-hover);
+}
+
+.preset-flyout-lock {
+    font-size: 0.8em;
+    opacity: 0.7;
+}
+
+.preset-flyout-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

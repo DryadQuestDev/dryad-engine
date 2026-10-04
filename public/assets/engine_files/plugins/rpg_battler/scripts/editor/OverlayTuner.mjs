@@ -14,14 +14,14 @@ export default defineComponent({
     // (item/skill-slot applied-status shape) rather than at the entity top level.
     const NESTED = ['item_templates', 'skill_slots'];
     const nested = NESTED.includes(props.subtabId);
-    function artRoot(base) {
+    // `create` only on a write. Opening the tuner must leave the item untouched: an empty
+    // `status: {}` added on mount reads as an unsaved edit in the popup wrapper.
+    function artRoot(base, create = false) {
       if (!base) return base;
       if (!nested) return base;
-      if (!base.status) base.status = {};
-      return base.status;
+      if (!base.status && create) base.status = {};
+      return base.status ?? {};
     }
-    // Ensure the writable root exists before first render so early reads are safe.
-    artRoot(localItem.value);
     const artLocal = computed(() => artRoot(localItem.value));
     const artCore = computed(() => props.coreItem ? (nested ? props.coreItem.status : props.coreItem) : undefined);
 
@@ -37,7 +37,7 @@ export default defineComponent({
     const dragStartOverlayDx = ref(0);
     const dragStartOverlayDy = ref(0);
 
-    watch(() => props.item, (v) => { localItem.value = v; artRoot(localItem.value); }, { deep: true });
+    watch(() => props.item, (v) => { localItem.value = v; }, { deep: true });
 
     const viewName = computed(() => side.value === 'player' ? 'back' : undefined);
 
@@ -50,7 +50,7 @@ export default defineComponent({
     const overlayDy = computed(() => artLocal.value.traits?.battle_overlay_y_offset || 0);
 
     function updateTrait(key, value) {
-      const root = artRoot(localItem.value);
+      const root = artRoot(localItem.value, true);
       if (!root.traits) root.traits = {};
       root.traits[key] = Math.round(value * 10) / 10;
       emit('update:item', localItem.value);

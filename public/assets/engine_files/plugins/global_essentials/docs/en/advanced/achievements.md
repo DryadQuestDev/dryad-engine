@@ -2,7 +2,7 @@
 
 Achievements are data your game drives. You define them in the editor, your scripts decide when progress moves, and the engine does the rest: it stores the progress in the save, scores the reward points, pops the unlock notification, and renders the Achievements tab.
 
-The split matters. The engine ships **no** achievements of its own and does **no** tracking, and neither do plugins — a plugin's job is only to make sure the moments worth tracking are covered by emitters. Nothing in the engine knows what "Anal Slut" means or how many loads it takes; that lives entirely in your game's data and one tracking script.
+The split matters. The engine ships **no** achievements of its own and does **no** tracking, and neither do plugins — a plugin's job is only to make sure the moments worth tracking are covered by emitters. Nothing in the engine knows what "Dragon Slayer" means or how many dragons it takes; that lives entirely in your game's data and one tracking script.
 
 ---
 
@@ -31,8 +31,8 @@ The tab appears only when a game actually defines achievements. Ship none and th
 Three calls, all on `game`:
 
 ```js
-game.progressAccolade('first_seedling');            // +1
-game.progressAccolade('tidewater', volume);         // +N
+game.progressAccolade('first_dragon');            // +1
+game.progressAccolade('dragons_killed', volume);         // +N
 game.setAccoladeProgress('overkill', hit.damage);   // raise to this value
 ```
 
@@ -51,8 +51,8 @@ There is no way to lower progress or un-earn an achievement. Progress models "th
 Tiered achievements — ten loads, fifty, two hundred — are one event driving several entries. Tag them in the editor rather than listing ids in code:
 
 ```js
-// every achievement tagged "seed_ass" advances; each stops at its own target
-game.progressAccoladesByTag('seed_ass');
+// every achievement tagged "dragons" advances; each stops at its own target
+game.progressAccoladesByTag('dragons');
 
 // or push an absolute value to the whole family
 game.setAccoladeProgressByTag('mc_level', level);
@@ -117,7 +117,7 @@ const { game } = window.engine;
 game.setAccoladeTarget('complete_kitchen', game.getData('item_recipes').size);
 
 // tiered family, driven by tag
-game.on('sprout_birth', () => game.progressAccoladesByTag('births'));
+game.on('dragon_killed', () => game.progressAccoladesByTag('dragons'));
 
 // best-of, safe to call on every hit
 game.on('battle_action_applied', (caster, ev) => {
@@ -126,7 +126,10 @@ game.on('battle_action_applied', (caster, ev) => {
 
 // distinct counting, with your own saved set
 const seen = game.createStore('achievement_track');
+const statusDefs = game.getData('character_statuses', true);
 game.on('status_added', (character, status) => {
+    // equipment and learned skills arrive here as hidden statuses — count authored ones only
+    if (status.isHidden || !statusDefs.has(status.id)) return;
     const list = seen.get('statuses') || [];
     if (!list.includes(status.id)) {
         list.push(status.id);

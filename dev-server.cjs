@@ -47,6 +47,16 @@ app.use((req, res, next) => {
 // Security: Path Sandboxing
 // ============================================================================
 
+// Games under public/assets are often symlinks into production (games_files/<game> →
+// production/...), and they must list like real folders so the landing page finds them. stat
+// follows a link; lstat and Dirent types do not. Only the read-only listings use these.
+function isDirFollow(p) {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+function isFileFollow(p) {
+  try { return fs.statSync(p).isFile(); } catch { return false; }
+}
+
 function getSafePath(relativePath) {
   if (!relativePath || typeof relativePath !== 'string') {
     relativePath = '.';
@@ -195,12 +205,14 @@ app.get('/engine/list-files', (req, res) => {
   }
 
   try {
-    if (!fs.existsSync(safeDirPath) || !fs.lstatSync(safeDirPath).isDirectory()) {
+    if (!isDirFollow(safeDirPath)) {
       return res.status(404).json({ error: 'Directory not found.' });
     }
 
     const dirents = fs.readdirSync(safeDirPath, { withFileTypes: true });
-    const files = dirents.filter(d => d.isFile()).map(d => d.name);
+    const files = dirents
+      .filter(d => d.isFile() || (d.isSymbolicLink() && isFileFollow(path.join(safeDirPath, d.name))))
+      .map(d => d.name);
 
     res.json({ files });
   } catch (e) {
@@ -223,12 +235,14 @@ app.get('/engine/list-folders', (req, res) => {
   }
 
   try {
-    if (!fs.existsSync(safeDirPath) || !fs.lstatSync(safeDirPath).isDirectory()) {
+    if (!isDirFollow(safeDirPath)) {
       return res.status(404).json({ error: 'Directory not found.' });
     }
 
     const dirents = fs.readdirSync(safeDirPath, { withFileTypes: true });
-    const folders = dirents.filter(d => d.isDirectory()).map(d => d.name);
+    const folders = dirents
+      .filter(d => d.isDirectory() || (d.isSymbolicLink() && isDirFollow(path.join(safeDirPath, d.name))))
+      .map(d => d.name);
 
     res.json({ folders });
   } catch (e) {
@@ -380,7 +394,7 @@ app.get('/engine/list-files-recursively', (req, res) => {
 
   function walkDir(currentAbsolutePath) {
     try {
-      if (!fs.existsSync(currentAbsolutePath) || !fs.lstatSync(currentAbsolutePath).isDirectory()) {
+      if (!isDirFollow(currentAbsolutePath)) {
         return;
       }
 
@@ -414,7 +428,7 @@ app.get('/engine/list-files-recursively', (req, res) => {
   }
 
   try {
-    if (!fs.existsSync(safeStartPath) || !fs.lstatSync(safeStartPath).isDirectory()) {
+    if (!isDirFollow(safeStartPath)) {
       return res.status(404).json({ error: 'Starting directory not found or is not a directory.' });
     }
 
@@ -422,7 +436,7 @@ app.get('/engine/list-files-recursively', (req, res) => {
     if (assetFolders && Array.isArray(assetFolders) && assetFolders.length > 0) {
       for (const folder of assetFolders) {
         const folderPath = getSafePath(folder);
-        if (folderPath && fs.existsSync(folderPath) && fs.lstatSync(folderPath).isDirectory()) {
+        if (folderPath && isDirFollow(folderPath)) {
           walkDir(folderPath);
         }
       }

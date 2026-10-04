@@ -13,7 +13,7 @@ In the engine editor, open a character template and fill in the **Spine** sectio
 
 You can declare more than one entry — one per view (default, `back`, etc.). Each entry has its own `art_dx`, `art_dy`, `art_scale` so each rig can be framed independently.
 
-Static (non-spine) characters use the analogous **Static Art** section — per-view `static_art` entries with the same `art_dx`/`art_dy`/`art_scale` fields, so the front scene doll and the back battle doll are framed independently. Both are tuned visually in the **Art Manager** popup (pick the view, drag the doll, scroll to scale).
+Static (non-spine) characters use the analogous **Static Art** section — per-view `static_art` entries with the same `art_dx`/`art_dy`/`art_scale` fields, so the front scene doll and the back battle doll are framed independently. Both are tuned visually in the **Art Manager** popup (pick the view, drag the doll, scroll to scale), whose **Spine** tab also adds or swaps the atlas and skeleton for the selected view and lists every animation and skin in the rig.
 
 When a character has a spine configured for the current view, the engine renders the spine animation instead of static image layers (unless a static layer for the same view is also active — see "Static Action Overlays" below).
 
@@ -41,10 +41,8 @@ Spine animations and skins follow character attributes. Set an attribute, the en
 ```javascript
 const mc = game.getCharacter('mc');
 
-// belly layer resolves to 'belly_2'
 mc.setAttribute('outfit', 'cute_dress');
 
-// face layer resolves to 'face_ahegao'
 mc.setAttribute('expression', 'angry');
 ```
 

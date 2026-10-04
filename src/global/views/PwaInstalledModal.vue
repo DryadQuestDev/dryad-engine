@@ -1,16 +1,24 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { Global } from '../global';
+
 defineEmits<{ close: [] }>();
+
+const global = Global.getInstance();
+
+const closeLabel = computed(() => global.getString('close'));
+const title = computed(() => global.getString('pwa.installed_title'));
+const hint = computed(() => global.getString('pwa.installed_hint'));
+const okLabel = computed(() => global.getString('ok'));
 </script>
 
 <template>
   <div class="installed-backdrop" @click.self="$emit('close')">
     <div class="installed-modal">
-      <button class="close-btn" @click="$emit('close')" aria-label="Close">×</button>
-      <h2>Installed!</h2>
-      <p>
-        Open the app from your home screen, your browser's menu, or your installed apps list – for fullscreen.
-      </p>
-      <button class="ok-btn" @click="$emit('close')">OK</button>
+      <button class="close-btn" @click="$emit('close')" :aria-label="closeLabel">×</button>
+      <h2>{{ title }}</h2>
+      <p>{{ hint }}</p>
+      <button class="ok-btn" @click="$emit('close')">{{ okLabel }}</button>
     </div>
   </div>
 </template>

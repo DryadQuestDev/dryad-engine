@@ -1,0 +1,22 @@
+$dungeon_name
+My Dungeon Name
+^main
+@description
+Screen Description
+
+#greetings{if: true}
+1
+%
+riko: Hi, I’m Riko!
+{actor: “riko->left”}
+
+riko: Nice to meet you!
+
+@encounter1
+!choice1
+Test Encounter
+
+#encounter1~choice1
+1
+%
+Test interaction

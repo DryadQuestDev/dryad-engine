@@ -13,6 +13,9 @@ import PopupContainer from './PopupContainer.vue';
 import LogsPopup from './LogsPopup.vue';
 import OverlayContainer from './overlays/OverlayContainer.vue';
 import SceneGradeFilter from './SceneGradeFilter.vue';
+import SceneShake from './SceneShake.vue';
+import SceneLight from './SceneLight.vue';
+import SceneAmbient from './SceneAmbient.vue';
 
 const global = Global.getInstance();
 const game = Game.getInstance();
@@ -48,6 +51,9 @@ const shouldShowDebugPanel = computed(() => {
   const isDevMode = localStorage.getItem('devMode') === 'true';
   return isDevMode && showDebugPanel.value;
 });
+
+const loadingLabel = computed(() => global.getString('form_loading'));
+const noGameStateLabel = computed(() => global.getString('game_screen.no_game_state'));
 </script>
 
 <template>
@@ -55,7 +61,7 @@ const shouldShowDebugPanel = computed(() => {
   <div class="game-screen">
     <div class="initial-loader" v-if="game.coreSystem.stateLoading.value">
       <div class="initial-loader__ring"></div>
-      <div class="initial-loader__label">Loading</div>
+      <div class="initial-loader__label">{{ loadingLabel }}</div>
     </div>
     <div class="game-body dark-scrollbar" v-else>
 
@@ -65,12 +71,16 @@ const shouldShowDebugPanel = computed(() => {
         <div class="game-state-wrapper" id="game-state-wrapper">
           <component :is="currentGameStateComponent" v-if="currentGameStateComponent" />
           <div class="no-game-state" v-else>
-            No game state is currently active.
+            {{ noGameStateLabel }}
           </div>
         </div>
 
         <div class="backgrounds-wrapper" id="backgrounds-wrapper" v-if="!game.coreSystem.getState('hide_events')">
           <BackgroundAsset v-for="asset in game.dungeonSystem.assets.value" :key="asset.id" :asset="asset" />
+          <!-- Light and ambient particles over the plates only: direct children of this wrapper so their
+               blend modes mix with the plates (see SceneLight), below the actors' wrapper. -->
+          <SceneLight />
+          <SceneAmbient />
         </div>
 
         <div class="progression-wrapper" id="progression-wrapper" v-if="game.coreSystem.getState('progression_state')">
@@ -93,8 +103,9 @@ const shouldShowDebugPanel = computed(() => {
              (BackgroundAsset, CharacterSlot's art wrapper, the map) reference it as a CSS filter,
              so UI is excluded by construction rather than by stacking order. -->
         <SceneGradeFilter />
+        <SceneShake />
 
-        <div class="overlay-wrapper" v-show="!game.coreSystem.getState('progression_state')">
+        <div class="overlay-wrapper" id="overlay-wrapper" v-show="!game.coreSystem.getState('progression_state')">
           <OverlayContainer />
           <!-- Scene UI, not global chrome: it belongs to the staged scene, so it rides this
                wrapper's z-index and its v-show — the character sheet covers it like it covers the
@@ -124,7 +135,7 @@ const shouldShowDebugPanel = computed(() => {
     <!-- Overlay variant: covers the game without unmounting it (asset preloading) -->
     <div class="initial-loader" v-if="game.coreSystem.screenLoading.value">
       <div class="initial-loader__ring"></div>
-      <div class="initial-loader__label">Loading</div>
+      <div class="initial-loader__label">{{ loadingLabel }}</div>
     </div>
   </div>
 </template>

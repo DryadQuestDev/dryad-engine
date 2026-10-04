@@ -66,8 +66,10 @@ export function serializeRow(row: Row): string {
 
 function serializeScene(scene: SceneBlock): string {
   const out: string[] = ['#' + scene.id + (scene.paramsRaw ?? '')];
+  if (scene.preRows !== undefined) out.push(scene.preRows);
   scene.rows.forEach((row, rowIdx) => {
-    out.push(String(rowIdx + 1));
+    out.push(String(rowIdx + 1) + (row.paramsRaw ?? ''));
+    if (row.preColumns !== undefined) out.push(row.preColumns);
     for (const column of row.columns) {
       out.push(serializeSceneColumn(column));
     }

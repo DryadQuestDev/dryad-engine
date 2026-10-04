@@ -66,6 +66,17 @@ const tabKey = computed(() => `${editor.mainTab}-${editor.secondaryTab}`);
 // --- Static bookmarks that should not trigger page navigation ---
 const staticBookmarks = ['new_item', 'filters', 'map'];
 
+// Filter presets are keyed by the tab's unresolved file (`[dungeon]/encounters` covers every
+// dungeon). Non-array tabs have no list to filter and dev/ files are the presets' own storage.
+// Dsearch builds its own preset session from this prop.
+const presetScope = computed<string | null>(() => {
+  if (!editor.isArray.value) return null;
+  const file = editor.getAllTabs()
+    .find(tab => tab.id === editor.mainTab)?.subtabs
+    .find(subtab => subtab.id === editor.secondaryTab)?.file ?? null;
+  return file && !file.startsWith('dev/') ? file : null;
+});
+
 // --- Scrollspy State (declared early — used by immediate watchers below) ---
 let _scrollRafId: number | null = null;
 const isScrollingProgrammatically = ref(false);
@@ -676,7 +687,7 @@ onUnmounted(() => {
 
     <!-- === File Path === -->
     <div v-if="currentFilePath" class="file-path-container mb-4 p-2 border-round flex align-items-center gap-2"
-      style="background-color: #f8f9fa; border: 1px solid #dee2e6;">
+      style="background-color: var(--editor-surface-raised); border: 1px solid var(--editor-border);">
       <Button icon="pi pi-folder-open" @click="openFileInBrowser" size="small" text rounded />
       <code class="text-sm flex-1">{{ currentFilePath }}</code>
     </div>
@@ -750,7 +761,8 @@ onUnmounted(() => {
       <template v-if="editor.schema.value && editor.activeObject.value">
         <h3 v-bind="{ 'data-bookmark-id': 'filters' }" class="mt-0 mb-3">Filters</h3>
         <Dsearch :schema="editor.schema.value" :data="editor.activeObject.value" :triggerClear="props.triggerClear"
-          @update:siftedData="emitFilteredUpdate" @update:isDirty="emitIsDirtyUpdate" class="mb-4" />
+          :preset-scope="presetScope" @update:siftedData="emitFilteredUpdate" @update:isDirty="emitIsDirtyUpdate"
+          class="mb-4" />
       </template>
       <div v-else class="p-3 text-color-secondary">Loading filters...</div>
 
@@ -815,7 +827,7 @@ onUnmounted(() => {
   <!-- Custom Popup Wrapper -->
   <CustomPopupWrapper v-if="activePopup" :visible="!!activePopup" :componentId="activePopup.id" :item="activePopup.item"
     :schema="editor.schema.value || undefined" :subtabId="editor.secondaryTab || ''"
-    :is-new-item="activePopup.isNewItem" @close="closePopup" />
+    :is-new-item="activePopup.isNewItem" :shown-entries="props.items ?? []" @close="closePopup" />
 </template>
 
 <style scoped src="./dform.component.css"></style>

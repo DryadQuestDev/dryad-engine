@@ -173,10 +173,8 @@ export function summonCombatant(character, side) {
   battle[s === 'enemy' ? 'enemyParty' : 'playerParty'].push(id);
   if (!preexisting) battle.summoned.push(id);
   battle.charState[id] = { side: s, battleIndex: 0, abilities: {}, defeated: false, bonusUsed: 0, support: supportJoin };
-  // A fresh spawn is created at full health; a preexisting reinforcement would otherwise walk in
-  // carrying wounds from earlier in the run. Match spawnEnemies and bring live enemy joiners in
-  // at full, before tracking init.
-  if (s === 'enemy' && preexisting) character.setResource('health', character.getStat('health'));
+  // A preexisting joiner enters with whatever health it has — a wound a scene dealt it is part of
+  // the fight, same as spawnEnemies.
   initCombatantTracking(id);
 
   const insertAt = Math.min(Math.max(battle.actorTurn + 1, 0), battle.turnOrder.length);
@@ -694,9 +692,10 @@ export function handleDeath(characterId) {
  * Spawn enemies from one wave's entry list.
  *
  * A live entry names persistent characters (`live_character_ids`) instead of a template — they are
- * fetched, not created, and survive the teardown that deletes the spawned ones. They enter at full
- * health: a live enemy carries its wounds out of the fight, so without this a retry after a defeat
- * would face the corpses the player left behind.
+ * fetched, not created, and survive the teardown that deletes the spawned ones. They enter with the
+ * health they have: a wound a scene dealt before the fight (an ambush, an opening strike) is meant
+ * to show. They carry their wounds OUT of the fight too — endRpgBattle only lifts the fallen to 1
+ * after a win. The game owns the rest (a retry after a loss, a reset between attempts).
  * @param {RpgBattleEntry[]} entries
  * @returns {{ ids: string[], spawned: string[] }} all enemy IDs, and the subset the battle created (non-live)
  */
@@ -712,7 +711,6 @@ export function spawnEnemies(entries) {
             + 'Live enemies are created by game scripts; check the id and that the script ran.');
           continue;
         }
-        char.setResource('health', char.getStat('health'));
         ids.push(char.id);
       }
       continue;
@@ -729,6 +727,34 @@ export function spawnEnemies(entries) {
 }
 
 // ── Waves ──
+
+/**
+ * A wave bigger than the enemy unit cap (battle_config max_enemy_units) would overflow the field.
+ * Split it, in roster order, into successive waves of at most the cap — the rest step in once the
+ * field is cleared, the same limit summons already respect. Waves within the cap pass untouched.
+ * @param {any[][]} waves @returns {any[][]}
+ */
+export function splitOverflowWaves(waves) {
+  const cap = Math.max(1, game.getData('plugins_data/rpg_battler/battle_config')?.max_enemy_units || 6);
+  const out = [];
+  for (const wave of waves) {
+    const units = [];
+    for (const entry of wave) {
+      if (entry.is_live_instance) {
+        for (const id of entry.live_character_ids || []) units.push({ ...entry, live_character_ids: [id] });
+      } else {
+        for (let i = 0; i < (entry.amount || 1); i++) units.push({ ...entry, amount: 1 });
+      }
+    }
+    if (units.length <= cap) {
+      out.push(wave);
+      continue;
+    }
+    console.info(`rpg_battler: a wave of ${units.length} enemies exceeds max_enemy_units (${cap}) — split into ${Math.ceil(units.length / cap)} waves`);
+    for (let i = 0; i < units.length; i += cap) out.push(units.slice(i, i + cap));
+  }
+  return out;
+}
 
 /** Whether another wave is queued behind the one currently on the field. */
 export function hasPendingWave() {
@@ -795,7 +821,10 @@ export function checkBattleEnd() {
     battle.phase = 'finished';
     // Mark defeated at the moment of victory (not at teardown) so battle_defeated listeners
     // (defeat rewards) run before the result overlay renders.
-    if (battle.battleId) game.getService('rpg_battle').addDefeated(battle.battleId);
+    if (battle.battleId) {
+      game.getService('rpg_battle').addDefeated(battle.battleId);
+      game.getService('rpg_battle').addFought(battle.battleId);
+    }
     game.setMusic('victory');
     game.trigger('battle_finished', 'victory', battle.battleId || null);
     return true;

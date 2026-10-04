@@ -9,7 +9,7 @@ const global = Global.getInstance();
 const dungeonSystem = game.dungeonSystem;
 
 const zoomText = computed(() => {
-  return `${Math.round(game.coreSystem.getState<number>('map_zoom_factor') * 100)}%`;
+  return global.getString('toolbar.zoom_value', { zoom: Math.round(game.coreSystem.getState<number>('map_zoom_factor') * 100) });
 });
 
 const zoomTooltip = computed(() => {

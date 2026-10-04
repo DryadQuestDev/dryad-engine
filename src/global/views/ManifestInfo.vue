@@ -20,6 +20,12 @@ const global = Global.getInstance();
 const activeIndex = ref(0);
 const videoRef = ref<HTMLVideoElement | null>(null);
 
+const coverAlt = computed(() => global.getString('manifest.cover_alt'));
+const thumbnailAlt = computed(() => global.getString('manifest.thumbnail_alt'));
+const noSelectionLabel = computed(() => global.getString('manifest.no_selection'));
+const authorLine = computed(() => global.getString('manifest.by_author', { author: props.manifest?.author || '' }));
+const versionLine = computed(() => global.getString('manifest.version', { version: props.manifest?.version || '' }));
+
 // Fullscreen gallery state
 const fullscreenVisible = ref(false);
 const fullscreenIndex = ref(0);
@@ -64,8 +70,8 @@ watch(activeIndex, async () => {
   <div v-if="manifest" class="manifest-info">
     <div v-if="!hideHeader" class="info-header">
       <div class="info-name">{{ manifest.name }}</div>
-      <div class="info-author" v-if="manifest.author">by {{ manifest.author }}</div>
-      <div class="info-version" v-if="manifest.version">v{{ manifest.version }}</div>
+      <div class="info-author" v-if="manifest.author">{{ authorLine }}</div>
+      <div class="info-version" v-if="manifest.version">{{ versionLine }}</div>
     </div>
 
     <div class="info-description" v-html="manifest.description"></div>
@@ -79,13 +85,13 @@ watch(activeIndex, async () => {
         { breakpoint: '1000px', numVisible: Math.min(2, currentCoverAssets.length) },
       ]" containerStyle="max-width: 100%" class="cover-gallery">
       <template #item="slotProps">
-        <img v-if="isImage(slotProps.item)" :src="slotProps.item" alt="Cover" class="gallery-item-image clickable"
+        <img v-if="isImage(slotProps.item)" :src="slotProps.item" :alt="coverAlt" class="gallery-item-image clickable"
           @click="openFullscreen()" />
         <video v-else-if="isVideo(slotProps.item)" ref="videoRef" :src="slotProps.item" controls autoplay loop
           playsinline class="gallery-item-video" />
       </template>
       <template #thumbnail="slotProps">
-        <img v-if="isImage(slotProps.item)" :src="slotProps.item" alt="Thumbnail" class="gallery-thumbnail" />
+        <img v-if="isImage(slotProps.item)" :src="slotProps.item" :alt="thumbnailAlt" class="gallery-thumbnail" />
         <video v-else-if="isVideo(slotProps.item)" :src="slotProps.item" class="gallery-thumbnail" />
       </template>
     </Galleria>
@@ -96,12 +102,12 @@ watch(activeIndex, async () => {
       :numVisible="Math.min(7, currentCoverAssets.length)"
       :pt="{ mask: { onClick: (e: MouseEvent) => { if (e.target === e.currentTarget) fullscreenVisible = false } } }">
       <template #item="slotProps">
-        <img v-if="isImage(slotProps.item)" :src="slotProps.item" alt="Cover" class="fullscreen-item" />
+        <img v-if="isImage(slotProps.item)" :src="slotProps.item" :alt="coverAlt" class="fullscreen-item" />
         <video v-else-if="isVideo(slotProps.item)" :src="slotProps.item" controls autoplay loop playsinline
           class="fullscreen-item" />
       </template>
       <template #thumbnail="slotProps">
-        <img v-if="isImage(slotProps.item)" :src="slotProps.item" alt="Thumbnail" class="gallery-thumbnail" />
+        <img v-if="isImage(slotProps.item)" :src="slotProps.item" :alt="thumbnailAlt" class="gallery-thumbnail" />
         <video v-else-if="isVideo(slotProps.item)" :src="slotProps.item" class="gallery-thumbnail" />
       </template>
     </Galleria>
@@ -110,7 +116,7 @@ watch(activeIndex, async () => {
 
   <!-- Show message if nothing is selected -->
   <div v-else class="no-manifest-selected">
-    Select an item to see details.
+    {{ noSelectionLabel }}
   </div>
 </template>
 

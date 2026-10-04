@@ -21,17 +21,47 @@ const newSaveName = ref<string>(''); // For the new save input
 const fileInput = ref<HTMLInputElement | null>(null); // Ref for the file input
 const isSaveDisabled = computed(() => props.isFromGame && game.coreSystem.isSaveDisabled());
 
-// Generate default save name
+const loadFromFileLabel = computed(() => global.getString('saves.load_from_file'));
+const saveToFileLabel = computed(() => global.getString('saves.save_to_file'));
+const saveLocallyLabel = computed(() => global.getString('saves.save_locally'));
+const selectGameLabel = computed(() => global.getString('saves.select_game'));
+const noSavesLabel = computed(() => global.getString('saves.none'));
+const deleteLabel = computed(() => global.getString('delete'));
+const devBadgeLabel = computed(() => global.getString('saves.dev_badge'));
+const noMetadataLabel = computed(() => global.getString('saves.no_metadata'));
+
+function coreVersionLine(versions: SaveMetaData['versions']): string {
+  const core = versions._core;
+  return `${core?.name || '_core'} ${global.getString('manifest.version', { version: core?.version || '' })}`;
+}
+
+function modVersionLines(versions: SaveMetaData['versions']): string {
+  return Object.entries(versions)
+    .filter(([id]) => id !== '_core')
+    .map(([id, entry]) => `${entry.name || id} ${global.getString('manifest.version', { version: entry.version || '' })}`)
+    .join(', ');
+}
+
+function saveDateLine(saveDate: number): string {
+  return global.getString('saves.date', { date: new Date(saveDate).toLocaleString() });
+}
+
+function playtimeLine(playTime: number | undefined): string {
+  return global.getString('saves.playtime', { time: formatPlayTime(playTime) });
+}
+
+function engineVersionLine(version: string): string {
+  return global.getString('saves.engine_version', { version });
+}
+
+// Generate default save name. The timestamp comes from toLocaleString rather than hand-padded
+// MM/DD/YYYY parts, so the date reads correctly outside the US and matches the save row's Date line.
 const generateDefaultSaveName = () => {
-  const dungeonName = game.dungeonSystem.currentDungeon.value?.getDungeonName() || 'Unknown';
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const year = now.getFullYear();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  return `${dungeonName}(${month}/${day}/${year} ${hours}:${minutes}:${seconds})`;
+  const dungeonName = game.dungeonSystem.currentDungeon.value?.getDungeonName() || global.getString('savelist.unknown_dungeon');
+  return global.getString('savelist.default_save_name', {
+    dungeon: dungeonName,
+    date: new Date().toLocaleString(),
+  });
 };
 
 // Set default save name when component is mounted
@@ -67,7 +97,7 @@ watch(() => props.gameId, async (newGameId) => {
 
 // Helper function to format playtime from seconds to HH:MM:SS
 const formatPlayTime = (totalSeconds: number | undefined): string => {
-  if (totalSeconds === undefined || totalSeconds < 0) return 'N/A';
+  if (totalSeconds === undefined || totalSeconds < 0) return global.getString('saves.playtime_unknown');
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -212,11 +242,11 @@ async function handleFileUpload(event: Event): Promise<void> {
     <input type="file" ref="fileInput" @change="handleFileUpload" accept=".json" style="display: none;" />
     <button @click="triggerLoadFromFile" class="load_button">
       <i class="pi pi-upload"></i>
-      <span>Load from File</span>
+      <span>{{ loadFromFileLabel }}</span>
     </button>
     <button v-if="isFromGame" @click="saveToFile" class="load_button" :disabled="isSaveDisabled">
       <i class="pi pi-download"></i>
-      <span>Save to File</span>
+      <span>{{ saveToFileLabel }}</span>
     </button>
   </div>
 
@@ -225,7 +255,7 @@ async function handleFileUpload(event: Event): Promise<void> {
       <input type="text" v-model="newSaveName" class="save_name_input" />
       <button @click="saveLocally" class="save_button save_button--primary" :disabled="isSaveDisabled">
         <i class="pi pi-save"></i>
-        <span>Save Locally</span>
+        <span>{{ saveLocallyLabel }}</span>
       </button>
     </div>
 
@@ -233,26 +263,26 @@ async function handleFileUpload(event: Event): Promise<void> {
 
   <div class="save_list">
     <div v-if="!props.gameId || saveFiles.length === 0" class="no_saves_message">
-      <span v-if="!props.gameId">Select a game to see saves.</span>
-      <span v-else>No saves found for this game.</span>
+      <span v-if="!props.gameId">{{ selectGameLabel }}</span>
+      <span v-else>{{ noSavesLabel }}</span>
     </div>
     <div class="save_item" @click="loadSelectedGame(item.slot)" v-for="item in saveFiles" :key="item.slot">
       <div class="save_item_main_content">
         <div class="save_item_header">
           <div class="save_name">
-            <span v-if="item.saveMeta?.isDevMode" class="dev_badge">Dev</span>
+            <span v-if="item.saveMeta?.isDevMode" class="dev_badge">{{ devBadgeLabel }}</span>
             <span>{{ item.slot }}</span>
           </div>
-          <button class="delete_save_button" @click.stop="deleteSaveSlot(item.slot)">Delete</button>
+          <button class="delete_save_button" @click.stop="deleteSaveSlot(item.slot)">{{ deleteLabel }}</button>
         </div>
         <div class="save_meta" v-if="item.saveMeta">
-          <span v-if="item.saveMeta?.versions"><b>{{ item.saveMeta.versions._core?.name || '_core' }} v{{ item.saveMeta.versions._core?.version }}</b><span v-if="Object.keys(item.saveMeta.versions).length > 1"> + {{ Object.entries(item.saveMeta.versions).filter(([k]) => k !== '_core').map(([k, v]) => `${v.name || k} v${v.version}`).join(', ') }}</span></span>
-          <span>Date: {{ new Date(item.saveMeta.saveDate).toLocaleString() }}</span>
-          <span>Playtime: {{ formatPlayTime(item.saveMeta.playTime) }}</span>
-          <span>Engine: v{{ item.saveMeta.engineVersion }}</span>
+          <span v-if="item.saveMeta?.versions"><b>{{ coreVersionLine(item.saveMeta.versions) }}</b><span v-if="Object.keys(item.saveMeta.versions).length > 1"> + {{ modVersionLines(item.saveMeta.versions) }}</span></span>
+          <span>{{ saveDateLine(item.saveMeta.saveDate) }}</span>
+          <span>{{ playtimeLine(item.saveMeta.playTime) }}</span>
+          <span>{{ engineVersionLine(item.saveMeta.engineVersion) }}</span>
         </div>
         <div class="save_meta" v-else>
-          <span>Metadata not available.</span>
+          <span>{{ noMetadataLabel }}</span>
         </div>
       </div>
     </div>

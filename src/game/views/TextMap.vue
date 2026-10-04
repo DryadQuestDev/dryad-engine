@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { Game } from '../game';
+import { Global } from '../../global/global';
 import type { DungeonRoom } from '../core/dungeon/dungeonRoom';
 import { ROOM_SIZE } from '../../editor/editorMap';
 
@@ -14,6 +15,7 @@ const emit = defineEmits<{
 }>();
 
 const game = Game.getInstance();
+const global = Global.getInstance();
 
 const ROOM_DISPLAY_SIZE = 30;
 const ROOM_HALF_SIZE = ROOM_DISPLAY_SIZE / 2;
@@ -178,20 +180,25 @@ const isMapInteractive = computed(() => {
 const miniMapViewBox = computed(() => {
   return `0 0 ${mapBounds.value.width} ${mapBounds.value.height}`;
 });
+
+const mapTitle = computed(() => global.getString('map.title'));
+const viewLogsLabel = computed(() => global.getString('navigation.view_logs'));
+const openFullMapLabel = computed(() => global.getString('map.open_full'));
+const closeMapLabel = computed(() => global.getString('map.close'));
 </script>
 
 <template>
   <div class="text-map-wrapper" :class="mode">
     <div class="map-header">
-      <span class="map-title">Map</span>
+      <span class="map-title">{{ mapTitle }}</span>
       <button v-if="mode === 'mini'" class="logs-btn"
-        @click.stop="game.dungeonSystem.isLogsPopupOpen.value = true" title="View logs">
+        @click.stop="game.dungeonSystem.isLogsPopupOpen.value = true" :title="viewLogsLabel">
         <i class="pi pi-book"></i>
       </button>
-      <button v-if="mode === 'mini'" class="expand-btn" @click="emit('openFullMap')" title="Open full map">
+      <button v-if="mode === 'mini'" class="expand-btn" @click="emit('openFullMap')" :title="openFullMapLabel">
         <i class="pi pi-expand"></i>
       </button>
-      <button v-else class="close-btn" @click="emit('closeFullMap')" title="Close map">
+      <button v-else class="close-btn" @click="emit('closeFullMap')" :title="closeMapLabel">
         <i class="pi pi-times"></i>
       </button>
     </div>

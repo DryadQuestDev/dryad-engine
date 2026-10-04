@@ -37,6 +37,7 @@ const useCharacterArtOffset = useStorage('character-scene-slot-editor:use-art-of
 // Preview canvas
 const canvasRef = ref<HTMLElement | null>(null);
 const characterElementRef = ref<HTMLElement | null>(null);
+const artWrapperRef = ref<HTMLElement | null>(null);
 const scaleWrapperRef = ref<HTMLElement | null>(null);
 const rotationWrapperRef = ref<HTMLElement | null>(null);
 const contentRef = ref<HTMLElement | null>(null);
@@ -55,6 +56,9 @@ const animationControls = useCharacterAnimation({
 // Connect element refs to composable
 watch(characterElementRef, (el) => {
   animationControls.elementRef.value = el;
+});
+watch(artWrapperRef, (el) => {
+  animationControls.artWrapperRef.value = el;
 });
 watch(scaleWrapperRef, (el) => {
   animationControls.scaleWrapperRef.value = el;
@@ -391,10 +395,10 @@ onMounted(async () => {
   }
 });
 
-// Character dropdown options
+// Character dropdown options: id first (that is what the slot's `char` references), name in brackets.
 const characterOptions = computed(() => {
   return characterTemplates.value.map(c => ({
-    label: c.traits?.name || c.id,
+    label: c.traits?.name && c.traits.name !== c.id ? `${c.id} (${c.traits.name})` : c.id,
     value: c.id
   }));
 });
@@ -618,18 +622,22 @@ onBeforeUnmount(() => {
                   <div class="anchor-crosshair horizontal"></div>
                   <div class="anchor-crosshair vertical"></div>
                 </div>
-                <div ref="scaleWrapperRef" class="character-slot-scale-wrapper" :style="scaleWrapperStyle">
-                  <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper" :style="rotationWrapperStyle">
-                    <div ref="contentRef" class="character-content" :style="contentStyle">
-                      <div ref="characterImagesRef" class="character-images" :style="characterImagesStyle">
-                        <!-- Spine character -->
-                        <div v-if="isSpineCharacter" ref="spineContainerRef" class="spine-preview-container" />
-                        <!-- Static image character -->
-                        <template v-else>
-                          <img v-for="(image, index) in characterImages" :key="index" :src="image"
-                            class="character-image"
-                            @error="($event.target as HTMLImageElement).style.display = 'none'" />
-                        </template>
+                <!-- Art only — same wrapper as CharacterSlot, so the idle preview
+                     leaves the anchor marker above in place. -->
+                <div ref="artWrapperRef" class="character-slot-art-wrapper">
+                  <div ref="scaleWrapperRef" class="character-slot-scale-wrapper" :style="scaleWrapperStyle">
+                    <div ref="rotationWrapperRef" class="character-slot-rotation-wrapper" :style="rotationWrapperStyle">
+                      <div ref="contentRef" class="character-content" :style="contentStyle">
+                        <div ref="characterImagesRef" class="character-images" :style="characterImagesStyle">
+                          <!-- Spine character -->
+                          <div v-if="isSpineCharacter" ref="spineContainerRef" class="spine-preview-container" />
+                          <!-- Static image character -->
+                          <template v-else>
+                            <img v-for="(image, index) in characterImages" :key="index" :src="image"
+                              class="character-image"
+                              @error="($event.target as HTMLImageElement).style.display = 'none'" />
+                          </template>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -647,11 +655,20 @@ onBeforeUnmount(() => {
 
       <!-- Right: Controls Panel -->
       <div class="controls-section">
+        <div class="control-group identity">
+          <p class="hint">
+            Everything below is the slot's default. Content can override any field live when it stages a
+            character: <code>{actor: "{{ selectedCharacter?.id || 'alice' }}->{{ localItem.id }}(x=30, scale=1.2)"}</code>.
+            On a character already staged, <code>{actor: "{{ selectedCharacter?.id || 'alice' }}(alpha=0.5)"}</code> updates it in place.
+            The character picked here is only for the preview.
+          </p>
+        </div>
+
         <!-- Character Selection -->
         <div class="control-group">
           <h4>Character Selection</h4>
           <Select v-model="selectedCharacterId" :options="characterOptions" optionLabel="label" optionValue="value"
-            placeholder="Select a character" class="control-dropdown" />
+            filter placeholder="Select a character" class="control-dropdown" />
           <!--
           <div class="checkbox-control">
             <Checkbox v-model="useCharacterArtOffset" inputId="artOffset" binary />
@@ -673,7 +690,7 @@ onBeforeUnmount(() => {
             <!-- Enter Animation -->
             <div class="animation-group">
               <div class="animation-select-item">
-                <label><strong>Enter:</strong></label>
+                <label><strong>Enter:</strong> <code class="prop-key">enter</code></label>
                 <Select v-model="localItem.enter" :options="enterTransitionOptions"
                   placeholder="Select enter transition" class="animation-dropdown" />
               </div>
@@ -682,7 +699,7 @@ onBeforeUnmount(() => {
               <div v-if="localItem.enter && localItem.enter !== 'none'" class="animation-properties">
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Duration: {{ (localItem.enter_duration ?? 0.5).toFixed(2) }}s</label>
+                    <label>Duration: {{ (localItem.enter_duration ?? 0.5).toFixed(2) }}s <code class="prop-key">enter_duration</code></label>
                     <span v-if="coreItem && localItem.enter_duration === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.enter_duration ?? 0.5).toFixed(2) }}s)
                     </span>
@@ -693,7 +710,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Delay: {{ (localItem.enter_delay ?? 0).toFixed(2) }}s</label>
+                    <label>Delay: {{ (localItem.enter_delay ?? 0).toFixed(2) }}s <code class="prop-key">enter_delay</code></label>
                     <span v-if="coreItem && localItem.enter_delay === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.enter_delay ?? 0).toFixed(2) }}s)
                     </span>
@@ -707,7 +724,7 @@ onBeforeUnmount(() => {
                     <span v-if="coreItem && localItem.enter_ease === undefined" class="core-value-indicator">
                       (core: {{ coreItem.enter_ease ?? 'power2' }})
                     </span>
-                  </label>
+                   <code class="prop-key">enter_ease</code></label>
                   <Select v-model="localItem.enter_ease" :options="easeOptions" placeholder="Select ease"
                     class="animation-dropdown" />
                 </div>
@@ -717,7 +734,7 @@ onBeforeUnmount(() => {
             <!-- Exit Animation -->
             <div class="animation-group">
               <div class="animation-select-item">
-                <label><strong>Exit:</strong></label>
+                <label><strong>Exit:</strong> <code class="prop-key">exit</code></label>
                 <Select v-model="localItem.exit" :options="exitTransitionOptions" placeholder="Select exit transition"
                   class="animation-dropdown" />
               </div>
@@ -726,7 +743,7 @@ onBeforeUnmount(() => {
               <div v-if="localItem.exit && localItem.exit !== 'none'" class="animation-properties">
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Duration: {{ (localItem.exit_duration ?? 0.5).toFixed(2) }}s</label>
+                    <label>Duration: {{ (localItem.exit_duration ?? 0.5).toFixed(2) }}s <code class="prop-key">exit_duration</code></label>
                     <span v-if="coreItem && localItem.exit_duration === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.exit_duration ?? 0).toFixed(2) }}s)
                     </span>
@@ -740,7 +757,7 @@ onBeforeUnmount(() => {
                     <span v-if="coreItem && localItem.exit_ease === undefined" class="core-value-indicator">
                       (core: {{ coreItem.exit_ease ?? 'power2' }})
                     </span>
-                  </label>
+                   <code class="prop-key">exit_ease</code></label>
                   <Select v-model="localItem.exit_ease" :options="easeOptions" placeholder="Select ease"
                     class="animation-dropdown" />
                 </div>
@@ -750,7 +767,7 @@ onBeforeUnmount(() => {
             <!-- Idle Animation -->
             <div class="animation-group">
               <div class="animation-select-item">
-                <label><strong>Idle:</strong></label>
+                <label><strong>Idle:</strong> <code class="prop-key">idle</code></label>
                 <Select v-model="localItem.idle" :options="idleAnimationOptions" placeholder="Select idle animation"
                   class="animation-dropdown" />
               </div>
@@ -762,7 +779,7 @@ onBeforeUnmount(() => {
               <div v-if="localItem.idle && localItem.idle !== 'none'" class="animation-properties">
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Duration: {{ (localItem.idle_duration ?? 2).toFixed(2) }}s</label>
+                    <label>Duration: {{ (localItem.idle_duration ?? 2).toFixed(2) }}s <code class="prop-key">idle_duration</code></label>
                     <span v-if="coreItem && localItem.idle_duration === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.idle_duration ?? 0).toFixed(2) }}s)
                     </span>
@@ -773,7 +790,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="control-item-with-core">
                   <div class="control-label-row">
-                    <label>Intensity: {{ (localItem.idle_intensity ?? 0.5).toFixed(2) }}</label>
+                    <label>Intensity: {{ (localItem.idle_intensity ?? 0.5).toFixed(2) }} <code class="prop-key">idle_intensity</code></label>
                     <span v-if="coreItem && localItem.idle_intensity === undefined" class="core-value-indicator">
                       (core: {{ (coreItem.idle_intensity ?? 0).toFixed(2) }})
                     </span>
@@ -792,7 +809,7 @@ onBeforeUnmount(() => {
           <h4>Position</h4>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>X: {{ animationControls.animatedX.value.toFixed(1) }}%</label>
+              <label>X: {{ animationControls.animatedX.value.toFixed(1) }}% <code class="prop-key">x</code></label>
               <span v-if="coreItem && localItem.x === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.x ?? 50).toFixed(1) }}%)
               </span>
@@ -803,7 +820,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Y: {{ animationControls.animatedY.value.toFixed(1) }}%</label>
+              <label>Y: {{ animationControls.animatedY.value.toFixed(1) }}% <code class="prop-key">y</code></label>
               <span v-if="coreItem && localItem.y === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.y ?? 50).toFixed(1) }}%)
               </span>
@@ -819,7 +836,7 @@ onBeforeUnmount(() => {
           <h4>Transform</h4>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Scale: {{ localItem.scale?.toFixed(2) ?? 1 }}</label>
+              <label>Scale: {{ localItem.scale?.toFixed(2) ?? 1 }} <code class="prop-key">scale</code></label>
               <span v-if="coreItem && localItem.scale === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.scale ?? 1).toFixed(2) }})
               </span>
@@ -830,7 +847,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Rotation: {{ localItem.rotation ?? 0 }}°</label>
+              <label>Rotation: {{ localItem.rotation ?? 0 }}° <code class="prop-key">rotation</code></label>
               <span v-if="coreItem && localItem.rotation === undefined" class="core-value-indicator">
                 (core: {{ coreItem.rotation ?? 0 }}°)
               </span>
@@ -841,7 +858,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Alpha: {{ localItem.alpha?.toFixed(2) ?? 1 }}</label>
+              <label>Alpha: {{ localItem.alpha?.toFixed(2) ?? 1 }} <code class="prop-key">alpha</code></label>
               <span v-if="coreItem && localItem.alpha === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.alpha ?? 1).toFixed(2) }})
               </span>
@@ -852,7 +869,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item control-item-horizontal">
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <label>Mirror (Flip Horizontal):</label>
+              <label>Mirror (Flip Horizontal): <code class="prop-key">mirror</code></label>
               <span v-if="coreItem && localItem.mirror === undefined" class="core-value-indicator">
                 (core: {{ coreItem.mirror ? 'true' : 'false' }})
               </span>
@@ -861,7 +878,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>X Anchor: {{ localItem.xanchor ?? 0 }}%</label>
+              <label>X Anchor: {{ localItem.xanchor ?? 0 }}% <code class="prop-key">xanchor</code></label>
               <span v-if="coreItem && localItem.xanchor === undefined" class="core-value-indicator">
                 (core: {{ coreItem.xanchor ?? 0 }}%)
               </span>
@@ -872,7 +889,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Y Anchor: {{ localItem.yanchor ?? 0 }}%</label>
+              <label>Y Anchor: {{ localItem.yanchor ?? 0 }}% <code class="prop-key">yanchor</code></label>
               <span v-if="coreItem && localItem.yanchor === undefined" class="core-value-indicator">
                 (core: {{ coreItem.yanchor ?? 0 }}%)
               </span>
@@ -888,7 +905,7 @@ onBeforeUnmount(() => {
           <h4>Filters</h4>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Brightness: {{ localItem.brightness?.toFixed(2) ?? 1 }}</label>
+              <label>Brightness: {{ localItem.brightness?.toFixed(2) ?? 1 }} <code class="prop-key">brightness</code></label>
               <span v-if="coreItem && localItem.brightness === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.brightness ?? 1).toFixed(2) }})
               </span>
@@ -899,7 +916,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Contrast: {{ localItem.contrast?.toFixed(2) ?? 1 }}</label>
+              <label>Contrast: {{ localItem.contrast?.toFixed(2) ?? 1 }} <code class="prop-key">contrast</code></label>
               <span v-if="coreItem && localItem.contrast === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.contrast ?? 1).toFixed(2) }})
               </span>
@@ -910,7 +927,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Saturate: {{ localItem.saturate?.toFixed(2) ?? 1 }}</label>
+              <label>Saturate: {{ localItem.saturate?.toFixed(2) ?? 1 }} <code class="prop-key">saturate</code></label>
               <span v-if="coreItem && localItem.saturate === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.saturate ?? 1).toFixed(2) }})
               </span>
@@ -921,7 +938,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Sepia: {{ localItem.sepia?.toFixed(2) ?? 0 }}</label>
+              <label>Sepia: {{ localItem.sepia?.toFixed(2) ?? 0 }} <code class="prop-key">sepia</code></label>
               <span v-if="coreItem && localItem.sepia === undefined" class="core-value-indicator">
                 (core: {{ (coreItem.sepia ?? 0).toFixed(2) }})
               </span>
@@ -932,7 +949,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Hue: {{ localItem.hue ?? 0 }}°</label>
+              <label>Hue: {{ localItem.hue ?? 0 }}° <code class="prop-key">hue</code></label>
               <span v-if="coreItem && localItem.hue === undefined" class="core-value-indicator">
                 (core: {{ coreItem.hue ?? 0 }}°)
               </span>
@@ -942,7 +959,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="control-item-with-core">
             <div class="control-label-row">
-              <label>Blur: {{ localItem.blur ?? 0 }}px</label>
+              <label>Blur: {{ localItem.blur ?? 0 }}px <code class="prop-key">blur</code></label>
               <span v-if="coreItem && localItem.blur === undefined" class="core-value-indicator">
                 (core: {{ coreItem.blur ?? 0 }}px)
               </span>
@@ -987,16 +1004,16 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem;
-  background-color: #f5f5f5;
+  background-color: var(--editor-surface-sunken);
   border-radius: 4px 4px 0 0;
-  border: 1px solid #ddd;
+  border: 1px solid var(--editor-border);
   border-bottom: none;
 }
 
 .preview-header h3 {
   margin: 0;
   font-size: 1rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .animation-status {
@@ -1007,12 +1024,12 @@ onBeforeUnmount(() => {
 }
 
 .status-label {
-  color: #666;
+  color: var(--editor-text-muted);
 }
 
 .status-value {
   font-family: var(--font-family-mono);
-  color: #333;
+  color: var(--editor-text);
   font-weight: 500;
 }
 
@@ -1045,7 +1062,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
   background-color: #2a2a2a;
-  border: 1px solid #ddd;
+  border: 1px solid var(--editor-border);
   border-radius: 0 0 4px 4px;
   container-type: size;
   display: flex;
@@ -1093,6 +1110,11 @@ onBeforeUnmount(() => {
   position: relative;
   height: 100%;
   width: 100%;
+}
+
+.character-slot-art-wrapper {
+  position: absolute;
+  inset: 0;
 }
 
 .character-slot-scale-wrapper {
@@ -1188,7 +1210,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 100%;
   height: 100%;
-  color: #999;
+  color: var(--editor-text-faint);
   font-size: 1rem;
 }
 
@@ -1201,8 +1223,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 1.5rem;
   padding: 1rem;
-  background-color: #f9f9f9;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-raised);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1214,13 +1236,41 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
 }
 
+.control-group.identity h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.identity-name {
+  font-weight: normal;
+  color: var(--editor-text-muted);
+}
+
+.hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--editor-text-muted);
+  font-style: italic;
+}
+
+.hint code,
+.identity h4 code {
+  font-style: normal;
+  font-size: 0.9em;
+  background: var(--editor-surface-hover);
+  padding: 0 0.25em;
+  border-radius: 3px;
+}
+
 .control-group h4 {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
-  color: #333;
+  color: var(--editor-text);
   padding-bottom: 0.5rem;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid var(--editor-border);
 }
 
 .control-dropdown {
@@ -1233,15 +1283,15 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
   margin-top: 0.75rem;
   padding: 0.75rem;
-  background-color: #f0f8ff;
-  border: 1px solid #b0d4f1;
+  background-color: var(--editor-tint-info);
+  border: 1px solid var(--editor-ink-blue);
   border-radius: 4px;
 }
 
 .checkbox-label {
   font-size: 0.85rem;
   font-weight: 500;
-  color: #333;
+  color: var(--editor-text);
   cursor: pointer;
   line-height: 1.4;
 }
@@ -1275,8 +1325,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
 }
 
@@ -1292,7 +1342,7 @@ onBeforeUnmount(() => {
 
 .animation-select-item label {
   font-size: 0.85rem;
-  color: #555;
+  color: var(--editor-text-muted);
 }
 
 .animation-dropdown {
@@ -1305,7 +1355,7 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
   margin-top: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--editor-border);
 }
 
 .control-item {
@@ -1320,10 +1370,23 @@ onBeforeUnmount(() => {
   justify-content: space-between;
 }
 
+.prop-key {
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.75em;
+  font-weight: normal;
+  font-style: normal;
+  color: var(--editor-text);
+  background: var(--editor-surface-hover);
+  padding: 0 0.3em;
+  border-radius: 3px;
+  margin-inline-start: 0.35em;
+  vertical-align: middle;
+}
+
 .control-item label {
   font-size: 0.85rem;
   font-weight: 500;
-  color: #555;
+  color: var(--editor-text-muted);
 }
 
 /* Core value indicators for mod support */
@@ -1348,7 +1411,7 @@ onBeforeUnmount(() => {
 
 /* CSS animation for jitter - more stable than GSAP for rapid movements */
 .idle-jitter {
-  animation: jitter-animation var(--jitter-duration, 0.15s) infinite;
+  animation: jitter-animation var(--jitter-duration, 0.15s) var(--jitter-delay, 0s) infinite;
   will-change: transform;
 }
 

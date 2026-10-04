@@ -541,7 +541,7 @@ export class Inventory {
     }
 
     public getItemsByTrait(trait: string): Item[] {
-        return this.items.filter(i => i.getTrait(trait) !== null);
+        return this.items.filter(i => !!i.getTrait(trait));
     }
 
 

@@ -60,7 +60,7 @@ game.on("save_load_before", (saveData) => {
 
 ### save_migrated
 
-Triggered inside the save-migration pass (`registerSaveMigration`), after every declared section has synced and every `item_migrate` has fired, before equip statuses are re-bound and resource pools put back. Fires only when the pass runs: an old save, or any load in dev mode.
+Triggered inside the save-migration pass (`registerSaveMigration`), after every declared section has synced and every `item_migrate` has fired, before equip statuses are re-bound and resource pools put back. Fires on an old save, or any load in dev mode — even when no migration is registered.
 
 **Use cases:**
 - Repair states, stores and flags the generic pass can't express
@@ -103,6 +103,20 @@ Triggered when any state value changes.
 ```js
 game.on("state_change", (id, newVal) => {
   if (id === "game_state") console.log(newVal);
+});
+```
+
+### game_setting_change
+
+Triggered when a game setting changes — through `game.setGameSetting()` or the Game Settings menu. Never fires for the values a save load restores.
+
+**Use cases:**
+- React to a difficulty or content toggle the moment it changes
+- Re-derive character state that a setting maps onto
+
+```js
+game.on("game_setting_change", (key, newVal, oldVal) => {
+  if (key === "difficulty") console.log(newVal);
 });
 ```
 
@@ -166,6 +180,8 @@ Triggered before entering a room. Return `false` to abort entering the room.
 **Parameters:**
 - `roomId` - The ID of the room being entered
 - `dungeonId` - The ID of the dungeon containing the room
+- `fromRoomId` - The room the player is leaving (`''` on the very first entry)
+- `fromDungeonId` - The dungeon the player is leaving — a different one when the player crosses into this dungeon
 
 **Use cases:**
 - Block access to locked rooms
@@ -180,6 +196,15 @@ game.on("room_enter_before", (roomId, dungeonId) => {
     return false;
   }
 });
+
+// A one-way mist: whichever way the player walks out of room 2, the mist carries them to room 3
+game.on("room_enter_before", (roomId, dungeonId, fromRoomId, fromDungeonId) => {
+  if (dungeonId !== "mist_forest" || fromDungeonId !== "mist_forest") return;
+  if (fromRoomId === "2" && roomId !== "3") {
+    game.enter("3");
+    return false;
+  }
+});
 ```
 
 ### room_enter_after
@@ -189,6 +214,8 @@ Triggered after entering a room.
 **Parameters:**
 - `roomId` - The ID of the room that was entered
 - `dungeonId` - The ID of the dungeon containing the room
+- `fromRoomId` - The room the player left (`''` on the very first entry)
+- `fromDungeonId` - The dungeon the player left
 
 **Use cases:**
 - Track visited rooms
@@ -264,7 +291,7 @@ game.on("encounter_collected", (encounterId, itemSpec, dungeonId) => {
 
 ### scene_play_before
 
-Triggered before a scene plays.
+Triggered before a scene plays. Args: `(sceneId, dungeonId, isRootScene, anchor)` — `anchor` is the `&name` the paragraph was reached by (`''` for a plain scene root), so a listener can tell a branch apart without decoding the line id. The same four arguments reach `scene_play` (the committed scene, about to run its actions) and `scene_play_after`.
 
 **Use cases:**
 - Set up scene-specific UI state
@@ -274,6 +301,10 @@ Triggered before a scene plays.
 ```js
 game.on("scene_play_before", (sceneId) => {
   console.log("Playing:", sceneId);
+});
+
+game.on("scene_play", (sceneId, dungeonId, isRootScene, anchor) => {
+  if (anchor === "ambush_left") game.getCharacter("guard").addResource("health", -30);
 });
 ```
 
@@ -430,6 +461,54 @@ game.on("asset_render", (asset) => {
 });
 ```
 
+### asset_exit
+
+Triggered when a staged asset starts leaving: its exit animation begins, or it is dropped outright.
+
+| Removed by | Fires |
+|------------|-------|
+| `{asset: "!id"}` | yes |
+| `clear`, `false`, `reset` | yes, for each asset swept |
+| A `solo` asset staged | yes, for each asset swept |
+| The scene ending | yes |
+| `game.setAssets()`, `game.clearAssets()` | yes, for each asset dropped |
+| Loading a save | no |
+
+Fires once per exit – sweeping an asset that is already mid-exit does not fire it again. Not cancellable. The asset stays in `game.getAssets()` while its exit animation plays; in a solo swap the incoming asset's `asset_render` fires first, before it joins `game.getAssets()`.
+
+**Use cases:**
+- Stop a looping sound that belongs to an asset
+- Clean up script state tied to a staged asset
+
+```js
+game.on("asset_render", (asset) => {
+  if (asset.tags?.includes("waterfall")) game.playSounds("waterfall_loop");
+});
+game.on("asset_exit", (asset) => {
+  if (asset.tags?.includes("waterfall")) game.stopSounds("waterfall_loop");
+});
+```
+
+### spine_event
+
+Triggered when a staged spine asset's animation passes an event key authored in the rig, every loop pass, at the animation's playing speed. `data` carries the key's `int`, `float` and `string` values.
+
+| Arg | Type |
+|-----|------|
+| `asset` | The staged asset |
+| `name` | The event's name in the rig |
+| `data` | `{ int, float, string }` |
+
+**Use cases:**
+- A sound on each beat of an animation (a footstep, a hit)
+- A screen shake or flash timed to a frame
+
+```js
+game.on("spine_event", (asset, name, data) => {
+  if (name === "hit") game.playSounds(asset.meta?.hit_sound || "impact");
+});
+```
+
 ### asset_resolve
 
 Triggered while an image asset's `layers` stack is built, on every render path — the staged
@@ -504,11 +583,25 @@ game.on("item_migrate", (item, template) => {
 });
 ```
 
-### item_drop_render
+### status_migrate
+
+Triggered for every status the save-migration pass recreates from its definition (the `statuses` section), before the fresh copy is added back, with the instance it replaces. The fresh copy carries only what the definition declares, so put back what was derived per instance when the status was applied. `previous` is discarded once the listener returns.
+
+**Use cases:**
+- Rescale a status that was applied at a granting item's level (stamp the level in its `meta` when applying)
+
+```js
+game.on("status_migrate", (char, status, previous) => {
+  const level = previous.meta?.item_level;
+  if (level) status.stats = game.getService("reward").scaleStats(status.stats, level);
+});
+```
+
+### item_discard_render
 
 Triggered to decide whether a **discard affordance renders** for an item — the item card's Drop choice and the experience plugin's reward-panel trash button both ask. Return `false` to hide it.
 
-This is the game's veto for its own protected kinds. The engine's own rules (equipped gear, `quest` rarity, `quest` category) live in `item.isDroppable()`, which each of those UIs checks alongside the emitter — so a game only writes what the engine can't know.
+This is the game's veto for its own protected kinds. The engine's own rules (equipped gear, `quest` rarity, the `no_discard` trait) live in `item.isDiscardable()`, which each of those UIs checks alongside the emitter — so a game only writes what the engine can't know. To protect a single item, set its `no_discard` trait instead of listening here.
 
 Pure predicate: it runs on every render, so listeners must only return — never show a notification, mutate, or play a scene from here.
 
@@ -517,19 +610,37 @@ Pure predicate: it runs on every render, so listeners must only return — never
 - Hide the button on gear a quest still needs
 
 ```js
-game.on("item_drop_render", (item) => {
+game.on("item_discard_render", (item) => {
   if (item.category === "keys") return false;
 });
 ```
 
-### item_drop_before
+### item_compare
 
-Triggered before an item is discarded via the `drop_item` action, after the player confirms in the popup. Return `false` to cancel — the engine just closes the popup silently, so a listener that blocks a drop owns the explanation (a notification, a scene, or nothing).
+Triggered while an item card compares an unequipped item against the slots it fits (`character.compareItem()`), once per slot. `stats.item` and `stats.equipped` are per-unit copies of both items' stats — rewrite keys there so the two sides line up.
 
-To simply protect a kind of item, use `item_drop_render` instead — the button never appears, so this never fires. Reach for `item_drop_before` when the drop itself is the event you care about: a condition that only resolves at confirm time, or a side effect on the way out.
+Pure: it runs on every render, so listeners may only edit the copies.
+
+**Use cases:**
+- A game that renames an item's stats on equip (a gem whose neutral power becomes the power of the socket it sits in)
 
 ```js
-game.on("item_drop_before", (item, char) => {
+game.on("item_compare", (item, equipped, slot, character, stats) => {
+  if (equipped?.slots.includes("socket")) {
+    stats.equipped.power = stats.equipped[`power_${slot.id}`];
+    delete stats.equipped[`power_${slot.id}`];
+  }
+});
+```
+
+### item_discard_before
+
+Triggered before an item is discarded via the `discard_item` action, after the player confirms in the popup. Return `false` to cancel — the engine just closes the popup silently, so a listener that blocks a drop owns the explanation (a notification, a scene, or nothing).
+
+To simply protect a kind of item, use `item_discard_render` instead — the button never appears, so this never fires. Reach for `item_discard_before` when the drop itself is the event you care about: a condition that only resolves at confirm time, or a side effect on the way out.
+
+```js
+game.on("item_discard_before", (item, char) => {
   if (item.hasTag("bound") && !game.getFlag("curse_lifted")) {
     game.execute({ scene: "cursed_item_refuses" });
     return false;
@@ -877,6 +988,21 @@ Triggered before a status is applied, including reapplies of a status the charac
 game.on("status_apply_before", (char, status, args) => {
   if (status.id === "burn" && char.getStat("fire_immune")) return false;
   if (args?.stacks) args.stacks = Math.ceil(args.stacks / 2);
+});
+```
+
+### status_preview
+
+Triggered while a status card shows a status that is **not applied** – a `[[status:id]]` link in an item's text, a status in an item's consume list – with a copy of the template's stats and what the card was opened from (`context.item`). Rewrite the copy to show the numbers the player will actually get. An applied status shows its live values and never fires this.
+
+Pure: it runs on every render, so listeners may only edit the copy.
+
+**Use cases:**
+- A status an item grants at the item's level (a crest, a levelled potion)
+
+```js
+game.on("status_preview", (statusId, stats, context) => {
+  if (context.item?.traits.grants === statusId) stats.power = stats.power * 2;
 });
 ```
 

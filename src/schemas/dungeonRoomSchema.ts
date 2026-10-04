@@ -9,6 +9,7 @@ export const DungeonRoomSchema = {
   key: { type: 'chooseOne', fromFile: 'item_templates', tooltip: 'Lock: entering this room needs this item in the party bag. The key is auto-used with a notification; without it entry is refused with a locked message. Stays unlocked for the rest of the save.' },
   key_consume: { type: 'boolean', tooltip: 'The key is spent by the unlock (single-use keys). Off = the key stays in the bag.' },
   default_assets: { type: 'chooseMany', fromFile: 'assets', tooltip: 'Assets (images/decorations) displayed by default when entering this room.' },
+  default_sounds: { type: 'chooseMany', fromFile: 'sounds', tooltip: 'Ambience that plays while the player is in this room (a river, a forge), on top of the dungeon\'s default sounds. Pick looping sounds: they keep playing through scenes and stop when the player walks out.' },
   fog: {
     type: 'schema', tooltip: 'Fog of war configuration for this room.', objects: {
       shape: { type: 'chooseOne', options: ['polygon', 'circle'], tooltip: 'Shape of the fog visibility area.' }, //, 'sector'

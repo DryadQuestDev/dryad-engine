@@ -45,8 +45,6 @@ game.trigger("battle_started", "goblin");
 
 **Reference:** ->builtins.game_emitters
 
-**Note:** These are game lifecycle emitters registered via `game.on()` in scripts. Don't confuse them with dungeon events (dialogues, scenes) which are content created in Google Docs.
-
 ---
 
 ## States
@@ -115,6 +113,30 @@ game.registerAction("my_action", {
   choiceModifier: (choice, value) => { /* rewrite the choice's label or availability */ },
 });
 ```
+
+On a choice, every `eventDelayed` action runs after the choice's other keys, whatever order they are written in – `{enter: "19", flag: "door_open = 1"}` sets the flag before room 19's events read it.
+
+A `choiceModifier` runs while the choice is built. To relabel it, either prefix `choice.name` (a static marker) or assign `choice.nameComputed = computed(() => ...)` when the label depends on live state (a price, a resource). Build from the raw `choice.name` — the engine passes every label, modifier-built or not, through the label resolver afterwards, so `|placeholders|`, `if{}` logic and text styles come out resolved either way. `choice.isAvailable = computed(() => ...)` greys the choice out.
+
+The label is only part of the row. To restyle the whole option – its number, the hover arrow and the label – give it a class with `choice.className`, a string or a computed:
+
+```javascript
+game.registerAction("require_corruption", {
+  choiceModifier: (choice, value) => {
+    const unlocked = computed(() => game.getCharacter("mc").getStat("corruption") >= value);
+    choice.isAvailable = unlocked;
+    choice.className = computed(() => unlocked.value ? "void-choice" : "");
+  },
+});
+```
+
+```css
+.choice-list .choice.void-choice { color: #c084fc; }
+.choice-list .choice.void-choice:hover { color: #e9d5ff; }
+.choice-list .choice.void-choice .choice-number { text-shadow: 0 0 6px #c084fc; }
+```
+
+Write the selectors this specific (row class plus `:hover`) so they win over the engine's own visited and hover colors.
 
 ### Gates: aborting a paragraph
 

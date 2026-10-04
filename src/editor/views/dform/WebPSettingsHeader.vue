@@ -139,8 +139,8 @@ const autoConvertTooltip = "Automatically converts selected PNG and JPG/JPEG fil
 <style scoped>
 .webp-settings-header {
   padding: 0.75rem;
-  background-color: var(--p-surface-50);
-  border-bottom: 1px solid var(--p-surface-200);
+  background-color: var(--editor-surface-sunken);
+  border-bottom: 1px solid var(--editor-border);
   user-select: none;
 }
 
@@ -175,7 +175,7 @@ const autoConvertTooltip = "Automatically converts selected PNG and JPG/JPEG fil
 
 .setting-item-row .pi-save {
   margin-right: 0.25rem;
-  color: var(--p-green-600);
+  color: var(--editor-fg-success);
 }
 
 .quality-select {
@@ -193,19 +193,19 @@ const autoConvertTooltip = "Automatically converts selected PNG and JPG/JPEG fil
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.75rem;
-  background-color: var(--p-blue-50);
-  border-left: 3px solid var(--p-blue-500);
+  background-color: var(--editor-tint-info);
+  border-left: 3px solid var(--editor-ink-blue);
   border-radius: var(--p-border-radius);
   margin-top: 1.5rem;
 }
 
 .backup-info-dialog .recommendation .pi-info-circle {
-  color: var(--p-blue-600);
+  color: var(--editor-fg-info);
   flex-shrink: 0;
   margin-top: 0.2rem;
 }
 
 .backup-info-dialog .recommendation strong {
-  color: var(--p-blue-700);
+  color: var(--editor-fg-info);
 }
 </style>

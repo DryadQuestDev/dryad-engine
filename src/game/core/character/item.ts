@@ -54,13 +54,16 @@ export class Item {
     /**
      * Whether this item may be thrown away at all — the engine's own rule, shared by every discard
      * UI (the item card's Drop choice, the experience plugin's reward-panel trash button). Equipped
-     * gear is unequipped rather than discarded, and anything of quest rarity is never throwable.
-     * Games add their own protected kinds through the `item_drop_render` emitter, which each UI
-     * checks alongside this.
+     * gear is unequipped rather than discarded, anything of quest rarity is never throwable, and
+     * neither is an item flagged with the `no_discard` trait (shipped by global_essentials — the
+     * per-item switch for story gear that must stay in the bag). Games add their own protected
+     * KINDS through the `item_discard_render` emitter, which each UI checks alongside this. Unrelated
+     * to loot: whether an item can drop from a chest is the loot tables' business.
      */
-    public isDroppable(): boolean {
+    public isDiscardable(): boolean {
         return !this.isEquipped
-            && this.getRarity() !== 'quest';
+            && this.getRarity() !== 'quest'
+            && !this.traits?.no_discard;
     }
 
     /**
@@ -151,12 +154,12 @@ export class Item {
 
         if (trait.is_persistent === true) {
             let templateTrait = this.getTemplateTrait(key);
-            if (templateTrait) {
+            if (templateTrait !== undefined && templateTrait !== null) {
                 return templateTrait;
             }
         }
 
-        return this.traits[key] || null;
+        return this.traits[key] ?? null;
     }
 
     // ignore types
@@ -166,7 +169,7 @@ export class Item {
             throw new Error(`Item Trait ${key} does not exist`);
         }
 
-        return this.traits[key] || null;
+        return this.traits[key] ?? null;
     }
 
     // retrieve trait from the template

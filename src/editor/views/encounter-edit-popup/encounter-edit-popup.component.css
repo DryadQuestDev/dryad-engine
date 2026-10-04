@@ -18,8 +18,8 @@
   }
   
   .popup-content {
-    background-color: var(--background-color, #fff); /* Use CSS variable or default */
-    color: var(--text-color, #333);
+    background-color: var(--editor-surface);
+    color: var(--editor-text);
     padding: 20px 25px;
     border-radius: 8px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
@@ -33,7 +33,7 @@
     margin-top: 0;
     margin-bottom: 20px;
     font-size: 1.4em;
-    border-bottom: 1px solid var(--border-color, #eee);
+    border-bottom: 1px solid var(--editor-border);
     padding-bottom: 10px;
   }
   
@@ -53,31 +53,31 @@
     font-weight: bold;
     margin-bottom: 5px;
     font-size: 0.9em;
-    color: var(--text-muted-color, #666);
+    color: var(--editor-text-muted);
   }
   
   .form-field input[type="text"],
   .form-field input[type="number"] {
     padding: 8px 10px;
-    border: 1px solid var(--border-color-light, #ccc);
+    border: 1px solid var(--editor-border);
     border-radius: 4px;
-    background-color: var(--input-background-color, #fff);
-    color: var(--input-text-color, #333);
+    background-color: var(--editor-surface-sunken);
+    color: var(--editor-text);
     width: 100%; /* Ensure inputs fill the grid column */
     box-sizing: border-box; /* Include padding and border in width */
   }
   
   .form-field input:focus {
     outline: none;
-    border-color: var(--primary-color, #007bff);
-    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+    border-color: var(--editor-accent);
+    box-shadow: 0 0 0 2px var(--editor-tint-info);
   }
   
   .form-field-readonly {
     opacity: 0.7;
   }
   .form-field-readonly span {
-    background-color: var(--background-color-light, #f8f8f8);
+    background-color: var(--editor-surface-sunken);
     padding: 8px 10px;
     border-radius: 4px;
     font-family: var(--font-family-mono);
@@ -91,7 +91,7 @@
     gap: 10px;
     margin-top: 25px;
     padding-top: 15px;
-    border-top: 1px solid var(--border-color, #eee);
+    border-top: 1px solid var(--editor-border);
   }
   
   /* Basic Button Styling (adapt to project's button classes/styles) */
@@ -105,11 +105,11 @@
   }
   
   .button.primary {
-    background-color: var(--primary-color, #007bff);
-    color: #fff;
+    background-color: var(--editor-accent);
+    color: var(--editor-accent-contrast);
   }
   .button.primary:hover {
-    background-color: var(--primary-color-dark, #0056b3);
+    background-color: var(--editor-accent-hover);
   }
   
   .button.secondary {
@@ -151,7 +151,7 @@
     max-width: 100px;
     max-height: 100px;
     object-fit: contain;
-    border: 1px solid var(--border-color-light, #ccc);
+    border: 1px solid var(--editor-border);
     border-radius: 4px;
   }
   

@@ -226,7 +226,7 @@ watch(spineContainerRef, (newRef) => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
+  color: var(--editor-text-muted);
   font-style: italic;
 }
 </style>

@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useFloating, offset, flip, shift, size, autoUpdate } from '@floating-ui/vue';
 import { Global } from '../../../global/global';
+import { useMobile } from '../../../global/composables/useMobile';
 import { notifyPopupEnter, notifyPopupLeave, closeFromDepth, unpinPopup } from './popupStore';
 import type { PopupEntry } from './popupStore';
 
@@ -17,6 +18,21 @@ const isInteractive = computed(() =>
     props.entry.mode === 'pinned'
     || props.entry.interactive === true
     || global.userSettings.value.interactive_tooltips === true
+);
+
+// Footer hint for the T key. Peek is the default, so a card the player cannot scroll or click
+// through looks broken until they find the setting — this is the signpost. Pointless where the
+// card is reachable no matter what the setting says (a pinned card, or one its trigger forced
+// `interactive`), and on touch, where there is no key to press.
+const { isMobile } = useMobile();
+const showInspectHint = computed(() =>
+    !isMobile.value && props.entry.mode === 'transient' && props.entry.interactive !== true
+);
+const inspectHint = computed(() => global.getString('popup.inspect_hint'));
+// The pill beside the hint: the setting T toggles, read live so every open card flips with it.
+const inspectOn = computed(() => global.userSettings.value.interactive_tooltips === true);
+const inspectStateLabel = computed(() =>
+    global.getString(inspectOn.value ? 'popup.inspect_state.on' : 'popup.inspect_state.off')
 );
 
 const anchor = ref<HTMLElement | null>(props.entry.anchorEl);
@@ -60,6 +76,8 @@ function onPopupLeave() {
 
 const cardProps = computed(() => ({ ...props.entry.props, onClose }));
 
+const closeLabel = computed(() => global.getString('close'));
+
 const widthStyle = computed(() => {
     const w = props.entry.width;
     if (w === undefined) return undefined;
@@ -72,8 +90,12 @@ const widthStyle = computed(() => {
         v-bind="{ 'data-depth': entry.displayDepth ?? depth, 'data-popup-key': entry.key, 'data-closable': entry.closable ? '' : undefined }"
         :style="[floatingStyles, { zIndex: 10000 + (entry.displayDepth ?? depth), width: widthStyle }]"
         @mouseenter="onPopupEnter" @mouseleave="onPopupLeave">
-        <button v-if="entry.closable" class="popup-close-overlay" @click="onClose" aria-label="Close">×</button>
+        <button v-if="entry.closable" class="popup-close-overlay" @click="onClose" :aria-label="closeLabel">×</button>
         <component :is="entry.component" v-bind="cardProps" />
+        <div v-if="showInspectHint" class="popup-inspect-hint">
+            <span>{{ inspectHint }}</span>
+            <span class="popup-inspect-state" :class="{ on: inspectOn }">{{ inspectStateLabel }}</span>
+        </div>
     </div>
 </template>
 
@@ -95,6 +117,42 @@ const widthStyle = computed(() => {
 
 .popup.interactive {
     pointer-events: auto;
+}
+
+/* Sticky so it stays put while a long card scrolls under it — .popup is the scroll container.
+   Opaque background matching .popup, or the content would read through it. */
+.popup-inspect-hint {
+    position: sticky;
+    bottom: 0;
+    padding: 4px 10px 5px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(15, 15, 18, 0.97);
+    color: rgba(232, 232, 240, 0.4);
+    font-size: 0.75em;
+    line-height: 1.3;
+    text-align: center;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.popup-inspect-state {
+    padding: 0 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(232, 232, 240, 0.18);
+    color: rgba(232, 232, 240, 0.55);
+    font-size: 0.9em;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.popup-inspect-state.on {
+    border-color: rgba(66, 185, 131, 0.7);
+    background: rgba(66, 185, 131, 0.15);
+    color: #42b983;
 }
 
 .popup-close-overlay {

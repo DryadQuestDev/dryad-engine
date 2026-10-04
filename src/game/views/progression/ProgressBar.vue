@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { Global } from '../../../global/global';
 
 const props = withDefaults(defineProps<{
   current: number;
@@ -24,8 +25,21 @@ const percentage = computed(() => {
 });
 
 const displayText = computed(() => {
-  const formatNum = (n: number) => props.formatNumbers ? n.toLocaleString('en-US') : String(n);
-  return props.hideMax ? formatNum(props.current) : `${formatNum(props.current)} / ${formatNum(props.max)}`;
+  const global = Global.getInstance();
+  // Each locale file names its own grouping locale, so 1,250 becomes 1.250 or 1 250 where that is
+  // expected. Underscored because it is a BCP-47 tag rather than text to translate. Hand-edited
+  // data all the same: an unparseable one must not throw out of the template.
+  const groupingLocale = global.getString('_number_locale');
+  const formatNum = (n: number) => {
+    if (!props.formatNumbers) return String(n);
+    try {
+      return n.toLocaleString(groupingLocale);
+    } catch {
+      return n.toLocaleString('en-US');
+    }
+  };
+  if (props.hideMax) return formatNum(props.current);
+  return global.getString('progress_bar.fraction', { current: formatNum(props.current), max: formatNum(props.max) });
 });
 </script>
 

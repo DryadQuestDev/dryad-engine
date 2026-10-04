@@ -19,7 +19,23 @@ const COMPONENT_ID = 'overlay-navigation';
 
 const isTextSelectable = ref(false);
 
-const isDialogueCollapsed = ref(false);
+// The player's fold of the dialogue box (Ctrl+H, the header's collapse button). A registered
+// state so content can set it too and a save restores it; the show-dialogue button brings it back.
+const isDialogueCollapsed = computed({
+  get: () => !!game.coreSystem.getState('dialogue_minimized'),
+  set: (value: boolean) => game.setState('dialogue_minimized', value),
+});
+// The author's hide: the box goes away together with its buttons, so the player cannot bring
+// it back. Meant for staging beats ([nw] transitions) where an empty box would sit over the art.
+// Cleared by the next playScene like hide_events. Choices hide with it: a paragraph that ends
+// in choices under hide_dialogue is the author's to resolve.
+const isDialogueHidden = computed(() => !!game.coreSystem.getState('hide_dialogue'));
+
+// Passed into the tooltips as a placeholder: a key name is the keyboard's, not a word, so it has
+// no business inside a translatable sentence.
+const DIALOGUE_TOGGLE_SHORTCUT = 'Ctrl+H';
+const hideDialogueTitle = computed(() => global.getString('navigation.hide_dialogue', { shortcut: DIALOGUE_TOGGLE_SHORTCUT }));
+const showDialogueTitle = computed(() => global.getString('navigation.show_dialogue', { shortcut: DIALOGUE_TOGGLE_SHORTCUT }));
 const showAnimatedContinueIndicator = ref(false);
 const showFlashContent = ref(false);
 const flashFooterRef = ref<HTMLElement | null>(null);
@@ -71,18 +87,47 @@ function handleKeyPress(event: KeyboardEvent) {
       return;
     }
 
-    // If typing animation is in progress, skip to end
+    // Typing in progress: reveal up to the next [w] click-wait, or continue from one
     if (typingAnimation.isAnimating.value) {
       typingAnimation.skipAnimation();
       return;
     }
 
     // When animation is done, advance to next scene
-    let choices = game.dungeonSystem.relevantChoices.value;
-    if (!Array.isArray(choices)) {
-      choices?.do();
-    }
+    advanceScene();
   }
+}
+
+/** Advance past a single-continue scene. Branch choices (an array) are the player's to pick. */
+function advanceScene() {
+  const choices = game.dungeonSystem.relevantChoices.value;
+  if (!Array.isArray(choices)) {
+    choices?.do();
+  }
+}
+
+// [nw] auto-advance. Armed by the typing animation when the text ends; dropped when the scene
+// changes underneath it or the same guards that stop a click from advancing are up.
+let autoAdvanceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelAutoAdvance() {
+  if (autoAdvanceTimer !== null) {
+    clearTimeout(autoAdvanceTimer);
+    autoAdvanceTimer = null;
+  }
+}
+
+function scheduleAutoAdvance(delaySeconds: number) {
+  cancelAutoAdvance();
+  const sceneId = game.dungeonSystem.currentSceneId.value;
+  autoAdvanceTimer = setTimeout(() => {
+    autoAdvanceTimer = null;
+    if (game.dungeonSystem.currentSceneId.value !== sceneId) return;
+    if (game.getOpenPopups().length) return;
+    if (game.coreSystem.getState('disable_ui') || game.coreSystem.getState('hide_events')) return;
+    if (isSceneBlocked.value) return;
+    advanceScene();
+  }, delaySeconds * 1000);
 }
 
 function handleCtrlKeyDown(event: KeyboardEvent) {
@@ -110,6 +155,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  cancelAutoAdvance();
   window.removeEventListener('keydown', handleKeyPress);
   window.removeEventListener('keydown', handleCtrlKeyDown);
   window.removeEventListener('keyup', handleCtrlKeyUp);
@@ -141,16 +187,13 @@ function handleEventClick(event: MouseEvent) {
     return;
   }
 
-  // If typing animation is in progress, skip to end
+  // Typing in progress: reveal up to the next [w] click-wait, or continue from one
   if (typingAnimation.isAnimating.value) {
     typingAnimation.skipAnimation();
     return;
   }
 
-  let choices = game.dungeonSystem.relevantChoices.value
-  if (!Array.isArray(choices)) {
-    choices?.do();
-  }
+  advanceScene();
 }
 
 const encounterContent = computed(() => {
@@ -271,13 +314,17 @@ const typingAnimation = useTypingAnimation({
       showFlashContent.value = true;
       await animateFlashIn();
     }
-  }
+  },
+  onNoWait: scheduleAutoAdvance
 });
 
 async function animateFlashIn() {
   await nextTick();
   const flashEl = flashFooterRef.value;
   if (!flashEl) return;
+  // The flash sits in the scrolling region under the text. When the text already fills the
+  // box, the flash lands below the fold — bring it up so a notice is never missed.
+  flashEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   gsap.fromTo(flashEl,
     {
       opacity: 0,
@@ -294,6 +341,7 @@ async function animateFlashIn() {
 
 // Watch for content changes and start animation for scenes
 watch(processedEventContent, (newContent) => {
+  cancelAutoAdvance();
   const isScene = game.dungeonSystem.choiceType.value === 'scene';
   const currentSceneId = game.dungeonSystem.currentSceneId.value;
   const animatedSceneId = game.dungeonSystem.currentSceneIdAnimated.value;
@@ -302,12 +350,21 @@ watch(processedEventContent, (newContent) => {
     // Check if this scene has already been animated
     const alreadyAnimated = currentSceneId === animatedSceneId;
 
-    if (alreadyAnimated) {
+    // A paragraph behind a hide_dialogue box has nobody to type for: count it revealed at once,
+    // so one press advances and an [nw] delay runs from the moment the paragraph appears.
+    if (alreadyAnimated || isDialogueHidden.value) {
       // Skip animation, show content instantly
       typingAnimation.reset();
-      typingAnimation.displayedText.value = newContent;
+      game.dungeonSystem.currentSceneIdAnimated.value = currentSceneId;
       showAnimatedContinueIndicator.value = true;
       showFlashContent.value = game.dungeonSystem.cachedFlashArray.value.length > 0;
+      // A paragraph shown in full never runs the typewriter, so its [nw] would never fire. After a
+      // save load that strands the player: with hide_dialogue on there is no box to click. Read
+      // the marker off the content and arm the advance the way the typewriter would have. Either
+      // quote: the resolver writes single-quoted attributes, but a save round trip hands the text
+      // back with double quotes.
+      const noWait = /data-tag=["']nw["'](?:\s+data-value=["']([^"']+)["'])?/.exec(newContent);
+      if (noWait) scheduleAutoAdvance(noWait[1] ? parseFloat(noWait[1]) : 0);
     } else {
       // Play animation
       showAnimatedContinueIndicator.value = false;
@@ -317,24 +374,25 @@ watch(processedEventContent, (newContent) => {
   } else {
     // For non-scenes, show content instantly (their flash is gated by showFlash, not by this latch)
     typingAnimation.reset();
-    typingAnimation.displayedText.value = newContent;
   }
 }, { immediate: true });
 
-// Content to display (either animated or instant)
-const displayContent = computed(() => {
-  const isScene = game.dungeonSystem.choiceType.value === 'scene';
-  const baseText = isScene ? typingAnimation.displayedText.value : processedEventContent.value;
+// A click on the event box does something when it advances a single-continue scene, or while the
+// text is still typing or parked on a [w] — even a scene that ends in branch choices is clickable
+// until its text is fully revealed.
+const isEventClickable = computed(() =>
+  !isSceneBlocked.value && (typingAnimation.isAnimating.value || !Array.isArray(game.dungeonSystem.relevantChoices.value))
+);
 
-  // Add continue indicator
-  const shouldShowIndicator = isScene
-    ? (showAnimatedContinueIndicator.value && showContinueIndicator.value)
-    : showContinueIndicator.value;
+// Choices wait for the text: not while it types, and not while a [w] holds it for a click —
+// the clicks those ask for would otherwise compete with the choice buttons.
+const choicesReady = computed(() => !typingAnimation.isAnimating.value);
 
-  return baseText + (shouldShowIndicator ? ' ➢' : '');
-});
-
-const fullDialogueHtml = computed(() => processedEventContent.value + ' ➢');
+// Continue arrow for the dialogue. A [w] click-wait shows it whatever the scene ends in — the
+// click it asks for continues the text, not the scene.
+const showDialogueArrow = computed(() =>
+  typingAnimation.isWaiting.value || (showAnimatedContinueIndicator.value && !!showContinueIndicator.value)
+);
 
 const flashHtml = computed(() => game.dungeonSystem.cachedFlashArray.value.join('<br>'));
 
@@ -349,7 +407,7 @@ const showFlash = computed(() => {
 // The encounter counterpart of the typing animation's onComplete fade-in. Keyed on the encounter
 // as well as the text: adjacent rooms can raise a byte-identical line (11c and 11d of the prologue
 // both only apply darkness), and watching the text alone would see no change and skip the fade.
-watch(() => `${game.dungeonSystem.activeEncounter.value?.id ?? ''} ${flashHtml.value}`, () => {
+watch(() => `${game.dungeonSystem.activeEncounter.value?.id ?? ''} ${flashHtml.value}`, () => {
   if (!flashHtml.value || game.dungeonSystem.choiceType.value === 'scene') return;
   animateFlashIn();
 });
@@ -375,6 +433,12 @@ const isTextDungeon = computed(() => {
   return game.dungeonSystem.currentDungeon.value?.dungeon_type === 'text';
 });
 
+// The event layer (dialogue box, choices, toolbar) is put away by the Ctrl+H collapse or by the
+// toolbar's minimize button. The text-dungeon side column follows it, but stays mounted.
+const isEventLayerHidden = computed(() =>
+  game.dungeonSystem.toolbarMinimized.value || isDialogueCollapsed.value || isDialogueHidden.value
+);
+
 // Over-encumbered indicator: shown atop the room description while the party bag is overweight.
 // Both banner sites live inside the no-scene (description) branch, so this only needs the weight
 // check — a no-op unless a game caps the party inventory.
@@ -393,51 +457,49 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
        down synchronously on exit, so a leave transition would show the wrong text). -->
   <Transition name="overlay-fade">
   <div v-if="!game.coreSystem.getState('hide_events')" :id="COMPONENT_ID" class="overlay"
-    :class="[game.dungeonSystem.currentDungeon.value?.dungeon_type, { 'overlay-closing': game.dungeonSystem.isSceneClosing.value }]">
+    :class="[game.dungeonSystem.currentDungeon.value?.dungeon_type, {
+      'overlay-closing': game.dungeonSystem.isSceneClosing.value,
+      'has-side-column': isTextDungeon && !isEventLayerHidden
+    }]">
 
     <div class="overlay-content" :class="game.dungeonSystem.choiceType.value + '-type'">
 
       <!-- Choices in normal position: when NOT scene OR when scene with character name (not for text dungeons - they show choices inline) -->
       <ChoiceList
-        v-if="!isTextDungeon && !game.dungeonSystem.toolbarMinimized.value && !game.coreSystem.isTextUIContent.value && !isDialogueCollapsed && (game.dungeonSystem.choiceType.value !== 'scene' || characterName)" />
+        v-if="choicesReady && !isTextDungeon && !isEventLayerHidden && !game.coreSystem.isTextUIContent.value && (game.dungeonSystem.choiceType.value !== 'scene' || characterName)" />
 
       <Toolbar v-if="game.dungeonSystem.choiceType.value === 'encounter'" />
 
       <!-- Show dialogue button when collapsed -->
-      <button v-if="isDialogueCollapsed && !game.dungeonSystem.toolbarMinimized.value" class="show-dialogue-button"
-        @click="toggleDialogueCollapse" title="Show dialogue (Ctrl+H)">
+      <button v-if="isDialogueCollapsed && !game.dungeonSystem.toolbarMinimized.value && !isDialogueHidden" class="show-dialogue-button"
+        @click="toggleDialogueCollapse" :title="showDialogueTitle">
       </button>
 
       <div
-        v-if="game.dungeonSystem.choiceType.value === 'scene' && !isDialogueCollapsed && !game.dungeonSystem.toolbarMinimized.value"
+        v-if="game.dungeonSystem.choiceType.value === 'scene' && !isEventLayerHidden"
         class="dialogue-header">
         <!-- Character name OR choices in left column -->
         <div v-if="characterName && !game.coreSystem.isTextUIContent.value" class="character-name"
           :style="characterNameStyle">{{ characterName }}</div>
         <div v-else class="dialogue-header-left">
           <!-- Choices inside header when it's a scene with no character name -->
-          <ChoiceList v-if="!game.coreSystem.isTextUIContent.value" />
+          <ChoiceList v-if="choicesReady && !game.coreSystem.isTextUIContent.value" />
         </div>
         <div class="header-buttons">
           <button class="header-button logs-button" @click="game.dungeonSystem.isLogsPopupOpen.value = true"
-            title="View logs">
+            :title="global.getString('navigation.view_logs')">
             <i class="pi pi-book"></i>
           </button>
-          <button class="header-button collapse-button" @click="toggleDialogueCollapse" title="Hide dialogue (Ctrl+H)">
+          <button class="header-button collapse-button" @click="toggleDialogueCollapse" :title="hideDialogueTitle">
           </button>
         </div>
       </div>
 
-      <!-- Text dungeon layout: side column (left, fixed 500px) + content (right, flex, max 800px) -->
-      <div v-if="isTextDungeon && !game.dungeonSystem.toolbarMinimized.value && !isDialogueCollapsed"
-        class="text-dungeon-layout">
-        <div class="overlay-navigation-side">
-          <CustomComponentContainer :slot="'overlay-navigation-side'"
-            :context="{ dungeon: game.dungeonSystem.currentDungeon.value }" />
-        </div>
-
+      <!-- Text dungeon layout: the content column (max 800px). The side column beside it is a
+           child of .overlay, above — not of this row. -->
+      <div v-if="isTextDungeon && !isEventLayerHidden" class="text-dungeon-layout">
         <div class="event-container" :class="{
-          'clickable': !isSceneBlocked && !Array.isArray(game.dungeonSystem.relevantChoices.value),
+          'clickable': isEventClickable,
           'text-selectable': isTextSelectable,
           'dialogue-mode': !!game.dungeonSystem.currentSceneId.value
         }" @click="handleEventClick">
@@ -451,8 +513,9 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
               <CustomComponentContainer :slot="'scene-content-top'"
                 :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
               <!-- events scenes-->
-              <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" :display-content="displayContent"
-                :full-content="fullDialogueHtml" :selectable="isTextSelectable" :character-name="characterName"
+              <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" :content="processedEventContent"
+                :revealed-chars="typingAnimation.revealedChars.value" :show-arrow="showDialogueArrow"
+                :selectable="isTextSelectable" :character-name="characterName"
                 :show-inline-name="talkingCharacterHasNoArt" :content-style="dialogueContentStyle"
                 :name-style="characterNameStyle" />
               <!-- encounters-->
@@ -460,15 +523,15 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
                 <div v-if="isOverEncumbered" class="over-encumbered-banner">{{ overEncumberedLabel }}</div>
                 <TextEncounter />
               </div>
+              <!-- flash (scene + encounter): follows the text inside the scrolling region, so a long
+                   run of notices scrolls with the text under the one scrollbar instead of squeezing it out -->
+              <div v-if="showFlash" ref="flashFooterRef"
+                class="flash-content flash-inline" v-script="{ html: flashHtml, resolver: false }"></div>
 
               <!-- Scene choices for text dungeons -->
-              <ChoiceList v-if="game.dungeonSystem.currentSceneId.value" />
+              <ChoiceList v-if="choicesReady && game.dungeonSystem.currentSceneId.value" />
               <CustomComponentContainer :slot="'scene-content-bottom'"
                 :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
-
-              <!-- flash footer (scene + encounter): sits below the content, never adds to the scroll -->
-              <div v-if="showFlash" ref="flashFooterRef"
-                class="flash-content flash-footer" v-script="{ html: flashHtml }"></div>
             </div>
 
           </div>
@@ -476,8 +539,8 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
       </div>
 
       <!-- Regular (non-text) dungeon layout -->
-      <div v-else-if="!game.dungeonSystem.toolbarMinimized.value && !isDialogueCollapsed" class="event-container"
-        :class="{ 'clickable': !isSceneBlocked && !Array.isArray(game.dungeonSystem.relevantChoices.value), 'text-selectable': isTextSelectable }"
+      <div v-else-if="!isEventLayerHidden" class="event-container"
+        :class="{ 'clickable': isEventClickable, 'text-selectable': isTextSelectable }"
         @click="handleEventClick">
         <div class="character-section">
           <CharacterFace :key="game.dungeonSystem.talkingCharacter.value?.id"
@@ -489,8 +552,9 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
             <CustomComponentContainer :slot="'scene-content-top'"
               :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
             <!-- events scenes-->
-            <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" :display-content="displayContent"
-              :full-content="fullDialogueHtml" :selectable="isTextSelectable" :character-name="characterName"
+            <DialogueDisplay v-if="game.dungeonSystem.currentSceneId.value" :content="processedEventContent"
+              :revealed-chars="typingAnimation.revealedChars.value" :show-arrow="showDialogueArrow"
+              :selectable="isTextSelectable" :character-name="characterName"
               :show-inline-name="false" :content-style="dialogueContentStyle" :name-style="characterNameStyle" />
             <!-- encounters-->
             <div v-else class="dialogue-content encounter-content" :style="dialogueContentStyle">
@@ -516,25 +580,35 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
                 <div class="encounter-text" v-script="{ html: encounterContent, resolver: false }"></div>
               </div>
             </div>
+            <!-- flash (scene + encounter): follows the text inside .content-scroll, so a long run of
+                 notices scrolls with the text under the one scrollbar instead of squeezing it out.
+                 animateFlashIn scrolls it into view when it lands, so it is never hidden below the fold. -->
+            <div v-if="showFlash" ref="flashFooterRef"
+              class="flash-content flash-inline" v-script="{ html: flashHtml, resolver: false }"></div>
 
-            <ChoiceList v-if="!game.dungeonSystem.toolbarMinimized.value && game.coreSystem.isTextUIContent.value" />
+            <ChoiceList v-if="choicesReady && !game.dungeonSystem.toolbarMinimized.value && game.coreSystem.isTextUIContent.value" />
             <CustomComponentContainer :slot="'scene-content-bottom'"
               :context="{ sceneId: game.dungeonSystem.currentSceneId.value }" />
-          </div>
-
-          <!-- flash footer (scene + encounter): pinned outside .content-scroll so it never triggers the box scrollbar -->
-          <div v-if="showFlash" ref="flashFooterRef"
-            class="flash-content flash-footer" v-script="{ html: flashHtml }">
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Screen-dungeon side column: absolutely positioned on the right edge of the viewport -->
-    <div v-if="!isTextDungeon" class="overlay-navigation-side overlay-navigation-side--screen">
-      <CustomComponentContainer :slot="'overlay-navigation-side'"
-        :context="{ dungeon: game.dungeonSystem.currentDungeon.value }" />
-    </div>
+    <!-- Side column: the same strip down the left edge of the overlay layer in every dungeon
+         type. Teleported out of .overlay because that box is the event layer's own — narrow,
+         centred and transformed in map/screen dungeons, and a transform makes it the containing
+         block for anything positioned inside it. `defer` waits for #overlay-wrapper to be in the
+         document (it mounts in the same tick, further up the tree). Mounted for the whole dungeon:
+         putting the UI away must not tear down the slot's components. -->
+    <Teleport defer to="#overlay-wrapper">
+      <div class="overlay-navigation-side" :class="[
+        isTextDungeon ? 'overlay-navigation-side--text' : 'overlay-navigation-side--screen',
+        { 'overlay-navigation-side--hidden': isEventLayerHidden }
+      ]">
+        <CustomComponentContainer :slot="'overlay-navigation-side'"
+          :context="{ dungeon: game.dungeonSystem.currentDungeon.value }" />
+      </div>
+    </Teleport>
 
     <!-- Custom components registered to this container -->
     <CustomComponentContainer :slot="COMPONENT_ID"
@@ -576,6 +650,8 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
 }
 
 .overlay {
+  color: white;
+
   position: absolute;
   bottom: 0;
   left: 50%;
@@ -609,8 +685,15 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
 
 .overlay.text .overlay-content {
   height: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Everything in the event layer — header, dialogue box, choices — starts where the side
+   column ends, so the header and the content box always share one left edge. */
+.overlay.text.has-side-column .overlay-content {
+  padding-left: calc(var(--overlay-side-width) + var(--overlay-side-gap));
 }
 
 .overlay.text .character-section {
@@ -626,8 +709,7 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
   position: relative;
   max-height: 40dvh;
   min-height: 0;
-  /* Clip here; the inner .content-scroll owns the scrollbar so the pinned
-     flash footer stays out of the scrollable region. */
+  /* Clip here; the inner .content-scroll owns the one scrollbar. */
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
@@ -664,8 +746,8 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
   min-height: 0;
 }
 
-/* Scrollable text region of the event box (regular/screen layout). The flash
-   footer is a sibling below this, so flash never contributes to the scrollbar. */
+/* Scrollable text region of the event box (regular/screen layout). The flash lives
+   inside it, right after the text, so text and flash share this one scrollbar. */
 .content-scroll {
   display: flex;
   flex-direction: column;
@@ -680,7 +762,7 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
   justify-content: safe center;
 }
 
-.flash-footer {
+.flash-inline {
   flex: 0 0 auto;
 }
 
@@ -710,7 +792,6 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
 }
 
 .overlay-content {
-  color: white;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -758,7 +839,6 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
 .overlay.text .dialogue-header {
   max-width: 800px;
   flex: 0 0 auto;
-  margin-left: 520px;
 }
 
 .character-name {
@@ -874,12 +954,12 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
   background: rgba(0, 0, 0, 0.9);
 }
 
-/* Text dungeon layout: fixed-width content column + side column */
+/* Text dungeon layout: the event box column, offset past the side column by .overlay-content. */
 .text-dungeon-layout {
   display: flex;
-  gap: 20px;
   height: 100%;
   flex: 1;
+  min-height: 0;
   align-items: stretch;
 }
 
@@ -890,33 +970,43 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
   border-radius: 4px;
 }
 
-/* Side column — left, fixed 500px in text dungeons. */
-.overlay.text .overlay-navigation-side {
-  flex: 0 0 500px;
-  width: 500px;
+/* Side column: a strip down the left edge of the game area, clearing the .ui-container tray, in
+   every dungeon type. Its box never depends on what the event layer renders. Teleported, so it
+   inherits nothing from .overlay — its text colour is set here. */
+.overlay-navigation-side {
+  position: absolute;
+  left: var(--ui-tray-reserved-left, 120px);
+  top: 0;
+  bottom: 0;
+  width: var(--overlay-side-width);
   padding: 10px;
   padding-bottom: 2em;
   box-sizing: border-box;
-  overflow-y: auto;
-  background: #2d2d2d4f;
-  height: 100%;
+  color: white;
+  z-index: 5;
 }
 
-/* Side column — screen dungeons: absolutely positioned on the right edge of the viewport,
-   empty by default so pass clicks through to underlying UI. */
+/* Text dungeons: a real column of the layout, with the event box beside it. It takes clicks —
+   .overlay-wrapper turns pointer-events off for the whole layer, and that property inherits. */
+.overlay-navigation-side--text {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #2d2d2d4f;
+  pointer-events: auto;
+}
+
+/* Map/screen dungeons: the same strip, but over the map art — no backdrop, and empty space
+   passes clicks through to the map and the UI underneath. */
 .overlay-navigation-side--screen {
-  position: fixed;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 300px;
-  padding: 20px;
-  box-sizing: border-box;
   pointer-events: none;
-  z-index: 5;
 }
 
 .overlay-navigation-side--screen>* {
   pointer-events: auto;
+}
+
+/* Put away with the rest of the UI, but kept mounted so slot components hold their state. */
+.overlay-navigation-side--hidden {
+  display: none;
 }
 </style>

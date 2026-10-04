@@ -1,9 +1,9 @@
 .dsearch-container {
     /* Add specific container styles if needed */
-    border: 1px solid gray;
+    border: 1px solid var(--editor-border-strong);
     border-radius: 20px;
     padding: 1rem;
-    background-color: #f8f8f8; /* Match background */
+    background-color: var(--editor-surface-raised); /* Match background */
     margin-bottom: 1rem; /* Replaces mb-4 */
     /* p-fluid is handled by PrimeVue */
 }
@@ -67,7 +67,7 @@
 /* Section/Group Headers */
 .group-header {
   padding: 0;
-  color: #5f6969;
+  color: var(--editor-text-muted);
   margin: 0 0 10px 0; 
   font-weight: bold; /* Replaces font-medium (using bold for clarity) */
 }
@@ -97,7 +97,7 @@
 
 /* Tag Filter Group */
 .tag-filter-group {
-    border: 1px solid var(--surface-border); /* Use theme variable */
+    border: 1px solid var(--editor-border); /* Use theme variable */
     border-radius: var(--border-radius); /* Use theme variable */
     margin-bottom: 1rem; /* Replaces mb-4 */
 }
@@ -123,12 +123,12 @@
 .tag-logic-label {
     margin-right: 0.5rem; /* Replaces mr-2 */
     font-size: 0.875rem; /* Replaces text-sm */
-    color: var(--text-color); /* Use primary text color */
+    color: var(--editor-text); /* Use primary text color */
 }
 
 /* Helper text (No unique values) */
 .no-options-text {
-    color: var(--text-color-secondary); /* Replaces text-color-secondary */
+    color: var(--editor-text-muted); /* Replaces text-color-secondary */
     font-size: 0.875rem;
     width: 100%; /* Ensure it takes full width if needed */
 }
@@ -144,3 +144,24 @@
     gap-2, gap-3, font-bold, white-space-nowrap, block, mb-1, mb-2, mb-3, p-inputgroup, p-inputgroup-addon, flex-wrap,
     ml-2, mr-2, text-color-secondary, mb-0
 */
+
+/* Toolbar above the fields: preset chips left, Clear filters right */
+.dsearch-toolbar {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 0.75rem;
+}
+
+.dsearch-toolbar .dsearch-toolbar-presets {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dsearch-toolbar .clear-filters-button {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+    white-space: nowrap;
+}
+

@@ -382,6 +382,8 @@ const isMapInteractive = computed(() => {
   return !game.dungeonSystem.currentSceneId.value && game.getState('overlay_state') === 'overlay-navigation';
 });
 
+const noMapLabel = computed(() => global.getString('exploration.no_map'));
+
 </script>
 <template>
   <!--
@@ -590,7 +592,7 @@ const isMapInteractive = computed(() => {
     <CustomComponentContainer :slot="COMPONENT_ID" :context="{ dungeon, currentRoom: game.dungeonSystem.currentRoom.value }" />
   </div>
   <div v-else>
-    no map found
+    {{ noMapLabel }}
   </div>
 
 </template>

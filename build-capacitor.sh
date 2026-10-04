@@ -1,6 +1,9 @@
 #!/bin/bash
 
 # Build Android APKs from the web build — one APK per entry in android-build-list.json.
+# Entries marked "premium": true land in dryad-engine-release/premium/, the rest in
+# public/. Entries marked "skip": true are left out of `all` (e.g. a game with no
+# new release) but still build when named explicitly.
 #
 # Usage: ./build-capacitor.sh [build_id|all]     (default: all)
 # Requires: dist-web/ (run build-web.sh first) and a one-time ./scripts/setup-android.sh
@@ -51,13 +54,17 @@ fi
 IMAGICK=""
 if command -v magick >/dev/null 2>&1; then IMAGICK="magick"; elif command -v convert >/dev/null 2>&1; then IMAGICK="convert"; fi
 
-mkdir -p "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR/public" "$RELEASE_DIR/premium"
 RELEASE_ABS="$(cd "$RELEASE_DIR" && pwd)"
 
-BUILD_IDS=$(jq -r '.[].id' android-build-list.json)
-if [ "$TARGET" != "all" ]; then
-    if ! echo "$BUILD_IDS" | grep -qx "$TARGET"; then
-        echo "Error: build '$TARGET' not found in android-build-list.json (have: $(echo $BUILD_IDS | tr '\n' ' '))"
+if [ "$TARGET" = "all" ]; then
+    BUILD_IDS=$(jq -r '.[] | select(.skip | not) | .id' android-build-list.json)
+    SKIPPED_IDS=$(jq -r '.[] | select(.skip) | .id' android-build-list.json)
+    [ -n "$SKIPPED_IDS" ] && echo "Skipping (\"skip\": true): $(echo $SKIPPED_IDS)"
+else
+    ALL_IDS=$(jq -r '.[].id' android-build-list.json)
+    if ! echo "$ALL_IDS" | grep -qx "$TARGET"; then
+        echo "Error: build '$TARGET' not found in android-build-list.json (have: $(echo $ALL_IDS | tr '\n' ' '))"
         exit 1
     fi
     BUILD_IDS="$TARGET"
@@ -69,6 +76,11 @@ for BUILD_ID in $BUILD_IDS; do
     ICON=$(jq -r ".[] | select(.id==\"$BUILD_ID\") | .icon // empty" android-build-list.json)
     BUMP=$(jq -r ".[] | select(.id==\"$BUILD_ID\") | .version_bump // 0" android-build-list.json)
     SUFFIX=$(jq -r ".[] | select(.id==\"$BUILD_ID\") | .version_suffix // empty" android-build-list.json)
+    if [ "$(jq -r ".[] | select(.id==\"$BUILD_ID\") | .premium // false" android-build-list.json)" = true ]; then
+        OUT_FOLDER="premium"
+    else
+        OUT_FOLDER="public"
+    fi
 
     # Version comes from the GAME's _core manifest (first game of the build),
     # not the engine — the APK is the game, its releases track game versions.
@@ -141,7 +153,7 @@ for BUILD_ID in $BUILD_IDS; do
         APK_SUFFIX="-debug"
     fi
 
-    APK_OUT="$RELEASE_ABS/${BUILD_ID}-android-v${GAME_VERSION}${APK_SUFFIX}.apk"
+    APK_OUT="$RELEASE_ABS/$OUT_FOLDER/${BUILD_ID}-android-v${GAME_VERSION}${APK_SUFFIX}.apk"
     cp "$APK_SRC" "$APK_OUT"
     echo "✓ Created: $APK_OUT ($(du -h "$APK_OUT" | cut -f1))"
 done

@@ -44,6 +44,7 @@ import LogsButtonComponent from '../views/navigation-toolbar/LogsButton.vue';
 import CharacterListComponent from '../views/ui-container/CharacterList.vue';
 import { PARTY_INVENTORY_ID } from './itemSystem';
 import { Item } from '../core/character/item';
+import { ItemSlot } from '../core/character/itemSlot';
 import { Dungeon } from '../core/dungeon/dungeon';
 import { Inventory } from '../core/character/inventory';
 import { Choice } from '../core/content/choice';
@@ -65,10 +66,15 @@ export const CORE_EMITTER_SIGNATURES = {
     "save_load_before": (saveData: any): boolean | void => { }, // fires with the raw save JSON immediately before deserialization. Listeners may mutate saveData in place to migrate old-shape data. Return false to abort the load entirely.
     // fires inside the save-migration pass (registerSaveMigration), after every declared section has
     // synced and every item_migrate has fired, before the engine re-binds equip statuses and puts
-    // resource pools back. Only when the pass actually runs: old save, or any load in dev mode.
+    // resource pools back. Old save, or any load in dev mode — even with no migration registered.
     "save_migrated": (): boolean | void => { },
     "html_mount": (): boolean | void => { },
     "state_change": (stateId: string, newValue: any, oldValue: any): boolean | void => { },
+    // fires from setGameSetting (the Game Settings menu writes through it). A save restore assigns
+    // the settings object directly and fires nothing, and the load window mutes emitters anyway, so a
+    // listener never sees a restored value as a change — unlike a Vue watch on getGameSetting(),
+    // which fires mid-load on half-restored state.
+    "game_setting_change": (key: string, newValue: any, oldValue: any): boolean | void => { },
     "dungeon_create": (dungeon: Dungeon): boolean | void => { }, // will be triggered when a dungeon is created, including on loading a save file(because dungeons are not serialized).
     // fires on a CROSS-dungeon entry only, before ANY dungeon state mutates — the movement block,
     // the same-dungeon short-circuit and the key gate have all already passed, so a listener here
@@ -76,19 +82,23 @@ export const CORE_EMITTER_SIGNATURES = {
     // Room-to-room movement inside the current dungeon fires room_enter_before instead.
     "dungeon_enter_before": (dungeonId: string, roomId: string): boolean | void => { },
     "dungeon_enter_after": (dungeonId: string, roomId: string): boolean | void => { },
-    "room_enter_before": (roomId: string, dungeonId: string): boolean | void => { },
-    "room_enter_after": (roomId: string, dungeonId: string): boolean | void => { },
+    // fromRoomId / fromDungeonId: where the player came from ('' on the very first entry). On a cross-
+    // dungeon entry they name the dungeon the player left — the current ids already point at the new one.
+    "room_enter_before": (roomId: string, dungeonId: string, fromRoomId: string, fromDungeonId: string): boolean | void => { },
+    "room_enter_after": (roomId: string, dungeonId: string, fromRoomId: string, fromDungeonId: string): boolean | void => { },
     "encounter_selected": (encounterId: string, dungeonId: string): boolean | void => { }, // an encounter was selected — clicked on the map / screen, or cycled to with the toolbar. Props never fire. Return false to block the selection.
     "encounter_discovered": (encounterId: string, dungeonId: string): boolean | void => { }, // a hidden `@x{discover: "perception#6"}` encounter was revealed; fires once, on the room entry that reveals it.
     "encounter_collected": (encounterId: string, itemSpec: string, dungeonId: string): boolean | void => { }, // a collectable encounter was collected. Regrow needs no listener — time plugins call game.tickCollectables instead.
     "collectable_resolve": (request: { dungeonId: string, encounterId: string, pool: string, itemId: string | null }): boolean | void => { }, // a collectable with a collect_pool asks for its item during dungeon creation (so also on save load). A listener claims the request by setting request.itemId to an item template id; listeners must skip requests already carrying one. An unanswered request degrades the encounter to a plain one with a logged error.
     "item_discovered": (itemId: string): boolean | void => { }, // an item was discovered (recipe learned from its scroll, book read to the last page, painting viewed). Fires once per item per save; drives the item-card check mark.
     "key_used": (keyItemId: string, targetId: string): boolean | void => { }, // a key was auto-used on a locked room or inventory. targetId is "dungeonId.roomId" for rooms, the inventory id for chests. Informational — the unlock already happened.
-    "scene_play_before": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
+    // `anchor` is the &name the line was reached by — '' for a plain scene root — so a listener can
+    // tell a branch apart without resolving the raw line id.
+    "scene_play_before": (sceneId: string, dungeonId: string, isRootScene: boolean, anchor: string): boolean | void => { },
     // fires when a committed scene is about to run its paragraph actions (after gates/redirects,
     // before the actions/assets) — the place to stage default actors so they precede the scene's assets.
-    "scene_play": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
-    "scene_play_after": (sceneId: string, dungeonId: string, isRootScene: boolean): boolean | void => { },
+    "scene_play": (sceneId: string, dungeonId: string, isRootScene: boolean, anchor: string): boolean | void => { },
+    "scene_play_after": (sceneId: string, dungeonId: string, isRootScene: boolean, anchor: string): boolean | void => { },
     // fires when a scene is about to exit (last-paragraph click, {exit} action, playScene(null)).
     // Return false to cancel the exit — e.g. a battle system playing a close animation first.
     "scene_exit_before": (skipEvents: boolean): boolean | void => { },
@@ -105,6 +115,13 @@ export const CORE_EMITTER_SIGNATURES = {
     // listeners can reassign character.renderedLayers to filter layers
     "character_render": (character: Character): boolean | void => { },
     "asset_render": (asset: AssetObject): boolean | void => { },
+    // fires when a staged asset starts leaving: its exit animation begins, or it is dropped outright
+    // ({asset: "!id"}, clear/false/reset, a solo sweep, the scene ending, a replaced stage). Once per
+    // exit — not again when a mid-exit asset is swept. Not cancellable. Not fired on load.
+    "asset_exit": (asset: AssetObject): boolean | void => { },
+    // fires when a staged spine asset's animation passes an event key authored in the rig — every loop
+    // pass, at the animation's playing speed. `data` carries the key's int/float/string values.
+    "spine_event": (asset: AssetObject, name: string, data: { int: number, float: number, string: string }): boolean | void => { },
     // triggered while an asset's image layers are built, on EVERY render path — the staged
     // scene, the gallery, the fullscreen overlay, the editor preview. Listeners receive a
     // throwaway copy and may filter/reorder `asset.layers` or swap an entry for
@@ -119,15 +136,25 @@ export const CORE_EMITTER_SIGNATURES = {
     // derivations done at item_create (level scaling, runtime-added choices) are put back here —
     // items are deserialized, so item_create never fires for them on load.
     "item_migrate": (item: Item, template: ItemTemplateObject): boolean | void => { },
-    // Fired before an item is discarded via the drop_item action. Return false in a listener to
+    // fires for every status the save-migration pass recreates from its definition (the `statuses`
+    // section), before the fresh copy is added back, with the instance it replaces. Per-instance
+    // derivations done when the status was applied (stats scaled to a granting item, stamped meta)
+    // are put back here — `previous` is discarded once this returns.
+    "status_migrate": (character: Character, status: Status, previous: Status): boolean | void => { },
+    // Fired before an item is discarded via the discard_item action. Return false in a listener to
     // veto the drop (e.g. protect key items).
-    "item_drop_before": (item: Item, character: Character): boolean | void => { },
+    "item_discard_before": (item: Item, character: Character): boolean | void => { },
     // Fired to decide whether a DISCARD AFFORDANCE renders for an item — the item card's Drop
     // choice and the experience plugin's reward-panel trash button both ask. Return false to hide
-    // it. The GAME's veto only; the engine's own rules live in Item.isDroppable(), which each of
+    // it. The GAME's veto only; the engine's own rules live in Item.isDiscardable(), which each of
     // those UIs checks alongside this.
     // Pure predicate: it runs on every render, so listeners must only return, never act.
-    "item_drop_render": (item: Item, character?: Character): boolean | void => { },
+    "item_discard_render": (item: Item, character?: Character): boolean | void => { },
+    // Fired while an item card compares an unequipped item against the slots it fits
+    // (Character.compareItem), once per slot. `stats` holds per-unit COPIES of both items' stats —
+    // rewrite keys there when a game renames an item's stats on equip, so the two sides line up.
+    // Pure: it runs on every render, so listeners may only edit the copies.
+    "item_compare": (item: Item, equipped: Item | null, slot: ItemSlot, character: Character, stats: { item: Record<string, number>; equipped: Record<string, number> }): boolean | void => { },
     //"item_destroy": (item: Item): boolean | void => { },
     "item_equip_before": (item: Item, character: Character): boolean | void => { },
     "item_equip_after": (item: Item, character: Character): boolean | void => { },
@@ -151,6 +178,10 @@ export const CORE_EMITTER_SIGNATURES = {
     "skill_unlearned": (skillTreeId: string, skillId: string): boolean | void => { }, // triggered when a skill is unlearned
 
     "status_apply_before": (character: Character, status: Status, applyArgs?: { stacks?: number; duration?: number; source?: string }): boolean | void => { }, // triggered before a status is applied, including reapplies. Return false to prevent it. Mutate applyArgs (when present) to change the stacks/duration that land
+    // Fired while a status card shows a status that is NOT applied (a link in an item's text, an item's
+    // consume list), with a COPY of its template stats and what the card was opened from. Rewrite the
+    // copy to show the numbers the player will actually get. Pure: it runs on every render.
+    "status_preview": (statusId: string, stats: Record<string, number>, context: { item?: Item; character?: Character }): boolean | void => { },
     "status_added": (character: Character, status: Status): boolean | void => { }, // triggered after a new status is added to a character (reapplies don't fire this)
     "status_removed": (character: Character, status: Status): boolean | void => { }, // triggered after a status is removed from a character
     "status_expired": (character: Character, status: Status, instance: StatusInstance): boolean | void => { }, // triggered per expired instance when tickStatusDuration drops its duration to <= 0
@@ -272,6 +303,9 @@ export class InitSystem {
         this.game.registerState('disable_ui', false);
         this.game.registerState('block_scene_advance', false);
         this.game.registerState('block_party_inventory', false);
+        // Content's own lock, kept until content clears it. block_party_inventory above is the
+        // engine's busy flag, which every scene start and end overwrites.
+        this.game.registerState('block_party_inventory_persist', false);
         this.game.registerState('show_character_list', true);
         // Suppress the scene actor rail for a beat without hiding the whole event layer the way
         // hide_events does. The rail already hides itself when nothing is staged.
@@ -313,6 +347,13 @@ export class InitSystem {
         this.game.registerState('hide', 40);
 
         this.game.registerState('hide_events', false);
+        // The player's fold of the dialogue box (Ctrl+H / the header's collapse button); the
+        // show-dialogue button restores it. Content may set it too.
+        this.game.registerState('dialogue_minimized', false);
+        // Removes the dialogue box AND its buttons for a staging beat, so the player cannot
+        // restore it. Cleared by the next playScene like hide_events; a branch paragraph shows
+        // the box regardless so its choices stay reachable.
+        this.game.registerState('hide_dialogue', false);
         // Hides the map (map dungeons) / background image (screen dungeons) — see isHideMap in Exploration.vue.
         this.game.registerState('hide_map', false);
     }
@@ -405,7 +446,7 @@ export class InitSystem {
             component: OverlayExchange
         });
 
-        // Modal confirm (+ quantity slider for stacks) for the drop_item action.
+        // Modal confirm (+ quantity slider for stacks) for the discard_item action.
         this.game.coreSystem.addComponent({
             id: 'drop_item_popup',
             slot: 'popup',
@@ -424,12 +465,11 @@ export class InitSystem {
      * Register progression tab components
      */
     private registerProgressionComponents(): void {
-        const global = Global.getInstance();
 
         this.game.coreSystem.addComponent({
             id: 'quests',
             slot: 'progression-tabs',
-            title: global.getString('progression.tab.quests'),
+            title: 'progression.tab.quests',
             component: QuestsTab,
             order: 0
         });
@@ -437,7 +477,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'character',
             slot: 'progression-tabs',
-            title: global.getString('progression.tab.party'),
+            title: 'progression.tab.party',
             component: CharacterTab,
             order: 10
         });
@@ -445,7 +485,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'gallery',
             slot: 'progression-tabs',
-            title: global.getString('progression.tab.gallery'),
+            title: 'progression.tab.gallery',
             component: GalleryTab,
             order: 20
         });
@@ -453,7 +493,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'encyclopedia',
             slot: 'progression-tabs',
-            title: global.getString('progression.tab.encyclopedia'),
+            title: 'progression.tab.encyclopedia',
             component: EncyclopediaTab,
             order: 30
         });
@@ -463,12 +503,11 @@ export class InitSystem {
      * Register character tab components (sub-tabs within character sheet)
      */
     private registerCharacterTabComponents(): void {
-        const global = Global.getInstance();
 
         this.game.coreSystem.addComponent({
             id: 'character-sheet',
             slot: 'character-tabs',
-            title: global.getString('character.tab.character_sheet'),
+            title: 'character.tab.character_sheet',
             component: CharacterSheet
         });
 
@@ -477,7 +516,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'inventory',
             slot: 'character-tabs',
-            title: global.getString('character.tab.inventory'),
+            title: 'character.tab.inventory',
             component: InventoryComponent,
             order: 2,
             props: {
@@ -489,7 +528,7 @@ export class InitSystem {
         this.game.coreSystem.addComponent({
             id: 'skill-trees',
             slot: 'character-tabs',
-            title: global.getString('character.tab.skills'),
+            title: 'character.tab.skills',
             component: SkillTree,
             order: 3
         });
@@ -727,6 +766,13 @@ export class InitSystem {
             return this.game.getState('chosen_item_id') === param;
         });
 
+        // Usage: _in_party(ane) = true — whether a character is currently in the party.
+        // A companion's own optional line is the `ane!:` speaker tag (resolveTalkingCharacter);
+        // this condition covers everything else, e.g. a line that plays only when Ane is away.
+        this.game.registerCondition("_in_party", (charId: string) => {
+            return this.game.getParty().some(c => c.id === String(charId ?? '').trim());
+        });
+
         this.game.registerCondition("_room_visited", (param: string) => {
             let dungeonId: string;
             let roomId: string;
@@ -749,6 +795,33 @@ export class InitSystem {
                 throw new Error(`[_room_visited]: Dungeon data for ${dungeonId} not found`);
             }
             return dungeonData.isRoomVisited(roomId);
+        });
+
+        // Returns the id of the room the player was in immediately before the current one ('' if
+        // none yet). Unlike _room_visited (ever visited), this is the room just left — gate entry
+        // flavor on which door you came through. Usage: if{_previous_room = 19}...fi{}
+        this.game.registerCondition("_previous_room", () => {
+            return this.game.dungeonSystem.previousRoomId.value ?? '';
+        });
+
+        // Returns the id of the room the player stands in. Usage: if{_room = room5}...fi{}
+        this.game.registerCondition("_room", () => {
+            return this.game.dungeonSystem.currentRoomId.value ?? '';
+        });
+
+        // Returns boolean: whether that choice was ever picked. The id is the choice's line id, with
+        // its dungeon in front to ask about another one: _choice_visited(dungeon2.~1.intro.3.1).
+        // A {no_visited} choice is never recorded, so it never counts.
+        this.game.registerCondition("_choice_visited", (param: string) => {
+            const spec = String(param ?? '').trim();
+            const match = spec.match(/^(?:([A-Za-z0-9_]+)\.)?([~>!].+)$/);
+            if (!match) {
+                gameLogger.error(`[_choice_visited] expected a choice id like ~room.scene.1.2, got "${spec}"`);
+                return false;
+            }
+            const dungeonId = match[1] || this.game.dungeonSystem.currentDungeonId.value!;
+            const data = this.game.dungeonSystem.dungeonDatas.value.get(dungeonId);
+            return !!data && data.visitedChoices.has(match[2]);
         });
 
         // Returns boolean: whether a scene is active
@@ -781,6 +854,40 @@ export class InitSystem {
                 return equippedItems.some(item => item.uid === activeUid);
             }
             return equippedItems.some(item => item.id === itemId);
+        });
+
+        // Returns boolean: whether the ACTIVE item (the one whose custom choice opened the current
+        // scene) is of this template id. Usage: _active_item(rusty_key) = true
+        this.game.registerCondition("_active_item", (itemId: string) => {
+            const uid = this.game.getState('active_item') as string;
+            if (!uid) return false;
+            const inventory = this.game.itemSystem.getInventory(this.game.getState('active_inventory') || PARTY_INVENTORY_ID);
+            return inventory?.getItemByUid(uid)?.id === String(itemId ?? '').trim();
+        });
+
+        // Returns the slot type the active item is equipped in on that character ('' while it isn't).
+        // Usage: _active_item_slot(alice) = ring
+        this.game.registerCondition("_active_item_slot", (characterId: string) => {
+            const uid = this.game.getState('active_item') as string;
+            if (!uid) return '';
+            const character = this.game.getCharacter(characterId);
+            if (!character) {
+                gameLogger.error(`character not found for condition _active_item_slot: ${characterId}`);
+                return '';
+            }
+            return character.getItemSlots().find(slot => slot.itemUid === uid)?.slotId || '';
+        });
+
+        // Returns boolean: whether anything is equipped in that slot (slot type or slot instance id).
+        // Usage: _slot_filled(alice, helmet) = false
+        this.game.registerCondition("_slot_filled", (characterId: string, slotId: string) => {
+            const character = this.game.getCharacter(characterId);
+            if (!character) {
+                gameLogger.error(`character not found for condition _slot_filled: ${characterId}`);
+                return false;
+            }
+            const slot = String(slotId ?? '').trim();
+            return character.getItemSlots().some(s => (s.slotId === slot || s.id === slot) && !!s.itemUid);
         });
 
 
@@ -946,6 +1053,10 @@ export class InitSystem {
 
         // Usage: |item(itemUid, inventoryId)|
         //        |item| — no args: the ACTIVE item (the one whose custom choice opened the scene)
+        // The name comes out tinted by rarity, like a [[item:id]] link — same `rarity rarity_<tier>`
+        // span, minus the lore-link affordance, since a placeholder carries no card to open.
+        // Single-quoted attribute, as every other emitter here: the dialogue pass colors `"..."`
+        // runs, and a double-quoted attribute reads to it as a line of speech.
         this.game.registerPlaceholder("item", (itemUid?: string, inventoryId?: string) => {
             if (!itemUid) {
                 itemUid = this.game.getState('active_item');
@@ -954,7 +1065,11 @@ export class InitSystem {
             }
             let inventory = this.game.itemSystem.getInventory(inventoryId!);
             let item = inventory?.getItemByUid(itemUid);
-            return item?.getName() || "";
+            if (!item) return "";
+            const name = item.getName();
+            const rarityClasses = item.getRarityClasses();
+            if (!rarityClasses.length) return name;
+            return `<span class='rarity ${rarityClasses.join(' ')}'>${name}</span>`;
         });
 
         // Usage: |property(propertyId)| or |property(propertyId.nested.path)|
@@ -1055,6 +1170,14 @@ export class InitSystem {
             }
         });
 
+        // {reveal_room: "3, 4"} — mark rooms explored without entering them (`dungeon.room` for
+        // another dungeon). Their fog lifts and their neighbors show, but no room events run.
+        this.game.registerAction("reveal_room", {
+            action: (spec: string) => {
+                this.game.dungeonSystem.revealRooms(spec);
+            }
+        });
+
         this.game.registerAction("lore", {
             action: (data: string) => {
                 for (const id of data.split(',').map(s => s.trim()).filter(Boolean)) {
@@ -1065,8 +1188,8 @@ export class InitSystem {
 
         // Authoring marker for a branch that isn't written yet: renders the choice greyed out and
         // unclickable with a "[wip]" prefix, so planned options stay visible without being reachable.
-        // Prefixes `name` rather than setting `nameComputed` so the label still goes through
-        // resolveLabel (placeholders, if{} logic, text styles) via performChoiceModifier's fallback.
+        // Prefixes `name` rather than setting `nameComputed` — the simplest shape for a static
+        // prefix (performChoiceModifier resolves modifier-built nameComputed labels too).
         // No `action` — the choice can never be picked.
         this.game.registerAction("wip", {
             choiceModifier: (choice: Choice) => {
@@ -1272,9 +1395,23 @@ export class InitSystem {
                     const assetSpecs = this.game.logicSystem.getParts(data);
 
                     for (const spec of assetSpecs) {
-                        // Check for ! prefix (removal)
+                        // Check for ! prefix (removal). Takes the same "(prop=val)" tail as the
+                        // add form so the exit can be picked on the spot: the props merge onto
+                        // the live asset before removal, and BackgroundAsset reads exit,
+                        // exit_duration and exit_ease off that object when it plays the exit.
                         if (spec.startsWith('!')) {
-                            const assetId = spec.substring(1).trim();
+                            const removeMatch = spec.substring(1).trim().match(/^([^\(]+)(?:\(([^\)]+)\))?$/);
+                            if (!removeMatch) {
+                                gameLogger.warn(`[asset] Invalid format: "${spec}"`);
+                                continue;
+                            }
+                            const assetId = removeMatch[1].trim();
+                            if (removeMatch[2]) {
+                                const existing = this.game.dungeonSystem.assets.value.find(a => a.id === assetId);
+                                if (existing) {
+                                    Object.assign(existing, this.game.dungeonSystem.parseInlineProperties(removeMatch[2]));
+                                }
+                            }
                             this.game.dungeonSystem.removeAssets(assetId);
                             continue;
                         }
@@ -1331,6 +1468,56 @@ export class InitSystem {
             // (like music/asset), and the saved value is what restores it on load.
             action: (data: string | boolean | Record<string, any>) => {
                 this.game.setGrade(data);
+            }
+        });
+
+        // {ambient: "fireflies"} / "motes" / "embers" / "fireflies#0.5" / false. Same timing as grade:
+        // it changes as the paragraph renders, and the saved value restores it on load.
+        this.game.registerAction("ambient", {
+            action: (data: string | boolean) => {
+                this.game.setAmbient(data);
+            }
+        });
+
+        // One-shot actor animations on actors already on stage: "chimera lunge, mc recoil(intensity=1.2)".
+        // The same thing rides in actor props as `anim=` ("chimera(anim=lunge)"). Not saved and not
+        // re-run on load — a lunge happens once, when its paragraph plays.
+        this.game.registerAction("animate", {
+            action: (data: string) => {
+                for (const spec of this.game.logicSystem.getParts(String(data ?? ''))) {
+                    const m = spec.trim().match(/^([\w-]+)\s+([\w-]+)\s*(?:\(([^)]*)\))?$/);
+                    if (!m) {
+                        gameLogger.warn(`[animate] Invalid spec "${spec}". Expected "char anim" or "char anim(intensity=1, duration=0.5)"`);
+                        continue;
+                    }
+                    const [, charId, anim, propsString] = m;
+                    if (!this.game.dungeonSystem.findSlotByChar(charId)) {
+                        gameLogger.warn(`[animate] "${charId}" is not on stage`);
+                        continue;
+                    }
+                    const props: Record<string, any> = propsString ? this.game.dungeonSystem.parseInlineProperties(propsString) : {};
+                    this.game.dungeonSystem.playActorAnim(charId, anim, { duration: props.duration, intensity: props.intensity });
+                }
+            }
+        });
+
+        // {screen_shake: 0.5} — shake the scene art (background + actors); the dialogue stays still.
+        // true = default strength; {intensity, duration} for control. One-shot, never saved.
+        this.game.registerAction("screen_shake", {
+            action: (data: number | boolean | { intensity?: number; duration?: number }) => {
+                if (data === false) return;
+                if (typeof data === 'object' && data) this.game.dungeonSystem.screenShake(data.intensity ?? 0.5, data.duration ?? 0.45);
+                else this.game.dungeonSystem.screenShake(typeof data === 'number' ? data : 0.5);
+            }
+        });
+
+        // {screen_flash: "red"} — a colour pulse over the scene art that returns to the current grade.
+        // "red", "white", or any grade preset ("infernal#0.7"); {color, duration} for control.
+        this.game.registerAction("screen_flash", {
+            action: (data: string | boolean | { color?: string; duration?: number }) => {
+                if (data === false) return;
+                if (typeof data === 'object' && data) this.game.dungeonSystem.screenFlash(data.color ?? 'red', data.duration ?? 0.5);
+                else this.game.dungeonSystem.screenFlash(typeof data === 'string' ? data : 'red');
             }
         });
 
@@ -1827,9 +2014,26 @@ export class InitSystem {
                     // Flashes are party-only: the player has no stake in a status landing on an NPC or an off-screen character.
                     const announce = this.game.isCharacterInParty(character);
                     for (const item of group.items) {
+                        // `poisoned(stacks = 2, duration = 3)` overrides the template's stacks and
+                        // duration for this apply; either key alone works.
+                        const match = item.name.match(/^([^(]+?)\s*(?:\((.*)\))?$/);
+                        const statusId = match ? match[1].trim() : item.name;
+                        const applyArgs: { stacks?: number; duration?: number } = {};
+                        let badArgs = false;
+                        for (const pair of (match?.[2] ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
+                            const [key, raw] = pair.split('=').map(s => s.trim());
+                            const value = Number(raw);
+                            if ((key !== 'stacks' && key !== 'duration') || !Number.isFinite(value)) {
+                                gameLogger.error(`[status] "${item.name}": expected (stacks = N, duration = N), got "${pair}"`);
+                                badArgs = true;
+                                continue;
+                            }
+                            applyArgs[key] = value;
+                        }
+                        if (badArgs) continue;
                         if (item.remove) {
-                            const existing = character.getStatus(item.name);
-                            character.removeStatus(item.name);
+                            const existing = character.getStatus(statusId);
+                            character.removeStatus(statusId);
                             // Only announce a removal that happened. A room description clearing a
                             // status on entry runs on every entry, so arriving without the status
                             // would otherwise flash a line naming it by its raw id.
@@ -1837,18 +2041,18 @@ export class InitSystem {
                             // hoverable status card.
                             if (announce && existing) this.game.addFlash(Global.getInstance().getString('status.removed', {
                                 character: characterName,
-                                status: `[[status:${existing.id || item.name}]]`,
+                                status: `[[status:${existing.id || statusId}]]`,
                             }));
                         } else {
                             try {
-                                const status = this.game.createStatus(item.name);
-                                character.addStatus(status);
+                                const status = this.game.createStatus(statusId);
+                                character.addStatus(status, Object.keys(applyArgs).length ? applyArgs : undefined);
                                 const lineId = status?.polarity === 'positive' ? 'status.added.positive'
                                     : status?.polarity === 'negative' ? 'status.added.negative'
                                         : 'status.added.neutral';
                                 if (announce) this.game.addFlash(Global.getInstance().getString(lineId, {
                                     character: characterName,
-                                    status: `[[status:${status?.id || item.name}]]`,
+                                    status: `[[status:${status?.id || statusId}]]`,
                                 }));
                             } catch (e) {
                                 gameLogger.error(`[status] cannot apply "${item.name}" to "${group.characterId}": ${e}`);
@@ -1884,7 +2088,7 @@ export class InitSystem {
             });
         }
 
-        this.game.registerAction("skin_layer", {
+        this.game.registerAction("skin", {
             action: (data: string) => {
                 const groups = this.game.logicSystem.parseTargetedSpec(data);
                 const adds: string[] = [];
@@ -2182,7 +2386,7 @@ export class InitSystem {
                                 character.equipItem(item);
                             }
                             if (created) {
-                                const message = Global.getInstance().getString('item.added', { item: item.getName(), quantity: '' });
+                                const message = Global.getInstance().getString('item.added_single', { item: item.getName() });
                                 this.game.dungeonSystem.addFlash(message);
                             }
                         } catch (e) {
@@ -2315,17 +2519,18 @@ export class InitSystem {
             const rarity = item.getRarity() || '';
             const rarityClass = rarity ? `item-name rarity_${rarity}` : '';
             const itemHtml = `<b class="${rarityClass}">${itemName}</b>`;
-            Global.getInstance().addNotification(
-                `${character.getName()} consumed ${itemHtml}`
-            );
+            Global.getInstance().addNotificationId('item.consumed', {
+                character: character.getName(),
+                item: itemHtml,
+            });
             gameLogger.info(`[consume_item] "${character.id}" consumed "${item.id}"`);
         });
 
         // Open the drop confirmation popup (quantity slider for stacks). The popup owns the confirm,
-        // the cancellable item_drop_before emitter, and the removal — see DropItemPopup.vue. Items
+        // the cancellable item_discard_before emitter, and the removal — see DropItemPopup.vue. Items
         // the render emitter vetoes never reach here; getItemChoices omits their Drop choice.
         this.game.registerState('drop_item_pending', null);
-        this.game.registerAction("drop_item", (data: { itemUid: string; characterId: string }) => {
+        this.game.registerAction("discard_item", (data: { itemUid: string; characterId: string }) => {
             const itemUid = data.itemUid || this.game.getState('active_item');
             const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
             const inventory = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
@@ -2337,7 +2542,8 @@ export class InitSystem {
         // choose_item — DQ9's item picker popup. Pauses the scene (eventDelayed parks it on the
         // synthetic continue choice), opens a grid of matching party-bag items; the pick lands in
         // active_item (uid) + chosen_item_id (template id, survives remove: true), then the
-        // follow-up scene plays (or the story resumes). Cancel resumes with chosen_item_id = ''.
+        // follow-up scene plays (or the story resumes). Cancel only closes the popup — the story
+        // stays on the choice that opened the picker, with chosen_item_id = ''.
         // Value: "all" | "<category>" | { id?, category?, tags?, remove?, scene?, title? }
         // (id/category/tags accept a string or an array; branch on _chosen_item(item_id)).
         this.game.registerState('choose_item_pending', null);
@@ -2507,10 +2713,10 @@ export class InitSystem {
                 for (const part of spec.split(',').map(s => s.trim()).filter(Boolean)) {
                     const [itemId, rawQty] = part.split('#').map(s => s.trim());
                     const quantity = parseInt(rawQty, 10) || 1;
-                    this.game.showNotification(Global.getInstance().getString('item.collected', {
-                        item: this.game.itemSystem.getItemNameHtml(itemId),
-                        quantity: quantity > 1 ? ` (x${quantity})` : '',
-                    }));
+                    const itemHtml = this.game.itemSystem.getItemNameHtml(itemId);
+                    this.game.showNotification(quantity > 1
+                        ? Global.getInstance().getString('item.collected_quantity', { item: itemHtml, count: quantity })
+                        : Global.getInstance().getString('item.collected_single', { item: itemHtml }));
                 }
 
                 const encounterId = typeof value === 'object' && value.encounter

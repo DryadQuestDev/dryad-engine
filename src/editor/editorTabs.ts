@@ -5,6 +5,8 @@ import { CharacterSkinLayerSchema } from "../schemas/characterSkinLayerSchema";
 import { PropertySchema } from "../schemas/propertySchema";
 import { EntityTraitSchema, DataEntityTraitSchema } from "../schemas/entityTraitSchema";
 import { StatusMetaSchema } from "../schemas/statusMetaSchema";
+import { StatMetaSchema } from "../schemas/statMetaSchema";
+import { AssetMetaSchema } from "../schemas/assetMetaSchema";
 import { CharacterTemplateSchema } from "../schemas/characterTemplateSchema";
 import { DungeonConfigObject, DungeonConfigSchema } from "../schemas/dungeonConfigSchema";
 import { DungeonEncounterSchema } from "../schemas/dungeonEncounterSchema";
@@ -13,6 +15,8 @@ import { SettingsSchema } from "../schemas/settingsSchema";
 import { ManifestSchema } from "../schemas/manifestSchema";
 import { Schema } from "../utility/schema";
 import { DevEncountersDefaultSchema } from "../schemas/devEncountersDefaultSchema";
+import { DevFilterPresetSchema } from "../schemas/devFilterPresetSchema";
+import { FILTER_PRESETS_FILE } from "./filterPresets";
 import { MusicSchema } from "../schemas/musicSchema";
 import { SoundSchema } from "../schemas/soundSchema";
 import { PluginSchema } from "../schemas/pluginShema";
@@ -37,6 +41,14 @@ import AssetPopup from "./views/customPopups/AssetPopup.vue";
 import MaskEditorPopup from "./views/customPopups/MaskEditorPopup.vue";
 import DungeonContentEditorPopup from "./views/customPopups/DungeonContentEditorPopup.vue";
 import AbilityPickerPopup from "./views/customPopups/AbilityPickerPopup.vue";
+import StatsPopup from "./views/customPopups/StatsPopup.vue";
+import AbilityEditorPopup from "./views/customPopups/abilityEditor/AbilityEditorPopup.vue";
+import BalanceSheetPopup from "./views/customPopups/abilityEditor/BalanceSheetPopup.vue";
+import InventoryEditorPopup from "./views/customPopups/inventoryEditor/InventoryEditorPopup.vue";
+import ItemEditorPopup from "./views/customPopups/itemEditor/ItemEditorPopup.vue";
+import { DevEditorLayoutSchema } from "../schemas/devEditorLayoutSchema";
+import { EDITOR_LAYOUTS_FILE } from "./editorLayouts";
+import { StatGroupSchema } from "../schemas/statGroupSchema";
 import { Editor } from "./editor";
 import { SkillSlotSchema } from "../schemas/skillSlotSchema";
 import { SkillTreeSchema } from "../schemas/skillTreeSchema";
@@ -154,6 +166,14 @@ export const EDITOR_TABS: EditorTab[] = [
         customPopups: ['asset-editor'],
       },
       {
+        id: 'asset_meta',
+        schema: AssetMetaSchema,
+        file: 'asset_meta',
+        title: 'asset_meta',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
         id: 'galleries',
         schema: GallerySchema,
         file: 'galleries',
@@ -257,6 +277,22 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
       },
       {
+        id: 'stat_groups',
+        schema: StatGroupSchema,
+        file: 'stat_groups',
+        title: 'stat_group',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'stat_meta',
+        schema: StatMetaSchema,
+        file: 'stat_meta',
+        title: 'stat_meta',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
         id: 'character_attributes',
         schema: EntityAttributeSchema,
         file: 'character_attributes',
@@ -281,15 +317,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'character_template',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker', 'item-slot-picker', 'ability-picker'],
-      },
-      {
-        id: 'status_meta',
-        schema: StatusMetaSchema,
-        file: 'status_meta',
-        title: 'status_meta',
-        isArray: true,
-        requiresMod: true,
+        customPopups: ['face-picker', 'stats-panel', 'item-slot-picker', 'ability-picker'],
       },
       {
         id: 'character_statuses',
@@ -298,7 +326,15 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'character_status',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker', 'ability-picker'],
+        customPopups: ['face-picker', 'stats-panel', 'ability-picker'],
+      },
+      {
+        id: 'status_meta',
+        schema: StatusMetaSchema,
+        file: 'status_meta',
+        title: 'status_meta',
+        isArray: true,
+        requiresMod: true,
       },
       {
         id: 'character_slot_templates',
@@ -316,7 +352,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'skill_slot',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker', 'ability-picker'],
+        customPopups: ['face-picker', 'stats-panel', 'ability-picker'],
       },
       {
         id: 'skill_trees',
@@ -342,6 +378,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'ability_template',
         isArray: true,
         requiresMod: true,
+        customPopups: ['ability-editor', 'ability-balance-sheet'],
       },
       {
         id: 'ability_groups',
@@ -405,7 +442,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'item_template',
         isArray: true,
         requiresMod: true,
-        customPopups: ['face-picker', 'ability-picker'],
+        customPopups: ['item-editor', 'face-picker', 'stats-panel', 'ability-picker'],
       },
       {
         id: 'inventory_traits',
@@ -422,6 +459,7 @@ export const EDITOR_TABS: EditorTab[] = [
         title: 'item_inventory',
         isArray: true,
         requiresMod: true,
+        customPopups: ['inventory-editor'],
       },
       {
         id: 'item_recipes',
@@ -579,6 +617,22 @@ export const EDITOR_TABS: EditorTab[] = [
         isArray: true,
         requiresMod: true,
       },
+      {
+        id: 'filter_presets',
+        schema: DevFilterPresetSchema,
+        file: FILTER_PRESETS_FILE,
+        title: 'filter_preset',
+        isArray: true,
+        requiresMod: true,
+      },
+      {
+        id: 'editor_layouts',
+        schema: DevEditorLayoutSchema,
+        file: EDITOR_LAYOUTS_FILE,
+        title: 'editor_layout',
+        isArray: true,
+        requiresMod: true,
+      },
     ],
   },
 ]
@@ -642,6 +696,41 @@ export function registerEditorCustomComponents(editor: Editor) {
     id: 'dungeon-content-editor',
     name: 'Content Editor',
     component: DungeonContentEditorPopup
+  });
+
+  // Register stats popup: editable stat grid + effective totals for every BaseStatusSchema holder
+  editor.registerCustomComponent({
+    id: 'stats-panel',
+    name: 'Stats',
+    component: StatsPopup
+  });
+
+  // Register the ability template editor: sentence rows, live card, modifier tools
+  editor.registerCustomComponent({
+    id: 'ability-editor',
+    name: 'Ability Editor',
+    component: AbilityEditorPopup
+  });
+
+  // Register the ability balance sheet: every ability of the tab as an editable table
+  editor.registerCustomComponent({
+    id: 'ability-balance-sheet',
+    name: 'Balance Sheet',
+    component: BalanceSheetPopup
+  });
+
+  // Register the item template editor: category, traits, trade, equip, consume, scripts, live card
+  editor.registerCustomComponent({
+    id: 'item-editor',
+    name: 'Item Editor',
+    component: ItemEditorPopup
+  });
+
+  // Register the inventory template editor: item pool with the item filter form, contents, capacity
+  editor.registerCustomComponent({
+    id: 'inventory-editor',
+    name: 'Inventory Editor',
+    component: InventoryEditorPopup
   });
 
   // Register ability picker popup for abilities/ability_modifiers chooseMany fields

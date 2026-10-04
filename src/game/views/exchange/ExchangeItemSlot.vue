@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, markRaw } from 'vue';
 import { Item } from '../../core/character/item';
 import { Inventory } from '../../core/character/inventory';
 import { Game } from '../../game';
 import { TradeContext } from '../../systems/itemSystem';
+import ItemPopupCard from '../popups/cards/ItemPopupCard.vue';
+import { popover as vPopover, type PopoverBinding } from '../../directives/popoverDirective';
+import { inspectMode } from './useExchangeInspect';
 
 const game = Game.getInstance();
 
@@ -16,9 +19,21 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   click: [event: MouseEvent];
-  mouseenter: [event: MouseEvent];
-  mouseleave: [];
 }>();
+
+const ItemPopupCardComp = markRaw(ItemPopupCard);
+
+// The slot's hover card rides the shared popup layer (peek by default, T flips it interactive).
+// A click here moves or buys the item, so the card never pins from it — except in Inspect mode,
+// the touch fallback where hover does not exist: there the click pins the card and moves nothing.
+// No choice buttons: equip/use/drop belong to the character sheet, not the trade table.
+const popoverBinding = computed<PopoverBinding>(() => ({
+  component: ItemPopupCardComp,
+  props: { item: props.item, noChoices: true },
+  disableClick: !inspectMode.value,
+  placement: props.isParty ? 'right-start' : 'left-start',
+  key: `exchange-item:${props.item.uid}`,
+}));
 
 // Get rarity CSS classes for the slot frame
 const attributeClasses = computed(() => {
@@ -75,14 +90,6 @@ const weight = computed(() => {
 function handleClick(event: MouseEvent) {
   emit('click', event);
 }
-
-function handleMouseEnter(event: MouseEvent) {
-  emit('mouseenter', event);
-}
-
-function handleMouseLeave() {
-  emit('mouseleave');
-}
 </script>
 
 <template>
@@ -91,8 +98,7 @@ function handleMouseLeave() {
       class="item-slot"
       :class="{ 'not-affordable': !isAffordable }"
       @click="handleClick"
-      @mouseenter="handleMouseEnter"
-      @mouseleave="handleMouseLeave"
+      v-popover="popoverBinding"
     >
       <img
         v-if="item.getTrait('image')"

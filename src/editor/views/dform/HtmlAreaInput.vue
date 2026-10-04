@@ -239,8 +239,8 @@ function onEditorInit({ instance }: { instance: any }) {
 }
 
 .html-source-editor {
-  background-color: var(--p-surface-100);
-  border: 1px solid var(--p-surface-300);
+  background-color: var(--editor-surface-sunken);
+  border: 1px solid var(--editor-border);
   border-radius: var(--p-border-radius);
   padding: 0.75rem;
 }

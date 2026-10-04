@@ -1,7 +1,7 @@
 /// <reference path="../dtypes.d.ts" />
 
-const { game, vue, components } = window.engine;
-const { computed, ref, watch, onMounted, nextTick, defineComponent } = vue;
+const { game, vue, components, gsap } = window.engine;
+const { computed, ref, watch, onMounted, onUnmounted, nextTick, defineComponent } = vue;
 const { CharacterSlot, BackgroundAsset, CharacterViewerPopup, CustomComponentContainer } = components;
 
 import { currentRpgBattle, getSpeedMult, getBattleDisplayName } from '../rpg-battle-state.mjs';
@@ -10,9 +10,72 @@ import { endRpgBattle } from '../main.mjs';
 import { executeAction, advanceToNextTurn, tickActiveCharacter, canUseAbility, processDeaths, refireChannels, consumeStun, flashAbilityName, consumeBattleConsumable } from '../rpg-battle-flow.mjs';
 import { isCharAlive, getStatusStacks, expandSplashTargets, resolveAbility, getAliveEnemies, getAliveAllies, consumeFreeAction, isSupport, isAIControlled } from '../rpg-battle-effects.mjs';
 import { decideAction, getValidTargets } from '../rpg-battle-ai.mjs';
-import { animateCast, animateEffects, setIdleState, prepSummon, animateSummonIn } from '../rpg-battle-anims.mjs';
+import { animateCast, animateEffects, setIdleState, prepSummon, animateSummonIn, preloadProjectiles } from '../rpg-battle-anims.mjs';
+import { LAYOUT, enemySlot, cameraOrigin } from '../rpg-vfx-geometry.mjs';
 /** @param {RpgBattle} b */
 function isBattleFinished(b) { return b.phase === 'finished'; }
+
+/**
+ * Idle loop for a character's battle slot: the `battle_idle` character trait, else the
+ * Config tab's opt-in default_idle. The trait lives on the character rather than on the
+ * battle entry so a bat floats in every fight and every wave from one authoring point; the
+ * config default keeps every grounded static plate alive without authoring at all.
+ * A Spine doll animates itself — a CSS idle on top would double it — so it takes only the
+ * trait (an explicit ask), never the config default.
+ * @param {string} charId
+ * @returns {{ idle?: string }}
+ */
+function battleIdle(charId) {
+  const c = game.getCharacter(charId);
+  const idle = c?.getTrait('battle_idle')
+    || (c?.isSpineCharacter?.() ? 'none' : (game.getData('plugins_data/rpg_battler/battle_config')?.default_idle ?? 'none'));
+  return idle && idle !== 'none' ? { idle } : {};
+}
+
+/** Idles that lift the body off the floor — the only ones that earn a ground shadow. */
+const LIFT_IDLES = new Set(['float', 'bounce', 'hop']);
+
+/**
+ * Ground shadow for a FLOATING enemy slot, in the world camera's coordinate frame — the
+ * disc the body hovers over, which is what sells the float. Walkers get none: they don't
+ * need one, and some plates carry a shadow baked into the art already.
+ * Mirrors what CharacterSlot does to the plate: the slot box is 100% wide/high with its
+ * corner at (x, y); the plate is centered in it, shifted by the Art Manager's art_dx/dy
+ * (× slot scale, in cqh of the stage) and scaled by slot scale × art_scale about the
+ * center — so the plate's bottom edge is y + 50 + dy·scale + 50·scale·art_scale. The disc
+ * sits just under that edge, fully visible below the body even at rest; the idle's lift
+ * then shrinks and fades it (syncGroundShadows). Static art only (the shipped enemies).
+ * @param {string} charId
+ * @param {number} x
+ * @param {number} y
+ * @param {number} scale
+ */
+function groundShadowStyle(charId, x, y, scale) {
+  const art = game.getCharacter(charId)?.getStaticArtOffset?.() || { dx: 0, dy: 0, scale: 1 };
+  const bodyScale = scale * (art.scale || 1);
+  const h = 12 * bodyScale;
+  return {
+    // art_dx is in cqh (height units) like art_dy — keep it so, don't rescale to % width.
+    left: `calc(${x + 50}% + ${art.dx * scale}cqh)`,
+    top: `calc(${y + 50 + 50 * bodyScale}% + ${art.dy * scale + 0.3 * h}cqh)`,
+    width: `${55 * bodyScale}cqh`,
+    height: `${h}cqh`,
+  };
+}
+
+/**
+ * Idle pivot at the FEET, for static plates. The idle animates the art wrapper, whose box
+ * is the whole slot (100% of the stage); the body is centered in it and scaled about the
+ * center, so its sole sits at 50 + 50·scale %. Anchoring there makes breathe a chest rise
+ * on planted feet instead of a scale about the belly that slides the feet. A Spine doll
+ * keeps the slot's default anchors — nothing of ours pivots on it.
+ * @param {string} charId
+ * @param {number} scale
+ */
+function feetAnchor(charId, scale) {
+  if (game.getCharacter(charId)?.isSpineCharacter?.()) return {};
+  return { xanchor: 50, yanchor: 50 + 50 * scale };
+}
 
 const BASE_ACTION_DELAY = 600;
 const BASE_CHAIN_DELAY = 500;
@@ -235,40 +298,38 @@ export const RpgBattleScreen = defineComponent({
     // Enemy slots are STATIC (base positions/scale) — the wrapper transform does the camera, so no
     // per-slot left/top animation (which thrashes layout and flickers with many canvas slots).
     // The player character is intentionally NOT in the wrapper (its own front-center pop).
-    const WORLD_ZOOM_IN = 1.12;
-    const worldCam = computed(() => zoomedIn.value ? WORLD_ZOOM_IN : 1);
+    const worldCam = computed(() => zoomedIn.value ? LAYOUT.WORLD_ZOOM_IN : 1);
+    // It zooms about the acting member's point (LAYOUT.inX/inY), the same origin the editor's preview uses.
+    const worldOrigin = `${50 + cameraOrigin().x}% ${50 + cameraOrigin().y}%`;
 
     const enemySlots = computed(() => {
       const enemies = aliveEnemies.value;
       if (enemies.length === 0) return [];
 
-      const startX = 0, dx = 15, dy = 25, cols = 3;
-      // Front/bottom row sits on the floor line; deeper rows stack upward. Positive =
-      // lower on screen — keeps the back row's overlay clear of the viewport top edge.
-      const floorY = 2;
-      const baseScale = 0.35; // up from 0.2
-      // Fake perspective: each row farther back is smaller (size only — a slot filter would
-      // also dim the HP-bar overlay).
-      const DEPTH_SCALE = 0.8;
-
+      // The grid lives in rpg-vfx-geometry (LAYOUT), shared with the editor's projectile preview.
+      // Front/bottom row sits on the floor line; deeper rows stack upward (positive y = lower on
+      // screen, which keeps the back row's overlay clear of the viewport top edge) and are smaller
+      // (size only — a slot filter would also dim the HP-bar overlay).
       return enemies.map((id, i) => {
-        const row = Math.floor(i / cols);
+        const { x, y, scale, row } = enemySlot(i);
+        const idle = battleIdle(id);
         return {
           charId: id,
           slot: {
             char: id,
-            x: startX + (i % cols) * dx,
-            y: floorY - row * dy,
+            x, y,
             z: -row,
-            scale: baseScale * Math.pow(DEPTH_SCALE, row),
+            scale,
+            ...feetAnchor(id, scale),
+            ...idle,
           },
+          shadowStyle: LIFT_IDLES.has(idle.idle ?? '') ? groundShadowStyle(id, x, y, scale) : null,
         };
       });
     });
 
-    // Player slots: single set, position changes based on zoom state
-    const outStartX = -35, outDx = 20, outY = 31, outScale = 0.39;
-    const inX = -30, inY = 5, inScale = 1;
+    // Player slots: single set, position changes based on zoom state (LAYOUT in rpg-vfx-geometry)
+    const { outStartX, outDx, outY, outScale, inX, inY, inScale } = LAYOUT;
 
     const playerSlots = computed(() => {
       const party = alivePlayers.value;
@@ -283,10 +344,35 @@ export const RpgBattleScreen = defineComponent({
             x: isActive ? inX : outStartX + i * outDx,
             y: isActive ? inY : outY,
             scale: isActive ? inScale : outScale,
+            ...feetAnchor(id, isActive ? inScale : outScale),
+            ...battleIdle(id),
           },
         };
       });
     });
+
+    // ── Ground shadows (floaters only) ──
+    // Follow the idle lift every frame: float/bounce/hop tween the slot's art wrapper, so
+    // read its GSAP y (a cache lookup, no layout) and shrink + fade the sibling shadow as
+    // the body leaves the floor. A handful of pairs at most, refreshed when the roster changes.
+    /** @type {{ shadow: HTMLElement, art: HTMLElement | null }[]} */
+    let shadowPairs = [];
+    function collectShadowPairs() {
+      shadowPairs = [...document.querySelectorAll('.rpg-ground-shadow')].map(shadow => ({
+        shadow: /** @type {HTMLElement} */ (shadow),
+        art: /** @type {HTMLElement | null} */ (shadow.parentElement?.querySelector('.character-slot-art-wrapper') ?? null),
+      }));
+    }
+    function syncGroundShadows() {
+      for (const { shadow, art } of shadowPairs) {
+        const lift = art ? Math.max(0, -(Number(gsap.getProperty(art, 'y')) || 0)) : 0;
+        shadow.style.transform = `translate(-50%, -50%) scale(${(1 - lift * 0.02).toFixed(3)})`;
+        shadow.style.opacity = Math.max(0, 1 - lift * 0.04).toFixed(3);
+      }
+    }
+    watch(enemySlots, () => nextTick(collectShadowPairs), { flush: 'post' });
+    onMounted(() => { nextTick(collectShadowPairs); gsap.ticker.add(syncGroundShadows); });
+    onUnmounted(() => gsap.ticker.remove(syncGroundShadows));
 
     // ── Ability resolution helpers ──
 
@@ -389,11 +475,21 @@ export const RpgBattleScreen = defineComponent({
       const newIds = b.enemyParty.slice(prevEnemyCount);
       await nextTick();
       for (const id of newIds) prepSummon(id);
+      preloadProjectiles(newIds);
       if (isPlayerTurn.value) { forceZoomOut.value = true; await waitZoom(); }
       waveBanner.value = `${game.getLine('ui_wave')} ${b.waveIndex + 1}`;
       await new Promise(resolve => setTimeout(resolve, WAVE_BANNER_MS));
       for (const id of newIds) await animateSummonIn(id);
       waveBanner.value = null;
+    }
+
+    // Who a cast's VFX plays on: every living enemy / ally for an area ability — a player's area cast
+    // carries no target and the AI's carries one dummy, and the VFX used to land on the caster or on
+    // that one — otherwise the chosen target.
+    function vfxTargets(casterId, targetId, targetType) {
+      if (targetType === 'all_enemies') return getAliveEnemies(casterId);
+      if (targetType === 'all_allies') return getAliveAllies(casterId);
+      return [targetId ?? casterId];
     }
 
     // Resolve an ability on a target with full caster+effect animation, then run any flurry
@@ -402,7 +498,7 @@ export const RpgBattleScreen = defineComponent({
     // Returns true if the cast resolved, false if executeAction returned null (veto / guard).
     async function performAbility(casterId, abilityId, targetId, targetType) {
       const ability = game.getCharacter(casterId)?.getAbility(abilityId);
-      const landPos = await animateCast(casterId, targetId ?? casterId, targetType, ability,
+      const landPos = await animateCast(casterId, vfxTargets(casterId, targetId, targetType), targetType, ability,
         { onCast: () => flashAbilityName(casterId, abilityId) });
       const results = executeAction(abilityId, targetId);
       if (results === null) return false;
@@ -411,6 +507,7 @@ export const RpgBattleScreen = defineComponent({
       if (summonIds.length) {
         await nextTick();
         for (const id of summonIds) prepSummon(id);
+        preloadProjectiles(summonIds);
         if (isPlayerTurn.value) { forceZoomOut.value = true; await waitZoom(); }
         for (const id of summonIds) await animateSummonIn(id);
       }
@@ -448,7 +545,7 @@ export const RpgBattleScreen = defineComponent({
         await new Promise(resolve => setTimeout(resolve, getChainDelay()));
         // Melee re-lunges per strike; ranged refires from the caster. Caster pose stays
         // suppressed like on bounces — the wind-up already played on the primary cast.
-        await animateCast(casterId, targetId, targetType, ability, { casterPose: false });
+        await animateCast(casterId, vfxTargets(casterId, targetId, targetType), targetType, ability, { casterPose: false });
         const res = resolveAbility(casterId, abilityId, targetId, { isBounce: true });
         await animateEffects(res);
         await processDeathsAndWaves();
@@ -609,7 +706,7 @@ export const RpgBattleScreen = defineComponent({
         if (currentRpgBattle.value !== b) break;
         // Retire the previous support's card here rather than at the end of its own turn:
         // this covers every way a turn can end, including the stunned/dead `continue`s and
-        // a manually played support handing control back through onEndTurn.
+        // a manually played support (battle_ai: false) handing control back through onEndTurn.
         await hideSupportFace();
         let wasZoomed = zoomedIn.value && !!b.activeCharId;
         const prevTurn = b.turn;
@@ -706,7 +803,11 @@ export const RpgBattleScreen = defineComponent({
       }
     }
 
-    onMounted(() => { driveTurns(); });
+    onMounted(() => {
+      const b = battle.value;
+      if (b) preloadProjectiles(new Set([...b.playerParty, ...b.enemyParty, ...b.turnOrder]));
+      driveTurns();
+    });
 
     // ── Actions ──
 
@@ -797,7 +898,7 @@ export const RpgBattleScreen = defineComponent({
       battle, activeChar, activeSupportChar, supportFaceChar, supportFaceIn, supportSlideMs, waveBanner,
       roundBanner, roundBannerMs,
       backgroundAsset, enemySlots, playerSlots, getBattleDisplayName, worldCam,
-      zoomedIn, isPlayerTurn, forceZoomOut, showZone,
+      zoomedIn, isPlayerTurn, forceZoomOut, showZone, worldOrigin,
       battlePhase, selectedAbilityName, activeBattleState, isBattleOver,
       isTargeting, targetsEnemies, targetsAllies, targetIncludesSelf,
       hoveredTargetId, isSplashTarget, onTargetHover, onTargetLeave,
@@ -823,12 +924,13 @@ export const RpgBattleScreen = defineComponent({
             <!-- Enemy camera: enemy slots scale together via ONE GPU transform on this
                  wrapper (same worldCam as the bg). No per-slot animation → no flicker.
                  Players + UI live OUTSIDE it. -->
-            <div class="rpg-world-camera" :style="{ transform: 'scale(' + worldCam + ') translateZ(0)' }">
+            <div class="rpg-world-camera" :style="{ transform: 'scale(' + worldCam + ') translateZ(0)', transformOrigin: worldOrigin }">
             <!-- Enemies. Overlay (name + HP + tokens) is rendered by CharacterSlot
                  via overlaySlot="rpg-battle-char-overlay" — anchored to the slot
                  (art_dx/dy center the body's pixels on it); battle_overlay_x/y_offset
                  fine-adjust from there. -->
             <div v-for="es in enemySlots" :key="'e_' + es.charId" :data-rpg-char-id="es.charId">
+              <div v-if="es.shadowStyle" class="rpg-ground-shadow" :style="es.shadowStyle"></div>
               <CharacterSlot
                 :character="game.getCharacter(es.charId)" :slot="es.slot"
                 :interactive="true" :instantLayers="true"

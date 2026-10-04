@@ -23,6 +23,7 @@ import { fitText } from './game/directives/fitTextDirective';
 import { script } from './game/directives/scriptDirective';
 import { popover } from './game/directives/popoverDirective';
 import { dragscroll } from 'vue-dragscroll';
+import { Global } from './global/global';
 
 const RootComponent = {
   render() {
@@ -30,7 +31,10 @@ const RootComponent = {
       default: () => h(App),
       fallback: () => h('div', { class: 'initial-loader' }, [
         h('div', { class: 'initial-loader__ring' }),
-        h('div', { class: 'initial-loader__label' }, 'Loading Dryad Engine'),
+        // The splash paints before global.init() has fetched a locale file, so the English
+        // fallback is what the first frames show; the render effect reads the reactive locale
+        // map, so the label repaints itself the moment the translation lands.
+        h('div', { class: 'initial-loader__label' }, Global.getInstance().getStringOr('boot.loading', 'Loading Dryad Engine')),
       ])
     });
   }
@@ -39,7 +43,13 @@ const RootComponent = {
 const app = createApp(RootComponent);
 app.use(PrimeVue, {
   theme: {
-    preset: Aura
+    preset: Aura,
+    options: {
+      // Explicit selector instead of PrimeVue's 'system' default: the game and main
+      // menu are dark by their own CSS whatever the OS says, and only the editor has a
+      // light/dark switch. EditorScreen puts this class on <html>; see editorTheme.ts.
+      darkModeSelector: '.editor-dark'
+    }
   }
 });
 app.use(ConfirmationService);

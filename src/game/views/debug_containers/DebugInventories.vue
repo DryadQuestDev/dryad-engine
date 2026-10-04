@@ -256,13 +256,13 @@ onMounted(() => {
   width: 100%;
   padding: 0.5rem 2rem 0.5rem 0.75rem;
   font-size: 0.875rem;
-  border: 1px solid #cbd5e0;
+  border: 1px solid var(--editor-border);
   border-radius: 0.375rem;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #2b6cb0;
+  border-color: var(--editor-ink-blue);
   box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
 }
 
@@ -270,7 +270,7 @@ onMounted(() => {
   position: absolute;
   right: 0.75rem;
   cursor: pointer;
-  color: #718096;
+  color: var(--editor-text-faint);
   font-size: 1.125rem;
   padding: 0.25rem;
   line-height: 1;
@@ -278,16 +278,16 @@ onMounted(() => {
 }
 
 .search-clear:hover {
-  color: #2d3748;
+  color: var(--editor-text);
 }
 
 /* Inventory Count */
 .inventory-count {
   font-size: 0.875rem;
-  color: #4a5568;
+  color: var(--editor-text-muted);
   margin-bottom: 1rem;
   padding: 0.5rem 0.75rem;
-  background: #f7fafc;
+  background: var(--editor-surface-raised);
   border-radius: 0.375rem;
   font-weight: 500;
 }
@@ -303,20 +303,20 @@ onMounted(() => {
 .inventory-id {
   font-family: var(--font-family-mono);
   font-weight: 600;
-  color: #2b6cb0;
+  color: var(--editor-ink-blue);
   font-size: 1rem;
 }
 
 .inventory-name {
-  color: #4a5568;
+  color: var(--editor-text-muted);
   font-style: italic;
   font-size: 0.875rem;
   padding-left: 0.5rem;
 }
 
 .item-count-badge {
-  background: #e6fffa;
-  color: #234e52;
+  background: var(--editor-tint-success);
+  color: var(--editor-fg-success);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   font-size: 0.75rem;
@@ -326,17 +326,17 @@ onMounted(() => {
 
 /* Add Item Form */
 .add-item-form {
-  background: #f0f9ff;
+  background: var(--editor-tint-info);
   padding: 1rem;
   border-radius: 0.375rem;
   margin-bottom: 1rem;
-  border: 1px solid #bae6fd;
+  border: 1px solid var(--editor-ink-blue);
 }
 
 .form-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #0c4a6e;
+  color: var(--editor-fg-info);
   margin: 0 0 0.75rem 0;
   text-transform: uppercase;
   letter-spacing: 0.025em;
@@ -357,7 +357,7 @@ onMounted(() => {
 .field-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--editor-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.025em;
 }
@@ -376,7 +376,7 @@ onMounted(() => {
 
 /* Inventory Info */
 .inventory-info {
-  background: #f7fafc;
+  background: var(--editor-surface-raised);
   padding: 1rem;
   border-radius: 0.375rem;
   margin-bottom: 1rem;
@@ -396,7 +396,7 @@ onMounted(() => {
 
 .info-label {
   font-weight: 600;
-  color: #4a5568;
+  color: var(--editor-text-muted);
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.025em;
@@ -404,10 +404,10 @@ onMounted(() => {
 
 .info-value {
   font-family: var(--font-family-mono);
-  color: #2d3748;
+  color: var(--editor-text);
   word-break: break-all;
   padding-left: 0.5rem;
-  border-left: 2px solid #e2e8f0;
+  border-left: 2px solid var(--editor-border);
 }
 
 /* Items Section */
@@ -418,10 +418,10 @@ onMounted(() => {
 .section-title {
   font-size: 0.95rem;
   font-weight: 600;
-  color: #2d3748;
+  color: var(--editor-text);
   margin: 0 0 0.75rem 0;
   padding-left: 0.5rem;
-  border-left: 3px solid #4299e1;
+  border-left: 3px solid var(--editor-ink-blue);
 }
 
 .items-list {
@@ -432,8 +432,8 @@ onMounted(() => {
 
 /* Item Card */
 .item-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--editor-surface);
+  border: 1px solid var(--editor-border);
   border-radius: 0.375rem;
   padding: 0.75rem;
   transition: box-shadow 0.2s;
@@ -449,7 +449,7 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 0.75rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--editor-border);
 }
 
 .item-main-info {
@@ -463,7 +463,7 @@ onMounted(() => {
   height: 48px;
   object-fit: contain;
   border-radius: 0.25rem;
-  background: #f7fafc;
+  background: var(--editor-surface-raised);
   padding: 0.25rem;
 }
 
@@ -475,19 +475,19 @@ onMounted(() => {
 
 .item-name {
   font-weight: 600;
-  color: #2d3748;
+  color: var(--editor-text);
   font-size: 0.95rem;
 }
 
 .item-id {
   font-family: var(--font-family-mono);
   font-size: 0.75rem;
-  color: #718096;
+  color: var(--editor-text-faint);
 }
 
 .item-stack-count {
-  background: #edf2f7;
-  color: #2d3748;
+  background: var(--editor-surface-sunken);
+  color: var(--editor-text);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   font-weight: 600;
@@ -510,7 +510,7 @@ onMounted(() => {
 
 .detail-label {
   font-weight: 600;
-  color: #4a5568;
+  color: var(--editor-text-muted);
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.025em;
@@ -518,7 +518,7 @@ onMounted(() => {
 
 .detail-value {
   font-family: var(--font-family-mono);
-  color: #718096;
+  color: var(--editor-text-faint);
   font-size: 0.8rem;
 }
 
@@ -531,7 +531,7 @@ onMounted(() => {
 }
 
 .property-item {
-  background: #f7fafc;
+  background: var(--editor-surface-raised);
   padding: 0.375rem 0.5rem;
   border-radius: 0.25rem;
   font-size: 0.8rem;
@@ -541,12 +541,12 @@ onMounted(() => {
 
 .property-name {
   font-weight: 500;
-  color: #4a5568;
+  color: var(--editor-text-muted);
 }
 
 .property-value {
   font-family: var(--font-family-mono);
-  color: #2f855a;
+  color: var(--editor-ink-green);
   font-weight: 600;
 }
 
@@ -559,8 +559,8 @@ onMounted(() => {
 }
 
 .attribute-tag {
-  background: #fef5e7;
-  color: #975a16;
+  background: var(--editor-tint-warning);
+  color: var(--editor-fg-warning);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   font-size: 0.75rem;
@@ -576,8 +576,8 @@ onMounted(() => {
 }
 
 .tag {
-  background: #e6f7ff;
-  color: #0958d9;
+  background: var(--editor-tint-info);
+  color: var(--editor-fg-info);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   font-size: 0.75rem;
@@ -587,8 +587,8 @@ onMounted(() => {
 /* Currency Badge */
 .currency-badge {
   display: inline-block;
-  background: #d1fae5;
-  color: #065f46;
+  background: var(--editor-tint-success);
+  color: var(--editor-fg-success);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   font-size: 0.75rem;
@@ -606,8 +606,8 @@ onMounted(() => {
 }
 
 .price-item {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--editor-surface-sunken);
+  color: var(--editor-text);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   font-size: 0.75rem;
@@ -618,14 +618,14 @@ onMounted(() => {
 .empty-inventory {
   padding: 2rem;
   text-align: center;
-  color: #718096;
+  color: var(--editor-text-faint);
   font-style: italic;
 }
 
 .no-results {
   padding: 2rem;
   text-align: center;
-  color: #718096;
+  color: var(--editor-text-faint);
   font-style: italic;
 }
 
@@ -635,16 +635,16 @@ onMounted(() => {
 }
 
 .debug-inventories::-webkit-scrollbar-track {
-  background: #f7fafc;
+  background: var(--editor-surface-raised);
   border-radius: 4px;
 }
 
 .debug-inventories::-webkit-scrollbar-thumb {
-  background: #cbd5e0;
+  background: var(--editor-border-strong);
   border-radius: 4px;
 }
 
 .debug-inventories::-webkit-scrollbar-thumb:hover {
-  background: #a0aec0;
+  background: var(--editor-text-faint);
 }
 </style>

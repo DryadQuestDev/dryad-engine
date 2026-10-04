@@ -5,6 +5,7 @@ import { useStorage, watchDebounced } from '@vueuse/core';
 import {
   dungeonSearchQuery as searchQuery,
   dungeonStructuredFilter,
+  dungeonStatusFilter,
 } from './dungeonEditor/searchState';
 import Button from 'primevue/button';
 import Textarea from 'primevue/textarea';
@@ -20,6 +21,12 @@ import { lintDungeonContent, type LintIssue } from '../../../utility/dungeonEdit
 import { lineStartOffset } from '../../../utility/dungeonEditor/locate';
 import { convertPov } from '../../../utility/dungeonEditor/povConvert';
 import { buildDocumentIndex, type IndexCategory } from '../../../utility/dungeonEditor/index';
+import {
+  readMeta, isMetaStatus, visibleParams,
+  META_STATUSES, META_STATUS_ICON, META_STATUS_LABEL,
+  type MetaStatus,
+} from '../../../utility/dungeonEditor/meta';
+import type { StatusFilter } from './dungeonEditor/searchState';
 import {
   newEncounter,
   newScene,
@@ -71,7 +78,10 @@ function blockMatches(block: Block, needle: string): boolean {
   // ids are written in source — `#introduction`. Matching against sigil+id
   // covers both the bare and the prefixed query in one check.
   if ((block as any).id && (kindSigil[block.kind] + String((block as any).id)).toLowerCase().includes(q)) return true;
-  if ('paramsRaw' in block && block.paramsRaw && block.paramsRaw.toLowerCase().includes(q)) return true;
+  // Match the author's own params, not the `__meta` scaffolding — otherwise
+  // searching "status" or "done" would hit every annotated block.
+  if ('paramsRaw' in block && block.paramsRaw
+    && visibleParams(block.paramsRaw).toLowerCase().includes(q)) return true;
   if (block.kind === 'encounter' || block.kind === 'template') {
     for (const row of block.rows) {
       if (row.kind === 'text' && stripHtml(row.text).toLowerCase().includes(q)) return true;
@@ -85,7 +95,11 @@ function blockMatches(block: Block, needle: string): boolean {
     return false;
   }
   if (block.kind === 'scene') {
+    // Parked comments are real authored text the author can search for; they
+    // used to live in a column's content and were findable there.
+    if (block.preRows?.toLowerCase().includes(q)) return true;
     for (const row of block.rows) {
+      if (row.preColumns?.toLowerCase().includes(q)) return true;
       for (const col of row.columns) {
         if (col.name?.toLowerCase().includes(q)) return true;
         if (col.paramsRaw?.toLowerCase().includes(q)) return true;
@@ -861,6 +875,72 @@ const tocRoles = computed<TocRole[]>(() => {
   return roles;
 });
 
+// Author status per block index. Read from `paramsRaw` rather than stored
+// alongside, so it cannot drift from what the file actually says.
+const blockStatuses = computed<(MetaStatus | null)[]>(() =>
+  doc.value.blocks.map((b) => {
+    const st = readMeta((b as any)?.paramsRaw)?.status;
+    return isMetaStatus(st) ? st : null;
+  }),
+);
+
+// A block is only "untriaged" if the author can actually give it a status.
+// `raw` has no params at all; and inside a grouped quest only the STAGE rows
+// get a MetaStatusGrid — QuestCard renders the title and goal headers without
+// one — so counting those would put a floor under the "No status" chip that
+// nothing can ever clear.
+const statusControllable = computed<boolean[]>(() => {
+  const blocks = doc.value.blocks;
+  const out = blocks.map((b) => !!b && b.kind !== 'raw');
+  for (const item of groupedItems.value) {
+    if (item.kind !== 'quest') continue;
+    const g = item.group;
+    const stages = new Set<number>([
+      ...g.mainStageIdxs,
+      ...g.goals.flatMap((goal) => goal.stageIdxs),
+    ]);
+    for (let i = g.startIndex; i < g.endIndex; i++) if (!stages.has(i)) out[i] = false;
+  }
+  return out;
+});
+
+const STATUS_FILTERS: StatusFilter[] = [...META_STATUSES, 'none'];
+
+const FILTER_ICON: Record<StatusFilter, string> = {
+  ...META_STATUS_ICON,
+  none: 'pi pi-minus-circle',
+};
+
+const FILTER_LABEL: Record<StatusFilter, string> = {
+  ...META_STATUS_LABEL,
+  none: 'No status',
+};
+
+const statusCounts = computed<Record<StatusFilter, number>>(() => {
+  const out = { todo: 0, wip: 0, done: 0, broken: 0, none: 0 } as Record<StatusFilter, number>;
+  const controllable = statusControllable.value;
+  blockStatuses.value.forEach((st, i) => {
+    if (st) out[st]++;
+    else if (controllable[i]) out.none++;
+  });
+  return out;
+});
+
+const statusBlockIndices = computed<Set<number> | null>(() => {
+  const want = dungeonStatusFilter.value;
+  if (!want) return null;
+  const controllable = statusControllable.value;
+  const out = new Set<number>();
+  blockStatuses.value.forEach((st, i) => {
+    if (want === 'none' ? (!st && controllable[i]) : st === want) out.add(i);
+  });
+  return out;
+});
+
+function toggleStatusFilter(st: StatusFilter) {
+  dungeonStatusFilter.value = dungeonStatusFilter.value === st ? null : st;
+}
+
 const filterBlockIndices = computed<Set<number> | null>(() => {
   const f = dungeonStructuredFilter.value;
   if (!f) return null;
@@ -870,8 +950,6 @@ const filterBlockIndices = computed<Set<number> | null>(() => {
 
 const matchingBlockIndices = computed<Set<number> | null>(() => {
   const q = searchQuery.value.trim();
-  const filterSet = filterBlockIndices.value;
-  if (!q && !filterSet) return null;
   const searchSet = q
     ? (() => {
       const out = new Set<number>();
@@ -879,12 +957,18 @@ const matchingBlockIndices = computed<Set<number> | null>(() => {
       return out;
     })()
     : null;
-  if (searchSet && filterSet) {
-    const intersected = new Set<number>();
-    for (const i of searchSet) if (filterSet.has(i)) intersected.add(i);
-    return intersected;
-  }
-  return searchSet ?? filterSet;
+  // Free text, structured filter and author status stack — each narrows the
+  // last. All null means "no filtering at all", which is not the same as an
+  // empty set (that one means "nothing matched").
+  const sets = [searchSet, filterBlockIndices.value, statusBlockIndices.value].filter(
+    (x): x is Set<number> => x !== null,
+  );
+  if (sets.length === 0) return null;
+  return sets.reduce((acc, set) => {
+    const out = new Set<number>();
+    for (const i of acc) if (set.has(i)) out.add(i);
+    return out;
+  });
 });
 
 // Occurrence-level match state for the counter and the prev/next arrows.
@@ -1114,10 +1198,10 @@ watchDebounced(
 // re-rendered their `.at-search` spans (reactive on the query; the debounce
 // is to avoid thrashing scroll position on every keystroke).
 watchDebounced(
-  [searchQuery, dungeonStructuredFilter],
+  [searchQuery, dungeonStructuredFilter, dungeonStatusFilter],
   () => {
     activeMatchPos.value = 0;
-    if (!searchQuery.value.trim() && !dungeonStructuredFilter.value) {
+    if (!searchQuery.value.trim() && !dungeonStructuredFilter.value && !dungeonStatusFilter.value) {
       matchCount.value = 0;
       return;
     }
@@ -1131,7 +1215,7 @@ watchDebounced(
 watchDebounced(
   () => doc.value.blocks,
   () => {
-    if (!searchQuery.value.trim() && !dungeonStructuredFilter.value) return;
+    if (!searchQuery.value.trim() && !dungeonStructuredFilter.value && !dungeonStatusFilter.value) return;
     const els = collectMatchEls();
     matchCount.value = els.length;
     if (activeMatchPos.value >= els.length) activeMatchPos.value = Math.max(0, els.length - 1);
@@ -1538,6 +1622,15 @@ function questKindOf(id: string | undefined): QuestKind | null {
         class="index-btn" @click="indexFlagsRef?.toggle($event)" />
       <Button :label="global.getString('dungeon_editor.index.anchors')" icon="pi pi-link" size="small" text
         class="index-btn" @click="indexAnchorsRef?.toggle($event)" />
+      <span class="search-divider" aria-hidden="true"></span>
+      <button v-for="st in STATUS_FILTERS" :key="st" type="button" class="status-filter"
+        :class="[`status-filter--${st}`, { 'status-filter--active': dungeonStatusFilter === st }]"
+        :disabled="!statusCounts[st] && dungeonStatusFilter !== st"
+        v-tooltip.top="`${FILTER_LABEL[st]} — ${statusCounts[st]} block(s)`"
+        @click="toggleStatusFilter(st)">
+        <i :class="FILTER_ICON[st]" />
+        <span class="status-filter-count">{{ statusCounts[st] }}</span>
+      </button>
       <IndexPopover ref="indexActionsRef" :entries="docIndex.action"
         :label="global.getString('dungeon_editor.index.actions')"
         :selected-name="dungeonStructuredFilter?.kind === 'action' ? dungeonStructuredFilter.name : null"
@@ -1578,6 +1671,9 @@ function questKindOf(id: string | undefined): QuestKind | null {
                   ? `toc-sigil--quest-${questKindOf((block as any).id)!.replace('_', '-')}` : '',
                 tocRoles[idx].questGroup ? 'toc-sigil--quest-title' : '',
               ]">{{ kindSigil[block.kind] }}</span>
+              <i v-if="blockStatuses[idx]" class="toc-status"
+                :class="[META_STATUS_ICON[blockStatuses[idx]!], `toc-status--${blockStatuses[idx]}`]"
+                v-tooltip.top="META_STATUS_LABEL[blockStatuses[idx]!]" />
               <span class="toc-label">{{ tocRoles[idx].questGroup ? `Quest: ${tocRoles[idx].questGroup!.questId}` :
                 labelFor(block) }}</span>
               <template v-if="block.kind === 'scene'">
@@ -1599,10 +1695,16 @@ function questKindOf(id: string | undefined): QuestKind | null {
                       <i :class="isGoalExpanded(sub.goalKey) ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"></i>
                     </button>
                     <span v-else class="toc-subentry-toggle toc-subentry-toggle--placeholder"></span>
+                    <i v-if="blockStatuses[sub.blockIdx]" class="toc-status"
+                      :class="[META_STATUS_ICON[blockStatuses[sub.blockIdx]!], `toc-status--${blockStatuses[sub.blockIdx]}`]"
+                      v-tooltip.top="META_STATUS_LABEL[blockStatuses[sub.blockIdx]!]" />
                     <span class="toc-subentry-label">{{ sub.label }}</span>
                   </div>
                   <div v-else-if="isGoalExpanded(sub.parentKey)" class="toc-subentry toc-subentry--col"
                     @click.stop="jumpToBlock(sub.blockIdx)">
+                    <i v-if="blockStatuses[sub.blockIdx]" class="toc-status"
+                      :class="[META_STATUS_ICON[blockStatuses[sub.blockIdx]!], `toc-status--${blockStatuses[sub.blockIdx]}`]"
+                      v-tooltip.top="META_STATUS_LABEL[blockStatuses[sub.blockIdx]!]" />
                     <span class="toc-subentry-label">{{ sub.label }}</span>
                   </div>
                 </template>
@@ -1675,7 +1777,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   gap: 5px;
   flex-wrap: wrap;
   padding: 0.5rem 0.25rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--editor-border);
   flex: 0 0 auto;
 }
 
@@ -1696,7 +1798,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
 .auto-open-label {
   font-size: 0.82rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .editor-title {
@@ -1704,7 +1806,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .meta code {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--editor-surface-hover);
   padding: 0.1rem 0.4rem;
   border-radius: 3px;
   font-family: var(--font-family-mono, monospace);
@@ -1716,7 +1818,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   gap: 0.75rem;
   font-family: var(--font-family-mono, monospace);
   font-size: 0.8rem;
-  color: #888;
+  color: var(--editor-text-faint);
 }
 
 .toolbar-right {
@@ -1727,9 +1829,9 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .lint-banner {
-  background: #fdecea;
-  border: 1px solid #f5b7b1;
-  color: #b71c1c;
+  background: var(--editor-tint-danger);
+  border: 1px solid var(--editor-ink-red);
+  color: var(--editor-ink-red);
   padding: 0.4rem 0.75rem;
   border-radius: 4px;
   margin: 0 0.25rem 0.5rem;
@@ -1746,7 +1848,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .lint-banner-summary:hover {
-  color: #7f0000;
+  color: var(--editor-fg-danger);
 }
 
 .lint-icon {
@@ -1765,8 +1867,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
   font-family: inherit;
   font-size: 0.78rem;
   font-weight: 600;
-  color: #b71c1c;
-  background: rgba(255, 255, 255, 0.55);
+  color: var(--editor-ink-red);
+  background: var(--editor-surface-hover);
   border: 1px solid rgba(183, 28, 28, 0.35);
   border-radius: 3px;
   padding: 0.15rem 0.5rem;
@@ -1775,8 +1877,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
 .lint-copy-all:hover,
 .lint-item-copy:hover {
-  background: #fff;
-  border-color: #b71c1c;
+  background: var(--editor-surface);
+  border-color: var(--editor-ink-red);
 }
 
 /* The list is the part a dev drags across to copy — keep it selectable. */
@@ -1806,7 +1908,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .lint-line {
   display: inline-block;
   font-family: var(--font-family-mono, monospace);
-  color: #6d4c41;
+  color: var(--editor-ink-brown);
   min-width: 3.5ch;
   text-align: right;
   cursor: pointer;
@@ -1815,7 +1917,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .lint-block-ref {
   font-family: var(--font-family-mono, monospace);
   font-weight: 700;
-  color: #880e4f;
+  color: var(--editor-ink-pink);
   cursor: pointer;
 }
 
@@ -1825,11 +1927,11 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .lint-message {
-  color: #b71c1c;
+  color: var(--editor-ink-red);
 }
 
 .lint-item--warning .lint-message {
-  color: #8d6e00;
+  color: var(--editor-fg-warning);
 }
 
 .lint-item-copy {
@@ -1849,7 +1951,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .toolbar-divider {
   width: 1px;
   height: 1.25rem;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--editor-surface-hover);
   margin: 0 0.25rem;
 }
 
@@ -1859,37 +1961,37 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
 .encounter-btn :deep(.p-button-label),
 .encounter-btn :deep(.p-button-icon) {
-  color: #9c27b0;
+  color: var(--editor-ink-purple);
 }
 
 .room-btn :deep(.p-button-label),
 .room-btn :deep(.p-button-icon) {
-  color: #ef6c00;
+  color: var(--editor-ink-orange);
 }
 
 .scene-btn :deep(.p-button-label),
 .scene-btn :deep(.p-button-icon) {
-  color: #1976d2;
+  color: var(--editor-ink-blue);
 }
 
 .quest-btn--title :deep(.p-button-label),
 .quest-btn--title :deep(.p-button-icon) {
-  color: #00838f;
+  color: var(--editor-ink-teal);
 }
 
 .quest-btn--main-stage :deep(.p-button-label),
 .quest-btn--main-stage :deep(.p-button-icon) {
-  color: #e65100;
+  color: var(--editor-ink-orange);
 }
 
 .quest-btn--goal :deep(.p-button-label),
 .quest-btn--goal :deep(.p-button-icon) {
-  color: #c17900;
+  color: var(--editor-ink-amber);
 }
 
 .quest-btn--goal-stage :deep(.p-button-label),
 .quest-btn--goal-stage :deep(.p-button-icon) {
-  color: #e65100;
+  color: var(--editor-ink-orange);
 }
 
 .editor-main {
@@ -1905,7 +2007,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   min-width: 180px;
   overflow-y: auto;
   padding: 0.5rem 0.25rem 0.5rem 0.5rem;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid var(--editor-border);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -1915,14 +2017,14 @@ function questKindOf(id: string | undefined): QuestKind | null {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #000;
+  color: var(--editor-text);
   font-weight: 600;
   padding: 0.25rem 0.25rem 0.5rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid var(--editor-border);
 }
 
 .toc-empty {
-  color: #555;
+  color: var(--editor-text-muted);
   font-style: italic;
   font-size: 0.85rem;
   padding: 0.5rem 0.25rem;
@@ -1943,7 +2045,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   border: none;
   padding: 0.25rem 0.4rem;
   border-radius: 3px;
-  color: #222;
+  color: var(--editor-text);
   font-size: 0.82rem;
   cursor: grab;
   text-align: left;
@@ -1952,7 +2054,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .toc-entry:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--editor-surface-hover);
 }
 
 .toc-entry:active {
@@ -1961,7 +2063,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
 .toc-entry--room {
   font-weight: 600;
-  color: #000;
+  color: var(--editor-text);
   font-size: 0.85rem;
   border-left: 2px solid transparent;
 }
@@ -1988,47 +2090,47 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .toc-sigil--room {
-  color: #f57f17;
+  color: var(--editor-ink-amber);
 }
 
 .toc-sigil--encounter {
-  color: #9c27b0;
+  color: var(--editor-ink-purple);
 }
 
 .toc-sigil--scene {
-  color: #81c784;
+  color: var(--editor-ink-green);
 }
 
 .toc-sigil--scene-event {
-  color: #1976d2;
+  color: var(--editor-ink-blue);
 }
 
 .toc-sigil--template {
-  color: #757575;
+  color: var(--editor-text-faint);
 }
 
 .toc-sigil--raw {
-  color: #888;
+  color: var(--editor-text-faint);
 }
 
 .toc-sigil--description {
-  color: #f57f17;
+  color: var(--editor-ink-amber);
 }
 
 .toc-sigil--quest-title {
-  color: #00838f;
+  color: var(--editor-ink-teal);
 }
 
 .toc-sigil--quest-main-stage {
-  color: #e65100;
+  color: var(--editor-ink-orange);
 }
 
 .toc-sigil--quest-goal {
-  color: #c17900;
+  color: var(--editor-ink-amber);
 }
 
 .toc-sigil--quest-goal-stage {
-  color: #e65100;
+  color: var(--editor-ink-orange);
 }
 
 .toc-label {
@@ -2046,19 +2148,19 @@ function questKindOf(id: string | undefined): QuestKind | null {
   margin-left: 1.5rem;
   padding: 0.1rem 0.45rem;
   font-size: 0.78rem;
-  color: #666;
+  color: var(--editor-text-muted);
   cursor: pointer;
   border-radius: 3px;
 }
 
 .toc-subentry:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #000;
+  background: var(--editor-surface-hover);
+  color: var(--editor-text);
 }
 
 .toc-subentry--row {
   font-weight: 600;
-  color: #555;
+  color: var(--editor-text-muted);
 }
 
 .toc-subentry--col {
@@ -2074,7 +2176,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   margin-right: 0.2rem;
   border: none;
   background: transparent;
-  color: #888;
+  color: var(--editor-text-faint);
   cursor: pointer;
   border-radius: 3px;
   display: inline-flex;
@@ -2083,8 +2185,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .toc-subentry-toggle:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: #000;
+  background: var(--editor-surface-hover);
+  color: var(--editor-text);
 }
 
 .toc-subentry-toggle .pi {
@@ -2116,36 +2218,36 @@ function questKindOf(id: string | undefined): QuestKind | null {
   align-items: center;
   gap: 0.4rem;
   padding: 0.25rem 0.5rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid var(--editor-border);
   flex: 0 0 auto;
 }
 
 .search-icon {
-  color: #888;
+  color: var(--editor-text-faint);
   font-size: 0.85rem;
 }
 
 .search-input {
   flex: 1;
   min-width: 0;
-  border: 1px solid rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   padding: 0.3rem 0.5rem;
   font-size: 0.9rem;
-  color: #000;
-  background: #fff;
+  color: var(--editor-text);
+  background: var(--editor-surface);
   outline: none;
 }
 
 .search-input:focus {
-  border-color: #1976d2;
+  border-color: var(--editor-ink-blue);
   box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.15);
 }
 
 .search-clear {
   border: none;
   background: transparent;
-  color: #888;
+  color: var(--editor-text-faint);
   cursor: pointer;
   padding: 0.25rem;
   border-radius: 3px;
@@ -2156,14 +2258,14 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .search-clear:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #000;
+  background: var(--editor-surface-hover);
+  color: var(--editor-text);
 }
 
 .search-nav {
   border: none;
   background: transparent;
-  color: #888;
+  color: var(--editor-text-faint);
   cursor: pointer;
   padding: 0.25rem;
   border-radius: 3px;
@@ -2174,8 +2276,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .search-nav:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.06);
-  color: #000;
+  background: var(--editor-surface-hover);
+  color: var(--editor-text);
 }
 
 .search-nav:disabled {
@@ -2192,14 +2294,14 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .search-count {
   font-family: var(--font-family-mono, monospace);
   font-size: 0.8rem;
-  color: #555;
+  color: var(--editor-text-muted);
   white-space: nowrap;
 }
 
 .search-divider {
   width: 1px;
   align-self: stretch;
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--editor-surface-hover);
   margin: 0.1rem 0.25rem;
 }
 
@@ -2212,7 +2314,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
   border: 1px solid rgba(25, 118, 210, 0.45);
   border-radius: 12px;
   font-size: 0.8rem;
-  color: #0d47a1;
+  color: var(--editor-ink-blue);
   white-space: nowrap;
   max-width: 18rem;
   overflow: hidden;
@@ -2228,7 +2330,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .filter-chip-clear {
   border: none;
   background: transparent;
-  color: #0d47a1;
+  color: var(--editor-ink-blue);
   cursor: pointer;
   padding: 0.1rem 0.25rem;
   border-radius: 8px;
@@ -2242,6 +2344,48 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .filter-chip-clear:hover {
   background: rgba(25, 118, 210, 0.2);
 }
+
+.status-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  padding: 0.18rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.72rem;
+  line-height: 1;
+  opacity: 0.55;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.status-filter:hover:not(:disabled) { opacity: 1; background: var(--editor-surface-hover); }
+.status-filter:disabled { opacity: 0.2; cursor: default; }
+.status-filter--active {
+  opacity: 1;
+  background: var(--editor-surface-hover);
+  border-color: currentColor;
+}
+
+.status-filter--todo { color: #d8a657; }
+.status-filter--wip { color: #7daea3; }
+.status-filter--done { color: #89b482; }
+.status-filter--broken { color: #d3869b; }
+.status-filter--none { color: var(--p-text-muted-color); }
+
+.status-filter-count { font-variant-numeric: tabular-nums; }
+
+.toc-status {
+  flex: 0 0 auto;
+  margin-right: 0.25rem;
+  font-size: 0.65rem;
+}
+
+.toc-status--todo { color: #d8a657; }
+.toc-status--wip { color: #7daea3; }
+.toc-status--done { color: #89b482; }
+.toc-status--broken { color: #d3869b; }
 
 .index-btn {
   flex: 0 0 auto;
@@ -2297,7 +2441,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
 .empty-state {
   text-align: center;
-  color: #888;
+  color: var(--editor-text-faint);
   padding: 3rem 1rem;
   font-style: italic;
 }

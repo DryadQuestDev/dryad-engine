@@ -404,19 +404,20 @@ function formatCharacterData(character: any) {
 </template>
 
 <style scoped>
-/* The host debug panel (Debug.vue) is a LIGHT surface — rgb(220, 220, 220) with dark text.
-   Everything here is painted against that, not against the game's dark glassy UI. */
+/* Painted against the host debug panel (Debug.vue), not against the game's dark glassy UI.
+   That panel follows the editor's theme, so read surfaces and text from the --editor-*
+   tokens rather than hardcoding the light palette it used to always have. */
 .debug-characters {
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  color: #333;
+  color: var(--editor-text);
 }
 
 .create-character-section {
   padding-bottom: 1rem;
-  border-bottom: 1px solid #bbb;
+  border-bottom: 1px solid var(--editor-border-strong);
 }
 
 .create-character-section summary {
@@ -473,21 +474,21 @@ function formatCharacterData(character: any) {
 .chip {
   padding: 0.2rem 0.6rem;
   border-radius: 1rem;
-  border: 1px solid #bbb;
-  background: #f5f5f5;
-  color: #555;
+  border: 1px solid var(--editor-border-strong);
+  background: var(--editor-surface-sunken);
+  color: var(--editor-text-muted);
   font-size: 0.8em;
   cursor: pointer;
 }
 
 .chip:hover {
-  border-color: #888;
-  background: #fff;
+  border-color: var(--editor-border-strong);
+  background: var(--editor-surface);
 }
 
 .chip.active {
   background: #42b983;
-  border-color: #369e6e;
+  border-color: var(--editor-ink-green);
   color: #fff;
 }
 
@@ -506,14 +507,14 @@ function formatCharacterData(character: any) {
 .filter-label {
   font-size: 0.8em;
   font-weight: 600;
-  color: #555;
+  color: var(--editor-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .tag-mode {
   display: flex;
-  border: 1px solid #bbb;
+  border: 1px solid var(--editor-border-strong);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -521,8 +522,8 @@ function formatCharacterData(character: any) {
 .tag-mode-button {
   padding: 0.1rem 0.45rem;
   border: none;
-  background: #f5f5f5;
-  color: #555;
+  background: var(--editor-surface-sunken);
+  color: var(--editor-text-muted);
   font-size: 0.7em;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -530,11 +531,11 @@ function formatCharacterData(character: any) {
 }
 
 .tag-mode-button + .tag-mode-button {
-  border-left: 1px solid #bbb;
+  border-left: 1px solid var(--editor-border-strong);
 }
 
 .tag-mode-button:hover:not(.active) {
-  background: #fff;
+  background: var(--editor-surface);
 }
 
 .tag-mode-button.active {
@@ -546,14 +547,14 @@ function formatCharacterData(character: any) {
   margin-left: auto;
   border: none;
   background: transparent;
-  color: #777;
+  color: var(--editor-text-faint);
   font-size: 0.75em;
   text-decoration: underline;
   cursor: pointer;
 }
 
 .tag-clear:hover {
-  color: #333;
+  color: var(--editor-text);
 }
 
 /* A game can define a lot of tags — keep the chip cloud from pushing the grid off-panel. */
@@ -608,7 +609,7 @@ function formatCharacterData(character: any) {
   padding: 0;
   border: none;
   background: transparent;
-  color: #555;
+  color: var(--editor-text-muted);
   font-size: 0.72em;
   text-align: center;
   cursor: pointer;
@@ -618,7 +619,7 @@ function formatCharacterData(character: any) {
 }
 
 .tile-id:hover {
-  color: #2a8f66;
+  color: var(--editor-ink-green);
   text-decoration: underline;
 }
 
@@ -635,18 +636,18 @@ function formatCharacterData(character: any) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #bbb;
+  border: 1px solid var(--editor-border-strong);
   border-radius: 50%;
-  background: #f5f5f5;
-  color: #333;
+  background: var(--editor-surface-sunken);
+  color: var(--editor-text);
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
 }
 
 .page-button:hover:not(:disabled) {
-  border-color: #888;
-  background: #fff;
+  border-color: var(--editor-border-strong);
+  background: var(--editor-surface);
 }
 
 .page-button:disabled {
@@ -656,7 +657,7 @@ function formatCharacterData(character: any) {
 
 .page-label {
   font-size: 0.85em;
-  color: #555;
+  color: var(--editor-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -670,17 +671,17 @@ function formatCharacterData(character: any) {
 .inspect-back {
   align-self: flex-start;
   padding: 0.25rem 0.7rem;
-  border: 1px solid #bbb;
+  border: 1px solid var(--editor-border-strong);
   border-radius: 4px;
-  background: #f5f5f5;
-  color: #333;
+  background: var(--editor-surface-sunken);
+  color: var(--editor-text);
   font-size: 0.85em;
   cursor: pointer;
 }
 
 .inspect-back:hover {
-  border-color: #888;
-  background: #fff;
+  border-color: var(--editor-border-strong);
+  background: var(--editor-surface);
 }
 
 .inspect-identity {
@@ -698,12 +699,12 @@ function formatCharacterData(character: any) {
 }
 
 .inspect-name {
-  color: #555;
+  color: var(--editor-text-muted);
   font-size: 0.85em;
 }
 
 .character-template {
-  color: #2a8f66;
+  color: var(--editor-ink-green);
   font-size: 0.85em;
 }
 
@@ -712,8 +713,8 @@ function formatCharacterData(character: any) {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
-  background-color: #e4e4e4;
-  border: 1px solid #ccc;
+  background-color: var(--editor-surface-hover);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
 }
 
@@ -736,9 +737,9 @@ function formatCharacterData(character: any) {
 }
 
 .character-data {
-  background-color: #fbfbfb;
-  color: #222;
-  border: 1px solid #ccc;
+  background-color: var(--editor-surface-raised);
+  color: var(--editor-text);
+  border: 1px solid var(--editor-border);
   border-radius: 4px;
   padding: 0.6rem;
   overflow-x: auto;
@@ -748,7 +749,7 @@ function formatCharacterData(character: any) {
 }
 
 .no-characters {
-  color: #777;
+  color: var(--editor-text-faint);
   font-style: italic;
 }
 </style>

@@ -14,6 +14,10 @@ const props = defineProps<{
   characterId?: string;
   showDelta?: boolean;
   improvementData?: { meta: Record<string, any>, effects: Record<string, Record<string, any>> };
+  /** A held-back modifier to show greyed, as a character whose `requires_status` is unmet sees it.
+   *  For previews without a character (the editor); with a characterId the character's own
+   *  held-back modifiers are used instead. */
+  inactiveData?: { meta?: Record<string, any>, effects: Record<string, Record<string, any>> };
   isGranted?: boolean;
   isInactive?: boolean;
 }>();
@@ -118,6 +122,12 @@ const metaDescription = computed(() => {
 const hasCosts = computed(() => {
   return abilityMeta.value?.costs && Object.keys(abilityMeta.value.costs).length > 0;
 });
+
+const notFoundText = computed(() => global.getString('ability.not_found', { ability: props.abilityId }));
+
+// The count is kept out of the noun: a flat locale file has no plural rule to pick "turn" over
+// "turns", and every language that inflects would be wrong at least half the time.
+const cooldownText = computed(() => global.getString('ability.cooldown', { turns: abilityMeta.value?.cd ?? 0 }));
 
 // Shared helpers for improvements/delta computation
 type DeltaResult = { newEffects: Record<string, Record<string, any>>, modifiedEffects: Record<string, Record<string, any>>, metaDiff: Record<string, any>, baseData: { meta: Record<string, any>, effects: Record<string, Record<string, any>> } };
@@ -297,9 +307,12 @@ const deltaData = computed((): DeltaResult | null => {
 // merged ability on purpose, so describe them straight off the held-back modifier — vanishing entirely
 // reads as "I lost it" rather than "it isn't active yet".
 const inactiveDesc = computed(() => {
-  if (!props.characterId || props.improvementData) return [];
-  const character = game.getCharacter(props.characterId);
-  const held = character?.inactiveAbilityModifiers?.[props.abilityId];
+  if (props.improvementData) return [];
+  let held: { effects?: Record<string, Record<string, any>> } | undefined = props.inactiveData;
+  if (!held) {
+    if (!props.characterId) return [];
+    held = game.getCharacter(props.characterId)?.inactiveAbilityModifiers?.[props.abilityId];
+  }
   if (!held?.effects || !Object.keys(held.effects).length) return [];
   // A held-back effect that reuses a BASE effect id is a delta onto the core numbers ("+1 bounce").
   // Standalone its lines read as absolutes ("Bounces to 1 random targets"), so while gated only its
@@ -371,7 +384,7 @@ function getStatIcon(statId: string): string | undefined {
 
 <template>
   <div v-if="!abilityMeta" class="ability-card ability-error">
-    Ability "{{ abilityId }}" not found
+    {{ notFoundText }}
   </div>
 
   <div v-else class="ability-card" :class="{ unusable: !usable }">
@@ -394,7 +407,7 @@ function getStatIcon(statId: string): string | undefined {
     <!-- Ability Meta Info (Cooldown & Costs) -->
     <div class="ability-meta" v-if="abilityMeta.cd || hasCosts">
       <span v-if="abilityMeta.cd" class="meta-item cooldown">
-        {{ abilityMeta.cd }} {{ abilityMeta.cd === 1 ? 'turn' : 'turns' }}
+        {{ cooldownText }}
       </span>
       <span v-for="(amount, statId) in abilityMeta.costs" :key="statId" class="meta-item cost"
         :style="getStatColor(String(statId)) ? { color: getStatColor(String(statId)) } : {}">

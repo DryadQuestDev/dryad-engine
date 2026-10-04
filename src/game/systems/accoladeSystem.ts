@@ -62,7 +62,7 @@ export class AccoladeSystem {
         }
         if (this.uiComponents && this.accolades.size > 0) {
             this.game.coreSystem.addComponent({
-                id: 'accolades', slot: 'progression-tabs', title: this.line('progression.tab.accolades'),
+                id: 'accolades', slot: 'progression-tabs', title: 'progression.tab.accolades',
                 component: this.uiComponents.tab, order: 25,
             });
             this.game.coreSystem.addComponent({

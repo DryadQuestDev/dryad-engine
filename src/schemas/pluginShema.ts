@@ -127,6 +127,13 @@ export const PluginSchema = {
             script: { type: 'string', tooltip: 'Component .mjs file relative to plugin folder (e.g., "scripts/editor/MyPopup.mjs")' },
             css: { type: 'string', tooltip: 'Optional CSS file relative to plugin folder (e.g., "scripts/editor/MyPopup.css")' },
         }
+    },
+    editor_hooks: {
+        type: 'schema[]', tooltip: 'Scripts that transform an entry of the plugin\'s own tabs as it is saved, from the tab form or any popup', objects: {
+            uid: { type: 'uid', required: true },
+            tabs: { type: 'string[]', tooltip: 'The plugin\'s tab IDs the hook runs on (e.g., ["projectiles"])' },
+            script: { type: 'string', tooltip: 'Self-contained .mjs relative to plugin folder exporting beforeSave(entry, ctx), which may change the entry and may be async (e.g., "scripts/editor/hooks.mjs")' },
+        }
     }
 } as const satisfies Schema;
 

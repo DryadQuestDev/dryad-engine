@@ -60,8 +60,8 @@ interface GameEvents {
   /**
    * Triggered inside the save-migration pass (`registerSaveMigration`), after every declared section
    * has synced and every `item_migrate` has fired, before the engine re-binds equip statuses and puts
-   * resource pools back. Fires only when the pass actually runs: an old save, or any load in dev mode.
-   * The place for whole-save repairs the generic pass can't express — states, stores, flags.
+   * resource pools back. Fires on an old save, or any load in dev mode — even when no migration is
+   * registered. The place for whole-save repairs the generic pass can't express — states, stores, flags.
    *
    * @example
    * game.on('save_migrated', () => {
@@ -76,6 +76,10 @@ interface GameEvents {
   // State Events
   /** Triggered when a state value changes */
   state_change: (stateId: string, newValue: any, oldValue: any) => boolean | void;
+  /** Triggered when a game setting changes — through `setGameSetting` or the Game Settings menu.
+   *  Muted during a save load, so a restored value never reads as a change (a Vue watch on
+   *  `getGameSetting` would fire mid-load, on half-restored state). */
+  game_setting_change: (key: string, newValue: any, oldValue: any) => boolean | void;
 
   // Dungeon Events
   /** Triggered when a dungeon is created */
@@ -84,10 +88,10 @@ interface GameEvents {
   dungeon_enter_before: (dungeonId: string, roomId: string) => boolean | void;
   /** Triggered when entering a dungeon */
   dungeon_enter_after: (dungeonId: string, roomId: string) => boolean | void;
-  /** Triggered before entering a room */
-  room_enter_before: (roomId: string, dungeonId: string) => boolean | void;
-  /** Triggered after entering a room */
-  room_enter_after: (roomId: string, dungeonId: string) => boolean | void;
+  /** Triggered before entering a room. fromRoomId / fromDungeonId name where the player came from ('' on the first entry), across dungeons too. Return false to abort. */
+  room_enter_before: (roomId: string, dungeonId: string, fromRoomId: string, fromDungeonId: string) => boolean | void;
+  /** Triggered after entering a room. fromRoomId / fromDungeonId name where the player came from ('' on the first entry). */
+  room_enter_after: (roomId: string, dungeonId: string, fromRoomId: string, fromDungeonId: string) => boolean | void;
   /** Triggered when an encounter is selected — clicked on the map / screen, or cycled to with the toolbar (props never fire). Return false to block the selection. */
   encounter_selected: (encounterId: string, dungeonId: string) => boolean | void;
   /** Triggered once when a hidden `{discover: "perception#6"}` encounter is revealed */
@@ -101,12 +105,12 @@ interface GameEvents {
    *  tier-weighted, environment-filtered roll locked per spot in the `gather_spots` state. */
   collectable_resolve: (request: { dungeonId: string, encounterId: string, pool: string, itemId: string | null }) => boolean | void;
   /** Triggered before a scene plays (gate — return false to block) */
-  scene_play_before: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
+  scene_play_before: (sceneId: string, dungeonId: string, isRootScene: boolean, anchor: string) => boolean | void;
   /** Triggered when a committed scene is about to run its paragraph actions (after gates/redirects,
    *  before the actions/assets). The place to stage default actors so they precede the scene's assets. */
-  scene_play: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
+  scene_play: (sceneId: string, dungeonId: string, isRootScene: boolean, anchor: string) => boolean | void;
   /** Triggered after a scene plays */
-  scene_play_after: (sceneId: string, dungeonId: string, isRootScene: boolean) => boolean | void;
+  scene_play_after: (sceneId: string, dungeonId: string, isRootScene: boolean, anchor: string) => boolean | void;
   /**
    * Triggered when a scene is about to exit (last-paragraph click, `{exit}` action, `playScene(null)`).
    * Return false to cancel the exit — e.g. to play a close animation first and re-call
@@ -134,6 +138,23 @@ interface GameEvents {
   /** Triggered when an asset is staged or updated. Listeners can modify asset properties before display. */
   asset_render: (asset: Asset) => boolean | void;
   /**
+   * Triggered when a staged asset starts leaving the stage: its exit animation begins, or it is
+   * dropped outright (`{asset: "!id"}`, `clear` / `false` / `reset`, a solo sweep, the scene ending,
+   * a replaced stage). Once per exit. Not cancellable, not fired on load. The asset stays in
+   * `game.getAssets()` while its exit animation plays; in a solo swap the incoming asset's
+   * `asset_render` fires first, before it is added to `game.getAssets()`.
+   */
+  asset_exit: (asset: Asset) => boolean | void;
+  /**
+   * Triggered when a staged spine asset's animation passes an event key authored in the rig —
+   * every loop pass, at the animation's playing speed. `data` carries the key's int/float/string values.
+   * @example
+   * game.on('spine_event', (asset, name) => {
+   *   if (name === 'hit') game.playSounds(asset.meta?.hit_sound || 'impact');
+   * });
+   */
+  spine_event: (asset: Asset, name: string, data: { int: number; float: number; string: string }) => boolean | void;
+  /**
    * Triggered while an asset's image layers are built, on every render path — the staged
    * scene, the gallery, the fullscreen overlay, the editor preview. Listeners get a throwaway
    * copy and may filter/reorder `asset.layers`, or swap an entry for `{ file, classes }` to
@@ -157,16 +178,33 @@ interface GameEvents {
    * });
    */
   item_migrate: (item: Item, template: any) => boolean | void;
-  /** Triggered before an item is discarded via the `drop_item` action (return false to cancel) */
-  item_drop_before: (item: Item, character: Character) => boolean | void;
+  /**
+   * Fired for every status the save-migration pass recreates from its definition (the `statuses`
+   * section), before the fresh copy is added back, with the instance it replaces. Put back what was
+   * derived per instance when the status was applied — `previous` is discarded once this returns.
+   * @example
+   * game.on('status_migrate', (character, status, previous) => {
+   *   if (previous.meta?.item_level) status.meta = { ...status.meta, item_level: previous.meta.item_level };
+   * });
+   */
+  status_migrate: (character: Character, status: Status, previous: Status) => boolean | void;
+  /** Triggered before an item is discarded via the `discard_item` action (return false to cancel) */
+  item_discard_before: (item: Item, character: Character) => boolean | void;
   /**
    * Triggered to decide whether a discard affordance renders for an item — the item card's Drop
    * choice and the experience plugin's reward-panel trash button both ask. Return false to hide it.
    * This is the GAME's veto for its own protected kinds; the engine's own rules (equipped gear,
-   * quest rarity) live in `item.isDroppable()`, which those UIs check alongside it.
+   * quest rarity, the `no_discard` trait) live in `item.isDiscardable()`, which those UIs check alongside it.
    * Pure predicate: it runs on every render, so listeners must only return, never act.
    */
-  item_drop_render: (item: Item, character?: Character) => boolean | void;
+  item_discard_render: (item: Item, character?: Character) => boolean | void;
+  /**
+   * Fired while an item card compares an unequipped item against the slots it fits
+   * (`character.compareItem()`), once per slot. `stats` holds per-unit COPIES of both items' stats:
+   * rewrite keys there when your game renames an item's stats on equip, so the two sides line up.
+   * Pure: it runs on every render, so listeners may only edit the copies.
+   */
+  item_compare: (item: Item, equipped: Item | null, slot: ItemSlot, character: Character, stats: { item: Record<string, number>; equipped: Record<string, number> }) => boolean | void;
   /** Triggered before an item is equipped (return false to cancel) */
   item_equip_before: (item: Item, character: Character) => boolean | void;
   /** Triggered after an item is equipped */
@@ -217,6 +255,15 @@ interface GameEvents {
   skill_learned: (skillTreeId: string, skillId: string, level: number) => boolean | void;
   /** Triggered when a skill is unlearned */
   skill_unlearned: (skillTreeId: string, skillId: string) => boolean | void;
+
+  // Status Events
+  /**
+   * Fired while a status card shows a status that is NOT applied — a `[[status:id]]` link in an item's
+   * text, an item's consume list — with a COPY of the status template's stats and what the card was
+   * opened from (`context.item`). Rewrite the copy to show the numbers the player will actually get.
+   * Pure: it runs on every render, so listeners may only edit the copy.
+   */
+  status_preview: (statusId: string, stats: Record<string, number>, context: { item?: Item; character?: Character }) => boolean | void;
 }
 
 // ============================================
@@ -241,7 +288,12 @@ interface CustomComponent {
   slot: string;
   /** The Vue component to render */
   component: any;
-  /** Optional tab title (components with titles render as tabs) */
+  /**
+   * Optional tab title (components with titles render as tabs). Resolved at render time as a
+   * locale key - the game's own locale first, then the engine's - so a title given as a key
+   * follows a language switch. Text that matches no key is shown as written. The debug panel is
+   * the exception: it renders `title` verbatim, since it never ships to a player.
+   */
   title?: string;
   /** Render order (lower numbers render first) */
   order?: number;
@@ -324,7 +376,7 @@ interface Asset {
   file_image?: string;
   /**
    * Extra image plates stacked on top of `file_image`, in order (image type). Every plate
-   * shares the asset's fit mode, position, scale, opacity and blur, so author them
+   * shares the asset's fit mode, position, scale, opacity and filters, so author them
    * pre-registered at the same canvas size. An `asset_resolve` listener may filter this list
    * or replace an entry with an object to say more about one plate:
    *
@@ -341,6 +393,8 @@ interface Asset {
   file_video?: string;
   /** Tags for categorizing and filtering */
   tags?: string[];
+  /** Custom fields defined in the Asset Meta editor tab, read by game or plugin scripts */
+  meta?: Record<string, any>;
   /** How the asset fits within its container */
   fit_mode?: 'cover' | 'contain' | 'fill' | 'scale-down' | 'none';
   /** X position as percentage (0-100) */
@@ -361,7 +415,17 @@ interface Asset {
   alpha?: number;
   /** Blur amount in pixels */
   blur?: number;
-  /** Seconds taken to glide to new values when an already-staged asset is re-staged with changes (default 0.5). 0 = snap. No effect on first staging. */
+  /** Brightness multiplier (1 = as authored) */
+  brightness?: number;
+  /** Contrast multiplier (1 = as authored) */
+  contrast?: number;
+  /** Saturation multiplier (1 = as authored, 0 = grayscale) */
+  saturate?: number;
+  /** Sepia tone (0 = none, 1 = full) */
+  sepia?: number;
+  /** Hue rotation in degrees (0 = as authored) */
+  hue?: number;
+  /** Seconds taken to glide to new values when an already-staged asset is re-staged with changes (default 0.5). 0 = snap. Covers position, scale, rotation, opacity and every filter. No effect on first staging. */
   tween?: number;
   /** Easing for the property glide (default 'power2.out') */
   tween_ease?: string;
@@ -385,6 +449,12 @@ interface Asset {
   slot_colors?: { slot: string; r?: number; g?: number; b?: number; alpha?: number; brightness?: number }[];
   /** Slot names whose attachment is cleared/hidden (spine type). */
   slot_remove?: string[];
+  /** How the spine's 16:9 frame is fitted when the screen is not 16:9 (spine type).
+   *  'contain' (default) letterboxes it and never shows anything outside the frame;
+   *  'cover' grows it past the screen edges so it always fills, keeping the same left/right
+   *  framing and cropping more off the top and bottom; 'full' matches the screen and reveals
+   *  whatever the rig has outside its 16:9 composition. Identical on a 16:9 screen. */
+  aspect_fit?: 'contain' | 'cover' | 'full';
 }
 
 /**
@@ -415,6 +485,38 @@ interface SceneGrade {
   b: number;
   /** Tint opacity, 0-1 */
   tint_amount: number;
+  /** Split toning: shadow colour (0-255 per channel) that dark tones lean toward */
+  shadow_r: number;
+  shadow_g: number;
+  shadow_b: number;
+  /** Split toning: how strongly dark tones lean toward the shadow colour, 0-1 */
+  shadow_amount: number;
+  /** Split toning: highlight colour (0-255 per channel) that bright tones lean toward. Also tints the light rays */
+  highlight_r: number;
+  highlight_g: number;
+  highlight_b: number;
+  /** Split toning: how strongly bright tones lean toward the highlight colour, 0-1 */
+  highlight_amount: number;
+  /** Sky gradient over scene backgrounds (soft-light): top, middle and bottom stops, 0-255 per channel. 128 grey = no change */
+  sky_top_r: number;
+  sky_top_g: number;
+  sky_top_b: number;
+  sky_mid_r: number;
+  sky_mid_g: number;
+  sky_mid_b: number;
+  sky_bottom_r: number;
+  sky_bottom_g: number;
+  sky_bottom_b: number;
+  /** Sky gradient opacity, 0-1 */
+  sky_amount: number;
+  /** Darkened edges over scene backgrounds, 0-1 */
+  vignette: number;
+  /** Animated light rays over scene backgrounds, 0-1 */
+  rays: number;
+  /** Light ray angle in degrees. 0 = vertical, negative leans the source to the left */
+  rays_angle: number;
+  /** Share of the grade characters take, 0-1 (default 0.5), so actors stay readable over the graded plate */
+  actor_strength: number;
 }
 
 /** The active grade plus the crossfade length that produced it. */
@@ -426,7 +528,7 @@ interface SceneGradeState {
 
 /** Object form accepted by game.setGrade(). Explicit fields override the preset. */
 interface SceneGradeInput {
-  /** Preset id — `night`, `sunlit`, `infernal`, `noir`, `none`… see ->builtins.actions#grade for the full table */
+  /** Preset id — `night`, `sunlit`, `infernal`, `noir`, `none`… see ->dungeons.grades for the full table */
   preset?: string;
   /** Preset strength, 0-1. Default 1 */
   amount?: number;
@@ -440,6 +542,30 @@ interface SceneGradeInput {
   tint?: string;
   /** Tint opacity, 0-1 */
   tint_amount?: number;
+  /** Split-toning shadow colour as hex */
+  shadow?: string;
+  shadow_amount?: number;
+  /** Split-toning highlight colour as hex (also tints the light rays) */
+  highlight?: string;
+  highlight_amount?: number;
+  /** Sky gradient stops as hex, over scene backgrounds only. '#808080' = no change */
+  sky_top?: string;
+  sky_mid?: string;
+  sky_bottom?: string;
+  sky_amount?: number;
+  vignette?: number;
+  rays?: number;
+  rays_angle?: number;
+  /** Share of the grade characters take, 0-1. Default 0.5 */
+  actor_strength?: number;
+}
+
+/** Saved ambient particle layer. Read from game.getAmbient(). */
+interface SceneAmbientState {
+  /** Which particles drift over the scene backgrounds */
+  kind: 'fireflies' | 'motes' | 'embers';
+  /** Count multiplier. 1 = the kind's default */
+  density: number;
 }
 
 /**
@@ -1240,6 +1366,7 @@ interface Game {
    * Get dungeon runtime data by ID.
    * @param id - The dungeon ID
    * @returns The DungeonData object with visited rooms, flags, etc.
+   * @throws If no runtime data exists for the id (a dungeon that was never entered).
    * @example
    * const data = game.getDungeonDataById('forest');
    * console.log(data.visitedRooms); // Set of visited room IDs
@@ -1607,7 +1734,7 @@ interface Game {
    * Parse a `targetId->item & item & ..., targetId->!item, ...` specification
    * into a typed list of per-target add/remove operations. Pure string parsing
    * — no characters, statuses, or game data are touched. Backs the `status`,
-   * `skin_layer`, and `item_slot` content actions; available to plugins
+   * `skin`, and `item_slot` content actions; available to plugins
    * authoring similar `caster->X & Y, caster->!Z` sugar.
    *
    * Format: comma-separates per-target specs; each spec is `id->item & item`,
@@ -1846,6 +1973,14 @@ interface Game {
   getInventory(id: string): Inventory | null;
 
   /**
+   * Get the party's shared inventory — the main party bag every party member draws from.
+   * @returns The party inventory, or null if it has not been created yet.
+   * @example
+   * const scarves = game.getPartyInventory()?.getItemQuantity('scarf_ghost') ?? 0;
+   */
+  getPartyInventory(): Inventory | null;
+
+  /**
    * Check if item usage is currently allowed.
    * Returns false when party inventory is blocked (e.g., during exchanges).
    * @returns true if items can be used
@@ -1871,36 +2006,53 @@ interface Game {
   // ============================================
 
   /**
-   * Set the currently playing music track. Crossfades from the previous track by default.
-   * @param val - Music ID from musicMap, or false to use the current dungeon's default music
-   * @param disableTransition - When true, switch instantly with no crossfade
+   * Set the currently playing music track. The outgoing track fades out (1 s by default) and the
+   * new one starts; an inline tail on the id overrides the track's own fields for this play:
+   * `fade_out` (how the outgoing track leaves), `fade_in`, `volume` (0–1, on top of the slider)
+   * and `shuffle`.
+   * @param val - Music ID, with optional `(prop=val)` tail; `"!"` or `"!(fade_out=N)"` stops the
+   * music; `false` returns to the current dungeon's default music
+   * @param disableTransition - When true, switch instantly: no fade-out, no fade-in
    * @example
    * game.setMusic('battle_theme');
-   * game.setMusic('battle_theme', true); // no crossfade
+   * game.setMusic('battle_theme(fade_in=3, volume=0.6)');
+   * game.setMusic('!(fade_out=4)');  // stop with a 4 s fade
+   * game.setMusic('battle_theme', true); // instant switch
    * game.setMusic(false); // Use current dungeon's music
    */
   setMusic(val: string | false, disableTransition?: boolean): void;
 
   /**
-   * Play sound effect(s). Sounds flagged `loop` in the editor repeat their whole file
-   * sequence until stopped. A loop started inside a scene ends with that scene; one started
-   * from a room or dungeon enter action follows the player across the map. Loops are saved
-   * with the run and resume on load.
-   * @param val - Sound ID(s) - can be comma-separated string or array
+   * Play sound effect(s). Each id takes an inline tail overriding the sound's own `volume`,
+   * `fade_in`, `fade_out` and `delay` for this play. Sounds flagged `loop` in the editor repeat
+   * their whole file sequence until stopped; playing one that is already running leaves it running
+   * (a new `volume` still applies). A loop started inside a scene ends with that scene; one started
+   * from a room or dungeon enter action follows the player across the map. Loops are saved with the
+   * run and resume on load. Sounds sharing a `channel` replace each other: starting one stops the
+   * others on that channel, each over its own `fade_out`. A sound flagged `random` plays ONE of its
+   * files, picked at random, instead of the whole sequence (a random loop shuffles its files). An audio file's path works in place of an id (what a
+   * `file` field with `fileType: 'audio'` stores): that one file plays with the default settings.
+   * @param val - Sound ID(s) or audio file path(s) - comma-separated string or array, each with optional `(prop=val)` tail
    * @example
    * game.playSounds('door_open');
-   * game.playSounds(['sword_swing', 'enemy_hit']);
+   * game.playSounds('rain(volume=0.4, fade_in=2)');
+   * game.playSounds(['sword_swing', 'enemy_hit(delay=0.3)']);
+   * game.playSounds('assets/games_assets/my_game/_core/sounds/arrow_hit.mp3');
    */
   playSounds(val: string | string[]): void;
 
   /**
-   * Stop sound(s) by id, looping or not. Scene sounds also stop automatically when the scene exits.
-   * @param val - Sound ID(s) to stop - comma-separated string or array. Omit to stop everything playing.
+   * Stop sound(s) by id, looping or not. Scene sounds also stop automatically when the scene exits,
+   * each over its own `fade_out`.
+   * @param val - Sound ID(s) to stop - comma-separated string or array, each with optional
+   * `(fade_out=N)` tail. Omit to stop everything playing.
+   * @param fadeOut - Seconds to fade every matched sound, unless its id carries its own tail
    * @example
    * game.stopSounds('rain');
-   * game.stopSounds(); // stop every sound currently playing
+   * game.stopSounds('rain(fade_out=3)');
+   * game.stopSounds(undefined, 2); // fade everything out over 2 s
    */
-  stopSounds(val?: string | string[]): void;
+  stopSounds(val?: string | string[], fadeOut?: number): void;
 
   // ============================================
   // Scene Grade
@@ -1912,7 +2064,7 @@ interface Game {
    * Presets cover time of day (`dawn` `dusk` `night` `moonlit` `sunlit` `bright`), weather and place
    * (`overcast` `stormy` `foggy` `underwater`), elemental and magical (`candlelit` `infernal`
    * `frozen` `arcane` `void`), state of mind (`sickly` `bloodied` `dream` `nightmare`), and utility
-   * (`memory` `noir`), plus `none` for daylight. Full table in ->builtins.actions#grade.
+   * (`memory` `noir`), plus `none` for daylight. Full table in ->dungeons.grades.
    * @param val - Preset id, preset with strength (`"night#0.5"`), `false`/`"none"` to clear, or an object
    * @param instant - When true, apply with no crossfade
    * @example
@@ -1927,6 +2079,21 @@ interface Game {
 
   /** Get the active scene grade, or null when the scene is at daylight. */
   getGrade(): SceneGradeState | null;
+
+  /**
+   * Ambient particles drifting over the scene backgrounds, below the actors: `fireflies`, `motes`
+   * (dust in a light shaft) or `embers`. Independent of the grade. Persists across rooms and saves
+   * until changed. Kinds and examples in ->dungeons.grades.
+   * @param val - Kind, kind with a density multiplier (`"fireflies#0.5"`), or `false`/`"none"` to clear
+   * @example
+   * game.setAmbient('fireflies');
+   * game.setAmbient('embers#1.5');     // half again as many
+   * game.setAmbient(false);
+   */
+  setAmbient(val: string | boolean | null): void;
+
+  /** Get the active ambient particle layer, or null when none is up. */
+  getAmbient(): SceneAmbientState | null;
 
   // ============================================
   // Store System
@@ -2020,7 +2187,7 @@ interface Game {
   getGameSetting(key: string): any;
 
   /**
-   * Set a per-game setting value. Persisted in save files.
+   * Set a per-game setting value. Persisted in save files. Fires `game_setting_change`.
    * @param key - Setting ID
    * @param value - New value
    * @example
@@ -2064,6 +2231,11 @@ interface Game {
    *
    * // Plugin data
    * const pluginData = game.getData("plugins_data/my_plugin/my_schema");
+   *
+   * // Meta/trait key definitions (stat_meta, status_meta, asset_meta,
+   * // dungeon_traits, inventory_traits) - the type/default/description of a key,
+   * // where the value itself sits on the entity (status.meta.power_scaling)
+   * const metaDef = game.getData("status_meta")?.get("power_scaling");
    */
   getData(filePath: string, noCopy?: boolean): any;
 
@@ -2232,6 +2404,20 @@ interface Game {
   registerPlaceholder(id: string, func: Function): void;
 
   /**
+   * Register a custom `[name]…[/name]` text effect for prose and choice labels.
+   * Every letter inside becomes an `.fx-char` span carrying `fx-<name>` — style it from your
+   * CSS — plus the classes of each `base` effect it builds on (built-in or registered earlier).
+   * Inline icons inside the tags move with the letters.
+   * @param name - Lowercase tag name; cannot reuse a built-in tag (`spooky`, `color`, `w`…)
+   * @param base - Effects whose look it extends, e.g. `['spooky']`
+   * @example
+   * game.registerTextEffect('void', ['spooky']);
+   * // CSS: .fx-char.fx-void { color: #c084fc; text-shadow: 0 0 6px #c084fcbf; }
+   * // Text: [void]Succumb...[/void]
+   */
+  registerTextEffect(name: string, base?: string[]): void;
+
+  /**
    * Returns the current resolve context passed to `resolveString()`. Use inside custom placeholder functions to access context like `character`.
    * @example
    * game.registerPlaceholder("hp", () => {
@@ -2320,10 +2506,12 @@ interface Game {
   getStatComputer(key: string): Function | undefined;
 
   /**
-   * Register a function that controls which stat groups appear in the character sheet.
-   * The resolver receives a character and returns an array of stat tag names.
-   * The engine builds groups by filtering stats that have each tag, sorts them by order,
-   * and resolves group display names from locale key `group.{tag}`.
+   * Register a function that overrides the character sheet's stat groups per character.
+   * By default the sheet uses the Stat Groups tab: each stat names its group through its
+   * `group` field, groups appear in their `order`, and ungrouped stats fall into the built-in
+   * Resources / Stats split. A resolver replaces that layout: it receives a character and
+   * returns stat TAG names; the engine builds one group per tag, sorts by order, and names
+   * it from locale key `group.{tag}`. Only needed for per-character layouts.
    * @param resolver - Function that receives a Character and returns stat tag names to display
    * @example
    * game.registerStatGroupResolver((character) => {
@@ -3029,6 +3217,27 @@ interface Character {
   hasStat(statId: string): boolean;
 
   /**
+   * Stat ids of one character-sheet group (a Stat Groups entry) that this character carries,
+   * in stat order. A stat counts when a status defines it or a computer gives it a non-zero
+   * value — the same rule the sheet uses. Pass `_ungrouped` for stats with no group, and
+   * `_resources` / `_stats` for the built-in split of those.
+   * @param groupId - The stat group id
+   * @param includeHidden - Also return hidden stats (default false)
+   * @example
+   * for (const statId of character.getStatsByGroup('combat')) {
+   *   console.log(statId, character.getStat(statId));
+   * }
+   */
+  getStatsByGroup(statGroupId: string, includeHidden?: boolean): string[];
+
+  /**
+   * Values of one stat group as `{ statId: value }`, same membership as getStatsByGroup.
+   * @example
+   * const combat = character.getStatValuesByGroup('combat'); // { power: 40, speed: 105 }
+   */
+  getStatValuesByGroup(groupId: string, includeHidden?: boolean): Record<string, number>;
+
+  /**
    * Set the base value of a stat on the character's core status.
    * @param name - The stat name
    * @param value - The value to set
@@ -3299,6 +3508,20 @@ interface Character {
    * @returns Array of compatible ItemSlots
    */
   getAvailableSlotsForItem(item: Item): ItemSlot[];
+
+  /**
+   * What equipping an item would change: one entry per slot instance that accepts it, in the
+   * character's slot order, each against whatever that slot holds now (`equipped: null` when empty).
+   * Compares the two items' own stats, times the stacks each would hold. Empty for an equipped item
+   * or one no slot accepts. The `item_compare` emitter can rewrite both sides first.
+   * @param item - The unequipped item to compare
+   * @returns One comparison per compatible slot
+   * @example
+   * for (const c of character.compareItem(ring)) {
+   *   console.log(c.slotName, c.equipped?.getName() ?? 'empty', c.stats); // { crit_chance: 2, dodge: -6 }
+   * }
+   */
+  compareItem(item: Item): ItemComparison[];
 
   // ============================================
   // Update & Utility Methods
@@ -3618,12 +3841,12 @@ interface Item {
    * Whether this item may be thrown away at all — the engine's own rule, shared by every discard UI
    * (the item card's Drop choice, the experience plugin's reward-panel trash button). Equipped gear
    * is unequipped rather than discarded, and anything of quest rarity is never throwable. Check it
-   * alongside the `item_drop_render` emitter, which carries the game's own protected kinds, when
+   * alongside the `item_discard_render` emitter, which carries the game's own protected kinds, when
    * adding a discard button of your own.
    * @example
-   * const canDiscard = item.isDroppable() && game.trigger('item_drop_render', item, character);
+   * const canDiscard = item.isDiscardable() && game.trigger('item_discard_render', item, character);
    */
-  isDroppable(): boolean;
+  isDiscardable(): boolean;
 
   /**
    * Get the price of the item.
@@ -4286,6 +4509,21 @@ interface Status {
 }
 
 /**
+ * One slot an unequipped item could go into, and what equipping it there changes.
+ * Returned by `character.compareItem()`.
+ */
+interface ItemComparison {
+  /** The slot instance compared against */
+  slot: ItemSlot;
+  /** Display name, numbered when the character has several slots of one type ("Ring 2") */
+  slotName: string;
+  /** What sits in the slot now; null when it is empty */
+  equipped: Item | null;
+  /** Stat deltas (item minus equipped), zero deltas dropped. Keys the item gains come first. */
+  stats: Record<string, number>;
+}
+
+/**
  * ItemSlot - An equipment slot on a character where items can be equipped.
  */
 interface ItemSlot {
@@ -4345,6 +4583,16 @@ interface Choice {
 
   /** Reactive computed property for the display name */
   nameComputed: { value: string };
+
+  /**
+   * Extra CSS class(es) on the choice's whole row — its number, hover arrow and label.
+   * Set it in a `choiceModifier`; a computed keeps it live. Style `.choice-list .choice.my-class`
+   * and its `:hover` — that matches the engine's own choice rules, and game CSS loads after them.
+   * The number is `.choice-number`; the hover arrow is the row's `::before`.
+   * @example
+   * choice.className = computed(() => unlocked.value ? 'void-choice' : '');
+   */
+  className?: { value: string } | string;
 
   /**
    * Check if the choice is currently available (active condition passes).

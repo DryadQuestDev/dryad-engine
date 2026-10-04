@@ -9,7 +9,8 @@ type XpService = {
   getXpToNext(characterId: string): number;
 };
 
-type RewardItemEntry = { id: string; name: string; image: string; quantity: number };
+/** `trashed` is the panel's per-line take-it-back mark, cashed in by clearPending on continue. */
+type RewardItemEntry = { id: string; name: string; image: string; quantity: number; trashed: boolean };
 
 /** Stat changed by a level-up: shown as before → after (values from Character.getStat, names/colors
  *  resolved off character_stats definitions by the panel). */
@@ -31,14 +32,39 @@ type RewardCharacterEntry = {
 
 type PendingReward = {
   items: RewardItemEntry[];
-  /** Generic resource gains recorded by the GAME ({ stat id, amount }); rendered off character_stats. */
-  resources: { id: string; amount: number }[];
+  /** Generic resource gains recorded by the GAME; rendered off character_stats. `characterId` is
+   *  the recipient, so the panel can put the bar in that character's row. */
+  resources: { id: string; amount: number; characterId: string }[];
   characters: RewardCharacterEntry[];
   /** Dev mode only: generator numbers for tuning, shown at the top of the panel. */
   debug: {
     battleId: string; level: number; scale: number; base: number; threat: number;
     threatXp: number; equipBudget: number; incomeBudget: number; currencyPayout: number;
   } | null;
+};
+
+/** One character block in the reward panel. Built by the panel, never recorded: a character who
+ *  earned XP gets the full row, while one who only gained resources gets `hasXp: false` and none of
+ *  the XP fields — the template gates every one of them on `hasXp`. */
+type RewardRow = {
+  id: string;
+  name: string;
+  character: Character | null;
+  items: Item[];
+  resources: any[];
+  statLines: any[];
+  hasXp: boolean;
+  gained?: number;
+  levelFrom?: number;
+  levelTo?: number;
+  xpFrom?: number;
+  xpTo?: number;
+  stats?: RewardStatChange[];
+  shownLevel?: number;
+  shownXp?: number;
+  barPct?: number;
+  leveled?: boolean;
+  statsVisible?: boolean;
 };
 
 type RewardService = {
@@ -48,8 +74,12 @@ type RewardService = {
   effectiveThreat(battleId: string): number;
   /** The current dungeon's level-group snapshot (MC level at first entry; default 1). */
   getDungeonLevel(): number;
-  /** Reward multiplier for a dungeon level: 1 + power_scale_per_level × (level − 1). */
+  /** Reward multiplier for a dungeon level: 1 + power_scale_per_level × (level − 1). Also the curve of `flat`-scaling stats. */
   dungeonScale(level: number): number;
+  /** Multiplier for `relative`-scaling stats: 1 + relative_scale_per_level × (level − 1). */
+  relativeScale(level: number): number;
+  /** Stats scaled to a level exactly as a levelled item's are: each stat's `scaling` meta picks the flat or relative curve; unset stays as authored. Returns a new object. */
+  scaleStats(stats: Record<string, number>, level: number): Record<string, number>;
   /** Enemy health/power multiplier for a dungeon level, from the authored `enemy_scaling` pins (closest pin at or below the level; 1 when none). */
   enemyScale(level: number): number;
   /** Override the level equipment is created at (item_create). Pass a level, then null to clear. */

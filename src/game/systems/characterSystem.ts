@@ -5,6 +5,7 @@ import { computed, reactive, ref } from "vue";
 import { Populate } from "../../utility/save-system";
 import { Ref, ComputedRef } from "vue";
 import { EntityStatObject } from "../../schemas/entityStatSchema";
+import { StatGroupObject } from "../../schemas/statGroupSchema";
 import { EntityAttributeObject } from "../../schemas/entityAttributeSchema";
 import { EntityTraitObject } from "../../schemas/entityTraitSchema";
 import { Skip } from "../../utility/save-system";
@@ -79,6 +80,8 @@ export class CharacterSystem {
   public statsMap!: Map<string, EntityStatObject>;
   @Skip()
   public statsVisibleMap!: Map<string, EntityStatObject>;
+  @Skip()
+  public statGroupsMap!: Map<string, StatGroupObject>;
   @Skip()
   public attributesMap!: Map<string, EntityAttributeObject>;
   @Skip()
@@ -584,6 +587,25 @@ export class CharacterSystem {
           continue;
         }
         value = n;
+      } else if (type === 'trait') {
+        // Content writes every value as text, and "false" is truthy — `{trait: "x.flag = false"}`
+        // would switch a boolean trait ON. Coerce to the trait's declared type.
+        const traitType = this.traitsMap.get(key)?.type;
+        if (traitType === 'boolean') {
+          const v = String(value).trim().toLowerCase();
+          if (v !== 'true' && v !== 'false') {
+            gameLogger.error(`Boolean trait "${key}" needs true or false. Got "${value}" for ${entry.id}`);
+            continue;
+          }
+          value = v === 'true';
+        } else if (traitType === 'number') {
+          const n = Number(value);
+          if (!Number.isFinite(n)) {
+            gameLogger.error(`Invalid numeric value: "${value}" for number trait ${entry.id}`);
+            continue;
+          }
+          value = n;
+        }
       } else if (type === 'skinStyle' && entry.op === '=' && typeof value === 'string'
                  && value.startsWith('[') && value.endsWith(']')) {
         value = value.slice(1, -1).split(',').map(s => s.trim()).filter(s => s.length > 0);
@@ -716,7 +738,7 @@ export class CharacterSystem {
 
       try {
         character.addSkinLayers([skinLayerId]);
-        gameLogger.info(`[skin_layer] Added "${skinLayerId}" to "${charId}"`);
+        gameLogger.info(`[skin] Added "${skinLayerId}" to "${charId}"`);
       } catch (error) {
         gameLogger.error(`Error adding skin layer: ${error}`);
       }
@@ -749,7 +771,7 @@ export class CharacterSystem {
 
       try {
         character.removeSkinLayers([skinLayerId]);
-        gameLogger.info(`[skin_layer] Removed "${skinLayerId}" from "${charId}"`);
+        gameLogger.info(`[skin] Removed "${skinLayerId}" from "${charId}"`);
       } catch (error) {
         gameLogger.error(`Error removing skin layer: ${error}`);
       }

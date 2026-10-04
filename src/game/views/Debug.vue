@@ -5,6 +5,7 @@ import CustomComponentContainer from './CustomComponentContainer.vue';
 import { computed, ref, watch, onMounted } from 'vue';
 import { useStorage } from '@vueuse/core';
 import Button from 'primevue/button';
+import { editorTheme, scopePrimeVueTokens } from '../../editor/editorTheme';
 import { DEV_AUTO_SAVE_SLOT, DEV_PREV_SCENE_SLOT, DEV_REPLAY_SCENE_KEY, DEV_LEFT_SCENE_KEY } from '../../services/indexeddb-save.service';
 
 const COMPONENT_ID = 'debug-panel';
@@ -43,6 +44,10 @@ const activeTabId = useStorage('debug-active-tab-id', '');
 
 // Lifecycle hooks
 onMounted(() => {
+  // The panel themes a subtree rather than the document, which PrimeVue's :root-level
+  // token aliases do not survive on their own.
+  scopePrimeVueTokens();
+
   // If no tab is selected, select the first one
   if (!activeTabId.value && debugMenuOptions.value.length > 0) {
     activeTabId.value = debugMenuOptions.value[0].id;
@@ -134,7 +139,10 @@ async function backToEditor() {
 </script>
 
 <template>
-  <div :id="COMPONENT_ID" class="debug-panel">
+  <!-- The dev panel is editor furniture parked next to the game, so it follows the editor's
+       theme preference. The class is local: it themes this subtree (PrimeVue tokens included)
+       and leaves the game beside it alone. -->
+  <div :id="COMPONENT_ID" class="debug-panel" :class="{ 'editor-dark': editorTheme === 'dark' }">
     <!--<Button label="Test" @click="test" class="mb-2" />-->
 
     <!-- Expand/Collapse Button -->
@@ -182,13 +190,44 @@ async function backToEditor() {
 
 <style scoped>
 .debug-panel {
+  --dp-bg: rgb(220, 220, 220);
+  --dp-block: #e0e0e0;
+  --dp-block-border: #999;
+  --dp-control: #f5f5f5;
+  --dp-control-hover: #ffffff;
+  --dp-border: #ccc;
+  --dp-border-hover: #999;
+  --dp-text: #333;
+  --dp-text-strong: #000;
+  --dp-content-bg: #ffffff;
+  --dp-content-border: #dee2e6;
+  --dp-accent-button: #333;
+  --dp-accent-button-hover: #555;
+
   position: relative;
   width: 100%;
   height: 100%;
   padding: 1rem;
-  background: rgb(220, 220, 220);
+  background: var(--dp-bg);
+  color: var(--dp-text);
   box-sizing: border-box;
   overflow: auto;
+}
+
+.debug-panel.editor-dark {
+  --dp-bg: var(--editor-surface);
+  --dp-block: var(--editor-surface-raised);
+  --dp-block-border: var(--editor-border-strong);
+  --dp-control: var(--editor-surface-hover);
+  --dp-control-hover: var(--editor-surface-selected);
+  --dp-border: var(--editor-border);
+  --dp-border-hover: var(--editor-border-strong);
+  --dp-text: var(--editor-text);
+  --dp-text-strong: var(--editor-text);
+  --dp-content-bg: var(--editor-surface-sunken);
+  --dp-content-border: var(--editor-border);
+  --dp-accent-button: var(--editor-surface-hover);
+  --dp-accent-button-hover: var(--editor-surface-selected);
 }
 
 .debug-panel h1 {
@@ -205,20 +244,20 @@ async function backToEditor() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #e0e0e0;
-  border: 1px solid #bbb;
+  background: var(--dp-block);
+  border: 1px solid var(--dp-border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
-  color: #555;
+  color: var(--dp-text);
   z-index: 1;
   transition: all 0.15s ease;
 }
 
 .expand-button:hover {
-  background: #d0d0d0;
-  border-color: #999;
-  color: #333;
+  background: var(--dp-control-hover);
+  border-color: var(--dp-border-hover);
+  color: var(--dp-text-strong);
 }
 
 .mb-2 {
@@ -235,40 +274,40 @@ async function backToEditor() {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 1rem;
-  background: #e0e0e0;
+  background: var(--dp-block);
   padding: 0.75rem;
   border-radius: 6px;
 }
 
 .tab-button {
   padding: 0.5rem 1rem;
-  background: #f5f5f5;
-  border: 2px solid #ccc;
+  background: var(--dp-control);
+  border: 2px solid var(--dp-border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #333;
+  color: var(--dp-text);
   transition: all 0.2s ease;
   white-space: nowrap;
 }
 
 .tab-button:hover {
-  background: #fff;
-  border-color: #999;
+  background: var(--dp-control-hover);
+  border-color: var(--dp-border-hover);
 }
 
 .tab-button.active {
-  background: #fff;
-  border-color: #666;
-  color: #000;
+  background: var(--dp-control-hover);
+  border-color: var(--dp-border-hover);
+  color: var(--dp-text-strong);
   font-weight: 600;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .tab-content {
-  background-color: #ffffff;
-  border: 1px solid #dee2e6;
+  background-color: var(--dp-content-bg);
+  border: 1px solid var(--dp-content-border);
   border-radius: 4px;
   padding: 0.5rem;
 }
@@ -277,8 +316,8 @@ async function backToEditor() {
   display: flex;
   align-items: stretch;
   gap: 0.5rem;
-  background: #e0e0e0;
-  border: 2px solid #999;
+  background: var(--dp-block);
+  border: 2px solid var(--dp-block-border);
   border-radius: 6px;
   padding: 0.75rem;
   margin-bottom: 1rem;
@@ -289,25 +328,25 @@ async function backToEditor() {
   width: 4.5rem;
   flex-shrink: 0;
   padding: 0.5rem;
-  background: #f5f5f5;
-  border: 2px solid #ccc;
+  background: var(--dp-control);
+  border: 2px solid var(--dp-border);
   border-radius: 4px;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #333;
+  color: var(--dp-text);
   text-align: center;
   transition: all 0.2s ease;
 }
 
 .panel-width-input:hover {
-  background: #fff;
-  border-color: #999;
+  background: var(--dp-control-hover);
+  border-color: var(--dp-border-hover);
 }
 
 .panel-width-input:focus {
   outline: none;
-  background: #fff;
-  border-color: #666;
+  background: var(--dp-control-hover);
+  border-color: var(--dp-border-hover);
 }
 
 .back-to-editor-button {
@@ -316,26 +355,26 @@ async function backToEditor() {
   font-size: 1rem;
   font-weight: 600;
   padding: 0.75rem;
-  background-color: #333 !important;
-  color: white !important;
+  background-color: var(--dp-accent-button) !important;
+  color: #fff !important;
   border: none !important;
   transition: all 0.2s ease;
 }
 
 .back-to-editor-button:hover {
-  background-color: #555 !important;
+  background-color: var(--dp-accent-button-hover) !important;
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 .back-to-editor-button:active {
   transform: translateY(0);
-  background-color: #4c4c4c !important;
+  background-color: var(--dp-accent-button-hover) !important;
 }
 
 .hard-reset-container {
-  background: #e0e0e0;
-  border: 2px solid #999;
+  background: var(--dp-block);
+  border: 2px solid var(--dp-block-border);
   border-radius: 6px;
   padding: 0.75rem;
   margin-bottom: 1rem;

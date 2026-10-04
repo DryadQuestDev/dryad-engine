@@ -179,7 +179,6 @@ function clearSelection() {
 
 // ── Sifting (engine Dsearch — filters derived from the ability schema) ──
 const clearCounter = ref(0);
-const filtersDirty = ref(false);
 const siftedIds = ref<Set<string> | null>(null);
 
 // Dsearch filters the ACTIVE tab's pool; entries missing a merged object (shouldn't
@@ -426,11 +425,8 @@ function aspectSummary(tpl: any): string {
       <div class="picker-body">
         <!-- Sifter column (engine Dsearch, standalone: no shared idFilter sync) -->
         <aside class="filter-col">
-          <Button v-if="filtersDirty" label="Clear filters" text size="small" class="clear-filters-btn"
-            @click="clearCounter++" />
           <Dsearch v-if="abilitySchema" :schema="abilitySchema" :data="sifterData" :triggerClear="clearCounter"
-            :sync-shared-id-filter="false" @update:siftedData="onSifted"
-            @update:isDirty="(v: boolean) => filtersDirty = v" />
+            :sync-shared-id-filter="false" preset-scope="ability_templates" @update:siftedData="onSifted" />
         </aside>
 
         <!-- Grid column (editor-game-preview scopes plugin editor_preview css) -->
@@ -571,9 +567,6 @@ function aspectSummary(tpl: any): string {
   padding: 0.25rem;
 }
 
-.clear-filters-btn {
-  align-self: flex-end;
-}
 
 /* ── Grid column (dark backdrop so the game-styled cards read correctly) ── */
 .grid-col {

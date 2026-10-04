@@ -66,6 +66,36 @@ Go to **Characters > Ability Templates** and create abilities like:
 
 **Why effects are a list:** One ability can do multiple things. Fireball might deal direct damage AND apply a burn effect. Each effect has its own aspects.
 
+### The Ability Editor
+
+Every ability template has two buttons beside its title: **Ability Editor** and **Balance Sheet**. The header of either popup switches to another ability or to the other popup, and both stay locked while the popup holds unsaved changes.
+
+**Ability Editor** puts one ability on one screen, with its card rendered live beside the form:
+
+- **Effects read as sentences.** Each aspect in use is its card line with inputs where the values print: *Apply [3] [Burn] to target for [2] turns*. The line comes from the aspect definition's in-game description, and every `[sibling_aspect]` it names becomes an inline input, so stacks and duration sit inside the apply-status line instead of in separate fields. An aspect without a description gets a labelled row that says the card never prints it.
+- **Only what is used is shown.** **+ Add aspect** lists the rest, the aspects this game uses most on top, then by group; its search matches ids and descriptions. Meta works the same way: pinned fields always show, the others come from **+ Add meta field**.
+- **Effect tools.** Reorder effects with the arrows (this writes their `order`), duplicate one, move an aspect out into a new effect, or open the attached-text editor.
+- **Warnings** flag what the card or the game would silently drop: an aspect the card never prints, a companion aspect whose owner is missing, ids that no longer exist, an effect with nothing in it, two effects sharing an id, a renamed ability that others still reference by its old id.
+- **Modifiers.** With `modifies` set, the base ability's effects are listed. **Extend** adds an effect with the same id, whose numbers add to the base values; **New group** adds a titled group of its own. The card shows the merged result, and a modifier with `requires_status` can be previewed with the status held or missing.
+- **Context.** A base ability lists the modifiers that target it, with checkboxes that apply them to the card. **Used by** lists every character, status, item and skill slot that grants the ability, each with a button that opens it.
+
+**Balance Sheet** shows every ability of the tab as a table, filtered with the usual filter form. Pick the columns (meta fields, one key of costs, or an aspect wherever it sits in the effects), sort by any column, and read each column's count, minimum, median and maximum. Click a cell to edit it. Edits to other abilities are applied when you save. Saved column sets appear as chips above the table.
+
+### Editor Layouts
+
+How the editor groups and presents fields lives in **Dev > Editor Layouts**, never in game data, and the game never reads it. Each entry targets one form through its scope:
+
+| Scope | Lays out |
+|-------|----------|
+| `ability_templates:meta` | The Ability Editor's meta panel |
+| `ability_templates:effects.aspects` | Aspect rows and the Add aspect menu |
+| `ability_templates:sheet` | A saved Balance Sheet column set |
+| `item_templates:traits` | The Item Editor's traits block |
+
+An entry holds named, colored groups of field ids and per-field hints: a unit shown after the value, step, minimum and maximum, the input widget, a value filled in when the field is added, and whether the field is pinned or left out of the Add menus.
+
+Plugins ship layouts for the fields they define, so the aspects of a battle plugin arrive grouped and with their units. Entries that share a scope combine, and groups and hints merge by id: a game adds its own aspects to a plugin's group by listing them under the same group id, or overrides a plugin entry by saving one with the same id.
+
 ---
 
 ## Granting Abilities

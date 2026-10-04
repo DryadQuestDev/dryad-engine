@@ -6,6 +6,7 @@
  */
 
 import { App } from 'vue';
+import { Global } from '../global/global';
 
 let appInstance: App | null = null;
 
@@ -37,19 +38,24 @@ export function showConfirm(options: ConfirmOptions): Promise<boolean> {
       return;
     }
 
+    // Resolved at show time, not at module scope: the dialog is built the moment it opens, so it
+    // always picks up the language selected by then. The English literals are the last-resort
+    // fallback for a locale file that lacks the key.
+    const locale = Global.getInstance();
+
     confirm.require({
       message: options.message,
-      header: options.header || 'Confirm',
+      header: options.header || locale.getStringOr('confirm', 'Confirm'),
       icon: options.icon || 'pi pi-exclamation-triangle',
-      acceptLabel: options.acceptLabel || 'OK',
-      rejectLabel: options.rejectLabel || 'Cancel',
+      acceptLabel: options.acceptLabel || locale.getStringOr('ok', 'OK'),
+      rejectLabel: options.rejectLabel || locale.getStringOr('cancel', 'Cancel'),
       accept: () => resolve(true),
       reject: () => resolve(false),
     });
   });
 }
 
-export function showAlert(message: string, header: string = 'Alert'): Promise<void> {
+export function showAlert(message: string, header?: string): Promise<void> {
   return new Promise((resolve) => {
     if (!appInstance) {
       console.warn('DialogService not initialized, falling back to native alert');
@@ -66,11 +72,13 @@ export function showAlert(message: string, header: string = 'Alert'): Promise<vo
       return;
     }
 
+    const locale = Global.getInstance();
+
     confirm.require({
       message: message,
-      header: header,
+      header: header || locale.getStringOr('dialog.alert_header', 'Alert'),
       icon: 'pi pi-info-circle',
-      rejectLabel: 'Close',
+      rejectLabel: locale.getStringOr('close', 'Close'),
       rejectClass: 'p-button-text',
       accept: () => resolve(),
       reject: () => resolve(),

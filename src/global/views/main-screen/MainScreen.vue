@@ -73,6 +73,18 @@ const landingSoundtrack = computed<string | null>(() => {
 
 const disableEngineLink = computed(() => manifests.value.some(m => !!m?.disable_engine_link));
 
+const installLabel = computed(() => global.getString('install.install'));
+const menuLabel = computed(() => global.getString('main_screen.menu'));
+const nsfwLabel = computed(() => global.getString('main_screen.nsfw_label'));
+const nsfwToggleAriaLabel = computed(() => global.getString('main_screen.nsfw_toggle_aria'));
+const editorLabel = computed(() => global.getString('editor'));
+const fullscreenLabel = computed(() => global.getString('main_screen.fullscreen'));
+const loadingLabel = computed(() => global.getString('main_screen.loading'));
+const noGamesLabel = computed(() => global.getString('main_screen.no_games'));
+const continueLabel = computed(() => global.getString('continue'));
+const newGameLabel = computed(() => global.getString('main_screen.new_game'));
+const savesLabel = computed(() => global.getString('saves'));
+
 const gameCompatibility = computed(() => {
   if (!selectedGame.value) return { isCompatible: true, warningMessage: undefined as string | undefined };
   return checkManifestCompatibility(
@@ -105,10 +117,10 @@ function syncUrl() {
 async function toggleNsfw() {
   if (!global.nsfwEnabled.value) {
     const confirmed = await showConfirm({
-      message: 'This content is intended for adults only. Are you 18 or older?',
-      header: 'Age Verification',
-      acceptLabel: 'Yes, I am 18+',
-      rejectLabel: 'No'
+      message: global.getString('nsfw.confirm.message'),
+      header: global.getString('nsfw.confirm.header'),
+      acceptLabel: global.getString('nsfw.confirm.accept'),
+      rejectLabel: global.getString('no')
     });
     if (!confirmed) return;
     global.nsfwEnabled.value = true;
@@ -170,28 +182,63 @@ function modIdsWithCore(): string[] {
   return ['_core', ...ids];
 }
 
-async function loadGameAssets(gameId: string) {
-  try {
-    const assets = await global.loadAndMergeArrayFile<AssetObject>(gameId, 'assets', modIdsWithCore(), true);
-    const map = new Map<string, AssetObject>();
-    for (const a of assets) if (a.id) map.set(a.id, a);
-    assetsMap.value = map;
-  } catch (err) {
-    console.warn('No assets file or failed to load assets for landing:', err);
-    assetsMap.value = new Map();
-  }
+// game|mods the maps below currently hold. The watcher and onMounted both drive these, and
+// a game's assets.json is the largest file on the landing page, so re-fetching it for a
+// selection that has not actually changed is pure transfer. Concurrent callers share the
+// in-flight promise rather than returning early — onMounted calls applyLandingMusic() right
+// after awaiting these, and that needs musicMap actually populated, not merely claimed.
+let loadedAssetsKey = '';
+let loadedMusicKey = '';
+let assetsInFlight: { key: string; promise: Promise<void> } | null = null;
+let musicInFlight: { key: string; promise: Promise<void> } | null = null;
+const selectionKey = (gameId: string) => `${gameId}|${modIdsWithCore().join(',')}`;
+
+function loadGameAssets(gameId: string): Promise<void> {
+  const key = selectionKey(gameId);
+  if (key === loadedAssetsKey) return Promise.resolve();
+  if (assetsInFlight?.key === key) return assetsInFlight.promise;
+
+  const promise = (async () => {
+    try {
+      const assets = await global.loadAndMergeArrayFile<AssetObject>(gameId, 'assets', modIdsWithCore(), true);
+      const map = new Map<string, AssetObject>();
+      for (const a of assets) if (a.id) map.set(a.id, a);
+      assetsMap.value = map;
+      loadedAssetsKey = key;
+    } catch (err) {
+      console.warn('No assets file or failed to load assets for landing:', err);
+      assetsMap.value = new Map();
+      loadedAssetsKey = '';
+    } finally {
+      if (assetsInFlight?.key === key) assetsInFlight = null;
+    }
+  })();
+  assetsInFlight = { key, promise };
+  return promise;
 }
 
-async function loadGameMusic(gameId: string) {
-  try {
-    const tracks = await global.loadAndMergeArrayFile<MusicObject>(gameId, 'music', modIdsWithCore(), true);
-    const map = new Map<string, MusicObject>();
-    for (const t of tracks) if (t.id) map.set(t.id, t);
-    musicMap.value = map;
-  } catch (err) {
-    console.warn('No music file or failed to load music for landing:', err);
-    musicMap.value = new Map();
-  }
+function loadGameMusic(gameId: string): Promise<void> {
+  const key = selectionKey(gameId);
+  if (key === loadedMusicKey) return Promise.resolve();
+  if (musicInFlight?.key === key) return musicInFlight.promise;
+
+  const promise = (async () => {
+    try {
+      const tracks = await global.loadAndMergeArrayFile<MusicObject>(gameId, 'music', modIdsWithCore(), true);
+      const map = new Map<string, MusicObject>();
+      for (const t of tracks) if (t.id) map.set(t.id, t);
+      musicMap.value = map;
+      loadedMusicKey = key;
+    } catch (err) {
+      console.warn('No music file or failed to load music for landing:', err);
+      musicMap.value = new Map();
+      loadedMusicKey = '';
+    } finally {
+      if (musicInFlight?.key === key) musicInFlight = null;
+    }
+  })();
+  musicInFlight = { key, promise };
+  return promise;
 }
 
 async function loadLatestSave(gameId: string | null) {
@@ -218,26 +265,31 @@ async function loadLatestSave(gameId: string | null) {
 function applyLandingMusic() {
   const id = landingSoundtrack.value;
   if (!id) {
-    MusicPlayer.getInstance().stop({ fade: 1.0 });
+    MusicPlayer.getInstance().stop({ fadeOut: 1.0 });
     return;
   }
   const track = musicMap.value.get(id);
   if (!track || !track.files || track.files.length === 0) return;
   const volume = (global.userSettings.value.music_volume || 0) / 100;
-  MusicPlayer.getInstance().play(id, track.files, { fade: 1.5, volume });
+  MusicPlayer.getInstance().play(id, track.files, { fadeOut: 1.5, volume });
 }
 
 watch(
-  () => [selectedGame.value?.id, activeMods.value.map(m => m.id).join(',')],
+  // One string, not a fresh array: an array literal is never Object.is-equal to the previous
+  // one, so the callback re-ran on every touch of these refs even when the selection was
+  // unchanged, re-fetching the selected game's assets and music each time.
+  () => `${selectedGame.value?.id ?? ''}|${activeMods.value.map(m => m.id).join(',')}`,
   async () => {
     const gameId = selectedGame.value?.id;
     if (!gameId) {
       assetsMap.value = new Map();
       musicMap.value = new Map();
+      loadedAssetsKey = '';
+      loadedMusicKey = '';
       latestSave.value = null;
       global.unloadLandingCss();
       global.clearEngineTheme();
-      MusicPlayer.getInstance().stop({ fade: 1.0 });
+      MusicPlayer.getInstance().stop({ fadeOut: 1.0 });
       return;
     }
     global.applyEngineTheme(manifests.value);
@@ -268,10 +320,10 @@ async function initFromQuery(): Promise<boolean> {
 
   if (anyNsfw && global.isNsfwGated && !global.nsfwEnabled.value) {
     const confirmed = await showConfirm({
-      message: 'This content is intended for adults only. Are you 18 or older?',
-      header: 'Age Verification',
-      acceptLabel: 'Yes, I am 18+',
-      rejectLabel: 'No'
+      message: global.getString('nsfw.confirm.message'),
+      header: global.getString('nsfw.confirm.header'),
+      acceptLabel: global.getString('nsfw.confirm.accept'),
+      rejectLabel: global.getString('no')
     });
     if (!confirmed) return false;
     global.nsfwEnabled.value = true;
@@ -366,7 +418,7 @@ onMounted(async () => {
 onUnmounted(() => {
   global.unloadLandingCss();
   if (global.engineState.value !== 'game') {
-    MusicPlayer.getInstance().stop({ fade: 0.6 });
+    MusicPlayer.getInstance().stop({ fadeOut: 0.6 });
     global.clearEngineTheme();
   }
 });
@@ -389,7 +441,7 @@ onUnmounted(() => {
       <div class="main-screen-header-left">
         <button v-if="!isWebMode" class="main-screen-hbtn main-screen-hbtn--accent" @click="openInstallModal" :disabled="!gamesLoaded">
           <i class="pi pi-download"></i>
-          <span>Install</span>
+          <span>{{ installLabel }}</span>
         </button>
         <GamesDropdown
           :games="games"
@@ -401,37 +453,35 @@ onUnmounted(() => {
       <div class="main-screen-header-right">
         <button class="main-screen-hbtn" @click="global.toggleMenu">
           <i class="pi pi-bars"></i>
-          <span>Menu</span>
+          <span>{{ menuLabel }}</span>
         </button>
         <div v-if="global.isNsfwGated" class="main-screen-nsfw" @click="toggleNsfw">
-          <span class="main-screen-nsfw-label">18+</span>
+          <span class="main-screen-nsfw-label">{{ nsfwLabel }}</span>
           <button
             type="button"
             class="main-screen-nsfw-toggle"
             :class="{ 'main-screen-nsfw-toggle--on': global.nsfwEnabled.value }"
             role="switch"
             :aria-checked="global.nsfwEnabled.value"
-            aria-label="Enable adult content"
+            :aria-label="nsfwToggleAriaLabel"
             @click.stop="toggleNsfw"
           ></button>
         </div>
         <button v-if="!isWebMode || global.isWebSite" class="main-screen-hbtn" @click="openEditor">
           <i class="pi pi-pencil"></i>
-          <span>Editor</span>
+          <span>{{ editorLabel }}</span>
         </button>
         <button v-if="showInstallButton" class="main-screen-hbtn" @click="showPwaModal = true">
           <i class="pi pi-window-maximize"></i>
-          <span>Fullscreen</span>
+          <span>{{ fullscreenLabel }}</span>
         </button>
       </div>
     </header>
 
     <main class="main-screen-stage">
-      <div v-if="!gamesLoaded" class="main-screen-empty">Loading…</div>
+      <div v-if="!gamesLoaded" class="main-screen-empty">{{ loadingLabel }}</div>
 
-      <div v-else-if="games.length === 0" class="main-screen-empty">
-        No games installed. Drop one into <code>games_files/</code> or build your own.
-      </div>
+      <div v-else-if="games.length === 0" class="main-screen-empty" v-html="noGamesLabel"></div>
 
       <div v-else-if="selectedGame" class="main-screen-cards">
         <ManifestPanel
@@ -450,7 +500,7 @@ onUnmounted(() => {
               @click="continueGame"
             >
               <i class="pi pi-play"></i>
-              <span>Continue</span>
+              <span>{{ continueLabel }}</span>
             </button>
             <button
               class="main-screen-cta"
@@ -459,7 +509,7 @@ onUnmounted(() => {
               @click="playGame"
             >
               <i class="pi pi-plus"></i>
-              <span>New Game</span>
+              <span>{{ newGameLabel }}</span>
             </button>
             <button
               v-if="latestSave"
@@ -467,7 +517,7 @@ onUnmounted(() => {
               @click="showSavesDrawer = true"
             >
               <i class="pi pi-folder-open"></i>
-              <span>Saves</span>
+              <span>{{ savesLabel }}</span>
             </button>
           </div>
 

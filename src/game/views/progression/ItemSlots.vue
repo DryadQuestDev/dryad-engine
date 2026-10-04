@@ -2,13 +2,15 @@
 import { computed } from 'vue';
 import { Character } from '../../core/character/character';
 import ItemSlot from './ItemSlot.vue';
-import { ITEM_SLOT_SIZE_PERCENT } from '../../../global/global';
+import { ITEM_SLOT_SIZE_PERCENT, Global } from '../../../global/global';
 
 const props = defineProps<{
   character: Character;
   disabled?: boolean; // Disable item click/drag while keeping hover tooltips
   layout?: 'doll' | 'row'; // 'doll' = positioned overlay (default), 'row' = flex row for text dungeons
 }>();
+
+const emptySlotAlt = computed(() => Global.getInstance().getString('item_slot.empty_alt'));
 
 // Get all item slots for this character with their equipped items
 const itemSlotsWithItems = computed(() => {
@@ -42,7 +44,7 @@ const itemSlotsWithItems = computed(() => {
       <ItemSlot v-if="slotData.item" :item="slotData.item" :character-id="character.id"
         :disabled="props.disabled === true" popup-placement="left-start" class="equipped-item" />
       <div v-else class="empty-slot">
-        <img v-if="slotData.emptySlotImage" :src="slotData.emptySlotImage" alt="Empty slot" class="empty-slot-image" />
+        <img v-if="slotData.emptySlotImage" :src="slotData.emptySlotImage" :alt="emptySlotAlt" class="empty-slot-image" />
         <span v-else class="empty-slot-name">{{ slotData.emptySlotName }}</span>
       </div>
     </div>

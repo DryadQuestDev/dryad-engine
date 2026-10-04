@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Global } from '../../global';
 
 defineProps<{
@@ -7,15 +8,17 @@ defineProps<{
 
 const global = Global.getInstance();
 const ENGINE_URL = 'https://dryadengine.com';
+
+const versionLabel = computed(() => global.getString('engine_logo.version', { version: global.engineVersion }));
 </script>
 
 <template>
   <div class="engine-logo">
     <a v-if="!disableLink" :href="ENGINE_URL" target="_blank" rel="noopener" class="engine-logo-text">
-      Dryad Engine v{{ global.engineVersion }}
+      {{ versionLabel }}
     </a>
     <span v-else class="engine-logo-text engine-logo-text--no-link">
-      Dryad Engine v{{ global.engineVersion }}
+      {{ versionLabel }}
     </span>
   </div>
 </template>

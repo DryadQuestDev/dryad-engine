@@ -12,6 +12,7 @@ At a high level, you use special markers to tell the engine what each piece of t
 - `@some_encounter` – a specific **encounter** in that room.
 - `#` – **events** that can be triggered manually or automatically when conditions are met.
 - `character_id:` – prefix dialogue with a character ID to set the **speaker**.
+- `character_id!:` – a **party line**: that speaker's paragraph plays only while they are in the party.
 
 There are three kinds of **choice**, and they differ in where they attach:
 
@@ -80,6 +81,27 @@ You usually:
   - `&my_anchor` – jump to an anchor in the **current dungeon**.  
   - `&other_dungeon.my_anchor` – jump to an anchor in another dungeon.
 
+An anchor is written on its own line as the **first line of the paragraph it names**:
+
+```text
+#door~examine
+1
+%
+|I| approach the door and examine it thoroughly.
+
+&door_choices
+Common sense tells |me| it must lead somewhere.
+2
+~Examine the statues
+|I| take a closer look at the stone figures.
+{choices: "&door_choices"}
+~Walk away{exit: true}
+```
+
+- An anchor below a line of the same paragraph, or with a blank line, `%`, `~` or `>` right below it, names nothing and is dropped.
+- A menu anchor (`{choices: "&x"}`) goes on the **last** paragraph before the choices. On an earlier paragraph the menu shows as a plain "continue" that replays the rest of the block.
+- The Dungeon Content Editor flags both on save.
+
 The engine’s dungeon system resolves these via its scene resolver, so you can:
 
 - Keep your document readable (anchors have human‑friendly names).  
@@ -90,7 +112,7 @@ The engine’s dungeon system resolves these via its scene resolver, so you can:
 ### Actions: Things That Happen
 
 **Actions** are commands executed when a scene, event, or choice runs.  
-They live inside curly‑brace blocks in your content (usually coming from Google Docs), for example:
+They live inside curly‑brace blocks in your content, for example:
 
 - `{flag: "door_opened=1"}`  
 - `{enter: "tutorial.entrance"}`  
@@ -252,7 +274,7 @@ Listen for pickups with the ->builtins.game_emitters `encounter_collected` emitt
 Examples:
 
 - `|flag(coins)|` – show the current value of a dungeon flag called `coins`.  
-- `|item|` – show the display name of an active item.  
+- `|item|` – show the display name of an active item, colored by its rarity.  
 - `|mc|` – show the main character’s name (as implemented in the Tutorial script).
 
 Under the hood:
@@ -301,6 +323,7 @@ if{machine_on}++The great machine roars, pistons hammering.++fi
 
 - Override the default colors by restyling `.initial` / `.altered` in your game CSS.
 - A stray `+` in prose stays literal: `Here's +43 health`, `gain +2 str and +4 agi`, and `C++` are never styled. The marked text must start with a letter and hug its `+` signs.
+- Line breaks, literal text and typing pace (`[br]`, `[code]`, `[w]`, `[cps]`…) are covered in ->dungeons.text_tags.
 
 ---
 
@@ -519,6 +542,22 @@ The engine automatically:
 3. Returns just the dialogue text (everything after the colon) for display.
 
 **Important:** The character ID must match a **live character instance** – meaning the character must be defined in the editor and exist in the game's character system. If the ID doesn't match any registered character, the engine won't know which portrait or name to display.
+
+#### Party lines
+
+Add `!` after the ID when the line belongs to a companion who may not be with the player. The paragraph plays only while that character is in the party. Otherwise it is skipped whole, actions included:
+
+```text
+ane!: “Are those... fresh? After all this time?”
+
+peth!: Peth ducks behind my back. “A g-ghost...”
+```
+
+To make a party line depend on who else is present, wrap it in an inline `if{}`:
+
+```text
+if{_in_party(klead) = false}ane!: Ane glances back the way we came.fi{}
+```
 
 To create and configure characters, see ->characters.characters_overview.
 

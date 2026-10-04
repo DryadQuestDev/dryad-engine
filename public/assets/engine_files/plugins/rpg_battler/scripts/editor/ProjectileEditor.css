@@ -1,0 +1,379 @@
+/* The battler's own projectile rules and presets, so the preview's sprites draw as in a fight. */
+@import url("../../css/rpg-vfx.css");
+
+.pje {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.pje-main,
+.pje-fields {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.pje-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── controls ── */
+.pje-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pje-seg {
+  display: inline-flex;
+  border: 1px solid var(--editor-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.pje-seg button,
+.pje-btn {
+  background: var(--editor-surface-raised);
+  color: var(--editor-text);
+  border: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pje-seg button+button {
+  border-left: 1px solid var(--editor-border);
+}
+
+.pje-btn {
+  border: 1px solid var(--editor-border);
+  border-radius: 6px;
+}
+
+.pje-btn.small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.pje-seg button:hover,
+.pje-btn:hover {
+  background: var(--editor-surface-hover);
+}
+
+.pje-seg button.on,
+.pje-btn.on {
+  background: var(--editor-tint-info);
+  color: var(--editor-fg-info);
+}
+
+/* ── the battle: a 16:9 viewport, the party along the bottom and the enemies above ── */
+.pje-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  flex: none;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--editor-border);
+  background: radial-gradient(120% 90% at 60% 30%, #3b3650 0%, #25222f 55%, #17151e 100%);
+}
+
+.pje-floor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(#2d2a3b, #1b1923);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* a slot: the body centred on its point, `scale` of the viewport tall */
+.pje-fig {
+  position: absolute;
+  translate: -50% -50%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.pje-fig:not(.caster):not(.target) {
+  opacity: 0.4;
+}
+
+/* caster and targets stand on a ring */
+.pje-fig.caster::after,
+.pje-fig.target::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 60%;
+  height: 7%;
+  translate: -50% 50%;
+  border-radius: 50%;
+}
+
+.pje-fig.caster::after {
+  background: rgba(111, 179, 216, 0.35);
+}
+
+.pje-fig.target::after {
+  background: rgba(217, 123, 112, 0.35);
+}
+
+.pje-doll {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 0.42;
+}
+
+.pje-doll::before,
+.pje-doll::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.pje-doll::before {
+  top: 0;
+  width: 42%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+
+.pje-doll::after {
+  top: 19%;
+  bottom: 0;
+  width: 84%;
+  border-radius: 42% 42% 22% 22%;
+}
+
+.pje-fig.enemy .pje-doll::before,
+.pje-fig.enemy .pje-doll::after {
+  background: #5b4c61;
+}
+
+.pje-fig.party .pje-doll::before,
+.pje-fig.party .pje-doll::after {
+  background: #46566d;
+}
+
+/* the sprites are the battler's .rpg-projectile, placed in the stage instead of the window */
+.pje-sprites {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.pje-sprites .rpg-projectile {
+  position: absolute;
+  z-index: auto;
+}
+
+.pje-stage-msg {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  z-index: 6;
+  color: var(--editor-fg-danger);
+  font-size: 12px;
+}
+
+.pje-info,
+.pje-muted {
+  font-size: 12px;
+  color: var(--editor-text-muted);
+}
+
+.pje-cast {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--editor-text-muted);
+}
+
+.pje-cast select {
+  margin-left: 6px;
+  max-width: 16rem;
+  padding: 2px 4px;
+  background: var(--editor-surface);
+  color: var(--editor-text);
+  border: 1px solid var(--editor-border);
+  border-radius: 4px;
+}
+
+/* ── the strips, frame by frame ── */
+.pje-sheets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pje-sheet {
+  padding: 8px;
+  border: 1px solid var(--editor-border);
+  border-radius: 6px;
+  background: var(--editor-surface-sunken);
+  min-width: 0;
+}
+
+.pje-sheet-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.pje-sheet-head span {
+  color: var(--editor-text-muted);
+}
+
+.pje-strip-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.pje-strip {
+  position: relative;
+  display: inline-block;
+  height: 72px;
+  border-radius: 4px;
+  background: repeating-conic-gradient(#3a3744 0 25%, #2e2b38 0 50%) 0 0 / 12px 12px;
+}
+
+.pje-strip img {
+  display: block;
+  height: 100%;
+  width: auto;
+}
+
+.pje-strip i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 100, 100, 0.75);
+}
+
+.pje-strip i.row {
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 1px;
+  bottom: auto;
+}
+
+/* the frame the impact lands on (hit_frame, or the fullest) */
+.pje-strip .pje-land {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #f5c542;
+  border-radius: 3px;
+  background: rgba(245, 197, 66, 0.12);
+  pointer-events: auto;
+}
+
+.pje-warn {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--editor-fg-warning);
+}
+
+.pje-users {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.pje-users b {
+  margin-right: 4px;
+}
+
+.pje-chip {
+  padding: 2px 8px;
+  font-size: 11.5px;
+  border-radius: 5px;
+  background: var(--editor-surface-raised);
+  border: 1px solid var(--editor-border);
+  color: var(--editor-text);
+  cursor: pointer;
+}
+
+.pje-chip.area {
+  border-color: var(--editor-fg-danger);
+}
+
+.pje-chip:hover {
+  border-color: var(--editor-accent);
+}
+
+/* ── the fields ── */
+.pje-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pje-group {
+  padding: 10px 12px;
+  border: 1px solid var(--editor-border);
+  border-radius: 8px;
+  background: var(--editor-surface);
+}
+
+.pje-group h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.pje-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--editor-text-muted);
+}
+
+.pje-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin: 4px 0 10px;
+  font-size: 12px;
+  color: var(--editor-text-muted);
+}
+
+.pje-quick span {
+  margin-right: 4px;
+}
+
+.pje-group .form-field-renderer {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 1100px) {
+  .pje {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    overflow: auto;
+  }
+
+  .pje-main,
+  .pje-fields {
+    overflow: visible;
+  }
+}

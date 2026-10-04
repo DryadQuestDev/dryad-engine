@@ -14,7 +14,7 @@
 
 .tutorial-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 1.1em;
   font-weight: 700;
   color: #7affd8;
 }
@@ -29,7 +29,7 @@
 /* Scrolls on its own so a long hint (a walkthrough with screenshots) keeps the title and
    the footer buttons in view. */
 .tutorial-body {
-  font-size: 15px;
+  font-size: 0.75em;
   line-height: 1.55;
   color: rgba(255, 255, 255, 0.85);
   overflow-y: auto;
@@ -65,7 +65,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 0.65em;
   color: rgba(255, 255, 255, 0.6);
   cursor: pointer;
   user-select: none;
@@ -82,9 +82,9 @@
 }
 
 .tutorial-page-btn {
-  width: 30px;
-  height: 30px;
-  font-size: 18px;
+  font-size: 0.9em;
+  width: 1.6667em;
+  height: 1.6667em;
   line-height: 1;
   color: rgba(255, 255, 255, 0.85);
   background: rgba(255, 255, 255, 0.08);
@@ -104,15 +104,15 @@
 }
 
 .tutorial-page-count {
-  font-size: 13px;
+  font-size: 0.65em;
   color: rgba(255, 255, 255, 0.6);
-  min-width: 42px;
+  min-width: 3.2308em;
   text-align: center;
 }
 
 .tutorial-ok {
-  padding: 9px 22px;
-  font-size: 14px;
+  font-size: 0.7em;
+  padding: 0.6429em 1.5714em;
   font-weight: 600;
   color: #0c0e12;
   background: #42b983;

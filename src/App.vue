@@ -12,8 +12,6 @@ import gsap from 'gsap';
 
 import { Global } from './global/global';
 import { useMobile } from './global/composables/useMobile';
-import Gform from './global/views/forms/Gform.vue';
-import { MenuOptions } from './global/menuOptions';
 
 // Define the notification item structure (can also be imported if defined elsewhere)
 interface NotificationItem {

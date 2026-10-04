@@ -88,7 +88,7 @@ function insertAction(name: string) {
 .action-runner-label {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #2d3748;
+  color: var(--editor-text);
 }
 
 .action-runner-input {
@@ -104,7 +104,7 @@ function insertAction(name: string) {
 }
 
 .action-error {
-  color: #c53030;
+  color: var(--editor-ink-red);
   font-size: 0.8rem;
   font-family: monospace;
   white-space: pre-wrap;
@@ -122,13 +122,13 @@ function insertAction(name: string) {
   width: 100%;
   padding: 0.5rem 2rem 0.5rem 0.75rem;
   font-size: 0.875rem;
-  border: 1px solid #cbd5e0;
+  border: 1px solid var(--editor-border);
   border-radius: 0.375rem;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #2b6cb0;
+  border-color: var(--editor-ink-blue);
   box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
 }
 
@@ -136,7 +136,7 @@ function insertAction(name: string) {
   position: absolute;
   right: 0.75rem;
   cursor: pointer;
-  color: #718096;
+  color: var(--editor-text-faint);
   font-size: 1.125rem;
   padding: 0.25rem;
   line-height: 1;
@@ -144,12 +144,12 @@ function insertAction(name: string) {
 }
 
 .search-clear:hover {
-  color: #2d3748;
+  color: var(--editor-text);
 }
 
 .action-empty {
   font-size: 0.8rem;
-  color: #718096;
+  color: var(--editor-text-faint);
 }
 
 .action-list {
