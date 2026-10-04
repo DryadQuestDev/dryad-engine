@@ -1,4 +1,4 @@
-import { ref, Ref, computed, nextTick, type ComputedRef } from "vue";
+import { ref, Ref, computed, nextTick, toRaw, type ComputedRef } from "vue";
 import gsap from 'gsap';
 
 import { DungeonData } from "../core/dungeon/dungeonData";
@@ -99,6 +99,7 @@ export type SceneSlot = CharacterSceneSlotObject & {
 export type SceneAsset = AssetObject & {
   isRemoving?: boolean; // Flag to trigger exit animation before removal
   removalTimeoutId?: number; // Pending removal timer, cleared if the asset is re-staged
+  silentExit?: boolean; // With isRemoving: leave without an exit animation (a background covered by its replacement)
 }
 
 /** One image plate of a stacked asset, after asset_resolve has had its say. */
@@ -620,6 +621,74 @@ export class DungeonSystem {
   }
 
   /**
+   * One background at a time: staging a `bg` asset retires every other `bg` on stage, defaults
+   * included. One drawn beneath the newcomer stays opaque until the newcomer has finished entering
+   * and then goes without an exit animation — fading both at once would dip the scene to black
+   * between them. One drawn above it would hide it, so it exits normally, like an explicit `!old`.
+   * Call before a new asset is pushed: it is placed last, so it draws above an equal-z background.
+   */
+  private applyBgAsset(asset: AssetObject): void {
+    if (!asset.bg) return;
+    const staged = this.assets.value;
+    const index = staged.indexOf(asset as SceneAsset);
+    const at = index === -1 ? staged.length : index;
+    const z = asset.z ?? 0;
+    const enterMs = asset.enter && asset.enter !== 'none'
+      ? ((asset.enter_delay ?? 0) + (asset.enter_duration ?? 0.5)) * 1000
+      : 0;
+    for (const old of [...staged]) {
+      if (old === asset || old.id === asset.id || !old.bg) continue;
+      // Already leaving with its own exit animation. A silent one (covered, or held by clearAssets)
+      // is re-timed to this newcomer instead.
+      if (old.isRemoving && !old.silentExit) continue;
+      const oldZ = old.z ?? 0;
+      const above = oldZ > z || (oldZ === z && staged.indexOf(old) > at);
+      if (this.isUnpainted(old) || (above && old.silentExit)) this.dropAssetNow(old);
+      else if (above) this.removeAssets(old.id);
+      else this.dropCoveredAsset(old, enterMs);
+    }
+  }
+
+  // Assets staged in the current task. Nothing has painted them yet, so a background replacing one
+  // takes it off at once instead of holding it under the newcomer: a room default that the scene's
+  // first paragraph swaps out (`false, forest`) would otherwise flash up for the length of the fade.
+  @Skip()
+  private unpaintedAssets = new WeakSet<SceneAsset>();
+
+  // Raw objects: the assets array hands back reactive proxies, which a WeakSet never matches.
+  private markUnpainted(asset: SceneAsset): void {
+    const raw = toRaw(asset);
+    this.unpaintedAssets.add(raw);
+    setTimeout(() => this.unpaintedAssets.delete(raw), 0);
+  }
+
+  private isUnpainted(asset: SceneAsset): boolean {
+    return this.unpaintedAssets.has(toRaw(asset));
+  }
+
+  private dropAssetNow(asset: SceneAsset): void {
+    if (!asset.isRemoving) this.game.trigger('asset_exit', asset);
+    clearTimeout(asset.removalTimeoutId);
+    this.assets.value = this.assets.value.filter(a => a !== asset);
+  }
+
+  /**
+   * Take an asset off the stage after `delayMs` with no exit animation: something opaque covers it.
+   * Calling it again on an asset already on its way re-times the drop.
+   */
+  private dropCoveredAsset(asset: SceneAsset, delayMs: number): void {
+    if (!asset.isRemoving) this.game.trigger('asset_exit', asset);
+    clearTimeout(asset.removalTimeoutId);
+    asset.isRemoving = true;
+    asset.silentExit = true;
+    // Removed by identity, as in removeAssets: a wipe or a re-stage in the meantime must win.
+    asset.removalTimeoutId = setTimeout(() => {
+      if (asset.isRemoving) this.assets.value = this.assets.value.filter(a => a !== asset);
+      delete asset.removalTimeoutId;
+    }, delayMs) as unknown as number;
+  }
+
+  /**
    * IDs of the dungeon- and room-level default assets — the backdrop that is
    * auto-staged at event start (insertion order matches that staging: dungeon
    * first, then room). Mirrors playSceneResolver: dungeon defaults apply to any
@@ -687,6 +756,7 @@ export class DungeonSystem {
   private cancelScheduledAssetRemoval(asset: SceneAsset): void {
     if (asset.isRemoving) {
       delete asset.isRemoving;
+      delete asset.silentExit;
 
       // Cancel the scheduled removal timeout
       if (asset.removalTimeoutId !== undefined) {
@@ -796,6 +866,7 @@ export class DungeonSystem {
             this.cancelScheduledAssetRemoval(existingAsset);
             this.game.trigger('asset_render', existingAsset);
             this.applySoloAsset(existingAsset);
+            this.applyBgAsset(existingAsset);
             gameLogger.info(`[addAsset] Revived exiting asset: "${assetId}"`);
           }
           continue;
@@ -808,7 +879,9 @@ export class DungeonSystem {
         this.game.trigger('asset_render', asset);
 
         this.applySoloAsset(asset);
+        this.applyBgAsset(asset);
         this.assets.value.push(asset);
+        this.markUnpainted(asset);
 
         // add to discovered assets for the gallery system
         this.game.coreSystem.addAssetToGallery(asset);
@@ -837,6 +910,7 @@ export class DungeonSystem {
         // Allow final mutations after update
         this.game.trigger('asset_render', existingAsset);
         this.applySoloAsset(existingAsset);
+        this.applyBgAsset(existingAsset);
         // add to discovered assets for the gallery system
         this.game.coreSystem.addAssetToGallery(existingAsset);
         gameLogger.info(`[addAsset] Updated existing asset: "${data.id}"`);
@@ -854,7 +928,9 @@ export class DungeonSystem {
       this.game.trigger('asset_render', asset);
 
       this.applySoloAsset(asset);
+      this.applyBgAsset(asset);
       this.assets.value.push(asset);
+      this.markUnpainted(asset);
 
       // add to discovered assets for the gallery system
       this.game.coreSystem.addAssetToGallery(asset);
@@ -921,6 +997,7 @@ export class DungeonSystem {
       const copy = { ...a };
       delete copy.isRemoving;
       delete copy.removalTimeoutId;
+      delete copy.silentExit;
       return copy;
     });
   }
@@ -931,10 +1008,22 @@ export class DungeonSystem {
     this.assets.value = [...assets];
   }
 
+  /**
+   * Empty the stage, letting the backdrop out last. A background is not dropped on the spot but
+   * held, silently on its way out: one staged in the same task (the next scene's opening paragraph,
+   * a room default, the `forest` of `false, forest`) takes over from it like any background change,
+   * and one left unclaimed goes at the end of the task. Dropping it outright left the incoming
+   * background fading in over an empty black stage. Staged again, the same background just stays.
+   */
   public clearAssets(): void {
-    this.exitAssets();
-    this.cancelAllAssetRemovals();
-    this.assets.value = [];
+    const held = this.assets.value.filter(a => a.bg && (!a.isRemoving || a.silentExit) && !this.isUnpainted(a));
+    for (const asset of this.assets.value) {
+      if (held.includes(asset)) continue;
+      if (!asset.isRemoving) this.game.trigger('asset_exit', asset);
+      this.cancelScheduledAssetRemoval(asset);
+    }
+    this.assets.value = held;
+    for (const asset of held) this.dropCoveredAsset(asset, 0);
   }
 
   // Active colour grade, saved with the run (no @Skip, same as `assets` above). null = daylight.
@@ -1660,9 +1749,8 @@ export class DungeonSystem {
     this.panelActors.value = [];
     // Assets go all at once, so kill their pending timers too: a timer surviving the wipe
     // would fire against the next scene's array and delete a backdrop that re-used the id.
-    this.exitAssets();
-    this.cancelAllAssetRemovals();
-    this.assets.value = [];
+    // The background is the exception — clearAssets holds it for the next scene to take over.
+    this.clearAssets();
 
     // A scene's sounds die with it: its one-shots and the loops it started. Loops started on the
     // map — room and dungeon enter actions, default_sounds, a resumed save — play on. Outside a
@@ -3191,7 +3279,12 @@ export class DungeonSystem {
    * every room entry and after every scene; sounds that no longer apply stop, the rest carry on.
    */
   public syncAmbience(): void {
-    const want = [...new Set([...(this.currentDungeon.value?.default_sounds ?? []), ...(this.currentRoom.value?.defaultSounds ?? [])])];
+    // Not this.currentRoom: a scene's {enter} into another dungeon reaches here through enterRoom's
+    // resetScene while currentRoomId still names the room left behind, and that computed throws on
+    // a room the new dungeon lacks — aborting the entry half-way (new dungeon, old room). The room
+    // sounds are picked up by enterRoom's own sync once the room is set.
+    const room = this.currentRoomId.value ? this.currentDungeon.value?.rooms.get(this.currentRoomId.value) : undefined;
+    const want = [...new Set([...(this.currentDungeon.value?.default_sounds ?? []), ...(room?.defaultSounds ?? [])])];
     const gone = this.ambienceIds.filter(id => !want.includes(id));
     if (gone.length) this.game.coreSystem.stopSounds(gone);
     this.ambienceIds = want;

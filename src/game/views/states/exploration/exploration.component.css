@@ -172,6 +172,9 @@
   transform: translate(-24%, -24%);
   /* Center the compass on the room coordinates */
   z-index: 2001;
+  /* It sits above every encounter, so the 100px box must not eat their clicks — only the arrows
+     (pointer-events: auto below) are hit targets. */
+  pointer-events: none;
 }
 
 .compass-fade-enter-active,
@@ -180,7 +183,9 @@
 }
 
 /* the departing compass still hovers over the map — don't let it eat clicks */
-.compass-fade-leave-active {
+.compass-fade-leave-active,
+.compass-fade-leave-active .compass-arrow,
+.compass-arrow.compass-fade-leave-active {
   pointer-events: none;
 }
 
@@ -218,6 +223,7 @@
 }
 
 .compass-arrow {
+  pointer-events: auto;
   width: 25px;
   height: 25px;
   position: absolute;

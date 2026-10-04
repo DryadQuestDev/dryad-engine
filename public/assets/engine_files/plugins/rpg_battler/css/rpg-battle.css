@@ -1054,11 +1054,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 12px;
+  box-sizing: border-box;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
 }
 
+/* Capped to the overlay and only the slot body scrolls. The battle screen is overflow:hidden, so
+   an uncapped card taller than a landscape phone pushed Continue off the bottom, unreachable. */
 .rpg-battle-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-height: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   text-align: center;
   padding: 32px 48px;
   background: rgba(0, 0, 0, 0.8);
@@ -1070,6 +1080,31 @@
   font-size: 32px;
   font-weight: 800;
   margin-bottom: 16px;
+}
+
+.rpg-battle-result-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.rpg-battle-result > .rpg-btn {
+  flex-shrink: 0;
+}
+
+@media (max-height: 540px) {
+  .rpg-battle-result {
+    padding: 12px 20px;
+  }
+
+  .rpg-battle-result-text {
+    font-size: 24px;
+    margin-bottom: 6px;
+  }
 }
 
 .rpg-battle-result.victory .rpg-battle-result-text {

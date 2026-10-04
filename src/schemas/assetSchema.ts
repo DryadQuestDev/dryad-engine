@@ -6,7 +6,7 @@ export const AssetSchema = {
     type: { type: 'chooseOne', options: ['image', 'video', 'spine'], defaultValue: 'image', tooltip: 'Type of asset to display.' },
     hide_actors: { type: 'boolean', tooltip: 'Hide the scene actors while this asset is visible. Auto-cleared when an actor is staged/moved/updated, so staging a character brings the actors back.' },
     solo: { type: 'boolean', tooltip: 'Remove all currently staged assets when this one is added, so it becomes the only asset on scene. The dungeon/room default assets (the backdrop) are kept. Removed assets honor their own exit animations.' },
-    bg: { type: 'boolean', tooltip: 'Mark this asset as a background: like the dungeon/room defaults, it is preserved by the "clear" keyword and by solo assets, until "false"/"reset" or an explicit removal. Set at stage time via inline props, e.g. forest(bg = true).' },
+    bg: { type: 'boolean', tooltip: 'Mark this asset as a background. Only one background stays on stage: staging one replaces the background already there, defaults included. It is preserved by the "clear" keyword and by solo assets, until "false"/"reset" or an explicit removal. Set at stage time via inline props, e.g. forest(bg = true).' },
 
     // File fields (conditional based on type)
     file_image: { type: 'file', fileType: 'image', tooltip: 'Path to an image file.', show: { type: ['image'] } },

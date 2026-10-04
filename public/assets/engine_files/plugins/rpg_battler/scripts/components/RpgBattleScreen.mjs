@@ -1033,7 +1033,9 @@ export const RpgBattleScreen = defineComponent({
       <div v-if="isBattleOver" class="rpg-battle-result-overlay">
         <div class="rpg-battle-result" :class="battle.result">
           <div class="rpg-battle-result-text">{{ battle.result === 'victory' ? game.getLine('ui_victory') : game.getLine('ui_defeat') }}</div>
-          <CustomComponentContainer :slot="'rpg-battle-result'" :context="{ result: battle.result }" />
+          <div class="rpg-battle-result-body">
+            <CustomComponentContainer :slot="'rpg-battle-result'" :context="{ result: battle.result }" />
+          </div>
           <button class="rpg-btn" @click="closeBattle">Continue</button>
         </div>
       </div>

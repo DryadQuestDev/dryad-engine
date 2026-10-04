@@ -1223,7 +1223,7 @@ onMounted(() => {
 
   // Handle exit preview (when component mounts with isRemoving already true)
   if (props.asset.isRemoving) {
-    applyExitTransition(element);
+    if (!props.asset.silentExit) applyExitTransition(element);
     return; // Skip enter/idle when previewing exit
   }
 
@@ -1251,6 +1251,8 @@ watch(() => props.asset.isRemoving, (isRemoving, wasRemoving) => {
   if (!element) return;
 
   if (isRemoving) {
+    // A background covered by its replacement stays as it is until it is taken off the stage.
+    if (props.asset.silentExit) return;
     // A spine asset removed before its skeleton arrived must not un-hide itself later.
     clearHeldEnter();
     // Stop idle animation before exit

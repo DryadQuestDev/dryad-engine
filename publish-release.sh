@@ -30,9 +30,11 @@ Usage: ./publish-release.sh [-u] [options]
   --no-engine         skip the bare engine zips
   --engine-only       only the bare engine zips
   --allow-debug       accept debug-signed APKs (*-debug.apk)
-  --legacy <dir> --product <id> --version <v> [--title "<title>"]
+  --legacy <dir> --product <id> --version <v> [--title "<title>"] [--nsfw]
                       upload a folder of old builds as their own product;
-                      platform is read from each file name (win, linux, mac, apk)
+                      platform is read from each file name (win, linux, mac, apk);
+                      --nsfw tags it 18+ on the download page (games take
+                      the flag from their manifest's "nsfw")
   --list              show what is in the bucket
   --delete <product>/<version>
                       remove that version's files from the bucket (with -u;
@@ -50,6 +52,7 @@ LEGACY_DIR=""
 LEGACY_PRODUCT=""
 LEGACY_VERSION=""
 LEGACY_TITLE=""
+LEGACY_NSFW=false
 LIST=false
 DELETE=""
 
@@ -64,6 +67,7 @@ while [ $# -gt 0 ]; do
         --product) LEGACY_PRODUCT="${2:?--product needs an id}"; shift ;;
         --version) LEGACY_VERSION="${2:?--version needs a value}"; shift ;;
         --title) LEGACY_TITLE="${2:?--title needs a value}"; shift ;;
+        --nsfw) LEGACY_NSFW=true ;;
         --list) LIST=true ;;
         --delete) DELETE="${2:?--delete needs <product>/<version>}"; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -127,16 +131,18 @@ if [ -n "$DELETE" ]; then
 fi
 
 # ── Collect the plan ─────────────────────────────────────────────────────────
-# One TSV row per file: product, version, title, kind, id, platform, premium, variant, path
+# One TSV row per file: product, version, title, kind, nsfw, id, platform, premium, variant, path
 PLAN=$(mktemp)
 trap 'rm -f "$PLAN" "$PLAN".*' EXIT
 MISSING=()
 
+# NSFW is per product, so it rides along in a variable the caller sets.
+NSFW=false
 add_file() {
     local product=$1 version=$2 title=$3 kind=$4 id=$5 platform=$6 premium=$7 variant=$8 path=$9
     if [ -f "$path" ]; then
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "$product" "$version" "$title" "$kind" "$id" "$platform" "$premium" "$variant" "$path" >> "$PLAN"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$product" "$version" "$title" "$kind" "$NSFW" "$id" "$platform" "$premium" "$variant" "$path" >> "$PLAN"
     else
         MISSING+=("$path")
     fi
@@ -160,6 +166,7 @@ if [ -n "$LEGACY_DIR" ]; then
     [ -d "$LEGACY_DIR" ] || { echo "Error: $LEGACY_DIR is not a folder"; exit 1; }
     [[ "$LEGACY_PRODUCT" =~ $SLUG_RE ]] || { echo "Error: --legacy needs --product <id> (lowercase, digits, - and _)"; exit 1; }
     [ -n "$LEGACY_VERSION" ] || { echo "Error: --legacy needs --version"; exit 1; }
+    NSFW=$LEGACY_NSFW
     shopt -s nullglob
     for path in "$LEGACY_DIR"/*; do
         [ -f "$path" ] || continue
@@ -195,6 +202,7 @@ if [ "$WITH_GAMES" = true ]; then
         [ -f "$manifest" ] || { echo "Error: no manifest for $G ($manifest)"; exit 1; }
         V=$(jq -r .version "$manifest")
         T=$(jq -r --arg g "$G" '.name // $g' "$manifest")
+        NSFW=$(jq -r 'if .nsfw == true then "true" else "false" end' "$manifest")
         add_file "$G" "$V" "$T" game windows windows false full "$RELEASE_DIR/public/$G-windows-v$V.zip"
         add_file "$G" "$V" "$T" game linux-mac linux-mac false full "$RELEASE_DIR/public/$G-linux+mac-v$V.zip"
         MODS=$(jq -r --arg g "$G" '.[] | select(.id == $g) | .premium_mods[]?' web-game-list.json)
@@ -217,6 +225,7 @@ if [ "$WITH_GAMES" = true ]; then
 fi
 
 if [ "$WITH_ENGINE" = true ]; then
+    NSFW=false
     add_file engine "$ENGINE_VERSION" "Dryad Engine" engine windows windows false full "$RELEASE_DIR/engine/$NAME-windows-v$ENGINE_VERSION.zip"
     add_file engine "$ENGINE_VERSION" "Dryad Engine" engine linux-mac linux-mac false full "$RELEASE_DIR/engine/$NAME-linux+mac-v$ENGINE_VERSION.zip"
 fi
@@ -231,7 +240,7 @@ if [ ! -s "$PLAN" ]; then
     exit 1
 fi
 
-dupes=$(cut -f1,2,5 "$PLAN" | sort | uniq -d)
+dupes=$(cut -f1,2,6 "$PLAN" | sort | uniq -d)
 if [ -n "$dupes" ]; then
     echo "Error: two files would get the same id (rename one):"
     echo "$dupes" | sed 's/^/  /'
@@ -249,8 +258,9 @@ while IFS=$'\t' read -r PRODUCT VERSION; do
     awk -F'\t' -v p="$PRODUCT" -v v="$VERSION" '$1 == p && $2 == v' "$PLAN" > "$ROWS"
     TITLE=$(head -1 "$ROWS" | cut -f3)
     KIND=$(head -1 "$ROWS" | cut -f4)
+    IS_NSFW=$(head -1 "$ROWS" | cut -f5)
 
-    echo "══ $TITLE  ($PREFIX, $KIND) ══"
+    echo "══ $TITLE  ($PREFIX, $KIND$( [ "$IS_NSFW" = true ] && echo ", 18+" )) ══"
     if rclone lsf "$DEST/$PREFIX/" 2>/dev/null | grep -qx release.json; then
         echo "⚠ Already in the bucket – uploading replaces it; press Update in Admin → Downloads afterwards."
     fi
@@ -258,7 +268,7 @@ while IFS=$'\t' read -r PRODUCT VERSION; do
     FILES_JSON="$PLAN.$PRODUCT.files"
     : > "$FILES_JSON"
     TOTAL=0
-    while IFS=$'\t' read -r _ _ _ _ ID PLATFORM PREMIUM VARIANT FILE; do
+    while IFS=$'\t' read -r _ _ _ _ _ ID PLATFORM PREMIUM VARIANT FILE; do
         NAME_OUT=$(basename "$FILE" | tr '+' '-')
         SIZE=$(stat -c %s "$FILE")
         SHA=$(sha256sum "$FILE" | cut -d' ' -f1)
@@ -288,9 +298,9 @@ while IFS=$'\t' read -r PRODUCT VERSION; do
 
         MANIFEST="$PLAN.$PRODUCT.manifest"
         jq -s --arg product "$PRODUCT" --arg version "$VERSION" --arg title "$TITLE" --arg kind "$KIND" \
-              --arg uploadedAt "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
-              '{format: 1, product: $product, version: $version, title: $title, kind: $kind, uploadedAt: $uploadedAt,
-                files: map(del(._path))}' "$FILES_JSON" > "$MANIFEST"
+              --argjson nsfw "$IS_NSFW" --arg uploadedAt "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+              '{format: 1, product: $product, version: $version, title: $title, kind: $kind, nsfw: $nsfw,
+                uploadedAt: $uploadedAt, files: map(del(._path))}' "$FILES_JSON" > "$MANIFEST"
         rclone copyto "$MANIFEST" "$DEST/$PREFIX/release.json"
         echo "  ✓ $PREFIX/release.json"
         UPLOADED+=("$PREFIX")
