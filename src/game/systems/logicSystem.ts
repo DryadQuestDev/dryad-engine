@@ -8,6 +8,11 @@ import { computed, ComputedRef } from "vue";
 import { gameLogger } from "../utils/logger";
 import { Global } from "../../global/global";
 import { normalizeAbilityEffects, sortEffectIds } from "../../utility/abilityEffects";
+
+import { splitOps, splitParts, splitTargeted, type OpsSpecOp } from "../../utility/contentGrammar";
+import { CHOICE_KEYS, type CallEntry, type ValueSpec } from "../../utility/contentVocabulary";
+/** An `id <op> value` operator: set, add or subtract. */
+export type { OpsSpecOp };
 import { CustomChoiceObject } from "../../schemas/customChoiceSchema";
 import { PoolDefinitionObject } from "../../schemas/poolDefinitionSchema";
 import { PoolEntryObject } from "../../schemas/poolEntrySchema";
@@ -29,6 +34,12 @@ export type ActionObject = {
      * dispatched through `action` like any other and does not abort anything.
      */
     gate?: (value: any, ctx: GateContext) => string | false | null | undefined;
+    /** One line the editor shows beside the action's name. */
+    help?: string;
+    /** What the value is; the editor checks and completes content from it. */
+    value?: ValueSpec;
+    /** Ways to write it, as content would (`{asset: "forest"}`); the editor shows them beside the help. */
+    examples?: string[];
 }
 
 // Simplified type for createCustomChoice - only requires id, name, and action
@@ -61,6 +72,9 @@ export class LogicSystem {
     conditionRegistry = new Map<string, Function>();
 
     placeholderRegistry = new Map<string, Function>();
+    /** Help and arguments of registered conditions and placeholders, for tooling. */
+    conditionInfo = new Map<string, CallEntry>();
+    placeholderInfo = new Map<string, CallEntry>();
     public resolveContext: Record<string, any> = {};
     actionRegistry = new Map<string, ActionObject>(); // make it an object {func: Function}
 
@@ -103,46 +117,45 @@ export class LogicSystem {
     }
 
     /**
-     * Parse a generic `id<op>value` specification into a typed list of ops.
+     * Parse a generic `id <op> value` specification into a typed list of ops.
      * Pure string parsing — no characters, stats, or game data are touched.
      * Plugins use this to avoid hand-rolling regex when they accept the
-     * common `"id>5, id2=3"` shorthand syntax. Reused internally by
-     * `processCharAction` (with dotted ids) and the `char` content action.
+     * common `"id += 5, id2 = 3"` shorthand syntax. Reused internally by
+     * `processCharAction` (with dotted ids), the `flag` and `property` actions.
      *
-     * String form: comma-separated `"<id><op><value>"` where op is `=`, `>`,
-     * or `<`. Whitespace around the operator is allowed. The id may contain
-     * dots (e.g. `alice.stat.brawn`). Returned `value` is the trimmed string
-     * after the operator — consumers coerce as needed.
+     * String form: comma-separated `"<id> <op> <value>"` where op is `=` (set),
+     * `+=` (add) or `-=` (subtract). Whitespace around the operator is optional.
+     * The id may contain dots (e.g. `alice.stat.brawn`). Returned `value` is the
+     * trimmed string after the operator — consumers coerce as needed.
      *
      * Object form: `{ id: any }`. For numeric values, sign infers the op
-     * (positive `>`, negative `<`, zero `=`) and `value` is the absolute
+     * (positive `+=`, negative `-=`, zero `=`) and `value` is the absolute
      * magnitude. For non-numeric values, op is `=` and the raw value passes
      * through.
      *
      * Invalid specs are logged and skipped.
      *
      * @example
-     * logicSystem.parseOpsSpec("alice>5, bob = 3");
-     * // [{ id: 'alice', op: '>', value: '5' }, { id: 'bob', op: '=', value: '3' }]
+     * logicSystem.parseOpsSpec("alice += 5, bob = 3");
+     * // [{ id: 'alice', op: '+=', value: '5' }, { id: 'bob', op: '=', value: '3' }]
      * logicSystem.parseOpsSpec({ alice: 5, bob: -2 });
-     * // [{ id: 'alice', op: '>', value: 5 }, { id: 'bob', op: '<', value: 2 }]
+     * // [{ id: 'alice', op: '+=', value: 5 }, { id: 'bob', op: '-=', value: 2 }]
      */
-    public parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '>' | '<'; value: any }> {
-        const out: Array<{ id: string; op: '=' | '>' | '<'; value: any }> = [];
+    public parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: OpsSpecOp; value: any }> {
+        const out: Array<{ id: string; op: OpsSpecOp; value: any }> = [];
         if (typeof data === 'string') {
-            for (const spec of data.split(',').map(s => s.trim()).filter(Boolean)) {
-                const m = spec.match(/^([^=<>\s]+)\s*([=<>])\s*(.+)$/);
-                if (!m) {
-                    gameLogger.error(`[parseOpsSpec] invalid spec: "${spec}". Use "<id>[=<>]<value>"`);
+            for (const { spec, id, op, value } of splitOps(data)) {
+                if (!id || !op || !value) {
+                    gameLogger.error(`[parseOpsSpec] invalid spec: "${spec.text}". Use "id = value", "id += value" or "id -= value"`);
                     continue;
                 }
-                out.push({ id: m[1], op: m[2] as '=' | '>' | '<', value: m[3].trim() });
+                out.push({ id: id.text, op, value: value.text });
             }
         } else if (data && typeof data === 'object') {
             for (const [id, raw] of Object.entries(data)) {
                 if (typeof raw === 'number') {
-                    if (raw > 0) out.push({ id, op: '>', value: raw });
-                    else if (raw < 0) out.push({ id, op: '<', value: Math.abs(raw) });
+                    if (raw > 0) out.push({ id, op: '+=', value: raw });
+                    else if (raw < 0) out.push({ id, op: '-=', value: Math.abs(raw) });
                     else out.push({ id, op: '=', value: 0 });
                 } else {
                     out.push({ id, op: '=', value: raw });
@@ -176,31 +189,22 @@ export class LogicSystem {
         if (typeof data !== 'string' || !data.trim()) return out;
 
         // Commas inside an item's parentheses (`poisoned(stacks = 2, duration = 3)`) stay with it.
-        for (const spec of this.getParts(data).map(s => s.trim()).filter(Boolean)) {
-            const arrowIdx = spec.indexOf('->');
-            if (arrowIdx === -1) {
-                gameLogger.error(`[parseTargetedSpec] missing '->' in spec: "${spec}"`);
+        for (const { spec, target, items } of splitTargeted(data)) {
+            if (!target) {
+                gameLogger.error(`[parseTargetedSpec] missing '->' in spec: "${spec.text}"`);
                 continue;
             }
-            const characterId = spec.slice(0, arrowIdx).trim();
-            if (!characterId) {
-                gameLogger.error(`[parseTargetedSpec] missing target id in spec: "${spec}"`);
+            if (!target.text) {
+                gameLogger.error(`[parseTargetedSpec] missing target id in spec: "${spec.text}"`);
                 continue;
             }
-            const items = spec.slice(arrowIdx + 2)
-                .split('&').map(s => s.trim()).filter(Boolean)
-                .map(token => {
-                    const remove = token.startsWith('!');
-                    return { name: remove ? token.slice(1).trim() : token, remove };
-                })
-                .filter(i => i.name);
             if (items.length === 0) continue;
-            out.push({ characterId, items });
+            out.push({ characterId: target.text, items: items.map(i => ({ name: i.name.text, remove: i.remove })) });
         }
         return out;
     }
 
-    public registerCondition(id: string, func: Function) {
+    public registerCondition(id: string, func: Function, info?: CallEntry) {
         let firstChar = id.charAt(0);
 
         if (firstChar !== '_') {
@@ -213,6 +217,7 @@ export class LogicSystem {
         }
 
         this.conditionRegistry.set(id, func);
+        if (info) this.conditionInfo.set(id, info);
     }
 
 
@@ -227,6 +232,13 @@ export class LogicSystem {
         // Note: We check for == and >= before = to avoid matching = in ==, >=, etc.
         // Key can be: flag, dungeon.flag, _condition, or _condition(arg1, arg2)
         const match = condition.match(/^([a-zA-Z0-9_.]+(?:\([^)]*\))?)\s*(==|!=|>=|<=|>|<|=)\s*(.+)$/);
+
+        // A bare key — `met_bob`, `town.gate_open`, `_has_key(rusty_key)` — is true when its value is set:
+        // anything but 0, false, an empty string, null or undefined (a flag nobody set reads 0).
+        if (!match && /^[a-zA-Z0-9_.]+(?:\([^)]*\))?$/.test(condition)) {
+            const value = this.getConditionValue(condition);
+            return Boolean(value) && value !== 'false' && value !== '0';
+        }
 
         if (!match) {
             gameLogger.error(`Invalid condition format: "${condition}". Use format like key==value or key=value without quotes`);
@@ -475,14 +487,15 @@ export class LogicSystem {
     }
 
     // if params is an array, it will be executed for each item
-    public resolveActions(params: Record<string, any> | string, skipDelayed: boolean = false) {
+    // Returns false when a `flow_advance_before` listener held the delayed actions back.
+    public resolveActions(params: Record<string, any> | string, skipDelayed: boolean = false): boolean {
 
         if (typeof params === 'string') {
             params = JSON.parse(this.fixJson(params)) as Record<string, any>;
         }
 
         // Data-only choice params: read off the Choice, never dispatched as actions.
-        let skip = ["if", "ifOr", "active", "activeOr", "clue", "no_visited", "ignore_replay"];
+        let skip = Object.keys(CHOICE_KEYS);
         // {choices: "&hub", ignore_replay: true} — a menu that leads back into play is not offered
         // in a gallery replay, so the replay ends with the scene instead of wandering on.
         if (params.ignore_replay && this.game.coreSystem.getState('replay_mode')) {
@@ -491,7 +504,7 @@ export class LogicSystem {
         // Delayed actions move the flow (enter, scene, exit, battle, loot…). They run after every
         // other key whatever the authored order, so `{enter: "19", flag: "x = 1"}` sets the flag
         // before room 19's events read it — the same order a paragraph gives them.
-        const delayed: [any, any][] = [];
+        const delayed: [string, any][] = [];
         for (let param of Object.keys(params)) {
             if (skip.includes(param)) {
                 continue;
@@ -504,14 +517,25 @@ export class LogicSystem {
             }
 
             if (actionObject.eventDelayed) {
-                if (!skipDelayed) delayed.push([actionObject, params[param]]);
+                if (!skipDelayed) delayed.push([param, actionObject]);
                 continue;
             }
             this.dispatchAction(actionObject, params[param]);
         }
-        for (const [actionObject, value] of delayed) {
-            this.dispatchAction(actionObject, value);
+        if (!delayed.length) {
+            return true;
         }
+        const delayedParams: Record<string, any> = {};
+        for (const [param] of delayed) {
+            delayedParams[param] = params[param];
+        }
+        if (!this.game.trigger('flow_advance_before', delayedParams)) {
+            return false;
+        }
+        for (const [param, actionObject] of delayed) {
+            this.dispatchAction(actionObject, params[param]);
+        }
+        return true;
     }
 
     private dispatchAction(actionObject: any, value: any) {
@@ -580,12 +604,13 @@ export class LogicSystem {
     }
 
 
-    public registerPlaceholder(id: string, func: Function) {
+    public registerPlaceholder(id: string, func: Function, info?: CallEntry) {
         let exists = this.placeholderRegistry.has(id);
         if (exists) {
             gameLogger.overwrite(`Placeholder "${id}" already exists - overwriting`);
         }
         this.placeholderRegistry.set(id, func);
+        if (info) this.placeholderInfo.set(id, info);
     }
 
 
@@ -621,7 +646,8 @@ export class LogicSystem {
         if (context) this.resolveContext = context;
 
         // todo: [code]some content with actions, placeholders etc that should be ignored in the resolvers[/code]
-        let output = this.resolveCode(input);
+        // a line with no text (an `@description` not written yet) parses with no val at all
+        let output = this.resolveCode(input ?? '');
 
         // if{} — hoisted to run first so unreachable branches (and their [[!id]] discover-on-encounter
         // tokens, side-effecting actions, etc.) are dropped before any other stage processes them.
@@ -804,23 +830,31 @@ export class LogicSystem {
     }
 
     /**
-     * `id: text` sets the speaker. `id!: text` is a party line: it plays only while that
+     * `id: text` names the speaker. `id!: text` is a party line: it plays only while that
      * character is in the party, and `absent` tells the caller to skip the paragraph whole.
+     * Pure — the caller sets talkingCharacterId for a paragraph it actually shows.
      */
-    public resolveTalkingCharacter(text: string): { text: string, absent: boolean } {
+    public resolveTalkingCharacter(text: string): { id: string | null, text: string, absent: boolean } {
         const match = text.match(/^(\w+)(!?):\s*(.*)$/);
         if (!match) {
-            this.game.dungeonSystem.talkingCharacterId.value = null;
-            return { text, absent: false };
+            return { id: null, text, absent: false };
         }
 
         const [, id, bang, rest] = match;
         if (bang && !this.game.getParty().some(c => c.id === id)) {
-            this.game.dungeonSystem.talkingCharacterId.value = null;
-            return { text: '', absent: true };
+            return { id: null, text: '', absent: true };
         }
-        this.game.dungeonSystem.talkingCharacterId.value = id;
-        return { text: rest, absent: false };
+        return { id, text: rest, absent: false };
+    }
+
+    /**
+     * Whether a paragraph plays nothing: an `id!:` party line whose character is away, or one
+     * whose if{} leaves neither text nor actions. Side-effect free (no actions, no `[[!id]]`
+     * discovery), so the dungeon can look ahead at the paragraphs after the one on screen.
+     */
+    public isLineSkipped(text: string): boolean {
+        const output = this.ifLogic(this.resolveCode(text)).trim();
+        return !output || this.resolveTalkingCharacter(output).absent;
     }
 
     public resolveTextStyles(text: string): string {
@@ -841,7 +875,7 @@ export class LogicSystem {
     }
 
     private resolveLoreLinks(text: string): string {
-        const regex = /\[\[(!?)(?:([a-z]+):)?([a-zA-Z0-9_-]+)(?:(?:>|&gt;)([^\]]+?))?\]\]/g;
+        const regex = /\[\[(!?)(?:([a-z]+):)?([a-zA-Z0-9_.-]+)(?:(?:>|&gt;)([^\]]+?))?\]\]/g;
         const narrative = this.game.narrativeSystem;
         return text.replace(regex, (_match, bang: string, kind: string | undefined, id: string, customLabel?: string) => {
             if (kind === 'item') {
@@ -1285,39 +1319,7 @@ export class LogicSystem {
         }
 
         // Split by commas, but not those inside brackets or parentheses
-        const parts: string[] = [];
-        let current = '';
-        let bracketDepth = 0;
-        let parenDepth = 0;
-
-        for (let i = 0; i < str.length; i++) {
-            const char = str[i];
-            if (char === '[') {
-                bracketDepth++;
-                current += char;
-            } else if (char === ']') {
-                bracketDepth--;
-                current += char;
-            } else if (char === '(') {
-                parenDepth++;
-                current += char;
-            } else if (char === ')') {
-                parenDepth--;
-                current += char;
-            } else if (char === ',' && bracketDepth === 0 && parenDepth === 0) {
-                parts.push(current.trim());
-                current = '';
-            } else {
-                current += char;
-            }
-        }
-
-        // Add the last part
-        if (current.trim()) {
-            parts.push(current.trim());
-        }
-
-        return parts;
+        return splitParts(str).map(p => p.text);
     }
 
 

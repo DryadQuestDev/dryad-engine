@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue';
 import type { IndexCategory } from '../../../../utility/dungeonEditor/index';
 import type { MetaStatus } from '../../../../utility/dungeonEditor/meta';
+import { findBraceRanges, isConditionBrace } from '../../../../utility/dungeonEditor/lint';
 
 /**
  * Shared query for the dungeon content editor's in-popup search bar.
@@ -47,4 +48,56 @@ export function inputMatchesSearch(value: string | undefined | null): boolean {
   if (!q) return false;
   if (!value) return false;
   return value.toLowerCase().includes(q);
+}
+
+/**
+ * `inputMatchesSearch` for a `{…}` params field (block header, choice, scene
+ * column). Also true when the field holds the active structured filter: the
+ * index counts actions found in params, so a filter for an action that lives
+ * only there (`replay`, `view`) must tint the field or the counter reads 0/0.
+ */
+export function paramsMatchSearch(value: string | undefined | null): boolean {
+  if (inputMatchesSearch(value)) return true;
+  const sf = dungeonStructuredFilter.value;
+  if (!sf || !value) return false;
+  return findStructuredRanges(value, sf.kind, sf.name).length > 0;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Structured-filter match: `name` only in its indexed role (see
+ * utility/dungeonEditor/index.ts), never as a plain substring — the word
+ * "actor" in prose must not match the `actor` action.
+ */
+export function findStructuredRanges(text: string, kind: IndexCategory, name: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  if (!name) return ranges;
+  const esc = escapeRegex(name);
+  if (kind === 'anchor') {
+    const re = new RegExp(`(^|\\n)&${esc}(?!\\w)`, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const lead = m[1] ? 1 : 0;
+      ranges.push([m.index + lead, m.index + m[0].length]);
+    }
+    return ranges;
+  }
+  const keyRe = new RegExp(`(^|[{,\\s"'])${esc}(?=\\s*["']?\\s*:)`, 'g');
+  const wordRe = new RegExp(`(^|[^\\w.])${esc}(?![\\w.])`, 'g');
+  for (const [s, e] of findBraceRanges(text)) {
+    // Condition braces hold flag checks, never actions.
+    if (kind === 'action' && isConditionBrace(text, s)) continue;
+    const re = kind === 'action' ? keyRe : wordRe;
+    const seg = text.slice(s, e);
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(seg)) !== null) {
+      const start = s + m.index + m[1].length;
+      ranges.push([start, start + name.length]);
+    }
+  }
+  return ranges;
 }

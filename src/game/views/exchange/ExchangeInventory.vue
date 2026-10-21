@@ -298,6 +298,8 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
 <style scoped>
 .exchange-inventory-container {
   flex: 1;
+  /* Lets the grid below give up height when the overlay hits its max-height — see .inventory-grid. */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: rgba(10, 15, 25, 0.3);
@@ -419,15 +421,16 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
 }
 
 .exchange-empty {
-  flex: 1;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
   justify-content: center;
   /* Matches .inventory-grid exactly — this replaces the grid when a filter matches nothing, so
      anything shorter would collapse the panel the moment a tab came up empty. */
   box-sizing: border-box;
-  min-height: 40vh;
-  min-height: 40dvh;
+  height: 40vh;
+  height: 40dvh;
+  min-height: 72px;
   max-height: 40vh;
   max-height: 40dvh;
   color: rgba(255, 255, 255, 0.4);
@@ -491,7 +494,7 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
 }
 
 .inventory-grid {
-  flex: 1;
+  flex: 0 1 auto;
   overflow-y: auto;
   overflow-x: visible;
   display: grid;
@@ -499,17 +502,20 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   gap: 8px;
   padding: 4px;
   align-content: start;
-  /* Pinned, not capped. min and max hold the same value so the grid is exactly this tall whether
-     it holds one item or overflows — the panel, and with it the whole exchange overlay, must not
-     resize as items move between the two sides or a filter tab hides most of them. Clamps are
-     applied after flexing, so `flex: 1` above cannot stretch or shrink past this.
+  /* Fixed, not content-sized: the grid is this tall whether it holds one item or overflows — the
+     panel, and with it the whole exchange overlay, must not resize as items move between the two
+     sides or a filter tab hides most of them. It never grows past it, but it may SHRINK (down to
+     one row) when the overlay hits its max-height: on a short screen a crafting panel's recipe
+     list plus a full-height grid pushed the craft button below the screen edge. What it shrinks
+     to depends only on the panel's other chrome, which stays put while items move.
      The repeated dvh line is the usual fallback for browsers without dynamic viewport units.
-     border-box so the pinned value is the OUTER height: this box carries 4px of padding and the
+     border-box so the value is the OUTER height: this box carries 4px of padding and the
      .exchange-empty that replaces it does not, and under content-box that 8px made the panel jump
      whenever a side went empty. */
   box-sizing: border-box;
-  min-height: 40vh;
-  min-height: 40dvh;
+  height: 40vh;
+  height: 40dvh;
+  min-height: 72px;
   max-height: 40vh;
   max-height: 40dvh;
 }

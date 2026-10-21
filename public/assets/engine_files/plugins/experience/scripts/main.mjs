@@ -5,7 +5,7 @@ const { game } = window.engine;
 import {
     inBattle, effectiveThreat, getDungeonLevel, dungeonScale, relativeScale, scaleStats, enemyScale,
     pendingReward, recordCharacterXp, recordResource,
-    clearPending, openRewardPopup, getMc, setGenerationLevel, simulateBattleLoot,
+    clearPending, openRewardPopup, getMc, setGenerationLevel, simulateBattleLoot, grantThreatXp,
     instantiateBoundInventories,
 } from './reward.mjs';
 import { simulatePool, instantiatePools } from './pools.mjs';
@@ -269,7 +269,7 @@ game.on('save_migrated', () => {
 game.registerCondition('_level', (/** @type {string} */ characterId) => {
     const char = game.getCharacter(characterId);
     return char?.getTrait('level') || 0;
-});
+}, { help: 'A character\'s level.', args: [{ ref: 'character' }], examples: ['_level(alice) >= 5'] });
 
 // ── Actions ──
 
@@ -282,6 +282,9 @@ function applyXp(/** @type {Character} */ char, /** @type {number} */ amount) {
 // popup and surface in the battle victory panel instead.
 // A numeric value grants the MC; with `shared_level` on it grants the whole (levelled) party.
 game.registerAction('xp', {
+    help: 'Grant XP: a number to the MC (or the leveled party), an amount to each named character, or a battle id for that victory\'s XP.',
+    value: { oneOf: ['number', { list: { pair: ['any', 'number'], optional: true } }] },
+    examples: ['{xp: 50}', '{xp: "alice->50, bob->20"}', '{xp: "goblin_camp"}'],
     eventDelayed: true,
     action: (/** @type {number|string} */ value) => {
         if (typeof value === 'number') {
@@ -292,8 +295,19 @@ game.registerAction('xp', {
                 }
             }
         } else if (typeof value === 'string') {
-            for (const part of value.split(',')) {
-                const [charId, amountStr] = part.trim().split('->');
+            for (const raw of value.split(',')) {
+                const part = raw.trim();
+                if (!part) continue;
+                // "<battleId>" grants exactly the XP that battle's victory grants (threat × coef at the
+                // current dungeon level) with no loot and no defeat record – a route that ends a fight
+                // without fighting or seducing it.
+                if (!part.includes('->')) {
+                    const threat = effectiveThreat(part);
+                    if (threat > 0) grantThreatXp(threat);
+                    else console.error(`[xp] "${part}" is neither "<charId>-><amount>" nor a battle with a threat`);
+                    continue;
+                }
+                const [charId, amountStr] = part.split('->');
                 const char = game.getCharacter(charId.trim());
                 if (!char) continue;
                 applyXp(char, parseInt(amountStr) || 0);

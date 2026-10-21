@@ -98,8 +98,8 @@ const centerFontSize = computed(() => Math.max(10, sizeNum.value * 0.14) + 'px')
     </div>
 
     <!-- Badge name (below face, default) -->
-    <div v-if="hasAnyArt && showName && (nameStyle ?? 'badge') === 'badge'" v-fit class="character-face-name">{{ characterName }}
-    </div>
+    <div v-if="hasAnyArt && showName && (nameStyle ?? 'badge') === 'badge'" v-fit class="character-face-name"><span
+        class="character-face-name-text">{{ characterName }}</span></div>
   </div>
 
   <!-- No-wrapper mode: just the face, no column layout -->
@@ -150,6 +150,14 @@ const centerFontSize = computed(() => Math.max(10, sizeNum.value * 0.14) + 'px')
   justify-content: center;
   outline: 2px solid rgba(255, 255, 255, 0.3);
   color: white;
+}
+
+/* A name too long even at v-fit's floor ends in an ellipsis. The badge is a centring flex box, so
+   text overflowing it directly was cut off at BOTH ends; the ellipsis needs this inner block. */
+.character-face-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .character-face-name-center {

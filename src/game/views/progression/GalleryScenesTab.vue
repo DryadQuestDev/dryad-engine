@@ -5,12 +5,16 @@ import { Global } from '../../../global/global';
 import type { ReplaySceneObject } from '../../systems/dungeonSystem';
 import CustomComponentContainer from '../CustomComponentContainer.vue';
 
+// Already trimmed and lowercased by GalleryTab
+const props = defineProps<{ search?: string }>();
+
 const game = Game.getInstance();
 const global = Global.getInstance();
 
 const maskedName = computed(() => global.getString('masked_name'));
 const exitReplayLabel = computed(() => global.getString('gallery.exit_replay'));
 const noScenesLabel = computed(() => global.getString('gallery.no_scenes'));
+const noMatchesLabel = computed(() => global.getString('gallery.no_matches'));
 
 // Update unlock status for all scenes based on current dungeon data
 const data = game.dungeonSystem.getReplaySceneObject();
@@ -27,7 +31,8 @@ for (const dungeon of data.dungeons || []) {
 // being written into it: getReplaySceneObject() returns a cached singleton that is never
 // invalidated, so baking the override in would leave scenes unlocked after the state is
 // cleared. Reactive, because this tab stays mounted while the menu that toggles it is open.
-const unlockAll = computed(() => !!game.getState('replay_mode_unlock_scenes'));
+// The reveal_all debug toggle opens them the same way.
+const unlockAll = computed(() => !!game.getState('replay_mode_unlock_scenes') || !!game.coreSystem.getDebugSetting('reveal_all'));
 const isSceneUnlocked = (scene: { unlocked: boolean }): boolean => unlockAll.value || scene.unlocked;
 
 // Check if dungeon is discovered (has any visited events)
@@ -47,6 +52,19 @@ const getDungeonDisplayName = (dungeon: { id: string; name: string }): string =>
 const getSceneDisplayName = (scene: { name: string; unlocked: boolean }): string => {
   return isSceneUnlocked(scene) ? scene.name : maskedName.value;
 };
+
+type ReplayDungeon = NonNullable<ReplaySceneObject['dungeons']>[number];
+
+// Scenes that survive the search. Matches the shown name, so a locked scene or an undiscovered
+// dungeon never gives its real one away; a hit on the dungeon's name keeps every scene in it.
+const getVisibleScenes = (dungeon: ReplayDungeon) => {
+  const scenes = dungeon.scenes || [];
+  const term = props.search;
+  if (!term || getDungeonDisplayName(dungeon).toLowerCase().includes(term)) return scenes;
+  return scenes.filter(scene => getSceneDisplayName(scene).toLowerCase().includes(term));
+};
+
+const getVisibleDungeons = () => (data.dungeons || []).filter(dungeon => getVisibleScenes(dungeon).length > 0);
 
 // Exit replay mode by loading the saved game
 const exitReplayMode = () => {
@@ -71,13 +89,17 @@ const exitReplayMode = () => {
       {{ noScenesLabel }}
     </div>
 
+    <div v-else-if="getVisibleDungeons().length === 0" class="empty-state">
+      {{ noMatchesLabel }}
+    </div>
+
     <div v-else class="scenes-columns">
-      <div v-for="dungeon in data.dungeons" :key="dungeon.id" class="dungeon-group">
+      <div v-for="dungeon in getVisibleDungeons()" :key="dungeon.id" class="dungeon-group">
         <div class="dungeon-header">
           {{ getDungeonDisplayName(dungeon) }}
         </div>
         <div class="scenes-list">
-          <div v-for="scene in dungeon.scenes" :key="scene.id" class="scene-item"
+          <div v-for="scene in getVisibleScenes(dungeon)" :key="scene.id" class="scene-item"
             @click="game.dungeonSystem.replayScene(scene.id, dungeon.id, isSceneUnlocked(scene))"
             :class="{ 'locked': !isSceneUnlocked(scene) }">
             {{ getSceneDisplayName(scene) }}

@@ -2,7 +2,7 @@ import { Global } from "../global/global";
 import { ManifestObject, ManifestSchema } from "../schemas/manifestSchema";
 import { mergeObjectArraySequentially } from "../functions/mergeById";
 import { Observable, Subject, BehaviorSubject, takeUntil, filter, firstValueFrom, of } from 'rxjs';
-import { Schema, Schemable, SchemaToType, getFileExtensions } from "../utility/schema";
+import { Schema, Schemable, SchemaToType, dropHiddenFields, getFileExtensions, isFieldShown } from "../utility/schema";
 import { EditorMap } from "./editorMap";
 import { debounceTime, switchMap, startWith, catchError, map, tap } from 'rxjs/operators';
 import { ref, reactive, Ref, watch, nextTick, computed, Component } from "vue";
@@ -55,6 +55,13 @@ interface FileSearchCriteria {
   fileType: string;
 }
 
+/** Order in which array files are written: `order` first, then id with numbers compared by value ("4.x" < "40.x"). */
+export function compareFileEntries(a: any, b: any): number {
+  const orderA = a.order ?? 0;
+  const orderB = b.order ?? 0;
+  if (orderA !== orderB) return orderA - orderB;
+  return a.id.localeCompare(b.id, undefined, { numeric: true });
+}
 
 export class Editor {
   private static instance: Editor;
@@ -937,6 +944,9 @@ export class Editor {
       // Defaults for single object
       if (this.schema.value && this.activeObject.value && typeof this.activeObject.value === 'object' && this.activeObject.value !== null) {
         this.applyDefaultValuesRecursive(this.activeObject.value, this.schema.value);
+        // The form drops a hidden field's value as it renders. Dropped here first, the object a
+        // popup copies on open is already the one the form will hold, so it opens unchanged.
+        dropHiddenFields(this.activeObject.value, this.schema.value, this.coreObject.value);
       }
     } else {
       // For arrays, we use another watcher
@@ -1009,9 +1019,14 @@ export class Editor {
     if (typeof dataNode === 'object' && dataNode !== null && !Array.isArray(dataNode) &&
       typeof currentSchema === 'object' && !Array.isArray(currentSchema) && isNotSchemable) {
       const objectSchema = currentSchema as Schema;
-      for (const key in objectSchema) {
+      // Unconditional fields first, so a `show` condition reads its field's own default. A field
+      // the form hides gets no default: the form drops a hidden field's value, and an object
+      // that gained it here would read as changed the moment the form renders.
+      const keys = Object.keys(objectSchema).sort((a, b) => Number(!!objectSchema[a]?.show) - Number(!!objectSchema[b]?.show));
+      for (const key of keys) {
         if (Object.prototype.hasOwnProperty.call(objectSchema, key)) {
           const fieldSchema = objectSchema[key] as Schemable;
+          if (fieldSchema.show && !isFieldShown(fieldSchema.show, dataNode)) continue;
           let currentValue = dataNode[key];
 
           // Apply defaultValue if current value is undefined and an explicit defaultValue exists
@@ -1266,12 +1281,7 @@ export class Editor {
     }
 
     if (this.isArray.value) {
-      this.activeObject.value = this.activeObject.value.sort((a: any, b: any) => {
-        const orderA = a.order ?? 0;
-        const orderB = b.order ?? 0;
-        if (orderA !== orderB) return orderA - orderB;
-        return a.id.localeCompare(b.id);
-      });
+      this.activeObject.value = this.activeObject.value.sort(compareFileEntries);
     }
 
     let selected_game = this.selectedGame ?? '';

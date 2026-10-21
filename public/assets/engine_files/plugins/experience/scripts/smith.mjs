@@ -174,6 +174,9 @@ game.registerEmitter('smith_broken');
 // eventDelayed so the overlay opens after the paragraph finishes — playScene forces
 // overlay-navigation and would clobber an immediate open.
 game.registerAction('smith', {
+    help: 'Open the smith station, to reforge or break down gear.',
+    value: 'any',
+    examples: ['{smith: true}'],
     eventDelayed: true,
     action: () => openSmith(),
 });

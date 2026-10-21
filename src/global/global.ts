@@ -73,6 +73,7 @@ import AbilitiesViewer from '../game/views/progression/AbilitiesViewer.vue';
 import CharacterViewer from '../game/views/progression/CharacterViewer.vue';
 import CharacterViewerPopup from '../game/views/progression/CharacterViewerPopup.vue';
 import CharacterRename from '../game/views/progression/CharacterRename.vue';
+import { bumpAssetRevision } from '../shared/utils/assetRevision';
 
 // Define the notification item structure
 interface NotificationItem {
@@ -836,6 +837,7 @@ export class Global {
     }*/
     game.characterSystem.traitsMap = await this.fetchMapValues(gameId, `character_traits`, modsIds, 'order');
     game.characterSystem.templatesMap = await this.fetchMapValues(gameId, `character_templates`, modsIds);
+    game.characterSystem.buildInstancesMap();
     game.characterSystem.statusesMap = await this.fetchMapValues(gameId, `character_statuses`, modsIds);
     game.characterSystem.skillSlotsMap = await this.fetchMapValues(gameId, `skill_slots`, modsIds);
     game.characterSystem.skillTreesMap = await this.fetchMapValues(gameId, `skill_trees`, modsIds);
@@ -983,6 +985,12 @@ export class Global {
         let character = game.characterSystem.createCharacter(characterObject.id, characterObject.id);
         game.characterSystem.addCharacter(character, characterObject.add_to_party);
       }
+    }
+
+    // template instances: auto_create is on unless an instance turns it off
+    for (const [id, { template, instance }] of game.characterSystem.instancesMap) {
+      if (instance.auto_create === false || game.characterSystem.characters.value.has(id)) continue;
+      game.characterSystem.addCharacter(game.characterSystem.createCharacter(id, template), !!instance.add_to_party);
     }
 
 
@@ -1670,6 +1678,11 @@ export class Global {
 
   async writeText(path: string, content: string): Promise<void> {
     return this.storageService.writeText(path, content);
+  }
+
+  async writeBinary(path: string, data: Uint8Array): Promise<void> {
+    await this.storageService.writeBinary(path, data);
+    bumpAssetRevision(path);
   }
 
   async listFiles(path: string): Promise<string[]> {

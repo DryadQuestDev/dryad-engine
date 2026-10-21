@@ -10,6 +10,13 @@ export interface PreloadCharacterAssetsOptions {
      * keys are never parsed (attribute values may contain underscores).
      */
     simulateAttributes?: Record<string, string[]>;
+    /**
+     * Status ids whose look to warm as if the character held them: each status's attributes join
+     * the simulated values, its skin layers join the character's, and its face_static (and, with
+     * `spine`, its spine rigs) are warmed too. A status that changes nothing about the look costs
+     * nothing; an unknown id is skipped.
+     */
+    statuses?: string[];
     /** Also warm spine atlas/skeleton assets for every view. */
     spine?: boolean;
 }
@@ -103,7 +110,8 @@ export async function preloadCharacterAssets(
     let faceStatic: string | undefined;
 
     if (typeof resolved === 'string') {
-        const template = characterSystem.templatesMap.get(resolved) as any;
+        const instanceOf = characterSystem.instancesMap.get(resolved)?.template;
+        const template = (instanceOf ? characterSystem.getCharacterTemplate(resolved, instanceOf) : characterSystem.templatesMap.get(resolved)) as any;
         if (!template) return;
         baseAttributes = { ...(template.attributes || {}) };
         layerIds = [...(template.skin_layers || [])];
@@ -118,6 +126,23 @@ export async function preloadCharacterAssets(
         return;
     }
 
+    // What each status would switch the look to (see Character.reevaluate) is warmed BESIDE the
+    // current look, never instead of it: the character may never receive the status.
+    const simulate: Record<string, string[]> = { ...(options.simulateAttributes || {}) };
+    const faces = faceStatic ? [faceStatic] : [];
+    for (const statusId of options.statuses || []) {
+        const status = characterSystem.statusesMap.get(statusId) as any;
+        if (!status) continue;
+        for (const attr in status.attributes || {}) {
+            simulate[attr] = [...(simulate[attr] || []), String(status.attributes[attr])];
+        }
+        for (const layerId of status.skin_layers || []) {
+            if (!layerIds.includes(layerId)) layerIds.push(layerId);
+        }
+        if (status.traits?.face_static) faces.push(status.traits.face_static);
+        for (const entry of status.spine || []) spineConfigs.push({ atlas: entry.atlas, skeleton: entry.skeleton });
+    }
+
     const tasks: Promise<unknown>[] = [];
 
     for (const layerId of layerIds) {
@@ -127,13 +152,13 @@ export async function preloadCharacterAssets(
         const masks = layer.masks as Record<string, string> | undefined;
         if (!images && !masks) continue;
 
-        for (const key of candidateKeys(layer, baseAttributes, options.simulateAttributes)) {
+        for (const key of candidateKeys(layer, baseAttributes, simulate)) {
             if (images?.[key]) tasks.push(warmImage(images[key]));
             if (masks?.[key]) tasks.push(warmImage(masks[key]));
         }
     }
 
-    if (faceStatic) tasks.push(warmImage(faceStatic));
+    for (const face of new Set(faces)) tasks.push(warmImage(face));
 
     if (options.spine) {
         for (const config of spineConfigs) {

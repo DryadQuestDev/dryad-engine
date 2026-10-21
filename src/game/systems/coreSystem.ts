@@ -476,7 +476,6 @@ export class CoreSystem {
     const statusesMap = game.characterSystem.statusesMap;
     const traitsMap = game.characterSystem.traitsMap;
     const attributesMap = game.characterSystem.attributesMap;
-    const templatesMap = game.characterSystem.templatesMap;
     const abilityTemplatesMap = game.characterSystem.abilityTemplatesMap;
     const skinLayersMap = game.characterSystem.skinLayersMap;
     const skillTreesMap = game.characterSystem.skillTreesMap;
@@ -484,7 +483,8 @@ export class CoreSystem {
     const itemSlotsMap = game.itemSystem.itemSlotsMap;
 
     for (const char of game.getAllCharacters()) {
-      const template = templatesMap.get(char.templateId);
+      // An instance syncs to its template with its own overrides applied, never to the bare template.
+      const template = game.characterSystem.getCharacterTemplate(char.id, char.templateId);
       if (!template) continue;                                       // template gone (e.g. removed mod); leave char alone
 
       const coreStatus = char.getCoreStatus();
@@ -1504,6 +1504,7 @@ export class CoreSystem {
   //    act inside the load.
   ignoreSupressEvents: Set<string> = new Set([
     'character_render', 'item_discard_render', 'item_compare', 'status_preview', 'asset_render', 'asset_exit',
+    'gallery_asset_preview',
     'dungeon_create', 'collectable_resolve',
     'character_create', 'item_create',
     'save_load_before', 'save_migrated', 'item_migrate', 'status_migrate',
@@ -1864,11 +1865,25 @@ export class CoreSystem {
   @Skip()
   public galleriesMap!: Map<string, GalleryObject>;
 
+  /** A character the Gallery tab should open on. The tab consumes it and sets it back to null. */
+  @Skip()
+  public galleryFocusCharacterId = ref<string | null>(null);
+
   @Populate(DiscoveredAsset, { mode: 'replace' })
   discoveredAssets: Map<string, DiscoveredAsset> = new Map();
 
   @Populate(DiscoveredCharacter, { mode: 'replace' })
   discoveredCharacters: Map<string, DiscoveredCharacter> = new Map();
+
+  /** True once the player has met the character, or while the reveal_all debug toggle is on (never written to the save). */
+  public isCharacterDiscovered(templateId: string): boolean {
+    return this.discoveredCharacters.has(templateId) || !!this.getDebugSetting('reveal_all');
+  }
+
+  /** True once the player has seen the asset, or while the reveal_all debug toggle is on (never written to the save). */
+  public isAssetDiscovered(assetId: string): boolean {
+    return this.discoveredAssets.has(assetId) || !!this.getDebugSetting('reveal_all');
+  }
 
   public addCharacterToGallery(character: Character) {
     // Skip if character has no template (not a template-based character)

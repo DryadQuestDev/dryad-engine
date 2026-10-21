@@ -4,6 +4,7 @@ import { useSortable } from '@vueuse/integrations/useSortable';
 import { Editor } from '../../editor';
 import { Global } from '../../../global/global';
 import { isImage, isVideo } from '../../../utility/functions';
+import { assetRevisionUrl } from '../../../shared/utils/assetRevision';
 import AutoComplete from 'primevue/autocomplete';
 import Button from 'primevue/button';
 import FloatLabel from 'primevue/floatlabel';
@@ -502,7 +503,7 @@ async function revealInFolder(path: string | null | undefined) {
     <div v-if="showPreview" class="input-wrapper flex items-center gap-2">
       <div class="inline-preview-wrapper flex-shrink-0">
         <img v-if="internalValue && isImage(internalValue)"
-             :src="internalValue"
+             :src="assetRevisionUrl(internalValue)"
              :alt="`Preview of ${internalValue}`"
              class="inline-preview-image" />
         <img v-else-if="internalValue && isVideo(internalValue) && videoThumbnails.get(internalValue)"
@@ -537,7 +538,7 @@ async function revealInFolder(path: string | null | undefined) {
             <template #option="slotProps">
               <div class="flex items-center gap-2 suggestion-item">
                 <img v-if="isImage(slotProps.option)"
-                     :src="slotProps.option"
+                     :src="assetRevisionUrl(slotProps.option)"
                      class="suggestion-image"
                      @error="($event.target as HTMLImageElement).style.display = 'none'" />
                 <img v-else-if="isVideo(slotProps.option) && videoThumbnails.get(slotProps.option)"
@@ -667,7 +668,7 @@ async function revealInFolder(path: string | null | undefined) {
 
           <!-- Inline Preview for Image, Asset, or Video -->
           <img v-if="showPreview && item && isImage(item)"
-               :src="item"
+               :src="assetRevisionUrl(item)"
                class="file-array-preview"
                alt="Preview"
                @error="($event.target as HTMLImageElement).style.display = 'none'" />
@@ -700,7 +701,7 @@ async function revealInFolder(path: string | null | undefined) {
             <template #option="slotProps">
               <div class="flex items-center gap-2 suggestion-item">
                 <img v-if="isImage(slotProps.option)"
-                     :src="slotProps.option"
+                     :src="assetRevisionUrl(slotProps.option)"
                      class="suggestion-image"
                      @error="($event.target as HTMLImageElement).style.display = 'none'" />
                 <img v-else-if="isVideo(slotProps.option) && videoThumbnails.get(slotProps.option)"

@@ -153,6 +153,7 @@ export const RpgBattleLog = defineComponent({
         statusName: e.statusName || statusDef?.name || e.statusId || '',
         statusIcon,
         duration: e.duration || 0,
+        name: e.mergedName || '',
       };
 
       const lineId = {
@@ -168,6 +169,7 @@ export const RpgBattleLog = defineComponent({
         cleanse: 'log_cleanse',
         thorns: 'log_thorns',
         reflect: 'log_reflect',
+        merge: 'log_merge',
       }[e.type];
 
       if (!lineId) return '';

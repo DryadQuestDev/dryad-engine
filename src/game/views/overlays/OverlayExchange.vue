@@ -62,6 +62,18 @@ const maxQuantity = computed(() => {
   return quantityPopupItem.value?.quantity || 1;
 });
 
+// In a trade, a stack that comes from the party is being sold, not bought: the popup's move-all
+// button and its total read from the player's side.
+const popupIsSelling = computed(() =>
+  mode.value === 'trade' && quantityPopupSource.value?.id === PARTY_INVENTORY_ID);
+
+const moveAllLabel = computed(() => {
+  if (mode.value !== 'trade') return global.getString('move_all');
+  return global.getString(popupIsSelling.value ? 'sell_all' : 'buy_all');
+});
+
+const totalLabel = computed(() => global.getString(popupIsSelling.value ? 'total_value' : 'total_cost'));
+
 // Total cost for the selected quantity in the popup
 const popupTotalCost = computed(() => {
   const item = quantityPopupItem.value;
@@ -494,7 +506,7 @@ function close() {
           <input type="number" v-model.number="selectedQuantity" :min="1" :max="maxQuantity" class="quantity-input" />
         </div>
         <div v-if="popupTotalCost.length > 0" class="popup-total-cost">
-          <span class="total-cost-label">{{ global.getString('total_cost') }}</span>
+          <span class="total-cost-label">{{ totalLabel }}</span>
           <div class="total-cost-currencies">
             <div v-for="currency in popupTotalCost" :key="currency.id" class="total-cost-item">
               <img v-if="currency.image" :src="currency.image" class="total-cost-icon" />
@@ -503,7 +515,7 @@ function close() {
           </div>
         </div>
         <div class="popup-buttons">
-          <button @click="moveAllQuantity" class="move-all-button">{{ mode === 'trade' ? global.getString('buy_all') : global.getString('move_all') }}</button>
+          <button @click="moveAllQuantity" class="move-all-button">{{ moveAllLabel }}</button>
           <button @click="confirmQuantity" class="confirm-button">{{ global.getString('confirm') }}</button>
           <button @click="closeQuantityPopup" class="cancel-button">{{ global.getString('cancel') }}</button>
         </div>
@@ -616,6 +628,9 @@ function close() {
   display: flex;
   gap: 16px;
   flex: 1;
+  /* Holds the body to the overlay's max-height, so the inventory grids shrink instead of the
+     panels spilling past the bottom edge with their action buttons. */
+  min-height: 0;
   overflow: visible;
 }
 

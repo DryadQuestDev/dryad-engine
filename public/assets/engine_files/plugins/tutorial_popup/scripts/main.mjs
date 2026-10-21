@@ -28,4 +28,9 @@ game.registerService('tutorial', {
   reset: tut.resetTutorials,
 });
 
-game.registerAction('show_hint', (recordId) => tut.showHint(recordId));
+game.registerAction('show_hint', {
+  help: 'Show a record as a one-time tutorial popup.',
+  value: { ref: 'records' },
+  examples: ['{show_hint: "tutorial_inventory"}'],
+  action: (recordId) => tut.showHint(recordId),
+});

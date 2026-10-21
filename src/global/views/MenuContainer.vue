@@ -215,6 +215,25 @@ function setMenuState(state: string) {
   }
 }
 
+/* A phone in landscape: the game's menu-before content (above the list) pushed Main Menu and Close
+   below the fold of the 80dvh panel. Taller panel, tighter rows — still comfortable tap targets. */
+@media (pointer: coarse) and (max-height: 720px) {
+  .menu-container-content {
+    height: 92vh;
+    height: 92dvh;
+    padding: 18px 22px;
+    gap: 8px;
+  }
+
+  .menu-container-content ul {
+    gap: 8px;
+  }
+
+  .menu-container-content li {
+    padding: 12px 24px;
+  }
+}
+
 
 /* Dev Mode Section */
 .dev-mode-section {

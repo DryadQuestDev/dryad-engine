@@ -583,6 +583,13 @@ ipcMain.handle("read-doc-file", async (_, category, page, language = 'en', baseP
 
 // --- End Read Doc File IPC Handler ---
 
+// True when `target` is `root` itself or lies under it. A plain startsWith(root) also accepts a
+// sibling sharing the prefix: `<root>/assets2/x` starts with `<root>/assets`.
+function isInsideFolder(root, target) {
+  const rel = path.relative(root, target);
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+}
+
 function getSafeAbsolutePath(userInputPath) {
   try {
 
@@ -594,21 +601,19 @@ function getSafeAbsolutePath(userInputPath) {
     }
 
     // Check that it's still inside the project folder
-    if (!resolvedPath.startsWith(assetsFolder)) {
+    if (!isInsideFolder(assetsFolder, resolvedPath)) {
       dialog.showErrorBox('Error', 'Path traversal attempt blocked');
       //app.quit();
       return null;
     }
 
-    // Check if the path exists before trying to get its stats
-    if (fs.existsSync(resolvedPath)) {
-      // Block symlinks if the path exists
-      const stat = fs.lstatSync(resolvedPath);
-      if (stat.isSymbolicLink()) {
-        dialog.showErrorBox('Error', 'Symlinks are not allowed');
-        //app.quit();
-        return null;
-      }
+    // Block symlinks. lstat, not existsSync: existsSync follows the link, so a dangling one would
+    // pass and a write through it would create its target outside assets.
+    const stat = fs.lstatSync(resolvedPath, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink()) {
+      dialog.showErrorBox('Error', 'Symlinks are not allowed');
+      //app.quit();
+      return null;
     }
     // If the path doesn't exist, it's considered safe for creation/reading (will return null/empty later)
 
@@ -739,6 +744,43 @@ ipcMain.handle("write-text", async (_, filePath, content) => {
     dialog.showErrorBox("Error writing file:", error);
     return;
   }
+});
+
+// Strict assets containment for write-binary. getSafeAbsolutePath only checks the final path for
+// a symlink, so a symlinked folder inside assets could still lead out. Here the target and its
+// nearest existing folder must both resolve inside assets.
+function resolveInsideAssets(relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath) return null;
+
+  const resolved = path.resolve(assetsFolder, relativePath);
+  if (resolved === assetsFolder || !isInsideFolder(assetsFolder, resolved)) return null;
+  // lstat, not existsSync: existsSync follows the link, so a dangling one would slip through
+  // and the write would create its target outside assets.
+  try {
+    if (fs.lstatSync(resolved).isSymbolicLink()) return null;
+  } catch { /* no file there yet */ }
+
+  let existing = path.dirname(resolved);
+  while (!fs.existsSync(existing)) existing = path.dirname(existing);
+  if (!isInsideFolder(fs.realpathSync(assetsFolder), fs.realpathSync(existing))) return null;
+  return resolved;
+}
+
+// 🖼️ Write Binary File (Electron IPC). Throws instead of showing a dialog, so the
+// caller can report the failed write in its own UI.
+ipcMain.handle("write-binary", async (_, filePath, data) => {
+  const safePath = resolveInsideAssets(filePath);
+  if (!safePath) {
+    throw new Error(`Refusing to write outside the assets folder: ${filePath}`);
+  }
+  if (!(data instanceof Uint8Array) || data.byteLength === 0) {
+    throw new Error('write-binary expects non-empty bytes');
+  }
+
+  await fs.promises.mkdir(path.dirname(safePath), { recursive: true });
+  await fs.promises.writeFile(safePath, Buffer.from(data));
+  console.log(`[IPC write-binary] Wrote ${filePath} (${data.byteLength} bytes)`);
+  return { message: "File saved successfully!" };
 });
 
 // 📂 List Files in Directory (Electron IPC)
@@ -907,7 +949,7 @@ ipcMain.handle("list-files-recursively", async (_, startDirPath, assetFolders, i
     ignoreFolders.push('engine_assets');
   }
 
-  const baseAssetsPath = assetsFolder; // Already ends with separator
+  const baseAssetsPath = assetsFolder;
 
   // Correctly get the base path string without the trailing separator for comparison
   const baseAssetsPathComparable = baseAssetsPath.endsWith(path.sep)
@@ -971,7 +1013,7 @@ ipcMain.handle("list-files-recursively", async (_, startDirPath, assetFolders, i
           // --- End Ignore Check ---
 
           // Security check: Ensure recursion stays within assetsPath boundary
-          if (fullPath.startsWith(baseAssetsPath)) {
+          if (isInsideFolder(baseAssetsPath, fullPath)) {
             console.log(`[WalkDir] Recursing into: ${entry.name}`);
             walkDir(fullPath);
           } else {
@@ -1137,7 +1179,7 @@ ipcMain.handle("export-game-zip", async (_, { gameId, modId, assetFolders, outpu
     console.log(`[IPC export-game-zip] Output path: ${outputPath}`);
 
     // Validate output path is within assets folder
-    if (!outputPath.startsWith(assetsFolder)) {
+    if (!isInsideFolder(assetsFolder, outputPath)) {
       throw new Error('Output path must be within assets folder');
     }
 
@@ -1154,7 +1196,7 @@ ipcMain.handle("export-game-zip", async (_, { gameId, modId, assetFolders, outpu
         const assetFolderPath = path.join(assetsFolder, 'games_assets', folder);
 
         // Check if path is safe
-        if (!assetFolderPath.startsWith(assetsFolder)) {
+        if (!isInsideFolder(assetsFolder, assetFolderPath)) {
           throw new Error(`Invalid asset folder path: ${folder}`);
         }
 
@@ -1498,7 +1540,7 @@ ipcMain.handle("install-game-archive", async (event, zipFileName) => {
 
               // Build target path with sandboxing
               const targetPath = getSafeAbsolutePath(tempFolderName + '/' + entry.fileName);
-              if (!targetPath || !targetPath.startsWith(tempPath)) {
+              if (!targetPath || !isInsideFolder(tempPath, targetPath)) {
                 console.warn(`[IPC install-game-archive] Path escapes temp folder: ${entry.fileName}`);
                 zipfile2.readEntry();
                 return;

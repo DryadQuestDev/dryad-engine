@@ -14,6 +14,7 @@ import type { QuestGroup } from '../../../../utility/dungeonEditor/quest';
 import { tagBlockDeep as tagBlock } from './uid';
 import { flashElement, type RevealRequest } from './reveal';
 import MetaStatusGrid from './MetaStatusGrid.vue';
+import type { IssueRange } from './issueSeverity';
 
 const props = defineProps<{
   group: QuestGroup;
@@ -26,18 +27,18 @@ const props = defineProps<{
 
 // Prose ranges per block, in the body textarea's model coordinates.
 const proseRangesByBlock = computed(() => {
-  const m = new Map<number, Array<[number, number]>>();
+  const m = new Map<number, IssueRange[]>();
   for (const issue of props.issues ?? []) {
     const at = issue.at;
     if (at?.target !== 'prose' || at.start === undefined) continue;
     const list = m.get(issue.blockIndex) ?? [];
-    list.push([at.start, at.end ?? at.start + 1]);
+    list.push([at.start, at.end ?? at.start + 1, issue.severity]);
     m.set(issue.blockIndex, list);
   }
   return m;
 });
 
-function proseRanges(idx: number): Array<[number, number]> | undefined {
+function proseRanges(idx: number): IssueRange[] | undefined {
   return proseRangesByBlock.value.get(idx);
 }
 
@@ -406,7 +407,7 @@ function removeQuest() {
         </div>
         <RichContentEditor v-if="goal.blockIdx >= 0" :model-value="bodyText(goal.blockIdx)"
           @update:model-value="(v: string) => setBody(goal.blockIdx, v)"
-          :placeholder="goal.locked ? 'quest title…' : 'goal description…'" class="content-area"
+          :placeholder="goal.locked ? 'quest title…' : 'goal description…'" class="content-area" assist="prose"
           :issue-ranges="proseRanges(goal.blockIdx)" :reveal="revealFor(goal.blockIdx)" />
         <div v-for="stageIdx in goal.stageIdxs" :key="(blocks[stageIdx] as any).__uid ?? stageIdx"
           class="quest-goal-stage" v-bind="{ 'data-block-index': stageIdx }">
@@ -435,7 +436,7 @@ function removeQuest() {
               aria-label="Remove goal stage" />
           </div>
           <RichContentEditor :model-value="bodyText(stageIdx)" @update:model-value="(v: string) => setBody(stageIdx, v)"
-            placeholder="stage body…" class="content-area"
+            placeholder="stage body…" class="content-area" assist="prose"
             :issue-ranges="proseRanges(stageIdx)" :reveal="revealFor(stageIdx)" />
         </div>
         <div class="add-toolbar add-toolbar--nested">

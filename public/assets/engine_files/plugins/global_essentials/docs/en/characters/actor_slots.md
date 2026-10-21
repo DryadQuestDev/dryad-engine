@@ -131,6 +131,24 @@ Switching idles eases through the rest pose instead of snapping, so a `slumped` 
 {actor: "ghost->center(idle=float, idle_intensity=0.8)"}
 ```
 
+### A character's own idle
+
+Give a character the `idle` trait and it plays that loop wherever it is staged – set `float` once on a bat, a ghost or a winged girl and every staging line lifts it, with no `idle=` on the line:
+
+```javascript
+{actor: "bat1->pos6"}            // floats: its idle trait is float
+{actor: "bat1->pos6(idle=none)"} // stands still this time
+```
+
+| Source | Wins over |
+|---|---|
+| The staging line's `idle` (`none` included) | everything |
+| The slot template's `idle` (anything but `inherit`) | the trait |
+| The idle the actor already has, kept by `inherit` when it moves | the trait |
+| The `idle` trait | nothing – it fills in when the others are empty |
+
+So a cancel sticks: `idle=none` on one line stays through later moves that set no idle. The trait's loop varies its length a little per actor, so several of them don't bob in step. Battle plugins may read the same trait – rpg_battler uses it for a battle slot that has no `battle_idle`.
+
 ---
 
 ## One-Shot Animations

@@ -4,6 +4,17 @@ All built-in conditions for choice visibility checks and conditional logic.
 
 ---
 
+## Syntax
+
+| Form | Passes when | Example |
+|------|-------------|---------|
+| `key = value` (`==`, `!=`, `>`, `<`, `>=`, `<=`) | The comparison holds | `gold >= 10`, `_room = room5` |
+| `key` | The value is set – anything but `0`, `false` or empty (an unset flag is `0`) | `if{met_bob}`, `if: "_in_party(alice)"` |
+| `a, b` in `if` / `active` | Every part passes | `if: "met_bob, gold > 5"` |
+| `a, b` in `ifOr` / `activeOr` | Any part passes | `ifOr: "met_bob, met_alice"` |
+
+---
+
 ## Built-in Conditions
 
 | Condition | Description | Example |

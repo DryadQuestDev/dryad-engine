@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import type { GalleryObject } from '../../../schemas/gallerySchema';
@@ -25,6 +25,10 @@ const selectedItemId = ref<string | null>(null);
 const descriptionMinimized = ref(false);
 const expandedGalleries = ref<Set<string>>(new Set());
 const isFullscreen = ref(false);
+// Shared by all three tabs, so one query can be checked against characters, assets and scenes.
+const searchQuery = ref('');
+const searchTerm = computed(() => searchQuery.value.trim().toLowerCase());
+const isSearching = computed(() => searchTerm.value.length > 0);
 
 const maskedName = computed(() => global.getString('masked_name'));
 const charactersTabLabel = computed(() => global.getString('gallery.tab.characters'));
@@ -46,12 +50,18 @@ const noGalleriesLabel = computed(() => global.getString(
 const noItemsLabel = computed(() => global.getString('gallery.no_items'));
 const noSelectionLabel = computed(() => global.getString('gallery.no_selection'));
 const assetUndiscoveredLabel = computed(() => global.getString('gallery.asset_undiscovered'));
+const searchPlaceholder = computed(() => global.getString('gallery.search'));
+const clearSearchLabel = computed(() => global.getString('gallery.clear_search'));
+const noMatchesLabel = computed(() => global.getString('gallery.no_matches'));
+const openInEncyclopediaLabel = computed(() => global.getString('record.open_in_encyclopedia'));
 
 // Character tweaks state
 const characterTweaks = ref<Map<string, { attributes: Map<string, string>, skinLayers: Set<string>, skinLayerStyles: Map<string, string[]>, view: string, spineModel: string | null, spineSkins: string[] }>>(new Map());
 
-// Asset tweaks state: Map<assetId, { animation: string | null, skins: string[] }>
-const assetTweaks = ref<Map<string, { animation: string | null, skins: string[] }>>(new Map());
+// Asset tweaks state: Map<assetId, { base, animation: string | null, skins: string[] }>
+// `base` is the copy the game dressed in gallery_asset_preview. The preview starts from it, so a look
+// the pickers can't express (slot_colors, a stage prop) still reaches the render.
+const assetTweaks = ref<Map<string, { base: AssetObject, animation: string | null, skins: string[] }>>(new Map());
 
 // Function: Filter galleries by type and only show galleries with items
 const getFilteredGalleries = (type: 'characters' | 'assets' = selectedTabType.value as 'characters' | 'assets') => {
@@ -74,7 +84,7 @@ const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = sele
   if (type === 'characters') {
     for (const template of game.characterSystem.templatesMap.values()) {
       if (template.gallery?.gallery_id === galleryId) {
-        const isDiscovered = game.coreSystem.discoveredCharacters.has(template.id);
+        const isDiscovered = game.coreSystem.isCharacterDiscovered(template.id);
         items.push({
           id: template.id,
           name: isDiscovered ? (template.gallery?.entity_name || template.id) : maskedName.value,
@@ -87,7 +97,7 @@ const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = sele
   } else {
     for (const asset of game.dungeonSystem.assetsMap.values()) {
       if (asset.gallery?.gallery_id === galleryId) {
-        const isDiscovered = game.coreSystem.discoveredAssets.has(asset.id);
+        const isDiscovered = game.coreSystem.isAssetDiscovered(asset.id);
         items.push({
           id: asset.id,
           name: isDiscovered ? (asset.gallery?.entity_name || asset.id) : maskedName.value,
@@ -104,6 +114,21 @@ const getGalleryItems = (galleryId: string, type: 'characters' | 'assets' = sele
 
   return items;
 };
+
+// Function: Items of a gallery that survive the search. Matches the shown name, so an
+// undiscovered entry never gives its real one away; a hit on the gallery's name keeps all of it.
+const getVisibleItems = (gallery: GalleryObject) => {
+  const items = getGalleryItems(gallery.id);
+  const term = searchTerm.value;
+  if (!term || (gallery.name || gallery.id).toLowerCase().includes(term)) return items;
+  return items.filter(item => item.name.toLowerCase().includes(term));
+};
+
+// Function: Galleries of the current tab that still have something to show under the search
+const getVisibleGalleries = () => getFilteredGalleries().filter(gallery => getVisibleItems(gallery).length > 0);
+
+// While searching every gallery with a hit stays open, so matches are never hidden behind a header
+const isGalleryOpen = (galleryId: string) => isSearching.value || expandedGalleries.value.has(galleryId);
 
 const hasCharactersTab = getFilteredGalleries('characters').length > 0;
 const hasAssetsTab = getFilteredGalleries('assets').length > 0;
@@ -124,7 +149,7 @@ const selectedItem = computed(() => {
     const template = game.characterSystem.templatesMap.get(selectedItemId.value);
     if (!template) return null;
 
-    const isDiscovered = game.coreSystem.discoveredCharacters.has(template.id);
+    const isDiscovered = game.coreSystem.isCharacterDiscovered(template.id);
     return {
       type: 'character' as const,
       id: template.id,
@@ -137,7 +162,7 @@ const selectedItem = computed(() => {
     const asset = game.dungeonSystem.assetsMap.get(selectedItemId.value);
     if (!asset) return null;
 
-    const isDiscovered = game.coreSystem.discoveredAssets.has(asset.id);
+    const isDiscovered = game.coreSystem.isAssetDiscovered(asset.id);
     return {
       type: 'asset' as const,
       id: asset.id,
@@ -148,6 +173,17 @@ const selectedItem = computed(() => {
     };
   }
 });
+
+// The encyclopedia entry about the selected character, once the player has discovered it
+const linkedRecordId = computed(() => {
+  const item = selectedItem.value;
+  if (!item || item.type !== 'character' || !item.isDiscovered) return null;
+  return game.getCharacterRecordId(item.id);
+});
+
+const openLinkedRecord = () => {
+  if (linkedRecordId.value) game.openEncyclopediaForRecord(linkedRecordId.value);
+};
 
 // Computed: Discovered character data for tweaks (keep reactive - depends on reactive selectedItemId/selectedTabType)
 const discoveredCharacterData = computed((): DiscoveredCharacter | null => {
@@ -257,13 +293,19 @@ const initializeAssetTweaks = (assetId: string) => {
   const asset = game.dungeonSystem.assetsMap.get(assetId);
   if (!asset) return;
 
-  // Set defaults from asset template
-  const defaultAnimation = asset.animation != null ? String(asset.animation) : null;
-  const defaultSkins = asset.skins ? [...asset.skins] : [];
+  // Defaults from the asset template, then the game's say on a copy: a look a scene sets when it
+  // stages the asset (asset_render) never reaches the gallery, which doesn't stage.
+  const base: AssetObject = { ...asset, skins: asset.skins ? [...asset.skins] : undefined };
+  const seen = game.coreSystem.discoveredAssets.get(assetId);
+  game.trigger('gallery_asset_preview', base, {
+    skins: seen ? Array.from(seen.skins) : [],
+    animations: seen ? Array.from(seen.animations) : []
+  });
 
   assetTweaks.value.set(assetId, {
-    animation: defaultAnimation,
-    skins: defaultSkins
+    base,
+    animation: base.animation != null ? String(base.animation) : null,
+    skins: base.skins ? [...base.skins] : []
   });
 };
 
@@ -273,11 +315,21 @@ const currentAssetTweaks = computed(() => {
   return assetTweaks.value.get(selectedItemId.value) || null;
 });
 
+// The starting look may name a skin or animation the player hasn't seen on this asset yet (the
+// game's defaults follow live state), so it joins the options — otherwise its selection has no
+// option to show.
+const startingAnimation = () => currentAssetTweaks.value?.base.animation;
+const startingSkins = () => currentAssetTweaks.value?.base.skins ?? [];
+
 // Function: Get animation options for asset dropdown
 const getAnimationOptions = () => {
   if (!discoveredAssetData.value) return [];
 
-  return Array.from(discoveredAssetData.value.animations)
+  const animations = new Set(discoveredAssetData.value.animations);
+  const starting = startingAnimation();
+  if (starting != null) animations.add(String(starting));
+
+  return Array.from(animations)
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     .map(anim => ({
       label: anim,
@@ -289,7 +341,7 @@ const getAnimationOptions = () => {
 const getSkinOptions = () => {
   if (!discoveredAssetData.value) return [];
 
-  return Array.from(discoveredAssetData.value.skins)
+  return Array.from(new Set([...discoveredAssetData.value.skins, ...startingSkins().map(String)]))
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     .map(skin => ({
       label: skin,
@@ -498,13 +550,13 @@ const previewAssetDiscovered = computed((): AssetObject | null => {
   if (selectedTabType.value !== 'assets' || !selectedItemId.value) return null;
   if (!selectedItem.value?.data || !currentAssetTweaks.value) return null;
 
-  const asset = selectedItem.value.data as AssetObject;
+  const { base, animation, skins } = currentAssetTweaks.value;
 
   // Apply tweaks - create a new object with tweaked values
   return {
-    ...asset,
-    animation: currentAssetTweaks.value.animation ?? asset.animation,
-    skins: currentAssetTweaks.value.skins.length > 0 ? currentAssetTweaks.value.skins : asset.skins
+    ...base,
+    animation: animation ?? base.animation,
+    skins: skins.length > 0 ? skins : base.skins
   };
 });
 
@@ -522,15 +574,15 @@ const selectTab = (type: 'characters' | 'assets' | 'scenes') => {
   selectedGalleryId.value = null;
   selectedItemId.value = null;
 
-  // Auto-open first gallery and select first item when switching tabs
-  const galleries = getFilteredGalleries();
+  // Auto-open first gallery and select first item when switching tabs (first match while searching)
+  const galleries = getVisibleGalleries();
   if (galleries.length > 0) {
     const firstGallery = galleries[0];
     expandedGalleries.value.clear();
     expandedGalleries.value.add(firstGallery.id);
 
     // Select first item in first gallery
-    const items = getGalleryItems(firstGallery.id);
+    const items = getVisibleItems(firstGallery);
     if (items.length > 0) {
       selectItem(items[0].id);
     }
@@ -592,6 +644,7 @@ const updateAssetSkins = (skins: string[]) => {
 };
 
 const toggleGallery = (galleryId: string) => {
+  if (isSearching.value) return;
   if (expandedGalleries.value.has(galleryId)) {
     expandedGalleries.value.delete(galleryId);
   } else {
@@ -609,8 +662,26 @@ const toggleFullscreen = () => {
   isFullscreen.value = !isFullscreen.value;
 };
 
+// Opens on the character another view asked for (game.openGalleryForCharacter), then clears the request
+const applyCharacterFocus = (): boolean => {
+  const templateId = game.coreSystem.galleryFocusCharacterId.value;
+  if (!templateId) return false;
+  game.coreSystem.galleryFocusCharacterId.value = null;
+  const galleryId = game.characterSystem.templatesMap.get(templateId)?.gallery?.gallery_id;
+  if (!galleryId) return false;
+  searchQuery.value = '';
+  game.coreSystem.setState('gallery_tab', 'characters');
+  expandedGalleries.value.add(galleryId);
+  selectItem(templateId);
+  return true;
+};
+
+watch(() => game.coreSystem.galleryFocusCharacterId.value, applyCharacterFocus);
+
 // Initialize gallery on mount
 onMounted(() => {
+  if (applyCharacterFocus()) return;
+
   const current = selectedTabType.value;
   const tabAvailable =
     (current === 'characters' && hasCharactersTab) ||
@@ -660,8 +731,19 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- Search (filters the groups of whichever tab is open) -->
+      <div class="gallery-search">
+        <i class="pi pi-search gallery-search-icon"></i>
+        <input v-model="searchQuery" type="text" class="gallery-search-input" :placeholder="searchPlaceholder"
+          @keydown.escape="searchQuery = ''" />
+        <button v-if="isSearching" class="gallery-search-clear" @click="searchQuery = ''"
+          :aria-label="clearSearchLabel">
+          <i class="pi pi-times"></i>
+        </button>
+      </div>
+
       <!-- Scenes Tab Content -->
-      <GalleryScenesTab v-if="selectedTabType === 'scenes'" class="scenes-tab-content" />
+      <GalleryScenesTab v-if="selectedTabType === 'scenes'" class="scenes-tab-content" :search="searchTerm" />
 
       <!-- Gallery List (for characters and assets tabs) -->
       <div v-else class="gallery-list-content">
@@ -669,16 +751,21 @@ onMounted(() => {
           {{ noGalleriesLabel }}
         </div>
 
+        <div v-else-if="getVisibleGalleries().length === 0" class="empty-state">
+          {{ noMatchesLabel }}
+        </div>
+
         <div v-else class="custom-accordion">
-          <div v-for="gallery in getFilteredGalleries()" :key="gallery.id" class="accordion-panel">
-            <div class="accordion-header" :class="{ 'expanded': expandedGalleries.has(gallery.id) }"
+          <div v-for="gallery in getVisibleGalleries()" :key="gallery.id" class="accordion-panel">
+            <div class="accordion-header"
+              :class="{ 'expanded': isGalleryOpen(gallery.id), 'searching': isSearching }"
               @click="toggleGallery(gallery.id)">
               <span class="accordion-title">{{ gallery.name || gallery.id }}</span>
-              <span class="accordion-icon">{{ expandedGalleries.has(gallery.id) ? '▼' : '►' }}</span>
+              <span v-if="!isSearching" class="accordion-icon">{{ isGalleryOpen(gallery.id) ? '▼' : '►' }}</span>
             </div>
-            <div v-if="expandedGalleries.has(gallery.id)" class="accordion-content">
+            <div v-if="isGalleryOpen(gallery.id)" class="accordion-content">
               <div class="gallery-items-list">
-                <template v-for="item in getGalleryItems(gallery.id)" :key="item.id">
+                <template v-for="item in getVisibleItems(gallery)" :key="item.id">
                   <div class="gallery-item" :class="{
                     'selected': selectedItemId === item.id,
                     'undiscovered': !item.isDiscovered
@@ -842,14 +929,20 @@ onMounted(() => {
 
       <template v-else>
         <!-- Description Overlay -->
-        <div v-if="selectedItem.isDiscovered && selectedItem.description" class="description-overlay"
+        <div v-if="selectedItem.isDiscovered && (selectedItem.description || linkedRecordId)" class="description-overlay"
           :class="{ 'minimized': descriptionMinimized }">
           <div class="description-header">
             <span v-if="!descriptionMinimized">{{ selectedItem.name }}</span>
-            <Button :icon="descriptionMinimized ? 'pi pi-window-maximize' : 'pi pi-window-minimize'" text rounded
-              size="small" @click="descriptionMinimized = !descriptionMinimized" />
+            <div class="description-actions">
+              <Button v-if="linkedRecordId" icon="pi pi-book" text rounded size="small"
+                v-tooltip.bottom="openInEncyclopediaLabel" :aria-label="openInEncyclopediaLabel"
+                @click="openLinkedRecord" />
+              <Button v-if="selectedItem.description"
+                :icon="descriptionMinimized ? 'pi pi-window-maximize' : 'pi pi-window-minimize'" text rounded
+                size="small" @click="descriptionMinimized = !descriptionMinimized" />
+            </div>
           </div>
-          <div v-if="!descriptionMinimized" v-script="selectedItem.description || ''" class="description-content"></div>
+          <div v-if="!descriptionMinimized && selectedItem.description" v-script="selectedItem.description" class="description-content"></div>
         </div>
 
         <!-- Preview Area -->
@@ -918,9 +1011,11 @@ onMounted(() => {
   grid-template-columns: 1fr;
 }
 
+/* min-height:0, not overflow:hidden — this class lands on GalleryScenesTab's root, and an overflow
+   here would override that root's own overflow-y:auto, leaving the scene list unscrollable. */
 .scenes-tab-content {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
 }
 
 /* Left Column */
@@ -971,6 +1066,68 @@ onMounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
+/* Search */
+.gallery-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 300px;
+  flex-shrink: 0;
+}
+
+.gallery-search-icon {
+  position: absolute;
+  left: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.85em;
+  pointer-events: none;
+}
+
+.gallery-search-input {
+  flex: 1;
+  /* An input's intrinsic width won't shrink below its size attribute without this. */
+  min-width: 0;
+  padding: 8px 32px;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  outline: none;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.gallery-search-input:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.gallery-search-input:focus {
+  background: rgba(0, 0, 0, 0.5);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.gallery-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.gallery-search-clear {
+  position: absolute;
+  right: 6px;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.8em;
+  cursor: pointer;
+}
+
+.gallery-search-clear:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .gallery-list-content {
   flex: 1;
   overflow-y: auto;
@@ -1012,6 +1169,11 @@ onMounted(() => {
   border-color: rgba(255, 255, 255, 0.2);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
+}
+
+/* Headers don't toggle while searching */
+.accordion-header.searching {
+  cursor: default;
 }
 
 .accordion-title {
@@ -1290,6 +1452,16 @@ onMounted(() => {
   margin-bottom: 10px;
   font-weight: 600;
   font-size: 1.1em;
+}
+
+.description-header:last-child {
+  margin-bottom: 0;
+}
+
+.description-actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
 }
 
 .description-content {

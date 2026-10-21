@@ -4,6 +4,7 @@ import Dialog from 'primevue/dialog';
 import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
+import { useConfirm } from 'primevue/useconfirm';
 import { Editor } from '../../editor';
 import { jumpToEntity } from '../../editorJump';
 import { Global } from '../../../global/global';
@@ -25,6 +26,7 @@ const emit = defineEmits<{
 }>();
 
 const editor = Editor.getInstance();
+const confirm = useConfirm();
 
 const localItem = ref<any>(props.visible && props.item ? JSON.parse(JSON.stringify(props.item)) : null);
 const idError = ref<string | null>(null);
@@ -161,8 +163,24 @@ watch(() => props.visible, (newVisible) => {
   }
 }, { immediate: true });
 
-function childHasLintIssues(): boolean {
-  return childRef.value?.hasLintIssues?.() === true;
+/**
+ * A child that checks its content (the dungeon content editor) reports its errors here. Warnings
+ * never stop a save; errors ask first, since the game may not read that content.
+ */
+async function confirmChildErrors(): Promise<boolean> {
+  const errors: number = childRef.value?.lintErrorCount?.() ?? 0;
+  if (!errors) return true;
+  return new Promise((resolve) => {
+    confirm.require({
+      header: 'Save with errors?',
+      message: `${errors} ${errors === 1 ? 'error' : 'errors'} in this content — the game may stop or skip there. They are listed above the editor.`,
+      acceptLabel: 'Save anyway',
+      rejectLabel: 'Keep editing',
+      accept: () => resolve(true),
+      reject: () => resolve(false),
+      onHide: () => resolve(false),
+    });
+  });
 }
 
 async function commitItem(): Promise<boolean> {
@@ -229,8 +247,8 @@ async function commitItem(): Promise<boolean> {
 }
 
 async function handleSave() {
-  if (!await commitItem()) return;
-  childHasLintIssues();
+  if (!await confirmChildErrors()) return;
+  await commitItem();
 }
 
 function handleCancel() {
@@ -238,10 +256,9 @@ function handleCancel() {
 }
 
 async function handleApplyAndSave() {
+  if (!await confirmChildErrors()) return;
   if (!await commitItem()) return;
-  if (!childHasLintIssues()) {
-    emit('close');
-  }
+  emit('close');
 }
 
 // Generic save-and-jump: commit the popup's item first (navigating with a popup
@@ -290,7 +307,6 @@ async function handleRequestOpenEntry(payload: { entityId: string; componentId?:
             :outlined="comp.id !== activeComponentId" :disabled="isBusy && comp.id !== activeComponentId"
             class="popup-switch-button" @click="switchPopup(comp.id)" />
         </div>
-        <span v-if="isBusy" class="popup-entry-dirty">unsaved changes</span>
       </div>
       <div v-if="isNewItem && idError && localItem" class="popup-id-fix">
         <label for="popup-id-fix-input">ID</label>
@@ -308,6 +324,9 @@ async function handleRequestOpenEntry(payload: { entityId: string; componentId?:
     <!-- Footer with OK/Cancel buttons -->
     <template #footer>
       <div class="popup-footer">
+        <!-- Lives here, not in the entry header: appearing there wrapped the popup switch buttons and
+             resized the popup body mid-edit. -->
+        <span v-if="isBusy" class="popup-entry-dirty">unsaved changes</span>
         <Button label="Cancel" severity="secondary" @click="handleCancel" text />
         <Button label="Reset" icon="pi pi-undo" severity="secondary" :disabled="!isBusy" outlined
           v-tooltip.top="'Discard the popup\'s changes and reload the entry as the tab holds it'" @click="handleReset" />
@@ -368,7 +387,8 @@ async function handleRequestOpenEntry(payload: { entityId: string; componentId?:
 }
 
 .popup-entry-dirty {
-  margin-left: auto;
+  align-self: center;
+  margin-right: auto;
   font-size: 0.8rem;
   color: var(--editor-fg-warning);
   font-style: italic;
@@ -406,6 +426,7 @@ async function handleRequestOpenEntry(payload: { entityId: string; componentId?:
 }
 
 .popup-footer {
+  flex: 1;
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;

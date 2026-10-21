@@ -138,6 +138,8 @@ const handleTooltipKey = (event: KeyboardEvent) => {
 };
 
 const handleEscKey = (event: KeyboardEvent) => {
+  // A component that consumed Escape itself (cancelling a rename) marks it handled.
+  if (event.defaultPrevented) return;
   if (event.key === 'Escape') {
     global.toggleMenu();
   }

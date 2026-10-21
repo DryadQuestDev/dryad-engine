@@ -191,6 +191,44 @@ app.post('/engine/write-text', (req, res) => {
   }
 });
 
+// POST /engine/write-binary?path=...
+// Body is the raw bytes. The path rides in the query because the body is not JSON — the global
+// express.json() ignores octet-stream, and its 100 KB limit would not fit an image anyway.
+app.post('/engine/write-binary', express.raw({ type: 'application/octet-stream', limit: '50mb' }), (req, res) => {
+  const relativePath = req.query.path;
+
+  if (!relativePath) {
+    return res.status(400).json({ error: 'Missing "path" query parameter.' });
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ error: 'Body must be non-empty application/octet-stream.' });
+  }
+
+  const safeFilePath = getSafePath(relativePath);
+  if (!safeFilePath) {
+    return res.status(400).json({ error: 'Invalid or forbidden path.' });
+  }
+
+  try {
+    // lstat, not existsSync: a dangling symlink would otherwise be written through to its target.
+    // Symlinked FOLDERS stay allowed – game folders under assets are symlinks in dev.
+    const existing = fs.lstatSync(safeFilePath, { throwIfNoEntry: false });
+    if (existing?.isDirectory()) {
+      return res.status(400).json({ error: 'Cannot overwrite a directory with a file.' });
+    }
+    if (existing?.isSymbolicLink()) {
+      return res.status(400).json({ error: 'Refusing to write through a symlinked file.' });
+    }
+
+    fs.mkdirSync(path.dirname(safeFilePath), { recursive: true });
+    fs.writeFileSync(safeFilePath, req.body);
+    res.json({ message: 'File written successfully.' });
+  } catch (e) {
+    console.error('[write-binary] Error:', e);
+    res.status(500).json({ error: 'Error writing file.' });
+  }
+});
+
 // GET /engine/list-files?path=...
 app.get('/engine/list-files', (req, res) => {
   const relativeDirPath = req.query.path;

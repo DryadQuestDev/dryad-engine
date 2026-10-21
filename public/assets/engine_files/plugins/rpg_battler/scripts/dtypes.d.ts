@@ -21,6 +21,9 @@ type RpgBattleDefinition = {
   loot?: string;
   /** Flat threat added on top of the enemy-sum (boss auras, scripted stakes). Included in getThreat. */
   bonus_threat?: number;
+  /** Characters who fight on the player side in this battle without joining the party. Each must
+   *  be a live character; its own battle_support trait decides sideline support or a slot. */
+  allies?: string[];
   enemies: RpgBattleEntry[];
 };
 
@@ -34,8 +37,12 @@ type StartRpgBattleParams = {
   /** Waves directly, for scripts that want more than the editor's flat fields expose. Wins over enemies/enemies2. */
   waves?: RpgBattleEntry[][];
   background?: string;
-  /** Status ids applied to every player party member as the battle opens (e.g. an ambush advantage). */
-  statuses?: string[];
+  /** Status ids applied to every player party member as the battle opens (e.g. an ambush advantage).
+   *  A list, or one string of comma-separated ids. */
+  statuses?: string | string[];
+  /** Characters who fight on the player side in this battle only, added to the definition's own
+   *  `allies`. A list, or one string of comma-separated ids. */
+  allies?: string | string[];
   /** Internal: battle_support members split out of playerParty, preserved across the picker round-trip. */
   _supportParty?: string[];
   /** Internal: set by confirmPartySelect so re-entry skips the picker. */
@@ -60,6 +67,8 @@ type RpgCharacterBattleState = {
   support?: boolean;
   /** This round's random turn-order tiebreak among combatants of equal speed. Re-rolled each round. */
   initiative?: number;
+  /** Set when this body merged into an ally (the `merge` aspect): it leaves the field without a defeat. */
+  mergedInto?: string;
 };
 
 type RpgBattle = {
@@ -115,7 +124,7 @@ type RpgStatusMeta = {
 type RpgEffectResultType =
   'damage' | 'heal' | 'steal' | 'thorns' | 'reflect' |
   'status_apply' | 'status_remove' | 'status_dot' | 'status_hot' | 'status_dot_heal' |
-  'cleanse' | 'dodge' | 'summon';
+  'cleanse' | 'dodge' | 'summon' | 'merge';
 
 type RpgEffectResult = {
   type: RpgEffectResultType;
@@ -130,6 +139,9 @@ type RpgEffectResult = {
   statusId?: string;
   statusName?: string;
   duration?: number;
+  /** merge: the body that merged into `targetId`, and its battle display name. */
+  mergedId?: string;
+  mergedName?: string;
 };
 
 // ── Battle Log ──
@@ -318,6 +330,24 @@ type RpgActionApplyEvent = {
   cleanse: boolean;
   cooldownChange: number;
   chargesChange: number;
+  /** The `merge` aspect's status: the caster merges into this target. Set to null to cancel the merge. */
+  merge: string | null;
+};
+
+// ── Battle preload ──
+
+/** Statuses one ability can apply, by who receives them (main.mjs statusRecipients). */
+type RpgStatusRecipients = {
+  /** the caster */
+  self: string[];
+  /** the caster's side */
+  own: string[];
+  /** the opposing side */
+  other: string[];
+  /** character templates the ability summons */
+  summons: string[];
+  /** statuses the summons receive */
+  summonStatuses: string[];
 };
 
 // ── AI ──

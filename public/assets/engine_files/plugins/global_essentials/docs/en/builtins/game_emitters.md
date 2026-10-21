@@ -322,6 +322,36 @@ game.on("scene_play_after", (sceneId) => {
 });
 ```
 
+### scene_replay_before
+
+Triggered when a gallery replay is about to play its scene. Args: `(sceneId, dungeonId)`. The game is already saved for the replay and `replay_mode` is on, so whatever a listener changes is undone when the player leaves replay mode. Not cancellable.
+
+**Use cases:**
+- Put characters into the look the scene expects
+
+```js
+game.on("scene_replay_before", () => {
+  game.getCharacter("riko")?.resetLooksToTemplate();
+});
+```
+
+### flow_advance_before
+
+Triggered when the story is about to move on – right before the actions that move the flow (`scene`, `exit`, `enter`, `battle`, `loot`…) run. Args: `(actions)` – those actions, keyed by action id. Any others in the same batch have already run. Return `false` to hold the flow where it is.
+
+| Fires on | Example |
+|----------|---------|
+| Continue past a paragraph | the next paragraph's `scene`, or the paragraph's own `{battle}` |
+| A choice that moves | `> Leave{exit: true}` |
+| Room enter actions that move | `{scene: "ambush"}` |
+| Never on a choice that moves nothing | `> Look closer{flag: "looked = 1"}` |
+
+```js
+game.on("flow_advance_before", (actions) => {
+  if (actions.battle && game.getCharacter("mc").getResource("health") <= 0) return false;
+});
+```
+
 ### event_end
 
 Triggered when an event/dialogue ends.
@@ -370,6 +400,20 @@ Triggered when a character's resource changes.
 ```js
 game.on("character_resource_change", (char, stat, old, val) => {
   if (val <= 0) game.showNotification(char.getName() + " fainted!");
+});
+```
+
+### character_trait_change
+
+Triggered after a character's trait value changes through `setTrait` – the `{trait}` action and scripts alike. Args: `(character, traitId, oldValue, newValue)`. Not cancellable. Silent while a save loads or migrates.
+
+**Use cases:**
+- Remember that the story renamed a character
+- React to a role or flag stored as a trait
+
+```js
+game.on("character_trait_change", (char, trait, old, val) => {
+  if (trait === "name") game.setFlag(char.id + "_renamed", true);
 });
 ```
 
@@ -548,6 +592,30 @@ game.on("asset_resolve", (asset) => {
       if (file.includes("fx.")) return { file, fade: true };
       return file;
     });
+});
+```
+
+### gallery_asset_preview
+
+Triggered once, the first time the gallery shows an asset. The gallery never stages an asset, so a look `asset_render` gives it in a scene never reaches the gallery – set the starting look here. The listener receives a throwaway copy; its `skins`, `animation` and `slot_colors` become the starting look, shown as selected in the gallery's pickers. The player's own picks replace it. Not cancellable.
+
+| Arg | Type |
+|-----|------|
+| `asset` | A copy of the asset template |
+| `seen` | `{ skins, animations }` – what the player has seen on this asset in play |
+
+**Use cases:**
+- Dress a spine asset the way `asset_render` dresses it in a scene
+- Pick a variant chosen at the call site in play, from what the player has already seen
+
+```js
+game.on("gallery_asset_preview", (asset, seen) => {
+  if (!asset.tags?.includes("riko")) return;
+  const hairStyle = game.getCharacter("riko")?.getAttribute("hairstyle");
+  asset.skins = ["default", "hair/hair" + hairStyle];
+  // the outfit is picked per scene in play: open on the first one the player has seen
+  const outfit = seen.skins.find((skin) => skin.startsWith("outfit/"));
+  if (outfit) asset.skins.push(outfit);
 });
 ```
 

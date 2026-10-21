@@ -424,15 +424,17 @@ export class PluginManager {
     /**
      * Resolves the base path for a plugin (global or mod-specific).
      */
-    private async resolvePluginPath(pluginId: string): Promise<string | null> {
+    public async resolvePluginPath(pluginId: string): Promise<string | null> {
         const editor = Editor.getInstance();
         const gameId = editor.selectedGame;
         const modId = editor.selectedMod;
 
-        // Check mod plugins first (they override global)
+        // Check mod plugins first (they override global). pathExists first, so a global plugin
+        // costs no 404 read per mod layer.
         if (gameId && modId) {
             for (const modIt of editor.getModList(modId)) {
                 const path = `games_files/${gameId}/${modIt}/plugins/${pluginId}`;
+                if (!await Global.getInstance().pathExists(`${path}/plugin.json`)) continue;
                 const json = await Global.getInstance().readJson(`${path}/plugin.json`);
                 if (json) return path;
             }

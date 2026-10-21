@@ -36,8 +36,8 @@ It’s completely possible to build a **fully playable game** by staying inside 
 
 While the editor can take you very far on its own, there are a few optional “extra power” tools you might want to use during development:
 
-- **Google Docs (strongly recommended for story‑heavy games)**  
-  - Great for writing and reviewing long scenes, dialogue, and branching storylines.  
+- **Google Docs (for advanced collaboration work)**  
+  - Useful when several writers share a story, or you want Docs' comments, suggestions, and revision history.  
   - You draft and iterate in Google Docs, then import the content into your game with a click of a button.
 
 - **Code editor (for advanced use cases)**  
@@ -51,5 +51,5 @@ While the editor can take you very far on its own, there are a few optional “e
 Most devs will:
 
 - Do **structure and systems** work in the **Game Editor**,  
-- Do **writing** in **Google Docs**,  
+- Do **writing** in the **Game Editor** too (Google Docs for advanced collaboration work),  
 - And only touch the **code editor** like VS Code when there's no plugins for it and they want to add a truly unique mechanic.

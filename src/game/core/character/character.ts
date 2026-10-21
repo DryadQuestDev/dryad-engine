@@ -497,8 +497,10 @@ export class Character {
       throw new Error(`Character Trait ${key} does not exist`);
     }
     let coreStatus = this.getCoreStatus();
+    const oldValue = coreStatus.traits[key];
     coreStatus.traits[key] = value;
     this.reevaluate();
+    if (oldValue !== value) Game.getInstance().trigger('character_trait_change', this, key, oldValue, value);
   }
 
   // ignore types
@@ -514,7 +516,7 @@ export class Character {
   // retrieve trait from the template
   // ignore types
   public getTemplateTrait(key: string): any {
-    const template = Game.getInstance().characterSystem.templatesMap.get(this.templateId);
+    const template = Game.getInstance().characterSystem.getCharacterTemplate(this.id, this.templateId);
     return template?.traits?.[key as keyof typeof template.traits];
   }
 
@@ -1113,6 +1115,19 @@ export class Character {
 
       //this.reevaluate();
     }
+    this.reevaluate();
+  }
+
+  /**
+   * Put the character's look – attributes and skin layers – back to its template's, keeping
+   * everything else (stats, statuses, traits, inventory). Does nothing for a character with no template.
+   */
+  public resetLooksToTemplate(): void {
+    const template = this.templateId ? Game.getInstance().characterSystem.getCharacterTemplate(this.id, this.templateId) : null;
+    if (!template) return;
+    const coreStatus = this.getCoreStatus();
+    coreStatus.attributes = JSON.parse(JSON.stringify((template as any).attributes || {}));
+    coreStatus.skinLayers = new Set((template as any).skin_layers || []);
     this.reevaluate();
   }
 

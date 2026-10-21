@@ -3,6 +3,10 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useStorage } from '@vueuse/core';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
+import { Global } from '../../../global/global';
+import { showAlert, showConfirm } from '../../../services/dialogService';
+import { bakeSpineFace, bakeStaticFace, FACE_BAKE_SIZE } from '../../faceBake';
+import { assetRevisionUrl } from '../../../shared/utils/assetRevision';
 import { loadCharacterImages } from '../../../shared/utils/characterImageLoader';
 import { spineRenderer, type SpineStats } from '../../../game/utils/spineRenderer';
 import { applyTrackMap, buildEditorSpineTrackMapFromLayers, buildEditorSpineSkinsFromLayers } from '../../../game/utils/spineAnimationGroups';
@@ -364,6 +368,8 @@ function initializeLocalValues() {
 
 // Persisted globally so the dev's preference carries across characters/sessions.
 const storedPreviewMode = useStorage<'spine' | 'static'>('facepicker_previewMode', 'spine');
+// Solid magenta behind the art, so holes in a cutout stand out. Remembered in this browser.
+const magentaBackground = useStorage('facepicker_magentaBackground', false);
 
 const hasOwnSpineForActiveView = computed(() =>
   !!findViewEntry(artLocal.value.spine, selectedView.value)?.skeleton
@@ -920,6 +926,57 @@ function setFaceStaticPrecedence(value: boolean) {
   commit();
 }
 
+// Bake: the crop as the game shows it, saved as a WebP in the edited game's or mod's own assets
+// and set as face_static. The file is written at once; the trait waits for Save like any edit.
+const faceBakePath = computed<string | null>(() => {
+  const id = localItem.value?.id;
+  if (!id || !editor.selectedGame) return null;
+  return `games_assets/${editor.selectedGame}/${editor.selectedMod || '_core'}/faces/${id}.webp`;
+});
+const faceBaking = ref(false);
+const faceStaticSrc = computed(() => assetRevisionUrl(faceStaticValue.value));
+const faceBakeTooltip = computed(() =>
+  `Turns the face crop into a fixed image: renders it the way the preview shows it now – ${effectivePreviewMode.value} `
+  + `art, with the selected layers and attributes – as a ${FACE_BAKE_SIZE}×${FACE_BAKE_SIZE} WebP, saves it to the faces `
+  + 'folder and sets it as the static face. Asks before replacing an existing file.');
+
+async function bakeFaceStatic() {
+  const path = faceBakePath.value;
+  if (!path || faceBaking.value) return;
+  faceBaking.value = true;
+  try {
+    const global = Global.getInstance();
+    if (await global.pathExists(path)) {
+      const overwrite = await showConfirm({
+        header: 'Overwrite face image?',
+        message: `${path} already exists. Replace it with the current crop?`,
+        acceptLabel: 'Overwrite',
+      });
+      if (!overwrite) return;
+    }
+
+    const crop = { x: localX.value, y: localY.value, scale: localScale.value };
+    const bytes = effectivePreviewMode.value === 'spine'
+      ? await bakeSpineFace({
+        atlasUrl: spineAtlasRef.value!,
+        skeletonUrl: spineSkeletonRef.value!,
+        skins: effectiveSkins.value,
+        trackMap: effectiveTrackMap.value,
+        artScale: spineDisplayOffset.value.scale,
+        gameScale: localSpineGameScale.value,
+      }, crop)
+      : await bakeStaticFace(imageLayers.value, crop);
+
+    await global.writeBinary(path, bytes);
+    setFaceStatic(`assets/${path}`);
+  } catch (error) {
+    console.error('[FacePicker] Face bake failed:', error);
+    showAlert(`The face could not be baked: ${(error as Error).message}`, 'Bake failed');
+  } finally {
+    faceBaking.value = false;
+  }
+}
+
 // In-game face preview. Mirrors CharacterFace: a 100px circle, the doll pinned at the
 // reference size and translated by -face_shift% × scale. Static art only – the spine
 // canvas cannot be duplicated, so spine characters rely on the purple FACE box.
@@ -1272,9 +1329,14 @@ onBeforeUnmount(() => {
                   @click="storedPreviewMode = 'static'">Static</button>
               </div>
             </div>
+            <div class="control-group"
+              v-tooltip.top="'Shows the art on solid magenta, so holes in a cutout stand out. Preview only.'">
+              <label for="fp-magenta-bg">Magenta bg</label>
+              <ToggleSwitch v-model="magentaBackground" inputId="fp-magenta-bg" />
+            </div>
           </div>
           <div v-if="!isCharacterTemplate" class="control-group">
-            <label title="The entry is previewed applied over this character template, as it is in the game. Preview only – remembered in this browser for every status, item and skill slot.">
+            <label v-tooltip.top="'The entry is previewed applied over this character template, as it is in the game. Preview only – remembered in this browser for every status, item and skill slot.'">
               Preview on character</label>
             <Select v-model="previewHostId" :options="hostOptions" optionLabel="id" optionValue="id" showClear
               :filter="hostOptions.length > 8" placeholder="none – this entry alone" size="small"
@@ -1291,7 +1353,7 @@ onBeforeUnmount(() => {
           <div class="pane-toolbar">
             <InputText v-model="layerSearch" placeholder="Search id or tag…" size="small" class="grow" />
             <span class="pane-count" :class="{ warn: unresolvedSelectedCount > 0 }"
-              :title="unresolvedSelectedCount > 0 ? `${unresolvedSelectedCount} selected layer(s) resolve to no image or animation for the current attributes` : ''">
+              v-tooltip.top="unresolvedSelectedCount > 0 ? `${unresolvedSelectedCount} selected layer(s) resolve to no image or animation for the current attributes` : ''">
               {{ selectedLayerCount }} selected<template v-if="hostedOnlyLayerCount > 0"> + {{ hostedOnlyLayerCount }} from
                 {{ previewHost?.id }}</template><template v-if="unresolvedSelectedCount > 0"> · {{ unresolvedSelectedCount }} unresolved</template>
             </span>
@@ -1305,7 +1367,7 @@ onBeforeUnmount(() => {
             <div>Listed but not defined in Skin Layers:</div>
             <div v-for="id in unknownLayerIds" :key="id" class="pane-warning-row">
               <code>{{ id }}</code>
-              <button type="button" class="tool-btn" title="Remove from this character" @click="removeLayerId(id)">✕</button>
+              <button type="button" class="tool-btn" v-tooltip.top="'Remove from this character'" @click="removeLayerId(id)">✕</button>
             </div>
           </div>
 
@@ -1326,19 +1388,19 @@ onBeforeUnmount(() => {
                     <span class="badge" :class="row.type">{{ row.type }}</span>
                     <span v-if="row.view !== DEFAULT_VIEW" class="badge view">{{ row.view }}</span>
                     <span v-if="row.locked" class="badge core"
-                      title="Listed by the core game – a mod can add layers but not remove them">core</span>
+                      v-tooltip.top="'Listed by the core game – a mod can add layers but not remove them'">core</span>
                     <span v-if="row.hosted" class="badge host"
-                      :title="`Listed by the preview character ${previewHost?.id} – rendered in the preview, not saved on this entry`">{{
+                      v-tooltip.top="`Listed by the preview character ${previewHost?.id} – rendered in the preview, not saved on this entry`">{{
                       previewHost?.id }}</span>
                   </div>
                   <div class="row-sub">
                     <span class="mono">z {{ row.zIndex }}</span>
                     <span v-if="row.attributes.length" class="mono">· {{ row.attributes.join(', ') }}</span>
                     <span v-if="row.selected || row.hosted" class="row-status" :class="row.resolved ? 'ok' : 'bad'"
-                      :title="layerStatusTitle(row)">{{ row.resolved ? '✓' : '✗' }} {{ row.key }}</span>
+                      v-tooltip.top="layerStatusTitle(row)">{{ row.resolved ? '✓' : '✗' }} {{ row.key }}</span>
                   </div>
                 </div>
-                <button type="button" class="tool-btn" title="Save & open in Skin Layers"
+                <button type="button" class="tool-btn" v-tooltip.top="'Save & open in Skin Layers'"
                   @click.stop="jumpToLayer(row.id)">✎</button>
               </div>
             </template>
@@ -1363,7 +1425,7 @@ onBeforeUnmount(() => {
             <div>Set on the character but not defined in Attributes:</div>
             <div v-for="id in unknownAttributeIds" :key="id" class="pane-warning-row">
               <code>{{ id }} = {{ artLocal.attributes[id] }}</code>
-              <button type="button" class="tool-btn" title="Remove from this character"
+              <button type="button" class="tool-btn" v-tooltip.top="'Remove from this character'"
                 @click="setAttribute(id, null)">✕</button>
             </div>
           </div>
@@ -1371,7 +1433,7 @@ onBeforeUnmount(() => {
           <div class="row-list attr-list">
             <div v-if="previewHost" class="attr-columns attr-columns-head">
               <span>This entry (saved)</span>
-              <span title="The character's own value – what setAttribute() changes at runtime. Preview only, never saved.">
+              <span v-tooltip.top="'The character\'s own value – what setAttribute() changes at runtime. Preview only, never saved.'">
                 {{ previewHost.id }} (preview)</span>
             </div>
             <div v-for="row in visibleAttributeRows" :key="row.id" class="attr-row"
@@ -1379,9 +1441,9 @@ onBeforeUnmount(() => {
               <div class="attr-head">
                 <span class="row-id">{{ row.id }}</span>
                 <span v-if="row.stale" class="badge bad"
-                  title="The stored value is not one of the attribute's declared values – layers will not resolve">stale</span>
+                  v-tooltip.top="'The stored value is not one of the attribute\'s declared values – layers will not resolve'">stale</span>
                 <span v-if="previewHost && isPinned(row) && row.hostValue !== undefined" class="badge pin"
-                  :title="pinTitle(row)">overrides {{ previewHost.id }}</span>
+                  v-tooltip.top="pinTitle(row)">overrides {{ previewHost.id }}</span>
                 <span v-if="row.coreValue !== undefined && row.coreValue !== row.value" class="core-value-indicator">
                   (core: {{ row.coreValue }})</span>
               </div>
@@ -1390,7 +1452,7 @@ onBeforeUnmount(() => {
                   optionValue="value" showClear :filter="row.values.length > 8" placeholder="unset" size="small"
                   class="control-select" appendTo="body" @update:modelValue="(v: string | null) => setAttribute(row.id, v)" />
                 <span v-if="previewHost" class="preview-select-wrap"
-                  :title="isPinned(row) ? pinTitle(row) : row.previewed ? `Preview only – the template sets ${row.hostValue ?? 'nothing'}` : ''">
+                  v-tooltip.top="isPinned(row) ? pinTitle(row) : row.previewed ? `Preview only – the template sets ${row.hostValue ?? 'nothing'}` : ''">
                   <Select :modelValue="row.previewValue ?? null" :options="previewAttributeOptions(row)"
                     optionLabel="label" optionValue="value" :showClear="row.previewed" :filter="row.values.length > 8"
                     placeholder="unset" size="small" class="control-select preview-select"
@@ -1480,7 +1542,7 @@ onBeforeUnmount(() => {
 
             <div v-if="showFacePreview" class="face-preview">
               <div class="face-preview-circle">
-                <img v-if="usesStaticFace" :src="faceStaticValue!" class="face-preview-static" />
+                <img v-if="usesStaticFace" :src="faceStaticSrc!" class="face-preview-static" />
                 <div v-else class="face-preview-doll" :style="facePreviewDollStyle">
                   <img v-for="(image, index) in imageLayers" :key="index" :src="image" class="face-preview-image" />
                 </div>
@@ -1523,6 +1585,16 @@ onBeforeUnmount(() => {
               <Slider :modelValue="localScale" @update:modelValue="handleScaleChange" :min="0.1" :max="3" :step="0.01"
                 class="control-slider" />
             </div>
+
+            <!-- Tooltip on a wrapper: a disabled button gets no hover events. -->
+            <span v-tooltip.top="faceBakeTooltip" class="self-start">
+              <Button label="Bake crop to static face" icon="pi pi-camera" size="small"
+                :loading="faceBaking" :disabled="!faceBakePath || (!hasSpineForActiveView && !hasStaticForActiveView)"
+                @click="bakeFaceStatic" />
+            </span>
+            <p v-if="faceBakePath" class="hint small">Saves to <code>{{ faceBakePath }}</code>. The image is written
+              right away; the path is kept on Save.</p>
+            <p v-else class="hint small">Give the entry an id to bake its face.</p>
           </template>
           <p v-else class="hint">The face crop is taken from the default view – switch <b>View</b> to Default to
             edit it.</p>
@@ -1573,7 +1645,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Preview container -->
-      <div class="preview-container" ref="containerRef">
+      <div class="preview-container" :class="{ 'magenta-bg': magentaBackground }" ref="containerRef">
         <!-- No Layers / No Spine Message -->
         <div v-if="!hasSpineForActiveView && !hasStaticForActiveView" class="no-layers-message">
           <p class="warning-text">⚠️ Nothing renders for the <strong>{{ selectedView }}</strong> view yet.</p>
@@ -2161,6 +2233,10 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   position: relative;
   container-type: size;
+}
+
+.preview-container.magenta-bg {
+  background-color: #ff00ff;
 }
 
 .no-layers-message {

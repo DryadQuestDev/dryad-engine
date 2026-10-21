@@ -32,6 +32,42 @@ export interface Schemable {
 
 export type Schema = Record<string, Schemable>;
 
+/**
+ * Whether a field's `show` conditions hold for `data`: each names another field and the values
+ * that show this one (`$truthy` / `$falsy` for any set or unset value). In a mod, an unset value
+ * falls back to the core entry's. The form hides a field that fails, and drops its value.
+ */
+export function isFieldShown(show: Schemable['show'], data: Record<string, any> | null | undefined, coreData?: Record<string, any> | null): boolean {
+  if (!show || Object.keys(show).length === 0) return true;
+  if (!data) return false;
+  for (const key in show) {
+    const expected = show[key];
+    let actual = data[key];
+    if ((actual === undefined || actual === null) && coreData && typeof coreData === 'object') actual = coreData[key];
+    if (expected === '$truthy') { if (!actual) return false; continue; }
+    if (expected === '$falsy') { if (actual) return false; continue; }
+    if (!Array.isArray(expected) || !expected.includes(actual)) return false;
+  }
+  return true;
+}
+
+/**
+ * Delete the values of fields whose `show` conditions fail, as the form does when it renders
+ * them; nested objects too. List items are left alone: the form only drops what it renders.
+ */
+export function dropHiddenFields(data: any, schema: Schema, coreData?: any): void {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+  for (const key in schema) {
+    const field = schema[key];
+    if (!field) continue;
+    if (field.show && !isFieldShown(field.show, data, coreData)) {
+      delete data[key];
+      continue;
+    }
+    if (field.type === 'schema' && field.objects) dropHiddenFields(data[key], field.objects, coreData?.[key]);
+  }
+}
+
 // Helper types for the revised SchemaToType
 // Find keys for required properties
 type RequiredKeys<T extends Schema> = {

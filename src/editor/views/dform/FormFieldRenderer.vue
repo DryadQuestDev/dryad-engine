@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { PropType, computed, ref, watch } from 'vue';
-import { Schemable, Schema } from '../../../utility/schema';
+import { Schemable, Schema, isFieldShown } from '../../../utility/schema';
 import InputText from 'primevue/inputtext';
 import InputNumber from 'primevue/inputnumber';
 import FloatLabel from 'primevue/floatlabel';
@@ -336,40 +336,7 @@ const isIdDisabled = computed(() => {
   return props.fieldKey === 'id' && editor.disableId.value;
 });
 
-const isVisible = computed(() => {
-  const conditions = effectiveFieldSchema.value?.show; // Use effectiveFieldSchema here
-  if (!conditions || Object.keys(conditions).length === 0) {
-    return true; // Always show if no 'show' conditions
-  }
-  if (!props.formData) {
-    // console.warn(`[FormFieldRenderer] formData is null for field '${props.fieldKey.toString()}', cannot evaluate 'show' condition. Field will be hidden.`);
-    return false; // Hide if formData is not available to check conditions
-  }
-
-  for (const dependentFieldKey in conditions) { // Iterate over conditions from effectiveFieldSchema
-    const expectedValues = conditions[dependentFieldKey];
-    let actualValue = props.formData[dependentFieldKey];
-
-    // Fall back to core data if mod data is undefined or null
-    if ((actualValue === undefined || actualValue === null) && props.parentCoreDataItem && typeof props.parentCoreDataItem === 'object') {
-      actualValue = props.parentCoreDataItem[dependentFieldKey];
-    }
-
-    // Truthy/falsy sentinels (same convention as fromFileTypeAnd/Or filters)
-    if (expectedValues === '$truthy') { if (!actualValue) return false; continue; }
-    if (expectedValues === '$falsy') { if (actualValue) return false; continue; }
-
-    if (!Array.isArray(expectedValues)) {
-      // console.warn(`[FormFieldRenderer] Expected values for '${dependentFieldKey}' in 'show' condition of '${props.fieldKey.toString()}' is not an array. Field will be hidden.`);
-      return false;
-    }
-
-    if (!expectedValues.includes(actualValue)) {
-      return false;
-    }
-  }
-  return true;
-});
+const isVisible = computed(() => isFieldShown(effectiveFieldSchema.value?.show, props.formData, props.parentCoreDataItem));
 
 // --- Dynamic Filter Schema for build_filters logic ---
 // When pool field has logic: 'build_filters', generate dynamic schema for filters_include/filters_exclude

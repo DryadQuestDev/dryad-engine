@@ -21,6 +21,7 @@ import { Choice } from './core/content/choice';
 import { PoolEntryObject } from '../schemas/poolEntrySchema';
 import { ManifestObject } from '../schemas/manifestSchema';
 import { closePopupsByKey } from './views/popups/popupStore';
+import type { CallEntry } from '../utility/contentVocabulary';
 export class Game {
 
   // ============================================
@@ -598,7 +599,13 @@ export class Game {
     return Array.from(this.characterSystem.characters.value.values());
   }
 
-  public createCharacter(characterId: string, template: any, skipEvents: boolean = false): Character {
+  /**
+   * Create a character from a template (an id or a template object). The template can be left out when
+   * `characterId` is one of a template's declared instances: the instance's template and overrides are used.
+   * The character is not added to the game until `addCharacter()`.
+   * @example game.addCharacter(game.createCharacter('guard1'));
+   */
+  public createCharacter(characterId: string, template?: any, skipEvents: boolean = false): Character {
     return this.characterSystem.createCharacter(characterId, template, skipEvents);
   }
 
@@ -652,14 +659,19 @@ export class Game {
     this.characterSystem.deleteCharacter(character);
   }
 
-  public resetCharacter(character: Character | string): Character {
-    return this.characterSystem.resetCharacter(character);
+  /**
+   * Destroy a character and rebuild it from its template under the same id; party membership is kept.
+   * A declared template instance is rebuilt with its overrides, and is created when it does not exist yet.
+   * Pass templateId to rebuild as a different template.
+   */
+  public resetCharacter(character: Character | string, templateId?: string): Character {
+    return this.characterSystem.resetCharacter(character, templateId);
   }
 
   /**
    * Parse a generic `id<op>value` specification into a typed list of ops.
    */
-  public parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '>' | '<'; value: any }> {
+  public parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '+=' | '-='; value: any }> {
     return this.logicSystem.parseOpsSpec(data);
   }
 
@@ -982,8 +994,8 @@ export class Game {
   // PUBLIC API: Logic System (Conditions, Actions, Placeholders)
   // ============================================
 
-  public registerCondition(id: string, func: Function) {
-    this.logicSystem.registerCondition(id, func);
+  public registerCondition(id: string, func: Function, info?: CallEntry) {
+    this.logicSystem.registerCondition(id, func, info);
   }
 
   public registerAction(id: string, actionObject: ActionObject | Function) {
@@ -994,8 +1006,8 @@ export class Game {
     }
   }
 
-  public registerPlaceholder(id: string, func: Function) {
-    this.logicSystem.registerPlaceholder(id, func);
+  public registerPlaceholder(id: string, func: Function, info?: CallEntry) {
+    this.logicSystem.registerPlaceholder(id, func, info);
   }
 
   /**
@@ -1084,6 +1096,26 @@ export class Game {
   public openEncyclopediaForRecord(recordId: string): void {
     this.narrativeSystem.openInEncyclopedia(recordId);
     this.coreSystem.setState('progression_state', 'encyclopedia');
+  }
+
+  /** Returns the id of the first discovered encyclopedia record whose `character` is this template, or null. */
+  public getCharacterRecordId(templateId: string): string | null {
+    return this.narrativeSystem.getCharacterRecordId(templateId);
+  }
+
+  /** Returns true if the character template sits in a character gallery and the player has met the character. */
+  public isCharacterInGallery(templateId: string): boolean {
+    const galleryId = this.characterSystem.templatesMap.get(templateId)?.gallery?.gallery_id;
+    if (!galleryId || this.coreSystem.galleriesMap.get(galleryId)?.type !== 'characters') return false;
+    return this.coreSystem.isCharacterDiscovered(templateId);
+  }
+
+  /** Switches the progression UI to the Gallery's Characters tab with the given character selected. No-op if `isCharacterInGallery()` is false. */
+  public openGalleryForCharacter(templateId: string): void {
+    if (!this.isCharacterInGallery(templateId)) return;
+    this.coreSystem.galleryFocusCharacterId.value = templateId;
+    this.coreSystem.setState('gallery_tab', 'characters');
+    this.coreSystem.setState('progression_state', 'gallery');
   }
 
   public registerStatComputer(key: string, computer: StatComputerFunction): void {

@@ -33,9 +33,9 @@ Get all characters in the game.
 const allChars = game.getAllCharacters();
 ```
 
-### createCharacter(id, template, skipEvents?)
+### createCharacter(id, template?, skipEvents?)
 
-Create a character from a template object or registered template ID.
+Create a character from a template object or registered template ID. Leave the template out when the ID is a template's declared instance – its template and overrides are used: `game.addCharacter(game.createCharacter("guard2"))`.
 
 ```js
 // From a registered template ID
@@ -104,7 +104,7 @@ game.deleteCharacter(npc);      // Using Character instance
 
 Rebuild a character from a template under the same ID — a narratively fresh entity in the same role. Party membership is kept; statuses, resources, the private inventory and learned skills are discarded. Triggers `character_delete` then `character_create`. Returns the new character.
 
-When no character with that ID is live, the ID is treated as a template ID and the character is created — so content can guarantee a pristine character without knowing whether one exists yet (`auto_create: false` templates, or characters deleted earlier in the run). Throws when there is neither a live character nor a template.
+A template's declared instance is rebuilt with its overrides. When no character with that ID is live, it is created from its instance declaration, or else the ID is treated as a template ID – so content can guarantee a pristine character without knowing whether one exists yet (`auto_create: false` templates and instances, or characters deleted earlier in the run). Throws when there is neither a live character, an instance nor a template.
 
 ```js
 game.resetCharacter("orc");     // Using ID string
@@ -807,5 +807,6 @@ Skin layer data for rendering.
 | `masks` | `Record<string, any>?` | Mask polygons per attribute combo (`"polygon(x% y%, …)"` strings, same keys as `images`) |
 | `mask_mode` | `'hide' \| 'keep'?` | `hide` (default): layers below are hidden *inside* the polygon. `keep`: targeted layers are clipped *to* the polygon (CSS clip-path semantics — e.g. hair trimmed to fit under a hat). Keep-mode polygon coordinates are in the target layer's *image* space; the engine remaps them into the letterboxed doll element automatically |
 | `mask_targets` | `string[]?` | Layer ids the mask applies to. Empty = every layer below |
+| `blend_mode` | `'normal' \| 'screen' \| 'multiply' \| 'overlay' \| 'soft-light' \| 'lighten' \| 'darken' \| 'color-dodge' \| 'plus-lighter'?` | How the layer mixes with the character's layers below it, like a Photoshop blend mode (`normal` by default). It blends with that character only – never the background or another character |
 | `styles` | `string[]?` | Default CSS classes |
 | `tags` | `string[]?` | Tags for filtering |

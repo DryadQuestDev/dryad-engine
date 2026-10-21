@@ -45,6 +45,9 @@ When the character is created, the plugin automatically sets up the `xp` resourc
 
 // Award different amounts to specific characters
 { xp: "hero->100, mage->50" }
+
+// Award a battle's victory XP without its loot
+{ xp: "goblin_ambush" }
 ```
 
 **From scripts:**

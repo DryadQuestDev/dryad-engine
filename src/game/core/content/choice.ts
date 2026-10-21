@@ -116,7 +116,10 @@ export class Choice {
       Game.getInstance().dungeonSystem.addLog(label || this.name, true);
     }
 
-    Game.getInstance().logicSystem.resolveActions(this.params);
+    // A held-back flow (flow_advance_before) moved nothing, so a one-shot continue stays live.
+    if (!Game.getInstance().logicSystem.resolveActions(this.params)) {
+      this.spent = false;
+    }
   }
 
   public setParams(params: Record<string, any> | undefined) {

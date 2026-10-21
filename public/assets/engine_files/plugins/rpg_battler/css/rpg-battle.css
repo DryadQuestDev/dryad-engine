@@ -159,11 +159,18 @@
 
 /* ── Turn Order ── */
 
+/* Scrolls when a big fight (supports + six enemies + the wave tracker) outgrows a phone's height.
+   Centred by the list's auto margins rather than align-items: centring an overflowing list would
+   push its top out of reach of the scroll. */
 .rpg-turn-order {
   flex: 1;
+  min-height: 0;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
 }
 
 .rpg-turn-order-list {
@@ -171,6 +178,7 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  margin-block: auto;
 }
 
 .rpg-turn-order-entry {
@@ -209,15 +217,15 @@
 
 /* ── Ability Panel ── */
 
+/* Bound height so a long ability list scrolls instead of overflowing the viewport. Only the rows
+   scroll: the slot content above them (resource panels) and the tabs stay pinned. When the whole
+   panel scrolled, a phone's short screen showed the header plus two rows, and scrolling to the rest
+   took the tabs away with it. */
 .rpg-ability-panel {
   position: absolute;
   left: var(--rpg-ability-panel-left, 30%);
   top: 40%;
-  /* Bound height so a long ability list scrolls instead of overflowing the viewport. */
   max-height: calc(60dvh - 16px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -226,8 +234,84 @@
   padding: 8px;
 }
 
-.rpg-ability-panel::-webkit-scrollbar {
-  display: none;
+/* A short screen (landscape phone, tablet, 720p) left the rows ~100px under the pinned header at
+   top: 40%; near the top the panel fits a whole tab. 72px clears the folded battle log, whose ▼
+   button sits under the panel's left edge on narrower screens. The panel only covers what its
+   content is tall enough to reach, and the hide button folds it away for a look at the field. */
+@media (max-height: 720px) {
+  .rpg-ability-panel {
+    top: 72px;
+    /* cqh of .rpg-viewport, the letterboxed 16:9 box `top` is measured from: on an iPad it starts
+       62px down the screen, and a dvh cap ran the panel's last rows off the bottom. */
+    max-height: calc(100cqh - 80px);
+  }
+}
+
+/* Folds the panel away: sits just outside its top-right corner, over the field. */
+.rpg-ability-hide {
+  position: absolute;
+  top: 8px;
+  right: -26px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0 6px 6px 0;
+  background: rgba(0, 0, 0, 0.75);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rpg-ability-hide:hover {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.9);
+}
+
+/* The folded panel: one button where the panel's top-left corner was. */
+.rpg-ability-reveal {
+  position: absolute;
+  left: calc(var(--rpg-ability-panel-left, 30%) + 8px);
+  top: calc(40% + 8px);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid rgba(66, 185, 131, 0.45);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #e6edf3;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  animation: rpg-slide-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.rpg-ability-reveal:hover {
+  border-color: rgba(66, 185, 131, 0.8);
+}
+
+@media (max-height: 720px) {
+  .rpg-ability-reveal {
+    top: 80px;
+  }
+}
+
+.rpg-ability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
 }
 
 .rpg-ability-item {
@@ -268,12 +352,14 @@
   border-color: rgba(66, 185, 131, 0.4);
 }
 
-.rpg-ability-panel.panel-exit>* {
+.rpg-ability-panel.panel-exit>:not(.rpg-ability-list),
+.rpg-ability-panel.panel-exit .rpg-ability-list>* {
   animation: rpg-slide-out 0.15s cubic-bezier(0.55, 0, 1, 0.45) both;
   animation-delay: calc(var(--i, 0) * 0.03s);
 }
 
-.rpg-ability-panel>* {
+.rpg-ability-panel>:not(.rpg-ability-list),
+.rpg-ability-list>* {
   animation: rpg-slide-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   animation-delay: calc(var(--i, 0) * 0.04s);
 }
@@ -737,6 +823,11 @@
 
 .rpg-floating-text.death-defiance {
   color: #ffd54f;
+  font-style: italic;
+}
+
+.rpg-floating-text.merge {
+  color: #aed581;
   font-style: italic;
 }
 

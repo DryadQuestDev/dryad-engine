@@ -13,6 +13,8 @@ export interface StorageService {
     writeJson(filePath: string, data: any): Promise<void>;
     readText(filePath: string): Promise<string | null>;
     writeText(filePath: string, content: string): Promise<void>;
+    /** Writes raw bytes (an image the editor generated). Rejects on failure, unlike writeJson/writeText. */
+    writeBinary(filePath: string, data: Uint8Array): Promise<void>;
     listFiles(dirPath: string): Promise<string[]>;
     listFolders(dirPath: string): Promise<string[]>;
     listFilesRecursively(dirPath: string, assetFolders?: string[], ignoreEngineAssets?: boolean): Promise<string[]>;

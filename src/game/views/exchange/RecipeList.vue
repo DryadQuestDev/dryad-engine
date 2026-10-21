@@ -112,7 +112,11 @@ const selectedRecipeId = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 200px;
+  /* Scales down on short screens and never flex-shrinks: the inventory grid below is the part
+     that gives up height, so the list can't be squeezed to nothing while the grid keeps its own. */
+  flex-shrink: 0;
+  max-height: min(200px, 25vh);
+  max-height: min(200px, 25dvh);
   overflow-y: auto;
   padding: 4px;
   margin-bottom: 12px;

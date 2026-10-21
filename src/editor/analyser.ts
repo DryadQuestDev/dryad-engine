@@ -2,7 +2,7 @@ import { Global } from "../global/global";
 import { DungeonLine } from "../game/systems/dungeonSystem";
 import { DungeonEncounterObject } from "../schemas/dungeonEncounterSchema";
 import { DungeonRoomObject } from "../schemas/dungeonRoomSchema";
-import { Editor } from "../editor/editor";
+import { compareFileEntries, Editor } from "../editor/editor";
 import { ref, Ref } from "vue";
 import { DevEncountersDefaultObject } from "../schemas/devEncountersDefaultSchema";
 import { DungeonConfigObject } from "../schemas/dungeonConfigSchema";
@@ -160,7 +160,7 @@ export class Analyser {
         }
 
         console.log(this.dungeonRoomsMod);
-        await this.global.writeJson(this.editor.getDungeonPath('rooms'), this.dungeonRoomsMod);
+        await this.global.writeJson(this.editor.getDungeonPath('rooms'), this.dungeonRoomsMod.sort(compareFileEntries));
 
         this.global.addNotificationId("redundant_rooms_deleted");
 
@@ -204,7 +204,7 @@ export class Analyser {
             this.dungeonEncountersMod.push(newEncounter);
         }
 
-        await this.global.writeJson(this.editor.getDungeonPath('encounters'), this.dungeonEncountersMod);
+        await this.global.writeJson(this.editor.getDungeonPath('encounters'), this.dungeonEncountersMod.sort(compareFileEntries));
         this.global.addNotificationId("missing_encounters_created");
 
         // Clear the missing encounters list to update the UI
@@ -219,7 +219,7 @@ export class Analyser {
             }
         }
 
-        await this.global.writeJson(this.editor.getDungeonPath('encounters'), this.dungeonEncountersMod);
+        await this.global.writeJson(this.editor.getDungeonPath('encounters'), this.dungeonEncountersMod.sort(compareFileEntries));
 
         this.global.addNotificationId("redundant_encounters_deleted");
 

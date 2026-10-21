@@ -37,8 +37,17 @@ function toggleCharacterList() {
 const listEl = ref<HTMLElement | null>(null);
 watch(listEl, (el, _prev, onCleanup) => {
   if (!el) return;
-  const sortable = Sortable.create(el, {
+  // supportPointer is a real Sortable option that @types/sortablejs leaves out.
+  const options: Sortable.Options & { supportPointer?: boolean } = {
     animation: 150,
+    // On touch a drag needs a short hold, so a swipe scrolls the rail instead of reordering it.
+    delay: 200,
+    delayOnTouchOnly: true,
+    // The touch drag's ghost goes on <body>: inside the list it counted as a row, so every drop
+    // landed the member last. Touch events rather than pointer events: after a swipe-scroll, a
+    // pointer-driven hold never started a drag again until the next tap.
+    fallbackOnBody: true,
+    supportPointer: false,
     onEnd: (evt) => {
       const { item, from, oldIndex, newIndex } = evt;
       if (oldIndex == null || newIndex == null || oldIndex === newIndex) return;
@@ -53,7 +62,8 @@ watch(listEl, (el, _prev, onCleanup) => {
       from.insertBefore(item, from.children[oldIndex] ?? null);
       if (order.length === members.size) game.reorderParty(order);
     },
-  });
+  };
+  const sortable = Sortable.create(el, options);
   onCleanup(() => sortable.destroy());
 });
 
@@ -148,8 +158,10 @@ function onLeave(el: Element, done: () => void) {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  max-height: 95vh;
-  max-height: 95dvh;
+  /* The list starts below the tray's icon row, so a 95vh cap only fit on tall desktop screens; on
+     a phone the last face ran off the bottom. 4.5rem clears the icons (3rem on touch) and margin. */
+  max-height: calc(100vh - 4.5rem);
+  max-height: calc(100dvh - 4.5rem);
   overflow: auto;
 }
 

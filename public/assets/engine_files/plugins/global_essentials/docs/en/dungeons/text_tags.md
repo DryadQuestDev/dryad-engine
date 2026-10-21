@@ -120,6 +120,7 @@ Only [glow]one word[/glow] needs to shine.
 | `[flicker]…[/flicker]` | irregular blackouts, like a failing light |
 | `[blur]…[/blur]` | a soft, static blur (a filter, no motion) |
 | `[glitch]…[/glitch]` | sudden skews with split colour fringes |
+| `[freeze]…[/freeze]` | letters shiver once, frost over to ice and hold still – plays once, never loops |
 
 `[shake]The ground trembles beneath you.[/shake]`
 
@@ -161,10 +162,15 @@ Only [glow]one word[/glow] needs to shine.
 
 @en/images/text_effects/glitch.gif
 
+`[freeze]Time stops at a single word.[/freeze]`
+
+@en/images/text_effects/freeze.gif
+
 - Effects nest: the inner text carries every open effect.
 - Bold, italic, lore links and `|placeholders|` work inside an effect.
 - The backlog shows the text still; players who set their system to reduce motion see it still everywhere.
 - Restyle or add effects from game CSS: every effect is a `.fx-<name>` rule on `.fx-char` spans, which carry `--i`, the letter's index in the run.
+- `[freeze]` starts from white; set `--fx-freeze-from` on `.fx-char.fx-freeze` in game CSS to start it from another colour.
 - An inline icon (an `<img>` or an empty element such as a masked `<span>`) inside an effect moves with the letters around it.
 
 ### Custom effects

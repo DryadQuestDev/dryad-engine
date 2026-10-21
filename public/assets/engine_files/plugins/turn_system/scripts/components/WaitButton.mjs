@@ -9,6 +9,8 @@ const { computed, defineComponent } = vue;
 const WaitButton = defineComponent({
     setup() {
         const turn = computed(() => game.getState('turn') || 0);
+        // A frozen clock has nothing to wait for, so the button steps aside; the counter stays.
+        const frozen = computed(() => !!game.getState('freeze_timer'));
 
         const showCounter = computed(() =>
             !!game.getData('plugins_data/turn_system/config_turns')?.show_turn_counter);
@@ -20,10 +22,10 @@ const WaitButton = defineComponent({
             game.showNotification(game.getLine('turn_waited'));
         }
 
-        return { turn, showCounter, tooltip, wait };
+        return { turn, frozen, showCounter, tooltip, wait };
     },
     template: /*html*/`
-        <div class="toolbar-item icon_wait" v-tooltip.top="tooltip" @click="wait"></div>
+        <div v-if="!frozen" class="toolbar-item icon_wait" v-tooltip.top="tooltip" @click="wait"></div>
         <div v-if="showCounter" class="toolbar-item turn-counter" v-tooltip.top="tooltip">
             <span class="turn-counter-text">{{ turn }}</span>
         </div>

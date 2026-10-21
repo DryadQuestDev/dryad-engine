@@ -442,9 +442,11 @@ export class ItemSystem {
                 // Two keys rather than one with an injected "(xN)" clause: the count is a number
                 // the locale value places itself, so a translation can drop it, move it before the
                 // name, or write its own multiplier glyph.
+                // The flash footer runs through v-script, so the lore link renders as a hoverable item card.
+                const link = `[[item:${itemId}]]`;
                 const message = quantity > 1
-                    ? Global.getInstance().getString('item.added_quantity', { item: item.getName(), count: quantity })
-                    : Global.getInstance().getString('item.added_single', { item: item.getName() });
+                    ? Global.getInstance().getString('item.added_quantity', { item: link, count: quantity })
+                    : Global.getInstance().getString('item.added_single', { item: link });
                 this.game.dungeonSystem.addFlash(message);
             }
 
@@ -502,7 +504,7 @@ export class ItemSystem {
                 gameLogger.warn(`[remove_item] active stack "${item.id}" only held ${removed} (asked for ${amount})`);
             }
             gameLogger.info(`[remove_item] Removed active item "${item.id}"${removed > 1 ? ' x' + removed : ''}`);
-            if (removed > 0) this.flashRemoved(item.getName(), removed);
+            if (removed > 0) this.flashRemoved(item.id, removed);
             return;
         }
         if (typeof data === 'boolean') return;
@@ -543,7 +545,7 @@ export class ItemSystem {
             if (removed > 0) {
                 removedItems.push(`${itemId}${removed > 1 ? ' x' + removed : ''}${targetInventoryId !== PARTY_INVENTORY_ID ? ' from ' + targetInventoryId : ''}`);
                 // The party bag is the player's own; a chest or a merchant losing stock says nothing.
-                if (targetInventoryId === PARTY_INVENTORY_ID) this.flashRemoved(this.getItemNameHtml(itemId), removed);
+                if (targetInventoryId === PARTY_INVENTORY_ID) this.flashRemoved(itemId, removed);
             }
         }
 
@@ -553,11 +555,12 @@ export class ItemSystem {
     }
 
     // The `item.removed_*` scene flash — the mirror of add_item's `item.added_*`, so a story that
-    // takes something away says so where the pickup did.
-    private flashRemoved(itemName: string, count: number): void {
+    // takes something away says so where the pickup did, with the same hoverable item link.
+    private flashRemoved(itemId: string, count: number): void {
+        const link = `[[item:${itemId}]]`;
         const message = count > 1
-            ? Global.getInstance().getString('item.removed_quantity', { item: itemName, count })
-            : Global.getInstance().getString('item.removed_single', { item: itemName });
+            ? Global.getInstance().getString('item.removed_quantity', { item: link, count })
+            : Global.getInstance().getString('item.removed_single', { item: link });
         this.game.dungeonSystem.addFlash(message);
     }
 

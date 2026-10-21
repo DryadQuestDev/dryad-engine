@@ -43,6 +43,7 @@ The Debug Panel is visible automatically when playtesting your game from the Eng
 - **Flags** - View and modify game flags
 - **States** - Check current UI and game states
 - **Registry** - See all registered events, actions, conditions, placeholders, stat computers, and components
+- **Execute Actions** - Run any action object on the spot, e.g. `{flag: "door_open = 1", flash: "Opened"}`. It suggests and describes as you type, like the content editor (->dungeons.visual_editor): actions with their help, then the scenes, flags, characters and assets the game has now. **Ctrl+Space** suggests anywhere.
 
 ### Custom Debug Buttons
 

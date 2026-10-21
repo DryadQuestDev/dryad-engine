@@ -123,6 +123,18 @@ export class LocalhostStorageService implements StorageService {
         }
     }
 
+    async writeBinary(filePath: string, data: Uint8Array): Promise<void> {
+        const url = `${this.baseUrl}/engine/write-binary?path=${encodeURIComponent(filePath)}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: data as BodyInit
+        });
+        if (!response.ok) {
+            throw new Error(`Writing ${filePath} failed: HTTP ${response.status}`);
+        }
+    }
+
     async listFiles(dirPath: string): Promise<string[]> {
         const url = `${this.baseUrl}/engine/list-files?path=${encodeURIComponent(dirPath)}`;
         try {

@@ -2,6 +2,7 @@ import { computed } from 'vue';
 import { Game } from '../game';
 import { Global } from '../../global/global';
 import { gameLogger } from '../utils/logger';
+import type { RefSpec, ValueSpec } from '../../utility/contentVocabulary';
 import { Character } from '../core/character/character';
 import { AssetObject } from '../../schemas/assetSchema';
 import { CharacterSceneSlotObject } from '../../schemas/characterSceneSlotSchema';
@@ -102,10 +103,23 @@ export const CORE_EMITTER_SIGNATURES = {
     // fires when a scene is about to exit (last-paragraph click, {exit} action, playScene(null)).
     // Return false to cancel the exit — e.g. a battle system playing a close animation first.
     "scene_exit_before": (skipEvents: boolean): boolean | void => { },
+    // fires when the story is about to move on: an action batch is about to run its delayed actions —
+    // the ones that move the flow (scene, exit, enter, battle, loot…). A paragraph parks its own until
+    // the continue click, so in a scene this is the moment the player leaves a paragraph; on the map, a
+    // choice or a room's enter actions that move. A batch with nothing to move fires nothing (a choice
+    // that only sets a flag). `actions` is that delayed subset keyed by action id; the batch's other
+    // actions have already run. Return false to hold the flow where it is — none of them run.
+    "flow_advance_before": (actions: Record<string, any>): boolean | void => { },
+    // fires when a gallery replay is about to play its scene: the game is saved for the replay and
+    // replay_mode is on, so anything a listener changes is undone on leaving replay mode. Not cancellable.
+    "scene_replay_before": (sceneId: string, dungeonId: string): boolean | void => { },
     "event_end": (): boolean | void => { },
 
     "character_create": (character: Character): boolean | void => { },
     "character_resource_change": (character: Character, statId: string, oldValue: number, newValue: number): boolean | void => { },
+    // fires after setTrait changes a trait's value – the {trait} action and scripts alike. Not cancellable.
+    // Like every game event it stays silent while a save loads or migrates.
+    "character_trait_change": (character: Character, traitId: string, oldValue: any, newValue: any): boolean | void => { },
     //"character_update": (character: Character): boolean | void => { },
     "character_delete": (character: Character): boolean | void => { },
     "character_join_party": (character: Character): boolean | void => { },
@@ -129,6 +143,11 @@ export const CORE_EMITTER_SIGNATURES = {
     // computed, so writing reactive state from a listener risks a render loop, and the copy
     // is discarded rather than staged or saved.
     "asset_resolve": (asset: AssetObject): boolean | void => { },
+    // fires once, the first time the gallery shows an asset, with a throwaway copy and the skins and
+    // animations the player has seen on it. The gallery never stages, so asset_render never dresses
+    // it: listeners set the starting look here (skins, animation, slot_colors), which the gallery's
+    // pickers then show as selected. The player's own picks replace it.
+    "gallery_asset_preview": (asset: AssetObject, seen: { skins: string[], animations: string[] }): boolean | void => { },
 
     "item_create": (item: Item): boolean | void => { },
     // fires for every inventory item the save-migration pass visits, right after its template-owned
@@ -187,6 +206,17 @@ export const CORE_EMITTER_SIGNATURES = {
     "status_expired": (character: Character, status: Status, instance: StatusInstance): boolean | void => { }, // triggered per expired instance when tickStatusDuration drops its duration to <= 0
 };
 
+// Value pieces several built-in actions share (ValueSpec in contentVocabulary).
+const CHARACTER: RefSpec = { ref: 'character' };
+const ITEMS: ValueSpec = { list: { pair: [{ ref: 'item_templates', count: true }, 'any'], optional: true } };
+const CHAR_KEYS = {
+    attribute: { ref: 'attribute' },
+    trait: { ref: 'character_traits' },
+    stat: { ref: 'character_stats' },
+    resource: { ref: 'character_stats' },
+    skinStyle: 'any',
+} satisfies Record<string, ValueSpec>;
+
 /**
  * InitSystem - Centralized registration system for all game components, actions, states, etc.
  *
@@ -211,6 +241,19 @@ export class InitSystem {
         this.registerPlaceholders();
         this.registerActions();
         this.registerStatComputers();
+    }
+
+    /**
+     * Register only what content names: states, conditions, placeholders and actions, with their
+     * help and values. The editor runs this against a recorder that has nothing but the four
+     * game.register* methods, so registration-time code here must only register: anything else
+     * belongs inside the handlers.
+     */
+    public registerContentVocabulary(): void {
+        this.registerStates();
+        this.registerConditions();
+        this.registerPlaceholders();
+        this.registerActions();
     }
 
     // ============================================
@@ -742,7 +785,7 @@ export class InitSystem {
             }
 
             return property.currentValue;
-        });
+        }, { help: 'A property\'s value.', args: [{ ref: 'properties', root: true }], examples: ['_property(gold) > 100', '_property(settings.volume) > 50'] });
 
         // Returns boolean: whether a room has been visited
         // Usage: _room_visited(dungeon1.room5) = true (explicit dungeon)
@@ -758,20 +801,20 @@ export class InitSystem {
                 itemId = parts[1];
             }
             return this.game.itemSystem.getInventory(inventoryId)?.getItemQuantity(itemId) ?? 0;
-        });
+        }, { help: 'How many of an item the party carries; inventory.item counts another inventory.', args: ['any'], examples: ['_item_count(pickaxe) > 0', '_item_count(chest.gold) >= 100'] });
 
         // Whether the last choose_item pick was this template id ('' after a cancel).
         // Usage: if{_chosen_item(key_mansion) = false}{redirect: "shift:1"} fi{}
         this.game.registerCondition("_chosen_item", (param: string) => {
             return this.game.getState('chosen_item_id') === param;
-        });
+        }, { help: 'Whether the last item pick was this item.', args: [{ ref: 'item_templates' }], examples: ['_chosen_item(rusty_key) = true'] });
 
         // Usage: _in_party(ane) = true — whether a character is currently in the party.
         // A companion's own optional line is the `ane!:` speaker tag (resolveTalkingCharacter);
         // this condition covers everything else, e.g. a line that plays only when Ane is away.
         this.game.registerCondition("_in_party", (charId: string) => {
             return this.game.getParty().some(c => c.id === String(charId ?? '').trim());
-        });
+        }, { help: 'Whether a character is in the party.', args: [CHARACTER], examples: ['_in_party(alice) = true'] });
 
         this.game.registerCondition("_room_visited", (param: string) => {
             let dungeonId: string;
@@ -795,19 +838,19 @@ export class InitSystem {
                 throw new Error(`[_room_visited]: Dungeon data for ${dungeonId} not found`);
             }
             return dungeonData.isRoomVisited(roomId);
-        });
+        }, { help: 'Whether a room was ever visited.', args: [{ ref: 'room' }], examples: ['_room_visited(room5) = true', '_room_visited(dungeon1.room5) = true'] });
 
         // Returns the id of the room the player was in immediately before the current one ('' if
         // none yet). Unlike _room_visited (ever visited), this is the room just left — gate entry
         // flavor on which door you came through. Usage: if{_previous_room = 19}...fi{}
         this.game.registerCondition("_previous_room", () => {
             return this.game.dungeonSystem.previousRoomId.value ?? '';
-        });
+        }, { help: 'The room the player was in just before this one.', examples: ['_previous_room = 19'] });
 
         // Returns the id of the room the player stands in. Usage: if{_room = room5}...fi{}
         this.game.registerCondition("_room", () => {
             return this.game.dungeonSystem.currentRoomId.value ?? '';
-        });
+        }, { help: 'The room the player is in.', examples: ['_room = room5'] });
 
         // Returns boolean: whether that choice was ever picked. The id is the choice's line id, with
         // its dungeon in front to ask about another one: _choice_visited(dungeon2.~1.intro.3.1).
@@ -822,19 +865,19 @@ export class InitSystem {
             const dungeonId = match[1] || this.game.dungeonSystem.currentDungeonId.value!;
             const data = this.game.dungeonSystem.dungeonDatas.value.get(dungeonId);
             return !!data && data.visitedChoices.has(match[2]);
-        });
+        }, { help: 'Whether a choice was ever picked, by its line id.', args: ['any'], examples: ['_choice_visited(~1.intro.3.1) = true'] });
 
         // Returns boolean: whether a scene is active
         // Usage: _scene = true  or  _scene() = true
         this.game.registerCondition("_scene", () => {
             return !!this.game.dungeonSystem.currentSceneId.value;
-        });
+        }, { help: 'Whether a scene is playing.', examples: ['_scene = true'] });
 
         // Returns the currently selected character ID
         // Usage: _selected_character = alice  or  _selected_character() = alice
         this.game.registerCondition("_selected_character", () => {
             return this.game.getState('selected_character');
-        });
+        }, { help: 'The selected character\'s id.', examples: ['_selected_character = alice'] });
 
 
         // Returns boolean: whether a character has an item equipped
@@ -854,7 +897,7 @@ export class InitSystem {
                 return equippedItems.some(item => item.uid === activeUid);
             }
             return equippedItems.some(item => item.id === itemId);
-        });
+        }, { help: 'Whether a character has an item equipped; without an item, the active one.', args: [CHARACTER, { ref: 'item_templates' }], examples: ['_item_on(alice, sword) = true', '_item_on(alice) = true'] });
 
         // Returns boolean: whether the ACTIVE item (the one whose custom choice opened the current
         // scene) is of this template id. Usage: _active_item(rusty_key) = true
@@ -863,7 +906,7 @@ export class InitSystem {
             if (!uid) return false;
             const inventory = this.game.itemSystem.getInventory(this.game.getState('active_inventory') || PARTY_INVENTORY_ID);
             return inventory?.getItemByUid(uid)?.id === String(itemId ?? '').trim();
-        });
+        }, { help: 'Whether the active item is this item.', args: [{ ref: 'item_templates' }], examples: ['_active_item(rusty_key) = true'] });
 
         // Returns the slot type the active item is equipped in on that character ('' while it isn't).
         // Usage: _active_item_slot(alice) = ring
@@ -876,7 +919,7 @@ export class InitSystem {
                 return '';
             }
             return character.getItemSlots().find(slot => slot.itemUid === uid)?.slotId || '';
-        });
+        }, { help: 'The slot type the active item is equipped in on that character.', args: [CHARACTER], examples: ['_active_item_slot(alice) = ring'] });
 
         // Returns boolean: whether anything is equipped in that slot (slot type or slot instance id).
         // Usage: _slot_filled(alice, helmet) = false
@@ -888,7 +931,7 @@ export class InitSystem {
             }
             const slot = String(slotId ?? '').trim();
             return character.getItemSlots().some(s => (s.slotId === slot || s.id === slot) && !!s.itemUid);
-        });
+        }, { help: 'Whether anything is equipped in that slot.', args: [CHARACTER, 'any'], examples: ['_slot_filled(alice, helmet) = false'] });
 
 
         // Returns a character property value by path
@@ -951,7 +994,7 @@ export class InitSystem {
                 gameLogger.error(`[_char] Error getting ${type}.${key} for character "${charId}": ${error}`);
                 return undefined;
             }
-        });
+        }, { help: 'A character\'s attribute, trait, stat, resource or skin style.', args: [{ ref: 'character', root: true }], examples: ['_char(alice.stat.strength) > 10', '_char(alice.attribute.sex) = female'] });
 
         // Returns the learned level of a skill (0 if not learned)
         // Usage: _skill(alice.fire_magic.fireball) > 0  (check if learned)
@@ -992,7 +1035,7 @@ export class InitSystem {
                 s => s.skillTreeId === treeId && s.id === slotId
             );
             return learned?.level || 0;
-        });
+        }, { help: 'A skill\'s learned level.', args: ['any'], examples: ['_skill(alice.fire_magic.fireball) > 0', '_skill(fire_magic.fireball) >= 3'] });
 
         // Does the character currently have an ability? 1 if yes, 0 if not. Reads the FINAL ability
         // set, so status-granted and item-granted abilities count, and one hidden behind an unmet
@@ -1027,7 +1070,7 @@ export class InitSystem {
             }
 
             return character.getAbility(abilityId) ? 1 : 0;
-        });
+        }, { help: 'Whether a character has an ability: 1 or 0.', args: ['any'], examples: ['_ability(mc.fireball) = 1'] });
 
     }
 
@@ -1049,7 +1092,7 @@ export class InitSystem {
         this.game.registerPlaceholder("flag", (flagName: string) => {
             let flag = this.game.dungeonSystem.getFlag(flagName);
             return flag;
-        });
+        }, { help: 'A flag\'s value.', args: ['any'], examples: ['|flag(visits)|'] });
 
         // Usage: |item(itemUid, inventoryId)|
         //        |item| — no args: the ACTIVE item (the one whose custom choice opened the scene)
@@ -1070,7 +1113,7 @@ export class InitSystem {
             const rarityClasses = item.getRarityClasses();
             if (!rarityClasses.length) return name;
             return `<span class='rarity ${rarityClasses.join(' ')}'>${name}</span>`;
-        });
+        }, { help: 'An item\'s name; without arguments, the active item\'s.', args: ['any', 'any'], examples: ['|item|'] });
 
         // Usage: |property(propertyId)| or |property(propertyId.nested.path)|
         this.game.registerPlaceholder("property", (path: string) => {
@@ -1092,15 +1135,19 @@ export class InitSystem {
             if (value === undefined || value === null) return "";
             if (typeof value === 'object') return JSON.stringify(value);
             return String(value);
-        });
+        }, { help: 'A property\'s value.', args: [{ ref: 'properties', root: true }], examples: ['|property(gold)|'] });
 
-        // Usage: |stat(statId)| — requires context.character passed to resolveString
+        // Usage: |stat(statId)| — reads context.stats first (a status card for a status nobody holds
+        // passes the status's own stats), else context.character's stat
         this.game.registerPlaceholder("stat", (statId: string) => {
-            const char = this.game.getResolveContext()?.character;
+            const ctx = this.game.getResolveContext();
+            const own = ctx?.stats?.[statId];
+            if (own != null) return String(own);
+            const char = ctx?.character;
             if (!char) return "";
             const val = char.getStat(statId);
             return val != null ? String(val) : "";
-        });
+        }, { help: 'A stat of the character in context.', args: [{ ref: 'character_stats' }], examples: ['|stat(strength)|'] });
 
         // Shared: parse key->value args, resolve a locale entry through the full pipeline
         const resolveLocale = (localeId: string, args: string[]): string => {
@@ -1116,7 +1163,7 @@ export class InitSystem {
         // Usage: |from(localeId)| or |from(localeId, name->Elf, species->minotaur)|
         this.game.registerPlaceholder("from", (localeId: string, ...args: string[]) => {
             return resolveLocale(localeId, args);
-        });
+        }, { help: 'A locale line, with name->value substitutions.', args: ['any'], examples: ['|from(greeting, name->Elf)|'] });
 
         // Usage: |pick(baseId)| or |pick(baseId, name->Elf)|
         // Randomly selects from numbered locale variants: baseId, baseId_2, baseId_3, ...
@@ -1130,7 +1177,7 @@ export class InitSystem {
             }
             const chosen = variants[Math.floor(Math.random() * variants.length)];
             return resolveLocale(chosen, args);
-        });
+        }, { help: 'A random numbered variant of a locale line.', args: ['any'], examples: ['|pick(greeting)|'] });
     }
 
     // ============================================
@@ -1152,6 +1199,9 @@ export class InitSystem {
      */
     private registerCoreActions(): void {
         this.game.registerAction("notification", {
+            help: 'Show a notification popup.',
+            value: 'text',
+            examples: ['{notification: "The gate creaks open."}'],
             action: (text: string) => {
                 Global.getInstance().addNotification(text);
             }
@@ -1160,6 +1210,9 @@ export class InitSystem {
         this.game.registerAction("flash", {
             // Accepts a plain string or `{ text, class? }` — the object form wraps the text in
             // <span class="..."> so callers can use e.g. `.flash-small` for a gray sub-line.
+            help: 'Show a short message under the text; the object form gives it a CSS class.',
+            value: { oneOf: ['text', { fields: { text: 'text', class: 'any' } }] },
+            examples: ['{flash: "Item received!"}', '{flash: {text: "a small note", class: "flash-small"}}'],
             action: (value: string | { text: string; class?: string }) => {
                 if (typeof value === 'string') {
                     this.game.dungeonSystem.addFlash(value);
@@ -1173,12 +1226,18 @@ export class InitSystem {
         // {reveal_room: "3, 4"} — mark rooms explored without entering them (`dungeon.room` for
         // another dungeon). Their fog lifts and their neighbors show, but no room events run.
         this.game.registerAction("reveal_room", {
+            help: 'Mark rooms explored without entering them: their fog lifts and their neighbors show.',
+            value: { list: { ref: 'room' } },
+            examples: ['{reveal_room: "3, 4"}', '{reveal_room: "dungeon2.room3"}'],
             action: (spec: string) => {
                 this.game.dungeonSystem.revealRooms(spec);
             }
         });
 
         this.game.registerAction("lore", {
+            help: 'Mark lore records discovered.',
+            value: { list: { ref: 'records' } },
+            examples: ['{lore: "kingdom_of_luminaria"}', '{lore: "goblins, orcs, trolls"}'],
             action: (data: string) => {
                 for (const id of data.split(',').map(s => s.trim()).filter(Boolean)) {
                     this.game.narrativeSystem.discoverRecord(id);
@@ -1192,6 +1251,9 @@ export class InitSystem {
         // prefix (performChoiceModifier resolves modifier-built nameComputed labels too).
         // No `action` — the choice can never be picked.
         this.game.registerAction("wip", {
+            help: 'Mark a choice as unwritten: greyed out with a [wip] label.',
+            value: 'boolean',
+            examples: ['{wip: true}'],
             choiceModifier: (choice: Choice) => {
                 choice.name = `[wip] ${choice.name}`;
                 choice.isAvailable = computed(() => false);
@@ -1203,6 +1265,9 @@ export class InitSystem {
         // enforcement). Reactive: getInventory returns the reactive proxy, so maxWeight and item
         // weight both drive it. No-op unless a game caps the party inventory.
         this.game.registerAction("enc_sensitive", {
+            help: 'Grey the choice out while the party carries too much.',
+            value: 'boolean',
+            examples: ['{enc_sensitive: true}'],
             choiceModifier: (choice: Choice) => {
                 choice.isAvailable = computed(
                     () => !this.game.itemSystem.getInventory(PARTY_INVENTORY_ID)?.isOverCapacity()
@@ -1231,21 +1296,15 @@ export class InitSystem {
         // String format: "propId=value" (set), "propId>value" (add), "propId<value" (subtract)
         // Object format: { propertyId: value } or { propertyId: { op: "add", value: 10 } }
         this.game.registerAction("property", {
+            help: 'Change game properties: = sets, += adds, -= subtracts.',
+            value: { oneOf: [{ ops: { key: { ref: 'properties', root: true } } }, 'any'] },
+            examples: ['{property: "gold += 100"}', '{property: "score = 0, gold -= 5"}'],
             action: (data: string | Record<string, any>) => {
                 const modifiedProps: string[] = [];
 
                 if (typeof data === 'string') {
-                    // Parse string format: "propId=value, propId2>10"
-                    const parts = data.split(',').map(s => s.trim());
-                    for (const part of parts) {
-                        // Match: propertyId followed by operator (=, >, <) and value
-                        const match = part.match(/^([^=><]+)([=><])(.+)$/);
-                        if (!match) {
-                            gameLogger.error(`[property] Invalid format: "${part}". Use "propId=value", "propId>value", or "propId<value"`);
-                            continue;
-                        }
-
-                        const [, propId, op, rawValue] = match;
+                    // "propId = value, propId2 += 10"
+                    for (const { id: propId, op, value: rawValue } of this.game.logicSystem.parseOpsSpec(data)) {
                         const property = this.game.coreSystem.properties.value.get(propId.trim());
                         if (!property) {
                             gameLogger.error(`[property] Property "${propId}" not found`);
@@ -1268,10 +1327,10 @@ export class InitSystem {
                         if (op === '=') {
                             property.currentValue = value;
                             modifiedProps.push(`${propId}=${value}`);
-                        } else if (op === '>' && property.type === 'number') {
+                        } else if (op === '+=' && property.type === 'number') {
                             property.addCurrentValue(value);
                             modifiedProps.push(`${propId}+=${value}`);
-                        } else if (op === '<' && property.type === 'number') {
+                        } else if (op === '-=' && property.type === 'number') {
                             property.addCurrentValue(-value);
                             modifiedProps.push(`${propId}-=${value}`);
                         } else {
@@ -1298,6 +1357,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("state", {
+            help: 'Set game states.',
+            value: { oneOf: [{ ops: { key: { ref: 'state' } } }, 'any'] },
+            examples: ['{state: "disable_ui=true"}', '{state: "game_state=battle, disable_ui=true"}'],
             action: (data: string | Record<string, any>) => {
                 const updatedStates: string[] = [];
                 if (typeof data === 'string') {
@@ -1334,6 +1396,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("popup", {
+            help: 'Open a popup; !id closes that one, false closes them all.',
+            value: { oneOf: [{ list: { ref: 'any', remove: true } }, 'boolean'] },
+            examples: ['{popup: "my_popup"}', '{popup: "!my_popup"}', '{popup: false}'],
             action: (popupId: string | false) => {
                 if (popupId === false) {
                     this.game.closeAllPopups();
@@ -1353,12 +1418,18 @@ export class InitSystem {
      */
     private registerDungeonActions(): void {
         this.game.registerAction("music", {
+            help: 'Play background music; ! stops it, false returns to the dungeon\'s own music.',
+            value: { oneOf: [{ ref: 'music', stop: true, paths: true, props: ['volume', 'fade_in', 'fade_out', 'shuffle'] }, 'boolean'] },
+            examples: ['{music: "battle_theme"}', '{music: "battle_theme(fade_in=3, volume=0.6)"}', '{music: "!(fade_out=4)"}', '{music: false}'],
             action: (music: string) => {
                 this.game.setMusic(music);
             }
         });
 
         this.game.registerAction("sound", {
+            help: 'Play sound effects; !id stops one, false stops them all.',
+            value: { oneOf: [{ list: { ref: 'sounds', remove: true, paths: true, props: ['volume', 'fade_in', 'fade_out', 'delay'] } }, 'boolean'] },
+            examples: ['{sound: "sword_slash"}', '{sound: "rain(volume=0.4, fade_in=2)"}', '{sound: "!rain(fade_out=3)"}'],
             action: (sound: string | false) => {
                 // {sound: false} stops everything currently playing, mirroring {asset: false}
                 if (!sound) {
@@ -1383,6 +1454,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("asset", {
+            help: 'Stage, update or remove assets. false removes all, clear keeps the backdrop, reset re-stages the defaults.',
+            value: { oneOf: [{ list: { ref: 'assets', remove: true, props: true }, words: ['false', 'clear', 'reset'] }, { fields: { id: { ref: 'assets' } } }, 'boolean'] },
+            examples: ['{asset: "forest(bg=true), pic1"}', '{asset: "!pic1"}', '{asset: "clear"}'],
             action: (data: string | (Partial<AssetObject> & { id: string })) => {
                 if (!data) {
                     this.game.dungeonSystem.assets.value = [];
@@ -1466,6 +1540,9 @@ export class InitSystem {
         this.game.registerAction("grade", {
             // Neither eventDelayed nor onGameLoad: the grade should change as the paragraph renders
             // (like music/asset), and the saved value is what restores it on load.
+            help: 'Color-grade the scene by preset; #N sets the strength, false clears it.',
+            value: { oneOf: [{ ref: 'grade_presets', count: true, words: ['false', 'none'] }, { fields: { preset: { ref: 'grade_presets' } } }, 'boolean'] },
+            examples: ['{grade: "night"}', '{grade: "night#0.5"}', '{grade: false}'],
             action: (data: string | boolean | Record<string, any>) => {
                 this.game.setGrade(data);
             }
@@ -1474,6 +1551,9 @@ export class InitSystem {
         // {ambient: "fireflies"} / "motes" / "embers" / "fireflies#0.5" / false. Same timing as grade:
         // it changes as the paragraph renders, and the saved value restores it on load.
         this.game.registerAction("ambient", {
+            help: 'Particles over the scene backgrounds; #N sets the density, false clears them.',
+            value: { oneOf: [{ ref: 'ambient_kinds', count: true, words: ['false', 'none'] }, 'boolean'] },
+            examples: ['{ambient: "fireflies"}', '{ambient: "embers#1.5"}', '{ambient: false}'],
             action: (data: string | boolean) => {
                 this.game.setAmbient(data);
             }
@@ -1483,6 +1563,9 @@ export class InitSystem {
         // The same thing rides in actor props as `anim=` ("chimera(anim=lunge)"). Not saved and not
         // re-run on load — a lunge happens once, when its paragraph plays.
         this.game.registerAction("animate", {
+            help: 'Play a one-shot actor animation.',
+            value: { list: { pair: [CHARACTER, { ref: 'actor_animations', props: ['intensity', 'duration'] }], sep: ' ' } },
+            examples: ['{animate: "chimera lunge"}', '{animate: "chimera lunge, mc recoil(intensity=1.3)"}'],
             action: (data: string) => {
                 for (const spec of this.game.logicSystem.getParts(String(data ?? ''))) {
                     const m = spec.trim().match(/^([\w-]+)\s+([\w-]+)\s*(?:\(([^)]*)\))?$/);
@@ -1504,6 +1587,9 @@ export class InitSystem {
         // {screen_shake: 0.5} — shake the scene art (background + actors); the dialogue stays still.
         // true = default strength; {intensity, duration} for control. One-shot, never saved.
         this.game.registerAction("screen_shake", {
+            help: 'Shake the scene art once.',
+            value: 'any',
+            examples: ['{screen_shake: true}', '{screen_shake: 0.5}', '{screen_shake: {intensity: 1, duration: 0.6}}'],
             action: (data: number | boolean | { intensity?: number; duration?: number }) => {
                 if (data === false) return;
                 if (typeof data === 'object' && data) this.game.dungeonSystem.screenShake(data.intensity ?? 0.5, data.duration ?? 0.45);
@@ -1514,6 +1600,9 @@ export class InitSystem {
         // {screen_flash: "red"} — a colour pulse over the scene art that returns to the current grade.
         // "red", "white", or any grade preset ("infernal#0.7"); {color, duration} for control.
         this.game.registerAction("screen_flash", {
+            help: 'Pulse the scene art to a color and back.',
+            value: { oneOf: [{ ref: 'flash_presets', count: true }, { fields: { color: { ref: 'flash_presets' } } }] },
+            examples: ['{screen_flash: "red"}', '{screen_flash: "white#0.6"}', '{screen_flash: {color: "red", duration: 0.8}}'],
             action: (data: string | boolean | { color?: string; duration?: number }) => {
                 if (data === false) return;
                 if (typeof data === 'object' && data) this.game.dungeonSystem.screenFlash(data.color ?? 'red', data.duration ?? 0.5);
@@ -1522,12 +1611,18 @@ export class InitSystem {
         });
 
         this.game.registerAction("flag", {
+            help: 'Set flags: = sets, += adds, -= subtracts. Flags hold numbers.',
+            value: { oneOf: [{ ops: { key: { ref: 'flag' }, value: 'number' } }, 'any'] },
+            examples: ['{flag: "met_riko = 1"}', '{flag: "visits += 1"}', '{flag: "dungeon2.gate_open = 1"}'],
             action: (data: string | Record<string, any>) => {
                 this.game.dungeonSystem.processFlagAction(data);
             }
         });
 
         this.game.registerAction("exit", {
+            help: 'End the current scene.',
+            value: 'any',
+            examples: ['{exit: true}'],
             eventDelayed: true,
             action: () => {
                 this.game.dungeonSystem.exitScene();
@@ -1535,6 +1630,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("enter", {
+            help: 'Enter a room of this dungeon or another.',
+            value: { ref: 'room', fatal: true },
+            examples: ['{enter: "room5"}', '{enter: "ancient_cave.room10"}'],
             eventDelayed: true,
             action: (id: string) => {
                 this.game.dungeonSystem.enter(id);
@@ -1542,6 +1640,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("scene", {
+            help: 'Play a scene.',
+            value: 'scene',
+            examples: ['{scene: "intro"}', '{scene: "2.cave_mouth"}', '{scene: "&campfire"}'],
             eventDelayed: true,
             action: (value: string) => {
                 let { sceneId, dungeonId } = this.game.dungeonSystem.resolveSceneId(value);
@@ -1552,12 +1653,18 @@ export class InitSystem {
         });
 
         this.game.registerAction("redirect", {
+            help: 'Jump to a scene instead of this paragraph.',
+            value: 'scene',
+            examples: ['{redirect: "&alt_scene"}', '{redirect: "shift:1"}'],
             action: (value: string) => {
                 this.game.logicSystem.resolveActions({ scene: value });
             }
         });
 
         this.game.registerAction("choices", {
+            help: 'Offer the choices of another scene.',
+            value: 'scene',
+            examples: ['{choices: "&talk_hub"}'],
             onGameLoad: true,
             action: (value: string) => {
                 let { sceneId, dungeonId } = this.game.dungeonSystem.resolveSceneId(value);
@@ -1576,6 +1683,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("choices_over", {
+            help: 'Offer another scene\'s choices instead of this scene\'s own ~ choices.',
+            value: 'scene',
+            examples: ['{choices_over: "&talk_hub"}'],
             onGameLoad: true,
             action: (value: string) => {
                 let { sceneId, dungeonId } = this.game.dungeonSystem.resolveSceneId(value);
@@ -1592,6 +1702,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("actor", {
+            help: 'Stage, move or remove actors. false removes all at once, clear with exit animations.',
+            value: { oneOf: [{ list: { pair: [{ ref: 'character', remove: true, props: true }, { ref: 'character_slot_templates', props: true, newWith: ['x', 'y'] }], optional: true }, words: ['false', 'clear'] }, { fields: { char: CHARACTER, slot: { ref: 'character_slot_templates' } } }, 'boolean'] },
+            examples: ['{actor: "alice->pos5, bob->pos9"}', '{actor: "alice->pos5(enter=fade)"}', '{actor: "!alice"}', '{actor: "clear"}'],
             action: (data: string | (Partial<CharacterSceneSlotObject> & { char: string })) => {
                 // if data is empty, remove all actors with exit animations
                 if (!data) {
@@ -1714,6 +1827,9 @@ export class InitSystem {
         // Scene-scoped, so it clears when the actors do. Staged actors are listed automatically and
         // do not need this; listing one anyway is harmless (the panel de-duplicates).
         this.game.registerAction("panel_actor", {
+            help: 'List characters in the actor panel without staging them; !id removes, false clears.',
+            value: { oneOf: [{ list: { ref: 'character', remove: true } }, 'boolean'] },
+            examples: ['{panel_actor: "alice, bob"}', '{panel_actor: "!alice"}'],
             action: (data: string | boolean) => {
                 const dungeonSystem = this.game.dungeonSystem;
                 if (data === false) {
@@ -1745,6 +1861,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("quest", {
+            help: 'Add quest log entries.',
+            value: { list: { ref: 'quest_log' } },
+            examples: ['{quest: "main_quest.goal1.log1"}', '{quest: "dungeon2.main_quest.goal1.log2"}'],
             action: (questPath: string) => {
                 // Support multiple quest logs separated by commas
                 const questPaths = questPath.split(",").map(p => p.trim());
@@ -1853,28 +1972,33 @@ export class InitSystem {
     private registerCharacterActions(): void {
 
 
-        this.game.registerAction("party", (data: string) => {
-            for (let part of this.game.logicSystem.getParts(data, true)) {
-                const leave = part.startsWith('!');
-                const id = leave ? part.slice(1).trim() : part;
-                let character = this.game.characterSystem.getCharacter(id);
-                if (!character) {
-                    throw new Error(`Character with id "${id}" not found.`);
-                }
-                if (leave) {
-                    if (!this.game.characterSystem.isCharacterInParty(character)) {
-                        gameLogger.warn(`[party] Character "${id}" is not in the party, skipping`);
-                        continue;
+        this.game.registerAction("party", {
+            help: 'Add characters to the party; !id removes.',
+            value: { list: { ref: 'character', remove: true } },
+            examples: ['{party: "alice, bob"}', '{party: "!carol"}'],
+            action: (data: string) => {
+                for (let part of this.game.logicSystem.getParts(data, true)) {
+                    const leave = part.startsWith('!');
+                    const id = leave ? part.slice(1).trim() : part;
+                    let character = this.game.characterSystem.getCharacter(id);
+                    if (!character) {
+                        throw new Error(`Character with id "${id}" not found.`);
                     }
-                    this.game.characterSystem.removeFromParty(character);
-                    this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.left', { character: character.getName() }));
-                } else {
-                    if (this.game.characterSystem.isCharacterInParty(character)) {
-                        gameLogger.warn(`[party] Character "${id}" is already in the party, skipping`);
-                        continue;
+                    if (leave) {
+                        if (!this.game.characterSystem.isCharacterInParty(character)) {
+                            gameLogger.warn(`[party] Character "${id}" is not in the party, skipping`);
+                            continue;
+                        }
+                        this.game.characterSystem.removeFromParty(character);
+                        this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.left', { character: character.getName() }));
+                    } else {
+                        if (this.game.characterSystem.isCharacterInParty(character)) {
+                            gameLogger.warn(`[party] Character "${id}" is already in the party, skipping`);
+                            continue;
+                        }
+                        this.game.characterSystem.addToParty(character);
+                        this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.joined', { character: character.getName() }));
                     }
-                    this.game.characterSystem.addToParty(character);
-                    this.game.dungeonSystem.addFlash(Global.getInstance().getString('party.joined', { character: character.getName() }));
                 }
             }
         });
@@ -1882,126 +2006,153 @@ export class InitSystem {
 
         // Accepts {create_character: "villager"} / "villager, guard" (id doubles as template id)
         // as well as {create_character: {id: "npc1", template: "villager", party: true}}.
-        this.game.registerAction("create_character", (data: string | Record<string, any>) => {
-            for (const spec of this.toCharacterSpecs(data, true)) {
-                if (!spec.id) {
-                    throw new Error("Character id is required when creating a character.");
-                }
+        this.game.registerAction("create_character", {
+            help: 'Create characters from a template or an instance id.',
+            value: { oneOf: [{ list: { ref: 'character_template' } }, { fields: { template: { ref: 'character_templates' }, party: 'boolean' } }] },
+            examples: ['{create_character: "guard1"}', '{create_character: {id: "npc1", template: "villager"}}'],
+            action: (data: string | Record<string, any>) => {
+                for (const spec of this.toCharacterSpecs(data, true)) {
+                    if (!spec.id) {
+                        throw new Error("Character id is required when creating a character.");
+                    }
+                    // {create_character: {id: "guard1"}} — an instance id needs no template
+                    if (!spec.template && this.game.characterSystem.instancesMap.has(spec.id)) {
+                        spec.template = this.game.characterSystem.instancesMap.get(spec.id)!.template;
+                    }
 
-                // Checked here, before createCharacter: addCharacter throws on a duplicate id, and
-                // resolveActions has no try/catch — a throw from a room hook aborts enterRoom()
-                // before the room_enter_after trigger, leaving a half-built character behind.
-                if (this.game.characterSystem.getCharacter(spec.id)) {
-                    gameLogger.error(`[create_character] Character "${spec.id}" already exists, skipping`);
-                    continue;
-                }
-                if (spec.template && !this.game.characterSystem.templatesMap.has(spec.template)) {
-                    gameLogger.error(`[create_character] No template found for "${spec.template}"`);
-                    continue;
-                }
+                    // Checked here, before createCharacter: addCharacter throws on a duplicate id, and
+                    // resolveActions has no try/catch — a throw from a room hook aborts enterRoom()
+                    // before the room_enter_after trigger, leaving a half-built character behind.
+                    if (this.game.characterSystem.getCharacter(spec.id)) {
+                        gameLogger.error(`[create_character] Character "${spec.id}" already exists, skipping`);
+                        continue;
+                    }
+                    if (spec.template && !this.game.characterSystem.templatesMap.has(spec.template)) {
+                        gameLogger.error(`[create_character] No template found for "${spec.template}"`);
+                        continue;
+                    }
 
-                let character
-                if (spec.template) {
-                    character = this.game.characterSystem.createCharacter(spec.id, spec.template);
-                } else {
-                    character = this.game.characterSystem.createCharacter(spec.id, spec as CharacterTemplateObject);
-                }
-                gameLogger.info(`[create_character] Created character "${spec.id}"${spec.template ? ` from template "${spec.template}"` : ''}`);
+                    let character
+                    if (spec.template) {
+                        character = this.game.characterSystem.createCharacter(spec.id, spec.template);
+                    } else {
+                        character = this.game.characterSystem.createCharacter(spec.id, spec as CharacterTemplateObject);
+                    }
+                    gameLogger.info(`[create_character] Created character "${spec.id}"${spec.template ? ` from template "${spec.template}"` : ''}`);
 
-                this.game.characterSystem.addCharacter(character, spec.party);
+                    this.game.characterSystem.addCharacter(character, spec.party);
+                }
             }
         });
 
-        this.game.registerAction("update_character", (data: any) => {
-            if (!data.id) {
-                throw new Error("Character id is required when updating a character.");
-            }
-            let character = this.game.characterSystem.getCharacter(data.id);
-            if (!character) {
-                gameLogger.error(`[update_character] Character "${data.id}" not found`);
-                return;
-            }
-            character.update(data);
-
-            let partyStatus = '';
-            // update party
-            if (data.party) {
-                if (data.party == true) {
-                    this.game.characterSystem.addToParty(character);
-                    partyStatus = ', added to party';
-                } else {
-                    this.game.characterSystem.removeFromParty(character);
-                    partyStatus = ', removed from party';
+        this.game.registerAction("update_character", {
+            help: 'Update a character.',
+            value: { fields: { id: CHARACTER, party: 'boolean' } },
+            examples: ['{update_character: {id: "alice", party: true}}'],
+            action: (data: any) => {
+                if (!data.id) {
+                    throw new Error("Character id is required when updating a character.");
                 }
+                let character = this.game.characterSystem.getCharacter(data.id);
+                if (!character) {
+                    gameLogger.error(`[update_character] Character "${data.id}" not found`);
+                    return;
+                }
+                character.update(data);
+
+                let partyStatus = '';
+                // update party
+                if (data.party) {
+                    if (data.party == true) {
+                        this.game.characterSystem.addToParty(character);
+                        partyStatus = ', added to party';
+                    } else {
+                        this.game.characterSystem.removeFromParty(character);
+                        partyStatus = ', removed from party';
+                    }
+                }
+                gameLogger.info(`[update_character] Updated character "${data.id}"${partyStatus}`);
             }
-            gameLogger.info(`[update_character] Updated character "${data.id}"${partyStatus}`);
         });
 
-        this.game.registerAction("delete_character", (data: any) => {
-            if (!data.id) {
-                throw new Error("Character id is required when deleting a character.");
+        this.game.registerAction("delete_character", {
+            help: 'Delete a character.',
+            value: { fields: { id: CHARACTER } },
+            examples: ['{delete_character: {id: "npc1"}}'],
+            action: (data: any) => {
+                if (!data.id) {
+                    throw new Error("Character id is required when deleting a character.");
+                }
+                // Log-and-return rather than letting deleteCharacter() throw: resolveActions has no
+                // try/catch, so a throw here kills the rest of the action bag — and from a room hook
+                // it aborts enterRoom() before the room_enter_after trigger (no turn tick, no event).
+                if (!this.game.characterSystem.getCharacter(data.id)) {
+                    gameLogger.error(`[delete_character] Character "${data.id}" not found`);
+                    return;
+                }
+                this.game.characterSystem.deleteCharacter(data.id);
+                gameLogger.info(`[delete_character] Deleted character "${data.id}"`);
             }
-            // Log-and-return rather than letting deleteCharacter() throw: resolveActions has no
-            // try/catch, so a throw here kills the rest of the action bag — and from a room hook
-            // it aborts enterRoom() before the room_enter_after trigger (no turn tick, no event).
-            if (!this.game.characterSystem.getCharacter(data.id)) {
-                gameLogger.error(`[delete_character] Character "${data.id}" not found`);
-                return;
-            }
-            this.game.characterSystem.deleteCharacter(data.id);
-            gameLogger.info(`[delete_character] Deleted character "${data.id}"`);
         });
 
         // Accepts {reset_character: "orc"} / "orc, goblin" as well as
         // {reset_character: {id: "orc", template: "orc_veteran", party: false}}.
-        this.game.registerAction("reset_character", (data: string | Record<string, any>) => {
-            for (const spec of this.toCharacterSpecs(data)) {
-                if (!spec.id) {
-                    throw new Error("Character id is required when resetting a character.");
-                }
+        this.game.registerAction("reset_character", {
+            help: 'Rebuild characters from their templates, keeping their ids and party membership.',
+            value: { oneOf: [{ list: CHARACTER }, { fields: { id: CHARACTER, template: { ref: 'character_templates' }, party: 'boolean' } }] },
+            examples: ['{reset_character: "orc"}', '{reset_character: {id: "orc", template: "orc_veteran"}}'],
+            action: (data: string | Record<string, any>) => {
+                for (const spec of this.toCharacterSpecs(data)) {
+                    if (!spec.id) {
+                        throw new Error("Character id is required when resetting a character.");
+                    }
 
-                // Every state check lives here, not in resetCharacter: resolveActions has no try/catch,
-                // so a throw from a room hook aborts enterRoom() before the room_enter_after trigger.
-                const templates = this.game.characterSystem.templatesMap;
-                if (spec.template && !templates.has(spec.template)) {
-                    gameLogger.error(`[reset_character] No template found for "${spec.template}"`);
-                    continue;
-                }
-
-                const character = this.game.characterSystem.getCharacter(spec.id);
-                let fresh: Character;
-                if (!character) {
-                    // Nothing live — fall back to id-as-template-id, so the same call creates or rebuilds.
-                    const templateId = spec.template || spec.id;
-                    if (!templates.has(templateId)) {
-                        gameLogger.error(`[reset_character] No live character or template found for "${spec.id}"`);
+                    // Every state check lives here, not in resetCharacter: resolveActions has no try/catch,
+                    // so a throw from a room hook aborts enterRoom() before the room_enter_after trigger.
+                    const templates = this.game.characterSystem.templatesMap;
+                    if (spec.template && !templates.has(spec.template)) {
+                        gameLogger.error(`[reset_character] No template found for "${spec.template}"`);
                         continue;
                     }
-                    fresh = this.game.characterSystem.resetCharacter(spec.id, templateId);
-                    gameLogger.warn(`[reset_character] "${spec.id}" was not live, created from template "${templateId}"`);
-                } else {
-                    const templateId = spec.template || character.templateId;
-                    if (!templateId || !templates.has(templateId)) {
-                        gameLogger.error(`[reset_character] Character "${spec.id}" has no known template ("${templateId}")`);
-                        continue;
-                    }
-                    fresh = this.game.characterSystem.resetCharacter(character, templateId);
-                    gameLogger.info(`[reset_character] Reset character "${spec.id}" from template "${templateId}"`);
-                }
 
-                // Party membership is preserved by resetCharacter; only an explicit key overrides it.
-                if (spec.party !== undefined) {
-                    const inParty = this.game.characterSystem.isCharacterInParty(fresh);
-                    if (spec.party == true && !inParty) {
-                        this.game.characterSystem.addToParty(fresh);
-                    } else if (spec.party != true && inParty) {
-                        this.game.characterSystem.removeFromParty(fresh);
+                    const character = this.game.characterSystem.getCharacter(spec.id);
+                    let fresh: Character;
+                    if (!character) {
+                        // Nothing live — fall back to id-as-template-id, so the same call creates or rebuilds.
+                        const templateId = spec.template || spec.id;
+                        if (!templates.has(templateId)) {
+                            gameLogger.error(`[reset_character] No live character or template found for "${spec.id}"`);
+                            continue;
+                        }
+                        fresh = this.game.characterSystem.resetCharacter(spec.id, templateId);
+                        gameLogger.warn(`[reset_character] "${spec.id}" was not live, created from template "${templateId}"`);
+                    } else {
+                        const templateId = spec.template || character.templateId;
+                        if (!templateId || !templates.has(templateId)) {
+                            gameLogger.error(`[reset_character] Character "${spec.id}" has no known template ("${templateId}")`);
+                            continue;
+                        }
+                        fresh = this.game.characterSystem.resetCharacter(character, templateId);
+                        gameLogger.info(`[reset_character] Reset character "${spec.id}" from template "${templateId}"`);
+                    }
+
+                    // Party membership is preserved by resetCharacter; only an explicit key overrides it.
+                    if (spec.party !== undefined) {
+                        const inParty = this.game.characterSystem.isCharacterInParty(fresh);
+                        if (spec.party == true && !inParty) {
+                            this.game.characterSystem.addToParty(fresh);
+                        } else if (spec.party != true && inParty) {
+                            this.game.characterSystem.removeFromParty(fresh);
+                        }
                     }
                 }
             }
         });
 
         this.game.registerAction("status", {
+            help: 'Apply or remove statuses; (stacks, duration) override the template\'s.',
+            value: { targeted: { ref: 'character_statuses', props: ['stacks', 'duration'] } },
+            examples: ['{status: "alice->blessed & focused"}', '{status: "alice->poisoned(duration = 3)"}', '{status: "bob->!cursed"}'],
             action: (data: string) => {
                 const groups = this.game.logicSystem.parseTargetedSpec(data);
                 for (const group of groups) {
@@ -2065,6 +2216,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("char", {
+            help: 'Change a character\'s attribute, trait, stat, resource or skin style.',
+            value: { oneOf: [{ ops: { target: CHARACTER, typed: { attribute: { ref: 'attribute' }, trait: { ref: 'character_traits' }, stat: { ref: 'character_stats' }, resource: { ref: 'character_stats' }, skinStyle: 'any' }, value: 'of' } }, 'any'] },
+            examples: ['{char: "alice.stat.strength += 5"}', '{char: "alice.attribute.face = happy"}'],
             action: (data: string | Record<string, any>) => {
                 this.game.characterSystem.processCharAction(data);
             }
@@ -2072,16 +2226,19 @@ export class InitSystem {
 
         // Shortcuts for the char action with the type segment implied.
         // Usage: attr: "ane.face = hurt" ≡ char: "ane.attribute.face = hurt"
-        const charShortcuts: Record<string, string> = {
-            attr: 'attribute',
-            trait: 'trait',
-            stat: 'stat',
-            resource: 'resource',
-            skin_style: 'skinStyle',
+        const charShortcuts: Record<string, { type: keyof typeof CHAR_KEYS; help: string; examples: string[] }> = {
+            attr: { type: 'attribute', help: 'Set attributes; a skin layer takes true or false.', examples: ['{attr: "ane.face = hurt"}', '{attr: "mc.wings = true"}'] },
+            trait: { type: 'trait', help: 'Set traits.', examples: ['{trait: "alice.name = Alice"}'] },
+            stat: { type: 'stat', help: 'Change stats.', examples: ['{stat: "alice.strength += 5"}'] },
+            resource: { type: 'resource', help: 'Change resources.', examples: ['{resource: "alice.health -= 10"}'] },
+            skin_style: { type: 'skinStyle', help: 'Set skin styles.', examples: ['{skin_style: "alice.hat = class1"}'] },
         };
         for (const actionId in charShortcuts) {
-            const type = charShortcuts[actionId];
+            const { type, help, examples } = charShortcuts[actionId];
             this.game.registerAction(actionId, {
+                help,
+                examples,
+                value: { oneOf: [{ ops: { target: CHARACTER, key: CHAR_KEYS[type], value: type === 'attribute' ? 'of' : 'any' } }, 'any'] },
                 action: (data: string | Record<string, any>) => {
                     this.game.characterSystem.processCharAction(data, type);
                 }
@@ -2089,6 +2246,9 @@ export class InitSystem {
         }
 
         this.game.registerAction("skin", {
+            help: 'Add or remove skin layers.',
+            value: { targeted: { ref: 'character_skin_layers' } },
+            examples: ['{skin: "alice->armor & helmet"}', '{skin: "bob->!cloak"}'],
             action: (data: string) => {
                 const groups = this.game.logicSystem.parseTargetedSpec(data);
                 const adds: string[] = [];
@@ -2105,6 +2265,9 @@ export class InitSystem {
         });
 
         this.game.registerAction("item_slot", {
+            help: 'Add or remove equipment slots.',
+            value: { targeted: { ref: 'item_slots' } },
+            examples: ['{item_slot: "alice->ring & necklace"}', '{item_slot: "bob->!belt"}'],
             action: (data: string) => {
                 const groups = this.game.logicSystem.parseTargetedSpec(data);
                 const adds: string[] = [];
@@ -2123,6 +2286,9 @@ export class InitSystem {
         // Grant / remove innate (core-status) abilities per target.
         // Format: "charId->abilityId & abilityId, otherChar->!abilityId" (`!` removes)
         this.game.registerAction("ability", {
+            help: 'Grant or remove innate abilities.',
+            value: { targeted: { ref: 'ability_templates' } },
+            examples: ['{ability: "alice->fireball & ice_bolt"}', '{ability: "bob->!punch"}'],
             action: (data: string) => {
                 const groups = this.game.logicSystem.parseTargetedSpec(data);
                 for (const group of groups) {
@@ -2148,6 +2314,9 @@ export class InitSystem {
         // Format: "characterId.treeId.slotId" or "characterId.treeId.slotId#level"
         // Or: "treeId.slotId" (uses selected character) or "treeId.slotId#level"
         this.game.registerAction("skill", {
+            help: 'Learn a skill or level it up; #N adds levels.',
+            value: 'any',
+            examples: ['{skill: "alice.fire_magic.fireball"}', '{skill: "fire_magic.fireball#2"}'],
             action: (data: string) => {
                 const skillSpecs = data.split(",").map(s => s.trim());
 
@@ -2238,7 +2407,7 @@ export class InitSystem {
         if (typeof data === 'string') {
             return this.game.logicSystem.getParts(data, true)
                 .filter(id => id)
-                .map(id => templateFromId ? { id, template: id } : { id });
+                .map(id => templateFromId ? { id, template: this.game.characterSystem.instancesMap.get(id)?.template ?? id } : { id });
         }
         return [data || {}];
     }
@@ -2247,52 +2416,94 @@ export class InitSystem {
      * Register item system actions
      */
     private registerItemActions(): void {
-        this.game.registerAction("equip_item", (data: {
-            itemUid: string;
-            characterId: string;
-            slotId: string;
-            slotIndex: number;
-        }) => {
-            const itemUid = data.itemUid || this.game.getState('active_item');
-            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
-            const character = this.game.getCharacter(characterId);
-            if (!character) {
-                throw new Error(`Character with id "${characterId}" not found.`);
-            }
+        this.game.registerAction("equip_item", {
+            help: 'Equip the active item (internal).',
+            value: 'any',
+            action: (data: {
+                itemUid: string;
+                characterId: string;
+                slotId: string;
+                slotIndex: number;
+            }) => {
+                const itemUid = data.itemUid || this.game.getState('active_item');
+                const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+                const character = this.game.getCharacter(characterId);
+                if (!character) {
+                    throw new Error(`Character with id "${characterId}" not found.`);
+                }
 
-            character.equipItem(itemUid, data.slotId, data.slotIndex);
+                character.equipItem(itemUid, data.slotId, data.slotIndex);
+            }
         });
 
-        this.game.registerAction("unequip_item", (data: {
-            characterId: string;
-            itemUid: string;
-        }) => {
-            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
-            const character = this.game.getCharacter(characterId);
-            if (!character) {
-                throw new Error(`Character with id "${characterId}" not found.`);
-            }
+        this.game.registerAction("unequip_item", {
+            help: 'Unequip the active item (internal).',
+            value: 'any',
+            action: (data: {
+                characterId: string;
+                itemUid: string;
+            }) => {
+                const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+                const character = this.game.getCharacter(characterId);
+                if (!character) {
+                    throw new Error(`Character with id "${characterId}" not found.`);
+                }
 
-            const itemUid = data.itemUid || this.game.getState('active_item');
-            character.unequipItem(itemUid);
+                const itemUid = data.itemUid || this.game.getState('active_item');
+                character.unequipItem(itemUid);
+            }
         });
 
-        this.game.registerAction("equip", (data: string) => {
-            if (typeof data !== 'string') return;
+        this.game.registerAction("equip", {
+            help: 'Equip or unequip items by character and item id.',
+            value: { targeted: { ref: 'item_templates' }, target: { ref: 'character', root: true }, bareRemove: true },
+            examples: ['{equip: "alice -> sword & ring"}', '{equip: "alice -> !sword"}', '{equip: "!alice.outfit"}'],
+            action: (data: string) => {
+                if (typeof data !== 'string') return;
 
-            for (const spec of data.split(',').map(s => s.trim()).filter(Boolean)) {
-                try {
-                    const arrowIdx = spec.indexOf('->');
+                for (const spec of data.split(',').map(s => s.trim()).filter(Boolean)) {
+                    try {
+                        const arrowIdx = spec.indexOf('->');
 
-                    if (arrowIdx === -1) {
-                        if (!spec.startsWith('!')) {
-                            gameLogger.warn(`[equip] invalid spec (missing '->'): "${spec}"`);
+                        if (arrowIdx === -1) {
+                            if (!spec.startsWith('!')) {
+                                gameLogger.warn(`[equip] invalid spec (missing '->'): "${spec}"`);
+                                continue;
+                            }
+                            const target = spec.slice(1).trim();
+                            const dotIdx = target.indexOf('.');
+                            const charId = (dotIdx === -1 ? target : target.slice(0, dotIdx)).trim();
+                            const slotType = dotIdx === -1 ? "" : target.slice(dotIdx + 1).trim();
+
+                            const character = this.game.getCharacter(charId);
+                            if (!character) {
+                                gameLogger.warn(`[equip] character not found: "${charId}"`);
+                                continue;
+                            }
+
+                            const slots = slotType ? character.getItemSlotsBySlotId(slotType) : character.itemSlots;
+                            let cleared = 0;
+                            for (const slot of [...slots]) {
+                                if (slot.itemUid) {
+                                    character.unequipItem(slot.itemUid);
+                                    cleared++;
+                                }
+                            }
+                            if (cleared === 0) {
+                                gameLogger.warn(`[equip] nothing to clear for "${spec}"`);
+                            }
                             continue;
                         }
-                        const target = spec.slice(1).trim();
+
+                        const target = spec.slice(0, arrowIdx).trim();
                         const dotIdx = target.indexOf('.');
                         const charId = (dotIdx === -1 ? target : target.slice(0, dotIdx)).trim();
                         const slotType = dotIdx === -1 ? "" : target.slice(dotIdx + 1).trim();
+
+                        if (!charId) {
+                            gameLogger.warn(`[equip] missing character in spec: "${spec}"`);
+                            continue;
+                        }
 
                         const character = this.game.getCharacter(charId);
                         if (!character) {
@@ -2300,101 +2511,72 @@ export class InitSystem {
                             continue;
                         }
 
-                        const slots = slotType ? character.getItemSlotsBySlotId(slotType) : character.itemSlots;
-                        let cleared = 0;
-                        for (const slot of [...slots]) {
-                            if (slot.itemUid) {
-                                character.unequipItem(slot.itemUid);
-                                cleared++;
-                            }
+                        const inventory = character.getPartyInventory();
+                        if (!inventory) {
+                            gameLogger.warn(`[equip] no inventory for character "${charId}"`);
+                            continue;
                         }
-                        if (cleared === 0) {
-                            gameLogger.warn(`[equip] nothing to clear for "${spec}"`);
-                        }
-                        continue;
-                    }
 
-                    const target = spec.slice(0, arrowIdx).trim();
-                    const dotIdx = target.indexOf('.');
-                    const charId = (dotIdx === -1 ? target : target.slice(0, dotIdx)).trim();
-                    const slotType = dotIdx === -1 ? "" : target.slice(dotIdx + 1).trim();
+                        const payloads = spec.slice(arrowIdx + 2).split('&').map(s => s.trim()).filter(Boolean);
+                        for (const payload of payloads) {
+                            try {
+                                const remove = payload.startsWith('!');
+                                const itemId = (remove ? payload.slice(1) : payload).trim();
+                                if (!itemId) continue;
 
-                    if (!charId) {
-                        gameLogger.warn(`[equip] missing character in spec: "${spec}"`);
-                        continue;
-                    }
+                                if (remove) {
+                                    const candidateSlots = slotType ? character.getItemSlotsBySlotId(slotType) : character.itemSlots;
+                                    let removed = 0;
+                                    for (const slot of [...candidateSlots]) {
+                                        if (!slot.itemUid) continue;
+                                        const equipped = inventory.getItemByUid(slot.itemUid);
+                                        if (equipped && equipped.id === itemId) {
+                                            character.unequipItem(slot.itemUid);
+                                            removed++;
+                                        }
+                                    }
+                                    if (removed === 0) {
+                                        gameLogger.warn(`[equip] "${itemId}" is not equipped on "${charId}"${slotType ? ` in slot "${slotType}"` : ''}`);
+                                    }
+                                    continue;
+                                }
 
-                    const character = this.game.getCharacter(charId);
-                    if (!character) {
-                        gameLogger.warn(`[equip] character not found: "${charId}"`);
-                        continue;
-                    }
-
-                    const inventory = character.getPartyInventory();
-                    if (!inventory) {
-                        gameLogger.warn(`[equip] no inventory for character "${charId}"`);
-                        continue;
-                    }
-
-                    const payloads = spec.slice(arrowIdx + 2).split('&').map(s => s.trim()).filter(Boolean);
-                    for (const payload of payloads) {
-                        try {
-                            const remove = payload.startsWith('!');
-                            const itemId = (remove ? payload.slice(1) : payload).trim();
-                            if (!itemId) continue;
-
-                            if (remove) {
-                                const candidateSlots = slotType ? character.getItemSlotsBySlotId(slotType) : character.itemSlots;
-                                let removed = 0;
-                                for (const slot of [...candidateSlots]) {
-                                    if (!slot.itemUid) continue;
-                                    const equipped = inventory.getItemByUid(slot.itemUid);
-                                    if (equipped && equipped.id === itemId) {
-                                        character.unequipItem(slot.itemUid);
-                                        removed++;
+                                let item: Item | null = inventory.items.find(i => i.id === itemId && !i.isEquipped) ?? null;
+                                let created = false;
+                                if (!item) {
+                                    try {
+                                        item = this.game.createItem(itemId);
+                                        created = true;
+                                    } catch {
+                                        gameLogger.warn(`[equip] item id not found / not resolvable: "${itemId}"`);
+                                        continue;
                                     }
                                 }
-                                if (removed === 0) {
-                                    gameLogger.warn(`[equip] "${itemId}" is not equipped on "${charId}"${slotType ? ` in slot "${slotType}"` : ''}`);
-                                }
-                                continue;
-                            }
 
-                            let item: Item | null = inventory.items.find(i => i.id === itemId && !i.isEquipped) ?? null;
-                            let created = false;
-                            if (!item) {
-                                try {
-                                    item = this.game.createItem(itemId);
-                                    created = true;
-                                } catch {
-                                    gameLogger.warn(`[equip] item id not found / not resolvable: "${itemId}"`);
-                                    continue;
+                                if (slotType) {
+                                    if (character.getItemSlotsBySlotId(slotType).length === 0) {
+                                        gameLogger.warn(`[equip] slot type not found: "${charId}.${slotType}"`);
+                                        continue;
+                                    }
+                                    character.equipItem(item, slotType);
+                                } else {
+                                    if (!character.getRelevantSlotForItem(item)) {
+                                        gameLogger.warn(`[equip] no compatible slot for item "${itemId}" on "${charId}"`);
+                                        continue;
+                                    }
+                                    character.equipItem(item);
                                 }
-                            }
-
-                            if (slotType) {
-                                if (character.getItemSlotsBySlotId(slotType).length === 0) {
-                                    gameLogger.warn(`[equip] slot type not found: "${charId}.${slotType}"`);
-                                    continue;
+                                if (created) {
+                                    const message = Global.getInstance().getString('item.added_single', { item: `[[item:${item.id}]]` });
+                                    this.game.dungeonSystem.addFlash(message);
                                 }
-                                character.equipItem(item, slotType);
-                            } else {
-                                if (!character.getRelevantSlotForItem(item)) {
-                                    gameLogger.warn(`[equip] no compatible slot for item "${itemId}" on "${charId}"`);
-                                    continue;
-                                }
-                                character.equipItem(item);
+                            } catch (e) {
+                                gameLogger.warn(`[equip] failed payload "${payload}" in spec "${spec}": ${e}`);
                             }
-                            if (created) {
-                                const message = Global.getInstance().getString('item.added_single', { item: item.getName() });
-                                this.game.dungeonSystem.addFlash(message);
-                            }
-                        } catch (e) {
-                            gameLogger.warn(`[equip] failed payload "${payload}" in spec "${spec}": ${e}`);
                         }
+                    } catch (e) {
+                        gameLogger.warn(`[equip] failed spec "${spec}": ${e}`);
                     }
-                } catch (e) {
-                    gameLogger.warn(`[equip] failed spec "${spec}": ${e}`);
                 }
             }
         });
@@ -2403,140 +2585,152 @@ export class InitSystem {
         // is already known, learns nothing and just notifies. Value is optional { itemUid, characterId };
         // both fall back to the active-item / used-character state (so a bare `{learn_recipe_item: true}`
         // works from an item choice or a scene action).
-        this.game.registerAction("learn_recipe_item", (data: {
-            itemUid?: string;
-            characterId?: string;
-        } = {}) => {
-            const itemUid = data.itemUid || this.game.getState('active_item') || "";
-            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
-            const character = this.game.getCharacter(characterId);
-            const inventory = character?.getPartyInventory();
-            const item = inventory?.getItemByUid(itemUid) || this.game.itemSystem.getItemByUid(itemUid);
-            if (!item || !item.learn_recipe) {
-                gameLogger.warn(`[learn_recipe_item] item "${itemUid}" not found or has no learn_recipe`);
-                return;
+        this.game.registerAction("learn_recipe_item", {
+            help: 'Learn the active item\'s recipe and consume the item (internal).',
+            value: 'any',
+            action: (data: {
+                itemUid?: string;
+                characterId?: string;
+            } = {}) => {
+                const itemUid = data.itemUid || this.game.getState('active_item') || "";
+                const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+                const character = this.game.getCharacter(characterId);
+                const inventory = character?.getPartyInventory();
+                const item = inventory?.getItemByUid(itemUid) || this.game.itemSystem.getItemByUid(itemUid);
+                if (!item || !item.learn_recipe) {
+                    gameLogger.warn(`[learn_recipe_item] item "${itemUid}" not found or has no learn_recipe`);
+                    return;
+                }
+
+                const recipeId = item.learn_recipe;
+                const recipeName = this.game.itemSystem.itemRecipesMap.get(recipeId)?.name || recipeId;
+
+                if (this.game.itemSystem.learnedRecipes.value.has(recipeId)) {
+                    this.game.showNotification(Global.getInstance().getString('recipe.already_known', { recipe: recipeName }));
+                    return;
+                }
+
+                this.game.itemSystem.addLearnedRecipe(recipeId);
+                this.game.itemSystem.discoverItem(item.id);
+                inventory?.removeItem(item);
+                this.game.showNotification(Global.getInstance().getString('recipe.learned', { recipe: recipeName }));
             }
-
-            const recipeId = item.learn_recipe;
-            const recipeName = this.game.itemSystem.itemRecipesMap.get(recipeId)?.name || recipeId;
-
-            if (this.game.itemSystem.learnedRecipes.value.has(recipeId)) {
-                this.game.showNotification(Global.getInstance().getString('recipe.already_known', { recipe: recipeName }));
-                return;
-            }
-
-            this.game.itemSystem.addLearnedRecipe(recipeId);
-            this.game.itemSystem.discoverItem(item.id);
-            inventory?.removeItem(item);
-            this.game.showNotification(Global.getInstance().getString('recipe.learned', { recipe: recipeName }));
         });
 
-        this.game.registerAction("consume_item", (data: {
-            itemUid: string;
-            characterId: string;
-        }) => {
-            const itemUid = data.itemUid || this.game.getState('active_item');
-            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
-            const character = this.game.getCharacter(characterId);
-            if (!character) {
-                throw new Error(`Character with id "${characterId}" not found.`);
-            }
-
-            const inventory = character.getPartyInventory();
-            if (!inventory) {
-                throw new Error(`No inventory found for character "${characterId}"`);
-            }
-
-            const item = inventory.getItemByUid(itemUid);
-            if (!item || !item.isConsumable()) {
-                throw new Error(`Item with uid "${itemUid}" not found or not consumable`);
-            }
-
-            // Set active states for action scripts
-            if (!this.game.getState('supress_game_events')) {
-                this.game.coreSystem.setState('active_character', characterId);
-                this.game.coreSystem.setState('active_inventory', inventory.id);
-                this.game.coreSystem.setState('active_item', item.uid);
-            }
-
-            // Before scripts + emitter (cancellable)
-            if (item.actions?.item_consume_before) {
-                this.game.logicSystem.resolveActions(item.actions.item_consume_before);
-            }
-            if (!this.game.trigger('item_consume_before', item, character)) return;
-
-            // 1) Apply consume statuses — real status templates, so each carries its own
-            // duration/max_stacks/polarity/group_id. addStatus handles stacking + group replacement.
-            for (const entry of item.apply_statuses_on_consume) {
-                if (!entry?.status) continue;
-                try {
-                    const status = this.game.createStatus(entry.status);
-                    // A consumable's status wears the icon of the item that applied it, so game data
-                    // does not have to duplicate the art on both. Recorded as an id — see
-                    // Status.displayImage. A status that defines its own image keeps it.
-                    if (!status.image) status.iconSource = item.id;
-                    character.addStatus(status, { stacks: entry.stacks ?? 1 });
-                } catch (e) {
-                    gameLogger.error(`[consume_item] cannot apply status "${entry.status}" from item "${item.id}": ${e}`);
+        this.game.registerAction("consume_item", {
+            help: 'Consume the active item (internal).',
+            value: 'any',
+            action: (data: {
+                itemUid: string;
+                characterId: string;
+            }) => {
+                const itemUid = data.itemUid || this.game.getState('active_item');
+                const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+                const character = this.game.getCharacter(characterId);
+                if (!character) {
+                    throw new Error(`Character with id "${characterId}" not found.`);
                 }
-            }
 
-            // 2) Apply consume_percentage (% of max resource)
-            for (const statId in item.consume_percentage) {
-                const pct = item.consume_percentage[statId];
-                if (!pct) continue;
-                const stat = this.game.characterSystem.statsMap.get(statId);
-                if (!stat || !stat.is_resource) {
-                    gameLogger.warn(`[consume_item] Stat "${statId}" not found or not a resource, skipping`);
-                    continue;
+                const inventory = character.getPartyInventory();
+                if (!inventory) {
+                    throw new Error(`No inventory found for character "${characterId}"`);
                 }
-                const maxVal = character.getStat(statId);
-                character.addResource(statId, maxVal * (pct / 100));
-            }
 
-            // 3) Apply consume_absolute (flat resource change)
-            for (const statId in item.consume_absolute) {
-                const amount = item.consume_absolute[statId];
-                if (!amount) continue;
-                const stat = this.game.characterSystem.statsMap.get(statId);
-                if (!stat || !stat.is_resource) {
-                    gameLogger.warn(`[consume_item] Stat "${statId}" not found or not a resource, skipping`);
-                    continue;
+                const item = inventory.getItemByUid(itemUid);
+                if (!item || !item.isConsumable()) {
+                    throw new Error(`Item with uid "${itemUid}" not found or not consumable`);
                 }
-                character.addResource(statId, amount);
+
+                // Set active states for action scripts
+                if (!this.game.getState('supress_game_events')) {
+                    this.game.coreSystem.setState('active_character', characterId);
+                    this.game.coreSystem.setState('active_inventory', inventory.id);
+                    this.game.coreSystem.setState('active_item', item.uid);
+                }
+
+                // Before scripts + emitter (cancellable)
+                if (item.actions?.item_consume_before) {
+                    this.game.logicSystem.resolveActions(item.actions.item_consume_before);
+                }
+                if (!this.game.trigger('item_consume_before', item, character)) return;
+
+                // 1) Apply consume statuses — real status templates, so each carries its own
+                // duration/max_stacks/polarity/group_id. addStatus handles stacking + group replacement.
+                for (const entry of item.apply_statuses_on_consume) {
+                    if (!entry?.status) continue;
+                    try {
+                        const status = this.game.createStatus(entry.status);
+                        // A consumable's status wears the icon of the item that applied it, so game data
+                        // does not have to duplicate the art on both. Recorded as an id — see
+                        // Status.displayImage. A status that defines its own image keeps it.
+                        if (!status.image) status.iconSource = item.id;
+                        character.addStatus(status, { stacks: entry.stacks ?? 1 });
+                    } catch (e) {
+                        gameLogger.error(`[consume_item] cannot apply status "${entry.status}" from item "${item.id}": ${e}`);
+                    }
+                }
+
+                // 2) Apply consume_percentage (% of max resource)
+                for (const statId in item.consume_percentage) {
+                    const pct = item.consume_percentage[statId];
+                    if (!pct) continue;
+                    const stat = this.game.characterSystem.statsMap.get(statId);
+                    if (!stat || !stat.is_resource) {
+                        gameLogger.warn(`[consume_item] Stat "${statId}" not found or not a resource, skipping`);
+                        continue;
+                    }
+                    const maxVal = character.getStat(statId);
+                    character.addResource(statId, maxVal * (pct / 100));
+                }
+
+                // 3) Apply consume_absolute (flat resource change)
+                for (const statId in item.consume_absolute) {
+                    const amount = item.consume_absolute[statId];
+                    if (!amount) continue;
+                    const stat = this.game.characterSystem.statsMap.get(statId);
+                    if (!stat || !stat.is_resource) {
+                        gameLogger.warn(`[consume_item] Stat "${statId}" not found or not a resource, skipping`);
+                        continue;
+                    }
+                    character.addResource(statId, amount);
+                }
+
+                // 4) Reduce quantity by 1; remove if empty
+                inventory.reduceItemQuantity(item, 1);
+
+                // After scripts + emitter
+                if (item.actions?.item_consume_after) {
+                    this.game.logicSystem.resolveActions(item.actions.item_consume_after);
+                }
+                this.game.trigger('item_consume_after', item, character);
+
+                const itemName = item.getTrait('name') || item.id;
+                const rarity = item.getRarity() || '';
+                const rarityClass = rarity ? `item-name rarity_${rarity}` : '';
+                const itemHtml = `<b class="${rarityClass}">${itemName}</b>`;
+                Global.getInstance().addNotificationId('item.consumed', {
+                    character: character.getName(),
+                    item: itemHtml,
+                });
+                gameLogger.info(`[consume_item] "${character.id}" consumed "${item.id}"`);
             }
-
-            // 4) Reduce quantity by 1; remove if empty
-            inventory.reduceItemQuantity(item, 1);
-
-            // After scripts + emitter
-            if (item.actions?.item_consume_after) {
-                this.game.logicSystem.resolveActions(item.actions.item_consume_after);
-            }
-            this.game.trigger('item_consume_after', item, character);
-
-            const itemName = item.getTrait('name') || item.id;
-            const rarity = item.getRarity() || '';
-            const rarityClass = rarity ? `item-name rarity_${rarity}` : '';
-            const itemHtml = `<b class="${rarityClass}">${itemName}</b>`;
-            Global.getInstance().addNotificationId('item.consumed', {
-                character: character.getName(),
-                item: itemHtml,
-            });
-            gameLogger.info(`[consume_item] "${character.id}" consumed "${item.id}"`);
         });
 
         // Open the drop confirmation popup (quantity slider for stacks). The popup owns the confirm,
         // the cancellable item_discard_before emitter, and the removal — see DropItemPopup.vue. Items
         // the render emitter vetoes never reach here; getItemChoices omits their Drop choice.
         this.game.registerState('drop_item_pending', null);
-        this.game.registerAction("discard_item", (data: { itemUid: string; characterId: string }) => {
-            const itemUid = data.itemUid || this.game.getState('active_item');
-            const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
-            const inventory = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
-            if (!inventory?.getItemByUid(itemUid)) return;
-            this.game.setState('drop_item_pending', { itemUid, characterId });
-            this.game.openPopup('drop_item_popup');
+        this.game.registerAction("discard_item", {
+            help: 'Drop the active item (internal).',
+            value: 'any',
+            action: (data: { itemUid: string; characterId: string }) => {
+                const itemUid = data.itemUid || this.game.getState('active_item');
+                const characterId = data.characterId || this.game.characterSystem.usedCharacterId.value || "";
+                const inventory = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
+                if (!inventory?.getItemByUid(itemUid)) return;
+                this.game.setState('drop_item_pending', { itemUid, characterId });
+                this.game.openPopup('drop_item_popup');
+            }
         });
 
         // choose_item — DQ9's item picker popup. Pauses the scene (eventDelayed parks it on the
@@ -2549,6 +2743,9 @@ export class InitSystem {
         this.game.registerState('choose_item_pending', null);
         this.game.registerState('chosen_item_id', '');
         this.game.registerAction("choose_item", {
+            help: 'Open the item picker; the pick lands in chosen_item_id.',
+            value: { oneOf: [{ ref: 'item_categories', words: ['all'] }, { fields: { category: { ref: 'item_categories' }, remove: 'boolean', scene: 'scene' } }, 'boolean'] },
+            examples: ['{choose_item: "all"}', '{choose_item: "keys"}', '{choose_item: {tags: ["herb"], remove: true, scene: "fed"}}'],
             eventDelayed: true,
             action: (value: string | { id?: string | string[]; category?: string | string[]; tags?: string | string[]; remove?: boolean; scene?: string; title?: string }) => {
                 let pending: Record<string, any>;
@@ -2583,117 +2780,160 @@ export class InitSystem {
             return null;
         };
 
-        this.game.registerAction("read_book", (value: any) => {
-            const item = resolveItemValue(value);
-            const ref = (item?.traits as any)?.book;
-            if (!item || !ref) {
-                gameLogger.warn(`[read_book] no item with a book trait resolved from`, value);
-                return;
+        this.game.registerAction("read_book", {
+            help: 'Open the book reader for the active item or a book item.',
+            value: { oneOf: [{ ref: 'item_templates' }, 'boolean'] },
+            examples: ['{read_book: true}', '{read_book: "old_diary"}'],
+            action: (value: any) => {
+                const item = resolveItemValue(value);
+                const ref = (item?.traits as any)?.book;
+                if (!item || !ref) {
+                    gameLogger.warn(`[read_book] no item with a book trait resolved from`, value);
+                    return;
+                }
+                // The engine's scene-reference grammar owns the parsing — the trait takes anything
+                // the scene action takes (dungeon.room.scene, room.scene, full #ids, &anchors).
+                const resolved = this.game.dungeonSystem.resolveSceneId(String(ref));
+                if (!resolved.sceneId) {
+                    gameLogger.error(`[read_book] book trait "${ref}" on "${item.id}" did not resolve to a scene.`);
+                    return;
+                }
+                const dungeonId = resolved.dungeonId || this.game.dungeonSystem.currentDungeonId.value || '';
+                const base = resolved.sceneId.replace(/^#/, '').split('.').slice(0, -3).join('.');
+                if (!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.1`)) {
+                    gameLogger.error(`[read_book] scene "#${base}.1.1.1" not found in dungeon "${dungeonId}" (book trait on "${item.id}").`);
+                    return;
+                }
+                const bookmarks = (this.game.getState('book_bookmarks') || {}) as Record<string, number>;
+                this.playBookPage(item.id, dungeonId, base, bookmarks[item.id] || 1);
             }
-            // The engine's scene-reference grammar owns the parsing — the trait takes anything
-            // the scene action takes (dungeon.room.scene, room.scene, full #ids, &anchors).
-            const resolved = this.game.dungeonSystem.resolveSceneId(String(ref));
-            if (!resolved.sceneId) {
-                gameLogger.error(`[read_book] book trait "${ref}" on "${item.id}" did not resolve to a scene.`);
-                return;
-            }
-            const dungeonId = resolved.dungeonId || this.game.dungeonSystem.currentDungeonId.value || '';
-            const base = resolved.sceneId.replace(/^#/, '').split('.').slice(0, -3).join('.');
-            if (!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.1`)) {
-                gameLogger.error(`[read_book] scene "#${base}.1.1.1" not found in dungeon "${dungeonId}" (book trait on "${item.id}").`);
-                return;
-            }
-            const bookmarks = (this.game.getState('book_bookmarks') || {}) as Record<string, number>;
-            this.playBookPage(item.id, dungeonId, base, bookmarks[item.id] || 1);
         });
 
-        this.game.registerAction("read_page", (page: number) => {
-            const reading = this.game.getState('reading_book') as { itemId: string; dungeonId: string; base: string; page: number } | null;
-            if (!reading || typeof page !== 'number') {
-                return;
+        this.game.registerAction("read_page", {
+            help: 'Turn the book reader to a page (internal).',
+            value: 'any',
+            action: (page: number) => {
+                const reading = this.game.getState('reading_book') as { itemId: string; dungeonId: string; base: string; page: number } | null;
+                if (!reading || typeof page !== 'number') {
+                    return;
+                }
+                this.playBookPage(reading.itemId, reading.dungeonId, reading.base, page);
             }
-            this.playBookPage(reading.itemId, reading.dungeonId, reading.base, page);
         });
 
-        this.game.registerAction("read_close", () => {
-            this.game.setState('reading_book', null);
-            this.game.dungeonSystem.playScene(null, null);
+        this.game.registerAction("read_close", {
+            help: 'Close the book reader (internal).',
+            value: 'any',
+            action: () => {
+                this.game.setState('reading_book', null);
+                this.game.dungeonSystem.playScene(null, null);
+            }
         });
 
         // A painting item (trait `painting` = asset id; the item id when equal/empty) opens a fake
         // scene: the registered full-size asset as background, the item's description as the scene
         // text. The scene line is synthesized into the global dungeon on first view. Viewing
         // discovers the item.
-        this.game.registerAction("view_painting", (value: any) => {
-            const item = resolveItemValue(value);
-            const traitValue = (item?.traits as any)?.painting;
-            if (!item || !traitValue) {
-                gameLogger.warn(`[view_painting] no item with a painting trait resolved from`, value);
-                return;
+        this.game.registerAction("view_painting", {
+            help: 'Open an item\'s painting.',
+            value: { oneOf: [{ ref: 'item_templates' }, 'boolean'] },
+            examples: ['{view_painting: true}', '{view_painting: "portrait"}'],
+            action: (value: any) => {
+                const item = resolveItemValue(value);
+                const traitValue = (item?.traits as any)?.painting;
+                if (!item || !traitValue) {
+                    gameLogger.warn(`[view_painting] no item with a painting trait resolved from`, value);
+                    return;
+                }
+                // Each painting is a one-paragraph scene in the "_paintings" SHADOW dungeon: the
+                // definition accumulates a pre-parsed line per viewed painting and persists in saves
+                // (so a save taken mid-view restores cleanly). Assets stage via the inline {asset}.
+                const assetId = (typeof traitValue === 'string' && traitValue.length) ? traitValue : item.id;
+                const lineId = `#view.${item.id}.1.1.1`;
+                const shadow = this.game.dungeonSystem.shadowDungeons.value.get('_paintings');
+                const existingLines = (Array.isArray(shadow?.content) ? shadow!.content : []) as { id: string; val?: string }[];
+                if (!existingLines.some(line => line.id === lineId)) {
+                    const description = (item.traits as any)?.description || '';
+                    this.game.dungeonSystem.addShadowDungeon('_paintings', {
+                        content: [...existingLines, { id: lineId, val: `${description}\n{asset: "${assetId}"}` }],
+                    });
+                }
+                this.game.itemSystem.discoverItem(item.id);
+                this.game.dungeonSystem.playSceneResolver(`_paintings.view.${item.id}`, null);
             }
-            // Each painting is a one-paragraph scene in the "_paintings" SHADOW dungeon: the
-            // definition accumulates a pre-parsed line per viewed painting and persists in saves
-            // (so a save taken mid-view restores cleanly). Assets stage via the inline {asset}.
-            const assetId = (typeof traitValue === 'string' && traitValue.length) ? traitValue : item.id;
-            const lineId = `#view.${item.id}.1.1.1`;
-            const shadow = this.game.dungeonSystem.shadowDungeons.value.get('_paintings');
-            const existingLines = (Array.isArray(shadow?.content) ? shadow!.content : []) as { id: string; val?: string }[];
-            if (!existingLines.some(line => line.id === lineId)) {
-                const description = (item.traits as any)?.description || '';
-                this.game.dungeonSystem.addShadowDungeon('_paintings', {
-                    content: [...existingLines, { id: lineId, val: `${description}\n{asset: "${assetId}"}` }],
-                });
-            }
-            this.game.itemSystem.discoverItem(item.id);
-            this.game.dungeonSystem.playSceneResolver(`_paintings.view.${item.id}`, null);
         });
 
         // A usable item (trait `use_scene` = a scene reference) opens that scene from the party
         // inventory with the item as the active one, so the scene reads |item| and can spend or
         // destroy it. Deliberately dumb: no cost, no gating, no consumption — the scene owns all
         // of that, which is what makes one trait enough for every kind of usable item.
-        this.game.registerAction("use_scene", (value: any) => {
-            const item = resolveItemValue(value);
-            const ref = (item?.traits as any)?.use_scene;
-            if (!item || !ref) {
-                gameLogger.warn(`[use_scene] no item with a use_scene trait resolved from`, value);
-                return;
+        this.game.registerAction("use_scene", {
+            help: 'Play an item\'s use scene.',
+            value: { oneOf: [{ ref: 'item_templates' }, 'boolean'] },
+            examples: ['{use_scene: true}', '{use_scene: "lockpick"}'],
+            action: (value: any) => {
+                const item = resolveItemValue(value);
+                const ref = (item?.traits as any)?.use_scene;
+                if (!item || !ref) {
+                    gameLogger.warn(`[use_scene] no item with a use_scene trait resolved from`, value);
+                    return;
+                }
+                this.game.coreSystem.setState('active_item', item.uid);
+                this.game.dungeonSystem.playSceneResolver(String(ref), null);
             }
-            this.game.coreSystem.setState('active_item', item.uid);
-            this.game.dungeonSystem.playSceneResolver(String(ref), null);
         });
 
-        this.game.registerAction("add_item", (data: string | string[]) => {
-            this.game.itemSystem.addItemsBySpec(data);
+        this.game.registerAction("add_item", {
+            help: 'Add items; #N is the count, -> puts them in another inventory.',
+            value: ITEMS,
+            examples: ['{add_item: "sword, potion#5"}', '{add_item: "key -> chest_inventory"}'],
+            action: (data: string | string[]) => {
+                this.game.itemSystem.addItemsBySpec(data);
+            }
         })
 
-        this.game.registerAction("remove_item", (data: boolean | number | string | string[]) => {
-            this.game.itemSystem.removeItemsBySpec(data);
+        this.game.registerAction("remove_item", {
+            help: 'Remove items; true takes one of the active item.',
+            value: { oneOf: [ITEMS, 'boolean', 'number'] },
+            examples: ['{remove_item: "potion#5"}', '{remove_item: true}'],
+            action: (data: boolean | number | string | string[]) => {
+                this.game.itemSystem.removeItemsBySpec(data);
+            }
         })
 
-        this.game.registerAction("transfer_item", (data: string | string[]) => {
-            this.game.itemSystem.transferItemsBySpec(data);
+        this.game.registerAction("transfer_item", {
+            help: 'Move items between inventories.',
+            value: 'any',
+            examples: ['{transfer_item: "gold#200 -> merchant"}'],
+            action: (data: string | string[]) => {
+                this.game.itemSystem.transferItemsBySpec(data);
+            }
         })
 
         // Show an item card under the dialogue text (EventItemCard on scene-content-bottom).
         // true/1 = the active item (the one whose custom choice opened the scene);
         // "item_id" = first matching stack in the party inventory; false = hide.
         // Cleared automatically on event_end.
-        this.game.registerAction("item_view", (value: boolean | number | string) => {
-            if (value === false) {
-                this.game.coreSystem.setState('viewed_item', null);
-                return;
+        this.game.registerAction("item_view", {
+            help: 'Show an item card under the text.',
+            value: { oneOf: [{ ref: 'item_templates' }, 'boolean'] },
+            examples: ['{item_view: true}', '{item_view: "healing_herb"}', '{item_view: false}'],
+            action: (value: boolean | number | string) => {
+                if (value === false) {
+                    this.game.coreSystem.setState('viewed_item', null);
+                    return;
+                }
+                let uid: string | null = null;
+                if (typeof value === 'string') {
+                    const inventory = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
+                    uid = inventory?.items.find(i => i.id === value)?.uid ?? null;
+                    if (!uid) gameLogger.warn(`[item_view] item "${value}" not found in party inventory`);
+                } else {
+                    uid = this.game.getState('active_item');
+                    if (!uid) gameLogger.warn(`[item_view] no active item to show`);
+                }
+                this.game.coreSystem.setState('viewed_item', uid);
             }
-            let uid: string | null = null;
-            if (typeof value === 'string') {
-                const inventory = this.game.itemSystem.getInventory(PARTY_INVENTORY_ID);
-                uid = inventory?.items.find(i => i.id === value)?.uid ?? null;
-                if (!uid) gameLogger.warn(`[item_view] item "${value}" not found in party inventory`);
-            } else {
-                uid = this.game.getState('active_item');
-                if (!uid) gameLogger.warn(`[item_view] no active item to show`);
-            }
-            this.game.coreSystem.setState('viewed_item', uid);
         });
 
         // Collect a collectable encounter: grant its item(s) and latch the encounter
@@ -2701,6 +2941,9 @@ export class InitSystem {
         // passes { spec, encounter }; author-written {collect: "id#qty"} passes a
         // string and falls back to the active encounter.
         this.game.registerAction("collect", {
+            help: 'Collect the current collectable encounter: grants its items and hides it.',
+            value: { oneOf: [ITEMS, { fields: { spec: ITEMS } }] },
+            examples: ['{collect: "berry#2"}'],
             action: (value: string | { spec: string; encounter: string }) => {
                 const spec = typeof value === 'string' ? value : value?.spec;
                 if (!spec) {
@@ -2738,6 +2981,9 @@ export class InitSystem {
 
         this.game.registerAction("loot",
             {
+                help: 'Open a loot exchange: an inventory, or ^pool for a generated one.',
+                value: { oneOf: [{ list: { ref: 'pool_entries' }, prefix: '^' }, { ref: 'item_inventories' }] },
+                examples: ['{loot: "chest_inventory"}', '{loot: "^chest_common"}', '{loot: "^herbs1,fungi1"}'],
                 action: (inventoryId: string) => {
                     this.game.itemSystem.openExchange(inventoryId, 'loot');
                 },
@@ -2747,6 +2993,9 @@ export class InitSystem {
 
         this.game.registerAction("trade",
             {
+                help: 'Open a trade exchange: an inventory, or ^pool for generated stock.',
+                value: { oneOf: [{ list: { ref: 'pool_entries' }, prefix: '^' }, { ref: 'item_inventories' }] },
+                examples: ['{trade: "merchant_inventory"}', '{trade: "^merchant_basic"}'],
                 action: (inventoryId: string) => {
                     this.game.itemSystem.openExchange(inventoryId, 'trade');
                 },
@@ -2754,9 +3003,14 @@ export class InitSystem {
             }
         );
 
-        this.game.registerAction("learn_recipe", (recipeId: string) => {
-            for (const part of recipeId.split(",").map(p => p.trim())) {
-                this.game.itemSystem.addLearnedRecipe(part);
+        this.game.registerAction("learn_recipe", {
+            help: 'Learn crafting recipes.',
+            value: { list: { ref: 'item_recipes' } },
+            examples: ['{learn_recipe: "iron_sword, steel_sword"}'],
+            action: (recipeId: string) => {
+                for (const part of recipeId.split(",").map(p => p.trim())) {
+                    this.game.itemSystem.addLearnedRecipe(part);
+                }
             }
         });
     }

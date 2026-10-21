@@ -102,6 +102,7 @@ Status apply/remove come in four **scopes** — `_target` (the ability's target(
 | `bounce_same` | boolean | When true, a bounce may land on the **same** target as the previous hop (allows repeats). Default false (consecutive hops must differ). |
 | `flurry` | number | **Total** number of strikes on the **same** target -- the primary cast counts, so `3` = normal hit + 2 extra re-resolves of the whole ability, with a short delay per strike; `1` or less adds nothing. Fizzles if the target dies -- remaining strikes are lost. Extra strikes re-apply effects only -- they do **not** re-pay cost or re-trigger cooldown/charges. Melee re-lunges per strike; use `bounce` for hops between random targets. |
 | `summon` | chooseOne (`character_templates`) | Spawn a combatant from the chosen character template onto the **caster's side**. It joins the battle and acts this round based on its speed (it is **not** added to the persistent party). One summon per effect — add more effects to summon multiple creatures. Independent of the ability's `target`; ignored on bounces. |
+| `merge` | chooseOne (`character_statuses`) | The caster **merges into the target ally** and leaves the battle, and the target gains one stack of this status. See [Merging](#merging-merge). Ignored on bounces. |
 
 ## Cooldowns & Charges
 
@@ -129,3 +130,36 @@ The channel ends when the caster is **stunned** — the token is a `meta.is_chan
 A character can channel **one** ability at a time: casting a channel removes the caster's existing channel first.
 
 Author the per-turn payload as normal effects on the ability (damage, status applies, etc.) — they re-fire every turn. Combine with a self-applied `stagger` effect for a self-limiting channel (the caster eventually stuns themselves, ending it).
+
+## Merging (`merge`)
+
+An effect with `merge` makes the caster merge into its target: two bodies become one stronger one. Use an `ally` target.
+
+When it resolves:
+
+1. The target's **base** `health` and `power` grow by the caster's. A scaling applied over base stats then applies to the total, so the merged body's max health is the two max healths added up.
+2. The target's health becomes what both bodies had left — damage dealt before the merge still counts.
+3. The caster's negative battle statuses (poisons, burns…) move to the target. Its buffs, `stagger` and `stun` stay behind.
+4. The target gains **1 stack** of the merge status.
+5. The caster leaves the field. It is **not defeated**: `battle_character_defeated` does not fire, death defiance does not trigger, and no death animation plays — it leaps into the target instead.
+
+Valid targets are living allies made from the **caster's own template**, or allies that already hold the merge status and have room for another stack. The status's `max_stacks` caps how many bodies one can take in (`2` = a body of three). A character holding the status cannot merge, so the ability greys out on a merged body.
+
+Give the merge status the look of the merged form: `traits` (name, face), `attributes`, `static_art`. The latest status wins when a character's look is evaluated, so the target turns into the new form in place, and the battle preloads that look at the start. Per-stack `stats` scale with the number of bodies taken in, e.g. `speed: -10` for a body that slows as it grows.
+
+The ability's projectile def (`meta.projectile`) gives the merge its sound and VFX: `sound` plays as the caster leaps, and `hit_sound` / `hit_image` at the moment the two meet. Statuses applied by the same effect (`status_apply_target`) land on the merged body.
+
+The AI only casts a merge when a valid target exists, and prefers a target that already holds stacks, so one body fills up before another starts. Set `base_weight` so the merge outscores the caster's attacks.
+
+```json
+{
+  "id": "slime_merge",
+  "meta": { "name": "Merge", "target": "ally", "group": "basic", "projectile": "slime_merge", "base_weight": 9 },
+  "effects": [
+    { "id": "e1", "aspects": { "merge": "merged_slime" } }
+  ]
+}
+```
+
+A battle listener can cancel a merge by setting `event.merge` to `null` in `battle_action_apply`.
+

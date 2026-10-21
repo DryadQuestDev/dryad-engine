@@ -12,6 +12,8 @@ import { Skip } from "../../utility/save-system";
 import { Character } from "../core/character/character";
 import { Property } from "../property";
 import { CharacterTemplateObject } from "../../schemas/characterTemplateSchema";
+
+export type CharacterInstanceObject = NonNullable<CharacterTemplateObject['instances']>[number];
 import { CharacterStatusObject } from "../../schemas/characterStatusSchema";
 import { CharacterSkinLayerObject } from "../../schemas/characterSkinLayerSchema";
 import { Status } from "../core/character/status";
@@ -90,6 +92,9 @@ export class CharacterSystem {
   public traitsMap!: Map<string, EntityTraitObject>;
   @Skip()
   public templatesMap!: Map<string, CharacterTemplateObject>;
+  /** Every template instance by its character id, with the id of the template that declares it. Built from templatesMap. */
+  @Skip()
+  public instancesMap: Map<string, { template: string; instance: CharacterInstanceObject }> = new Map();
   @Skip()
   public statusesMap!: Map<string, CharacterStatusObject>;
 
@@ -194,8 +199,59 @@ export class CharacterSystem {
     return result;
   }
 
-  public createCharacter(characterId: string, template: CharacterTemplateObject | string, skipEvents: boolean = false): Character {
-    // console.log("createCharacter", characterId, template);
+  /**
+   * Index every template's instances by character id. An instance id that is also a template id,
+   * or that two templates declare, is reported and the first declaration kept.
+   */
+  public buildInstancesMap(): void {
+    const map = new Map<string, { template: string; instance: CharacterInstanceObject }>();
+    for (const template of this.templatesMap.values()) {
+      for (const instance of template.instances || []) {
+        if (!instance?.id) continue;
+        const clash = map.get(instance.id);
+        if (clash) {
+          gameLogger.error(`Character instance "${instance.id}" is declared by both "${clash.template}" and "${template.id}" — keeping "${clash.template}".`);
+          continue;
+        }
+        if (this.templatesMap.has(instance.id)) {
+          gameLogger.error(`Character instance "${instance.id}" of "${template.id}" has the id of a template — instance skipped.`);
+          continue;
+        }
+        map.set(instance.id, { template: template.id, instance });
+      }
+    }
+    this.instancesMap = map;
+  }
+
+  /**
+   * The template a character is built from: the template itself, with the overrides of the instance
+   * when the character is one of its declared instances. Use it wherever a character is rebuilt or
+   * compared against its template, so an instance never falls back to the plain template's values.
+   */
+  public getCharacterTemplate(characterId: string, templateId: string): CharacterTemplateObject | undefined {
+    const template = this.templatesMap.get(templateId);
+    if (!template || this.instancesMap.get(characterId)?.template !== templateId) return template;
+    const merged = JSON.parse(JSON.stringify(template));
+    this.applyInstanceOverrides(characterId, templateId, merged);
+    return merged;
+  }
+
+  private applyInstanceOverrides(characterId: string, templateId: string, target: any): void {
+    const entry = this.instancesMap.get(characterId);
+    if (!entry || entry.template !== templateId) return;
+    for (const key of ['traits', 'attributes', 'stats'] as const) {
+      const overrides = entry.instance[key];
+      if (overrides && Object.keys(overrides).length) target[key] = { ...(target[key] || {}), ...JSON.parse(JSON.stringify(overrides)) };
+    }
+  }
+
+  public createCharacter(characterId: string, template?: CharacterTemplateObject | string, skipEvents: boolean = false): Character {
+    if (template === undefined) {
+      template = this.instancesMap.get(characterId)?.template;
+      if (!template) {
+        throw new Error(`createCharacter("${characterId}"): no template given and no template declares an instance with this id.`);
+      }
+    }
 
     // If template is a string, look it up from the templates map
     let templateId: string | undefined;
@@ -214,6 +270,7 @@ export class CharacterSystem {
 
     // deep clone template to avoid mutating the original object
     let deepClone = JSON.parse(JSON.stringify(obj));
+    if (templateId) this.applyInstanceOverrides(characterId, templateId, deepClone);
 
     let character = reactive(new Character());
     character.id = characterId;
@@ -431,7 +488,7 @@ export class CharacterSystem {
     // Covers auto_create:false templates and characters deleted earlier in the run.
     if (!existing) {
       const id = character as string;
-      const template = templateIdOverride || id;
+      const template = templateIdOverride || this.instancesMap.get(id)?.template || id;
       if (!this.templatesMap.has(template)) {
         throw new Error(`No live character or template found for "${id}".`);
       }
@@ -536,12 +593,12 @@ export class CharacterSystem {
 
   /**
    * Process character modifications from string or object format.
-   * Supports operations: = (set), < (reduce), > (increase)
+   * Supports operations: = (set), += (increase), -= (reduce)
    *
    * Resources accept the keyword `max` in place of a number — it resolves to that character's
    * cap for the resource, so `resource: "ane.health = max"` is a full heal.
    *
-   * @param data String format: "alice.trait.name=New Name, eleanor.resource.health<25.5, alice.skinStyle.hat>class1, alice.skinStyle.hat=[class1, class2]"
+   * @param data String format: "alice.trait.name = New Name, eleanor.resource.health -= 25.5, alice.skinStyle.hat += class1, alice.skinStyle.hat = [class1, class2]"
    *             Object format: { "alice.trait.name": "New Name", "eleanor.resource.health": -25.5 }
    * @param forcedType When set (e.g. by the `attr`/`stat`/`trait`/`resource`/`skin_style` shortcut
    *                   actions), paths are "charId.key" and this value is used as the type.
@@ -657,11 +714,11 @@ export class CharacterSystem {
           case 'stat':
             if (op.operator === '=') {
               character.update({ stats: { [op.key]: op.value } });
-            } else if (op.operator === '>') {
+            } else if (op.operator === '+=') {
               const coreStatus = character.getCoreStatus();
               const currentValue = coreStatus.stats[op.key] || 0;
               character.update({ stats: { [op.key]: currentValue + op.value } });
-            } else if (op.operator === '<') {
+            } else if (op.operator === '-=') {
               const coreStatus = character.getCoreStatus();
               const currentValue = coreStatus.stats[op.key] || 0;
               character.update({ stats: { [op.key]: currentValue - op.value } });
@@ -675,10 +732,10 @@ export class CharacterSystem {
             if (op.operator === '=') {
               // Set resource to exact value
               character.setResource(op.key, resourceValue);
-            } else if (op.operator === '>') {
+            } else if (op.operator === '+=') {
               // Increase resource
               character.addResource(op.key, resourceValue);
-            } else if (op.operator === '<') {
+            } else if (op.operator === '-=') {
               // Decrease resource
               character.addResource(op.key, -resourceValue);
             }
@@ -689,10 +746,10 @@ export class CharacterSystem {
             if (op.operator === '=') {
               // Overwrite: set styles to new value(s)
               character.setSkinLayerStyle(op.key, op.value);
-            } else if (op.operator === '>') {
+            } else if (op.operator === '+=') {
               // Add: append a new style class
               character.addSkinLayerStyle(op.key, op.value);
-            } else if (op.operator === '<') {
+            } else if (op.operator === '-=') {
               // Remove: remove a style class
               character.removeSkinLayerStyle(op.key, op.value);
             }

@@ -11,8 +11,9 @@ import { newSceneColumn, newSceneRow } from '../../../../utility/dungeonEditor/a
 import { readMeta, writeMeta, isMetaLayout } from '../../../../utility/dungeonEditor/meta';
 import type { LintIssue } from '../../../../utility/dungeonEditor/lint';
 import { tagWithUid } from './uid';
-import { inputMatchesSearch } from './searchState';
+import { inputMatchesSearch, paramsMatchSearch } from './searchState';
 import { flashElement, focusFieldAt, type RevealRequest } from './reveal';
+import { worse, type IssueRange, type Severity } from './issueSeverity';
 
 const props = defineProps<{
   block: SceneBlock;
@@ -30,28 +31,29 @@ const cellKey = (rowIdx: number, colIdx: number) => `${rowIdx}:${colIdx}`;
 // the same array reference across scene re-renders, so typing in one column
 // doesn't recompute every sibling's overlay.
 const contentIssueRanges = computed(() => {
-  const m = new Map<string, Array<[number, number]>>();
+  const m = new Map<string, IssueRange[]>();
   for (const issue of props.issues ?? []) {
     const at = issue.at;
     if (!at || at.target !== 'column-content') continue;
     if (at.rowIndex === undefined || at.colIndex === undefined || at.start === undefined) continue;
     const key = cellKey(at.rowIndex, at.colIndex);
     const list = m.get(key) ?? [];
-    list.push([at.start, at.end ?? at.start + 1]);
+    list.push([at.start, at.end ?? at.start + 1, issue.severity]);
     m.set(key, list);
   }
   return m;
 });
 
 const paramsIssueCells = computed(() => {
-  const set = new Set<string>();
+  const m = new Map<string, Severity>();
   for (const issue of props.issues ?? []) {
     const at = issue.at;
     if (at?.target === 'column-params' && at.rowIndex !== undefined && at.colIndex !== undefined) {
-      set.add(cellKey(at.rowIndex, at.colIndex));
+      const key = cellKey(at.rowIndex, at.colIndex);
+      m.set(key, worse(m.get(key), issue.severity));
     }
   }
-  return set;
+  return m;
 });
 
 // Comment lines the parser parks off the grid — under the `#id` header, or
@@ -248,10 +250,11 @@ function updateColumn<K extends keyof SceneColumn>(
                 @update:model-value="(v: any) => updateColumn(rowIdx, colIdx, 'name', v ?? '')"
                 placeholder="name" class="name-input"
                 :class="{ 'input-search-hit': inputMatchesSearch(column.name) }" />
-              <ParamsInput :model-value="column.paramsRaw ?? ''"
+              <ParamsInput :model-value="column.paramsRaw ?? ''" :assist="column.kind === '~' ? 'choice' : undefined"
                 @update:model-value="(v: string) => updateColumn(rowIdx, colIdx, 'paramsRaw', v ? v : undefined)"
                 class="params-input"
-                :class="{ 'params-input--error': paramsIssueCells.has(cellKey(rowIdx, colIdx)), 'input-search-hit': inputMatchesSearch(column.paramsRaw) }" />
+                :class="{ 'params-input--error': paramsIssueCells.get(cellKey(rowIdx, colIdx)) === 'error',
+                  'params-input--warning': paramsIssueCells.get(cellKey(rowIdx, colIdx)) === 'warning', 'input-search-hit': paramsMatchSearch(column.paramsRaw) }" />
             </template>
             <div v-else class="col-spacer" />
             <Button :icon="isStackedRow(row) ? 'pi pi-chevron-up' : 'pi pi-chevron-left'" severity="secondary" text
@@ -265,7 +268,7 @@ function updateColumn<K extends keyof SceneColumn>(
           </div>
           <RichContentEditor :model-value="column.content"
             @update:model-value="(v: string) => updateColumn(rowIdx, colIdx, 'content', v)"
-            placeholder="content…" class="content-area"
+            placeholder="content…" class="content-area" assist="prose"
             :issue-ranges="contentIssueRanges.get(cellKey(rowIdx, colIdx))"
             :reveal="revealFor(rowIdx, colIdx)" />
         </div>
@@ -528,6 +531,11 @@ function updateColumn<K extends keyof SceneColumn>(
 
 .params-input--error {
   outline: 2px solid #d32f2f;
+  outline-offset: -1px;
+}
+
+.params-input--warning {
+  outline: 2px solid #d99a00;
   outline-offset: -1px;
 }
 

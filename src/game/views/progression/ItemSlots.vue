@@ -116,6 +116,8 @@ const itemSlotsWithItems = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Cells scale with the doll (cqh), so the label query below reads the cell's own width. */
+  container-type: inline-size;
 }
 
 .empty-slot-image {
@@ -137,6 +139,14 @@ const itemSlotsWithItems = computed(() => {
   word-break: break-word;
   overflow: hidden;
   pointer-events: none;
+}
+
+/* A doll drawn small (the character viewer on a phone) shrinks the cells to ~30px, where the label
+   broke one letter per line and spilled over the neighbouring slots. The bare socket reads fine. */
+@container (max-width: 34px) {
+  .empty-slot-name {
+    display: none;
+  }
 }
 
 /* Make the equipped item fill the slot container */

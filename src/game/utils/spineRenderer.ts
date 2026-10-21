@@ -13,8 +13,8 @@
  * with the rendered frame copied to all their 2D canvases.
  */
 
-import { Application, Assets } from 'pixi.js';
-import { Spine } from '@esotericsoftware/spine-pixi-v8';
+import { Application, Assets, defaultFilterVert, Filter, GlProgram, Rectangle, RendererType, RenderTexture, Sprite, Texture } from 'pixi.js';
+import { Spine, SpineTexture } from '@esotericsoftware/spine-pixi-v8';
 import { Global } from '../../global/global';
 import { SPINE_REFERENCE_HEIGHT } from './characterReference';
 
@@ -28,6 +28,30 @@ const MIN_RENDER_SCALE = 0.6;
 /** Symmetric vertical pad → total canvas height multiplier. Clamped because a mistyped
  * pad multiplies VRAM for every slot rather than failing visibly. */
 const padFactorOf = (padY: number): number => 1 + 2 * Math.min(Math.max(padY, 0), 1);
+
+/** Premultiplied input, so a channel is capped at its own alpha rather than at 1. */
+const MULTIPLY_FRAGMENT = `
+in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform vec3 uMultiply;
+
+void main(void)
+{
+    vec4 color = texture(uTexture, vTextureCoord);
+    finalColor = vec4(min(color.rgb * uMultiply, vec3(color.a)), color.a);
+}
+`;
+
+/** Recoloured regions no live spine uses are kept for replays up to this many pixels (4 bytes each). */
+const IDLE_BAKE_BUDGET_PX = 8_000_000;
+
+interface BakedRegion {
+  region: any;
+  renderTexture: RenderTexture;
+  pixels: number;
+  refs: number;
+}
 
 interface SpineTransition {
   snapshot: HTMLCanvasElement;
@@ -89,7 +113,8 @@ interface RegisterOptions {
 
 /** Runtime tint for one slot: raw RGB multipliers into the slot color. Values × brightness
  * may exceed 1 on purpose — dark base art (e.g. red hair) is re-brightened into other hues
- * that way, so channels are passed through unclamped. */
+ * that way. Slot colours reach the GPU as 8 bits a channel, so a tint past 1 is instead
+ * multiplied into a recoloured copy of the slot's attachment (see applySlotColors). */
 export interface SlotColorSpec {
   slot: string;
   r?: number;
@@ -120,6 +145,12 @@ class SpineRendererService {
   private registerVersions = new Map<string, number>();
   private maxCanvasW = 0;
   private maxCanvasH = 0;
+
+  // Recoloured attachment regions for tints past 1, shared by every spine on the same region + multiplier.
+  private bakedRegions = new Map<string, BakedRegion>();
+  private bakedKeysBySpine = new WeakMap<Spine, string[]>();
+  private bakedOriginals = new WeakMap<object, any>();
+  private multiplyProgram: GlProgram | null = null;
 
   async init(): Promise<void> {
     if (this.initialized) return;
@@ -339,6 +370,8 @@ class SpineRendererService {
       slot.canvas2d.parentNode.removeChild(slot.canvas2d);
     }
 
+    this.setBakedKeys(slot.spine, []);
+
     // Don't destroy spine's children/textures — they may be shared with other instances
     // via PixiJS asset cache. Just detach and let GC handle it.
     slot.spine.destroy({ children: false });
@@ -365,14 +398,112 @@ class SpineRendererService {
 
   /** Tint slots by multiplying their slot color (per-instance — attachment colors are shared
    * skeleton data and must stay untouched). Re-apply after applySkins: setSlotsToSetupPose
-   * resets slot colors. */
+   * resets slot colors and attachments. A tint with a channel past 1 can't ride the 8-bit
+   * slot colour, so the slot's current attachment is swapped for a copy whose region was
+   * multiplied once on the GPU; an attachment timeline on that slot would swap the original back. */
   applySlotColors(spine: Spine, specs: SlotColorSpec[]): void {
+    const keys: string[] = [];
     for (const spec of specs) {
       if (!spec?.slot) continue;
       const slot = spine.skeleton.findSlot(spec.slot);
       if (!slot) continue;
       const bf = spec.brightness ?? 1;
-      slot.color.set((spec.r ?? 1) * bf, (spec.g ?? 1) * bf, (spec.b ?? 1) * bf, spec.alpha ?? 1);
+      const mul: [number, number, number] = [(spec.r ?? 1) * bf, (spec.g ?? 1) * bf, (spec.b ?? 1) * bf];
+      const alpha = spec.alpha ?? 1;
+      const current = slot.getAttachment();
+      const original = current ? (this.bakedOriginals.get(current) ?? current) : null;
+      const baked = Math.max(...mul) > 1 ? this.bakeAttachment(original, mul) : null;
+      if (baked) {
+        slot.setAttachment(baked.attachment);
+        slot.color.set(1, 1, 1, alpha);
+        keys.push(baked.key);
+      } else {
+        if (original !== current) slot.setAttachment(original);
+        slot.color.set(mul[0], mul[1], mul[2], alpha);
+      }
+    }
+    this.setBakedKeys(spine, keys);
+  }
+
+  /** A copy of `attachment` drawing from a region multiplied by `mul`, or null when it can't be baked
+   * (no WebGL, no atlas region, or a sequence that swaps regions per frame). */
+  private bakeAttachment(attachment: any, mul: [number, number, number]): { attachment: any; key: string } | null {
+    const region = attachment?.region;
+    const page = region?.page;
+    const source = region?.texture?.texture?.source;
+    if (!this.app || this.app.renderer.type !== RendererType.WEBGL) return null;
+    if (!page || !source || attachment.sequence || typeof attachment.copy !== 'function') return null;
+
+    // u/v span the packed rectangle on the page, whatever its rotation.
+    const x = Math.round(region.u * page.width);
+    const y = Math.round(region.v * page.height);
+    const width = Math.max(1, Math.round((region.u2 - region.u) * page.width));
+    const height = Math.max(1, Math.round((region.v2 - region.v) * page.height));
+    const key = `${source.uid}:${x},${y},${width},${height}:${mul.map(n => n.toFixed(3)).join(',')}`;
+
+    let entry = this.bakedRegions.get(key);
+    if (!entry) {
+      const renderTexture = this.renderMultiplied(source, new Rectangle(x, y, width, height), mul);
+      const texture = SpineTexture.from(renderTexture.source);
+      // Mesh UVs are computed against the page size, so the copy gets a page the size of its own texture.
+      const bakedPage = Object.assign(Object.create(Object.getPrototypeOf(page)), page, { width, height, texture });
+      const bakedRegion = Object.assign(Object.create(Object.getPrototypeOf(region)), region,
+        { page: bakedPage, texture, u: 0, v: 0, u2: 1, v2: 1 });
+      entry = { region: bakedRegion, renderTexture, pixels: width * height, refs: 0 };
+      this.bakedRegions.set(key, entry);
+    }
+
+    const copy = attachment.copy();
+    copy.region = entry.region;
+    copy.updateRegion();
+    this.bakedOriginals.set(copy, attachment);
+    return { attachment: copy, key };
+  }
+
+  private renderMultiplied(source: any, frame: Rectangle, mul: [number, number, number]): RenderTexture {
+    this.multiplyProgram ??= GlProgram.from({ vertex: defaultFilterVert, fragment: MULTIPLY_FRAGMENT, name: 'spine-slot-multiply' });
+    const filter = new Filter({
+      glProgram: this.multiplyProgram,
+      resources: { multiplyUniforms: { uMultiply: { value: new Float32Array(mul), type: 'vec3<f32>' } } },
+      resolution: 1,
+      antialias: 'off',
+    });
+    const texture = new Texture({ source, frame });
+    const sprite = new Sprite(texture);
+    sprite.filters = [filter];
+    const renderTexture = RenderTexture.create({ width: frame.width, height: frame.height, resolution: 1 });
+    this.app!.renderer.render({ container: sprite, target: renderTexture, clear: true, clearColor: [0, 0, 0, 0] });
+    sprite.destroy();
+    texture.destroy(false);
+    filter.destroy();
+    return renderTexture;
+  }
+
+  /** Points a spine at its baked regions: new ones gain a user before old ones lose theirs, then
+   * regions nobody uses are freed oldest-first once they pass the idle budget. */
+  private setBakedKeys(spine: Spine, keys: string[]): void {
+    const previous = this.bakedKeysBySpine.get(spine) ?? [];
+    for (const key of keys) {
+      const entry = this.bakedRegions.get(key);
+      if (!entry) continue;
+      entry.refs++;
+      this.bakedRegions.delete(key);
+      this.bakedRegions.set(key, entry);
+    }
+    for (const key of previous) {
+      const entry = this.bakedRegions.get(key);
+      if (entry) entry.refs--;
+    }
+    this.bakedKeysBySpine.set(spine, keys);
+
+    let idle = 0;
+    for (const entry of this.bakedRegions.values()) if (entry.refs <= 0) idle += entry.pixels;
+    for (const [key, entry] of this.bakedRegions) {
+      if (idle <= IDLE_BAKE_BUDGET_PX) break;
+      if (entry.refs > 0) continue;
+      entry.renderTexture.destroy(true);
+      this.bakedRegions.delete(key);
+      idle -= entry.pixels;
     }
   }
 

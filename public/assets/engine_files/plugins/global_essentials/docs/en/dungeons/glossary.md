@@ -61,9 +61,9 @@ Key ideas:
 - Flags are referenced by **ID**, like `door_opened` or `tutorial.completed_intro`.  
 - You can scope a flag to another dungeon using `dungeon_id.flag_id` (for example, `tutorial.seen_intro`).  
 - Flags can be **set** or **modified** via the `flag` action, e.g.:
-  - `door_opened=1` – set a value.  
-  - `coins>5` – add 5 coins.  
-  - `coins<2` – subtract 2 coins.
+  - `door_opened = 1` – set a value.  
+  - `coins += 5` – add 5 coins.  
+  - `coins -= 2` – subtract 2 coins.
 
 You usually:
 
@@ -133,17 +133,24 @@ Example – custom `genderbend` action (from the Tutorial game):
 
 ```js
 // In your script file, e.g. /assets/games_assets/[game]/_core/scripts/script1.mjs
-game.registerAction("genderbend", () => {
-  const mc = game.getCharacter("mc");         // get main character
-  const sex = mc.getAttribute("sex");         // read current sex attribute
+game.registerAction("genderbend", {
+  help: "Switch the MC between male and female.",   // shown when the content editor suggests it
+  value: "boolean",                                  // what it takes: {genderbend: true}
+  examples: ["{genderbend: true}"],
+  action: () => {
+    const mc = game.getCharacter("mc");         // get main character
+    const sex = mc.getAttribute("sex");         // read current sex attribute
 
-  if (sex === "male") {
-    mc.setAttribute("sex", "female");
-  } else {
-    mc.setAttribute("sex", "male");
+    if (sex === "male") {
+      mc.setAttribute("sex", "female");
+    } else {
+      mc.setAttribute("sex", "male");
+    }
   }
 });
 ```
+
+`help`, `value` and `examples` are optional: with them the content editor suggests, describes and checks the action – see ->advanced.registry.
 
 Then in your dungeon content you can call it like any other action:
 
@@ -452,6 +459,10 @@ Example – custom `_female` condition (from the Tutorial game):
 game.registerCondition("_female", (charId) => {
   const char = game.getCharacter(charId);
   return char.getAttribute("sex") === "female";
+}, {
+  help: "Whether a character is female.",
+  args: [{ ref: "character" }],   // what goes inside the brackets
+  examples: ["_female(mc) = true"],
 });
 ```
 
@@ -551,6 +562,17 @@ Add `!` after the ID when the line belongs to a companion who may not be with th
 ane!: “Are those... fresh? After all this time?”
 
 peth!: Peth ducks behind my back. “A g-ghost...”
+```
+
+A skipped line keeps its choices: its `>` choices, or the next row's `~` branches when it ends its block, are offered under the text already on screen.
+
+A `{…}` line directly under the text belongs to the same paragraph and is skipped with it. Put menus, flags, jumps and items on a paragraph that always plays – the Content Editor warns about a party line that carries anything beyond staging:
+
+```text
+ane!: Ane frowns at the map.
+
+The path forks ahead.
+{choices: "&fork"}
 ```
 
 To make a party line depend on who else is present, wrap it in an inline `if{}`:

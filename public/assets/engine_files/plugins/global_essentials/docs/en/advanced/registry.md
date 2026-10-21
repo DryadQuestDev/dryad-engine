@@ -99,8 +99,8 @@ game.registerAction("heal_party", () => {
 // Trigger your custom action
 game.execute({ heal_party: true });
 
-// Trigger a built-in action (> adds, < subtracts, = sets)
-game.execute({ flag: "gold>100" });
+// Trigger a built-in action (= sets, += adds, -= subtracts)
+game.execute({ flag: "gold += 100" });
 ```
 
 Instead of a bare function you can register an object to control *when* the action runs:
@@ -167,6 +167,41 @@ On a pass the first block renders and `boulder_moved` is set. On a fail the read
 
 > Gates only run on scene paragraphs. A gated action placed on a choice is dispatched through `action` like any other and aborts nothing.
 
+### Describing the value for the editor
+
+Give an action a `help` line, a `value` description and `examples`, and the dungeon content editor checks every use of it as you type: an id that is not in its data file is underlined, with a "Did you mean…?" fix. While you type, the help and the examples show beside the suggestions.
+
+```javascript
+game.registerAction("give", {
+  help: "Give an item to a character.",
+  value: { pair: [{ ref: "character" }, { ref: "item_templates" }] },
+  examples: ['{give: "alice->sword"}', '{give: "bob->potion"}'],
+  action: (spec) => { /* ... */ },
+});
+```
+
+Keep `help` to what the action does; show how to write it in `examples`, each written exactly as content would.
+
+```text
+{give: "alice->swrod"}     Item 'swrod' not found → sword
+```
+
+`ref` names the data file the id lives in – the same name `game.getData()` takes, so a plugin's own data works too (`{ ref: "plugins_data/my_plugin/battles", label: "Battle" }`). The other shapes cover the usual value grammars:
+
+| Shape | Value it describes |
+|-------|--------------------|
+| `{ ref: "records" }` | one id |
+| `{ words: ["left", "right", "both"] }` | one of these words |
+| `{ list: { ref: "records" } }` | `"a, b, c"` |
+| `{ pair: [{ ref: "character" }, { ref: "item_slots" }] }` | `"alice->ring"` |
+| `{ ops: { target: { ref: "character" }, key: { ref: "character_stats" } } }` | `"alice.brawn += 2"` (what `game.parseOpsSpec()` reads) |
+| `{ targeted: { ref: "character_statuses" } }` | `"alice->blessed & !cursed"` (what `game.parseTargetedSpec()` reads) |
+| `{ oneOf: ["boolean", { ref: "records" }] }` | `true` or an id |
+| `{ fields: { id: { ref: "character" } } }` | the object form `{ id: "alice" }` |
+| `"scene"`, `"condition"`, `"number"`, `"text"`, `"any"` | a scene id, a condition, … ; `"any"` is not checked |
+
+The editor reads your scripts without running them, so write the description as a literal or a `const` – a value built at runtime is not seen. An action without a `value` is still known by name; only its value goes unchecked. Without `help`, the comment right above the call is shown instead. Every type is in `types.d.ts` (`ValueSpec`, `RefSpec`).
+
 **Reference:** ->builtins.actions
 
 ---
@@ -183,14 +218,16 @@ On a pass the first block renders and `boulder_moved` is set. On a fail the read
 - Verify quest progress
 
 ```javascript
-// Register a custom condition
-game.registerCondition("can_afford", (amount) => {
+// Register a custom condition (its id starts with _)
+game.registerCondition("_can_afford", (amount) => {
   let partyInv = game.getInventory("_party_inventory");
   return partyInv.getCurrencyAmount("gold") >= amount;
 });
 
-// Used in dialogue: if{can_afford(100) = true}You can buy this.fi{}
+// Used in dialogue: if{_can_afford(100) = true}You can buy this.fi{}
 ```
+
+A third argument describes it for the editor, as `value` does for an action: `{ help: "…", args: [{ ref: "item_templates" }], examples: ["_can_afford(100) = true"] }` checks each `(…)` argument. `registerPlaceholder` takes the same.
 
 **Reference:** ->builtins.conditions
 

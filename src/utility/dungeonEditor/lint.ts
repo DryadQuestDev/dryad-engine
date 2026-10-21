@@ -1,6 +1,7 @@
 import type { Document } from './ast';
 import { isCommentLine, stripCodeBlocks, stripCommentLinesMapped } from './comments';
 import { anchorLineInBlock, blockStartLines } from './locate';
+import { blockScopes, checkRefsInText, indexDungeon, type LintContext, type ParamsKind, type RefFix } from './refs';
 
 /**
  * Which editable inside a block card an issue points at. The editor uses it
@@ -37,6 +38,12 @@ export type LintIssue = {
   /** 1-based line in the serialized dungeon text (what the Raw view shows). */
   line: number;
   at?: IssueAnchor;
+  /** One-click replacements, in the coordinates of `at`'s target text. */
+  fixes?: RefFix[];
+  /** `kind:value` an "Ignore here" stores in the block's `__meta` (name checks only). */
+  ignoreKey?: string;
+  /** Ignored by its block: not a problem to show, only listed as ignored. */
+  ignored?: boolean;
 };
 
 /** Every balanced `{…}` substring (nested braces supported). */
@@ -60,6 +67,59 @@ export function findBraceRanges(s: string): Array<[number, number]> {
   }
   return out;
 }
+
+/**
+ * Whether the `{` at `braceStart` opens an `if{…}` / `ifOr{…}` / `else{…}` / `fi{…}`
+ * condition rather than an action object. Longest keywords first so `ifOr` wins over `if`.
+ */
+export function isConditionBrace(text: string, braceStart: number): boolean {
+  for (const kw of ['ifOr', 'else', 'if', 'fi']) {
+    const kwStart = braceStart - kw.length;
+    if (kwStart >= 0 && text.substring(kwStart, braceStart) === kw) {
+      const prev = kwStart > 0 ? text[kwStart - 1] : '';
+      if (!/\w/.test(prev)) return true;
+    }
+  }
+  return false;
+}
+
+/** The top-level keys of a `{key: value, …}` action object, read leniently. */
+function topLevelKeys(segment: string): string[] {
+  const keys: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let expectKey = false;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (depth === 1 && expectKey && !/\s/.test(c)) {
+      expectKey = false;
+      const key = /^["']?([A-Za-z_$][\w$]*)["']?\s*:/.exec(segment.slice(i));
+      if (key) {
+        keys.push(key[1]);
+        i += key[0].length - 1;
+        continue;
+      }
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '{' || c === '[') expectKey = ++depth === 1;
+    else if (c === '}' || c === ']') depth--;
+    else if (c === ',' && depth === 1) expectKey = true;
+  }
+  return keys;
+}
+
+/**
+ * Actions a party line may carry. They only stage the scene, so dropping them with the line
+ * while that character is away is exactly what the author wants.
+ */
+const PARTY_LINE_STAGING = new Set([
+  'actor', 'animate', 'asset', 'sound', 'music', 'ambient', 'grade', 'screen_flash', 'screen_shake', 'panel_actor',
+]);
 
 /** Offsets of every `{` that never closes and every `}` that never opened. */
 export function findUnmatchedBraces(s: string): { opens: number[]; closes: number[] } {
@@ -222,8 +282,33 @@ export function validateParamsJson(raw: string): string | null {
 /** Turns a range in some scanned text into the anchor the editor can focus. */
 type Locator = (start: number, end: number) => IssueAnchor;
 
-export function lintDungeonContent(source: string, doc: Document): LintIssue[] {
+/**
+ * Lint a dungeon. Without `ctx` only the syntax and structure checks run; with it every id the
+ * content names is checked too (refs.ts) — the context is the loaded game's data and the other dungeons.
+ */
+export function lintDungeonContent(source: string, doc: Document, ctx?: LintContext | null): LintIssue[] {
   const issues: LintIssue[] = [];
+
+  // The dungeon being linted is indexed live from its document; every other one comes from ctx.
+  let refs: ((idx: number, text: string, params: ParamsKind | null, prose: boolean, field: LintIssue['field'], at: Locator) => void) | null = null;
+  if (ctx) {
+    const others = new Map(ctx.dungeons);
+    const saved = others.get(ctx.dungeonId);
+    others.delete(ctx.dungeonId);
+    const self = indexDungeon(doc, saved?.rooms ?? []);
+    const lint: LintContext = { ...ctx, dungeons: others };
+    const scopes = blockScopes(doc);
+    refs = (idx, text, params, prose, field, at) => {
+      if (!text) return;
+      for (const r of checkRefsInText(text, params, { ...scopes[idx], prose }, lint, self)) {
+        issues.push({
+          blockIndex: idx, field, severity: r.severity, message: r.message, line: 0,
+          at: at(r.start, r.end), fixes: r.fixes?.length ? r.fixes : undefined, ignoreKey: r.ignoreKey,
+          ...(r.ignored ? { ignored: true } : {}),
+        });
+      }
+    };
+  }
 
   // `line` is filled in once every block has been visited, so pushes only
   // need the anchor.
@@ -251,19 +336,7 @@ export function lintDungeonContent(source: string, doc: Document): LintIssue[] {
       }
       // `if{…}` / `ifOr{…}` / `else{…}` / `fi{…}` use a condition syntax
       // (`flag_name = value, …`) that isn't JSON — skip the strict validator.
-      // Longest keywords first so `ifOr` wins over `if`.
-      let isCondition = false;
-      for (const kw of ['ifOr', 'else', 'if', 'fi']) {
-        const kwStart = start - kw.length;
-        if (kwStart >= 0 && text.substring(kwStart, start) === kw) {
-          const prev = kwStart > 0 ? text[kwStart - 1] : '';
-          if (!/\w/.test(prev)) {
-            isCondition = true;
-            break;
-          }
-        }
-      }
-      if (isCondition) continue;
+      if (isConditionBrace(text, start)) continue;
       const err = validateParamsJsonAt(segment);
       if (err) {
         push({
@@ -443,16 +516,76 @@ export function lintDungeonContent(source: string, doc: Document): LintIssue[] {
     });
   };
 
+  // `id!: text` plays only while that character is in the party; otherwise the whole paragraph
+  // is skipped, actions included — and a `{…}` line right under the text is part of that
+  // paragraph. Anything beyond staging (a menu, a flag, a jump, an item) silently vanishes.
+  // Paragraphs follow parseText: a blank line or a `>` choice ends one, `&` and `//` don't.
+  const checkPartyLines = (idx: number, content: string, locate: Locator) => {
+    const lines = stripCodeBlocks(content).split('\n');
+    // Comment lines blanked to spaces, so a commented-out `{…}` is no action and offsets hold.
+    const masked = lines.map(l => (isCommentLine(l) ? l.replace(/[^\n]/g, ' ') : l)).join('\n');
+    let party: { id: string; start: number; end: number } | null = null;
+    let filling = false;
+
+    const flush = () => {
+      if (!party) return;
+      const text = masked.slice(party.start, party.end);
+      const keys: string[] = [];
+      let first = -1;
+      for (const [start, end] of findBraceRanges(text)) {
+        if (isConditionBrace(text, start)) continue;
+        const found = topLevelKeys(text.slice(start, end)).filter(k => !PARTY_LINE_STAGING.has(k));
+        if (found.length && first === -1) first = start;
+        keys.push(...found);
+      }
+      if (keys.length) {
+        push({
+          blockIndex: idx,
+          field: 'content',
+          severity: 'warning',
+          message: `Party line '${party.id}!:' carries {${keys.join(', ')}} — skipped with the line whenever ${party.id} is not in the party. Move it to a paragraph that always plays`,
+          at: locate(party.start + first, party.end),
+        });
+      }
+      party = null;
+    };
+
+    let offset = 0;
+    for (const line of lines) {
+      const lineStart = offset;
+      offset += line.length + 1;
+      if (isCommentLine(line)) continue;
+      const t = line.trim();
+      if (!t || t.startsWith('>')) {
+        flush();
+        filling = false;
+        continue;
+      }
+      if (t.startsWith('&') || /^\d+$/.test(t)) continue;
+      if (!filling) {
+        // Untrimmed, like the engine: an indented `ane!:` prints as text, it is no party line.
+        const tag = /^(\w+)!:/.exec(line);
+        party = tag ? { id: tag[1], start: lineStart, end: lineStart + line.length } : null;
+        filling = true;
+      } else if (party) {
+        party.end = lineStart + line.length;
+      }
+    }
+    flush();
+  };
+
   doc.blocks.forEach((block, idx) => {
     // serializeAst skips falsy entries; mirror it rather than crash on one.
     if (!block) return;
     if (block.kind === 'raw') {
       check(idx, block.text, 'content', (start, end) => ({ target: 'raw', start, end }));
+      refs?.(idx, block.text, null, false, 'content', (start, end) => ({ target: 'raw', start, end }));
       return;
     }
 
     if ('paramsRaw' in block && block.paramsRaw) {
       checkParams(idx, block.paramsRaw, 'paramsRaw', (start, end) => ({ target: 'header-params', start, end }));
+      refs?.(idx, block.paramsRaw, 'header', false, 'paramsRaw', (start, end) => ({ target: 'header-params', start, end }));
     }
 
     if (block.kind === 'encounter' || block.kind === 'template') {
@@ -470,8 +603,10 @@ export function lintDungeonContent(source: string, doc: Document): LintIssue[] {
         else if (row.kind === 'comment') proseLines.push(row.text);
         else if (row.kind === 'code') {
           check(idx, row.text, 'content', (start, end) => ({ target: 'row-text', rowIndex, start, end }));
+          refs?.(idx, row.text, null, false, 'content', (start, end) => ({ target: 'row-text', rowIndex, start, end }));
         } else if (row.kind === 'choice' && row.paramsRaw) {
           checkParams(idx, row.paramsRaw, 'content', (start, end) => ({ target: 'row-params', rowIndex, start, end }));
+          refs?.(idx, row.paramsRaw, 'choice', false, 'content', (start, end) => ({ target: 'row-params', rowIndex, start, end }));
         }
         if (row.kind === 'text' || row.kind === 'empty' || row.kind === 'comment') {
           proseOffset += proseLines[proseLines.length - 1].length + 1;
@@ -492,6 +627,7 @@ export function lintDungeonContent(source: string, doc: Document): LintIssue[] {
       });
       if (proseLines.length) {
         check(idx, proseLines.join('\n'), 'content', (start, end) => ({ target: 'prose', start, end }));
+        refs?.(idx, proseLines.join('\n'), null, true, 'content', (start, end) => ({ target: 'prose', start, end }));
       }
       return;
     }
@@ -501,12 +637,15 @@ export function lintDungeonContent(source: string, doc: Document): LintIssue[] {
         row.columns.forEach((col, colIndex) => {
           if (col.paramsRaw) {
             checkParams(idx, col.paramsRaw, 'content', (start, end) => ({ target: 'column-params', rowIndex, colIndex, start, end }));
+            refs?.(idx, col.paramsRaw, col.kind === '~' ? 'choice' : 'ignored', false, 'content', (start, end) => ({ target: 'column-params', rowIndex, colIndex, start, end }));
           }
           if (col.content) {
             const locate: Locator = (start, end) => ({ target: 'column-content', rowIndex, colIndex, start, end });
             check(idx, col.content, 'content', locate);
+            refs?.(idx, col.content, null, true, 'content', locate);
             checkInlineChoices(idx, col.content, locate);
             checkAnchors(idx, col.content, locate);
+            checkPartyLines(idx, col.content, locate);
           }
         });
       });

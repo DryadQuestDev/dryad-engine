@@ -1,0 +1,49 @@
+{
+  "id": "reputation",
+  "name": "Reputation",
+  "description": "What each character thinks of the player. A reputation trait on characters, changed by the reputation action and read by the _reputation() condition. A change adds a \"|name| will remember that.\" note under the dialogue text, and a Reputation debug tab lists every character that tracks it.",
+  "author": "Nekon",
+  "version": "1.0.0",
+  "order": 0,
+  "scripts": [
+    "main.mjs"
+  ],
+  "tabs": [
+    {
+      "id": "config",
+      "name": "Reputation Config",
+      "schema": {
+        "min": {
+          "type": "number",
+          "defaultValue": -10,
+          "tooltip": "Lowest reputation a character can reach. Changes past it stop here."
+        },
+        "max": {
+          "type": "number",
+          "defaultValue": 10,
+          "tooltip": "Highest reputation a character can reach. Changes past it stop here."
+        },
+        "show_direction": {
+          "type": "boolean",
+          "defaultValue": false,
+          "tooltip": "Mark the note with an up or down arrow. Off, every change reads the same \"will remember that\", so the player is left to guess which way it went."
+        }
+      }
+    }
+  ],
+  "data": {
+    "character_traits": [
+      {
+        "id": "reputation",
+        "type": "number",
+        "tooltip": "What this character thinks of the player. Set it on a template (0 for a neutral start, below 0 for someone who starts out hostile) to track it; a character with no value is untracked until a reputation action first changes it. The plugin keeps it out of save migration, so a load never resets it to the template."
+      }
+    ],
+    "locale": [
+      {
+        "id": "reputation_remember",
+        "val": "|name| will remember that."
+      }
+    ]
+  }
+}

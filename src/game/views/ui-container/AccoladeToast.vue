@@ -85,6 +85,17 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer); });
   pointer-events: auto;
 }
 
+/* On touch screens the dialogue box reaches the bottom-right corner, so the toast would cover its
+   text; the top centre is clear of it and of both rails. */
+@media (pointer: coarse) {
+  .accolade-toast {
+    top: 0.8rem;
+    bottom: auto;
+    right: 50%;
+    translate: 50% 0;
+  }
+}
+
 .medallion {
   width: 46px;
   height: 46px;

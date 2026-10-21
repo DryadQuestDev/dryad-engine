@@ -6,28 +6,36 @@ const { CharacterSlot, BackgroundAsset, CharacterViewerPopup, CustomComponentCon
 
 import { currentRpgBattle, getSpeedMult, getBattleDisplayName } from '../rpg-battle-state.mjs';
 import { battleSceneGate, isBattleScenePauseActive } from '../rpg-battle-scenes.mjs';
-import { endRpgBattle } from '../main.mjs';
+import { endRpgBattle, battlePreloadPlan } from '../main.mjs';
 import { executeAction, advanceToNextTurn, tickActiveCharacter, canUseAbility, processDeaths, refireChannels, consumeStun, flashAbilityName, consumeBattleConsumable } from '../rpg-battle-flow.mjs';
-import { isCharAlive, getStatusStacks, expandSplashTargets, resolveAbility, getAliveEnemies, getAliveAllies, consumeFreeAction, isSupport, isAIControlled } from '../rpg-battle-effects.mjs';
+import { isCharAlive, getStatusStacks, expandSplashTargets, resolveAbility, getAliveEnemies, getAliveAllies, consumeFreeAction, isSupport, isAIControlled, abilityMergeStatus } from '../rpg-battle-effects.mjs';
 import { decideAction, getValidTargets } from '../rpg-battle-ai.mjs';
-import { animateCast, animateEffects, setIdleState, prepSummon, animateSummonIn, preloadProjectiles } from '../rpg-battle-anims.mjs';
+import { animateCast, animateEffects, animateMerge, setIdleState, prepSummon, animateSummonIn, preloadProjectiles } from '../rpg-battle-anims.mjs';
 import { LAYOUT, enemySlot, cameraOrigin } from '../rpg-vfx-geometry.mjs';
 /** @param {RpgBattle} b */
 function isBattleFinished(b) { return b.phase === 'finished'; }
 
+/** The idles a battle slot can carry – the battle_idle trait's own list. The rest animate the element
+ * the lunge, hit and death tweens own, or read as damage (shake, jitter…). */
+const BATTLE_SAFE_IDLES = new Set(['float', 'bounce', 'hop', 'pan', 'pulse', 'breathe', 'ghost', 'glow']);
+
 /**
  * Idle loop for a character's battle slot: the `battle_idle` character trait, else the
- * Config tab's opt-in default_idle. The trait lives on the character rather than on the
- * battle entry so a bat floats in every fight and every wave from one authoring point; the
- * config default keeps every grounded static plate alive without authoring at all.
+ * character's scene `idle` (engine trait) when it is one a battle slot can carry, else the
+ * Config tab's opt-in default_idle. The traits live on the character rather than on the
+ * battle entry so a bat floats in every fight and every wave from one authoring point – and
+ * with `idle` alone it floats in scenes too; the config default keeps every grounded static
+ * plate alive without authoring at all.
  * A Spine doll animates itself — a CSS idle on top would double it — so it takes only the
- * trait (an explicit ask), never the config default.
+ * traits (an explicit ask), never the config default.
  * @param {string} charId
  * @returns {{ idle?: string }}
  */
 function battleIdle(charId) {
   const c = game.getCharacter(charId);
+  const own = c?.getTrait('idle');
   const idle = c?.getTrait('battle_idle')
+    || (BATTLE_SAFE_IDLES.has(own) ? own : '')
     || (c?.isSpineCharacter?.() ? 'none' : (game.getData('plugins_data/rpg_battler/battle_config')?.default_idle ?? 'none'));
   return idle && idle !== 'none' ? { idle } : {};
 }
@@ -498,10 +506,18 @@ export const RpgBattleScreen = defineComponent({
     // Returns true if the cast resolved, false if executeAction returned null (veto / guard).
     async function performAbility(casterId, abilityId, targetId, targetType) {
       const ability = game.getCharacter(casterId)?.getAbility(abilityId);
-      const landPos = await animateCast(casterId, vfxTargets(casterId, targetId, targetType), targetType, ability,
+      // A merge's leap into the ally IS its cast (animateMerge, after the resolve), so it skips the
+      // usual caster motion — a nudge toward the ally and back would play right before the leap.
+      const merges = !!abilityMergeStatus(ability);
+      if (merges) flashAbilityName(casterId, abilityId);
+      const landPos = merges ? null : await animateCast(casterId, vfxTargets(casterId, targetId, targetType), targetType, ability,
         { onCast: () => flashAbilityName(casterId, abilityId) });
       const results = executeAction(abilityId, targetId);
       if (results === null) return false;
+
+      for (const r of results) {
+        if (r.type === 'merge') await animateMerge(r.mergedId, r.targetId, ability);
+      }
 
       const summonIds = results.filter(r => r.type === 'summon').map(r => r.targetId);
       if (summonIds.length) {
@@ -805,7 +821,10 @@ export const RpgBattleScreen = defineComponent({
 
     onMounted(() => {
       const b = battle.value;
-      if (b) preloadProjectiles(new Set([...b.playerParty, ...b.enemyParty, ...b.turnOrder]));
+      if (b) {
+        const statuses = new Set([...battlePreloadPlan(b, b.waves).values()].flat());
+        preloadProjectiles(new Set([...b.playerParty, ...b.enemyParty, ...b.turnOrder]), statuses);
+      }
       driveTurns();
     });
 
@@ -968,8 +987,8 @@ export const RpgBattleScreen = defineComponent({
                 @click="isTargeting && targetsAllies && (targetIncludesSelf || ps.charId !== battle.activeCharId) ? selectTarget(ps.charId) : onSlotClick(ps.charId, 'player')" />
             </div>
 
-            <!-- Acting support: floating portrait above the party row instead of a slot;
-                 carries the data-rpg-char-id anchor, so projectiles launch from it. -->
+            <!-- Acting support: cut-in band above the party row instead of a slot;
+                 carries the data-rpg-char-id anchor, so projectiles launch from its face. -->
             <RpgSupportFace v-if="supportFaceChar" :character="supportFaceChar"
               :class="{ 'is-in': supportFaceIn }"
               :style="{ '--rpg-support-slide': supportSlideMs + 'ms' }" />

@@ -362,6 +362,48 @@ export function animateDeath(characterId) {
 }
 
 /**
+ * Animate a merge: the merging body leaps onto the ally it joins and melts into it, and the joined
+ * body swells as it takes it in. This is the whole cast of a merge ability — the ability's projectile
+ * def gives it sound and VFX: `sound` as the leap starts, then at contact the def's impact plays on
+ * the joined body (`hit_image` with `hit_sound`, or `hit_sound` alone).
+ * The merged body is left invisible; processDeaths takes it off the field.
+ * @param {string} mergedId @param {string} intoId @param {any} ability
+ * @returns {Promise<void>}
+ */
+export function animateMerge(mergedId, intoId, ability) {
+  const def = getProjectileDef(ability?.meta?.projectile);
+  const m = getSpeedMult();
+  setBattleState(mergedId, 'attack');
+
+  return new Promise(resolve => {
+    const el = getCharEl(mergedId);
+    const intoEl = getCharEl(intoId);
+    if (!el || !intoEl) {
+      if (el) el.style.opacity = '0';
+      resolve();
+      return;
+    }
+
+    const c = getCenter(el);
+    const t = getCenter(intoEl);
+    playSounds(def?.sound);
+    // Its name and health bar go with it: left behind, a bar already at 0 would read as a death.
+    const overlay = getCharWrapper(mergedId)?.querySelector('.rpg-char-overlay');
+    if (overlay) gsap.to(overlay, { opacity: 0, duration: 0.2 * m });
+    const tl = gsap.timeline({ onComplete: resolve });
+    tl.to(el, { x: t.x - c.x, y: t.y - c.y, scale: 0.6, duration: 0.32 * m, ease: 'power2.in', ...FEET });
+    tl.add(() => {
+      if (def?.hit_image) playHitVfx(def, intoId);
+      else playSounds(def?.hit_sound);
+    });
+    tl.to(el, { opacity: 0, scale: 0.2, duration: 0.16 * m, ease: 'power1.in' });
+    tl.fromTo(intoEl, { scaleX: 1.16, scaleY: 0.86 }, {
+      scaleX: 1, scaleY: 1, duration: 0.55 * m, ease: 'elastic.out(1, 0.45)', ...FEET,
+    }, '<');
+  });
+}
+
+/**
  * Play the caster's animation: a lunge for `melee`; for `cast`, a nudge toward another ally or a
  * wobble in place. Without a motion, the target type picks it as for an ability with no VFX.
  * @param {string} casterId
@@ -445,15 +487,26 @@ function loadDims(url) {
  * first cast of an effect already knows its frame shape and its image is loaded. Only what the
  * fight can use: a projectile is named by an ability (`meta.projectile`, a battle consumable's
  * included), so a battle loads its combatants' effects, never the whole Projectiles tab. Call it
- * as combatants join — the battle's start, a wave, a summon; known images are skipped.
- * @param {Iterable<string>} charIds
+ * as combatants join — the battle's start, a wave, a summon; known images are skipped. `statusIds` adds
+ * the effects of every ability those statuses grant or modify (a transformation's new kit).
+ * @param {Iterable<string>} charIds @param {Iterable<string>} [statusIds]
  */
-export function preloadProjectiles(charIds = []) {
+export function preloadProjectiles(charIds = [], statusIds = []) {
+  const warm = (/** @type {string | undefined} */ projectileId) => {
+    const def = getProjectileDef(projectileId);
+    if (def) { loadDims(def.travel_image); loadDims(def.hit_image); }
+  };
   for (const id of charIds) {
     const abilities = game.getCharacter(id)?.getAbilities() || {};
-    for (const aid in abilities) {
-      const def = getProjectileDef(abilities[aid]?.meta?.projectile);
-      if (def) { loadDims(def.travel_image); loadDims(def.hit_image); }
+    for (const aid in abilities) warm(abilities[aid]?.meta?.projectile);
+  }
+  // A status can grant abilities, or modify one, mid-fight: warm their effects too.
+  const statusDefs = game.getData('character_statuses', true);
+  const abilityTemplates = game.getData('ability_templates', true);
+  for (const statusId of statusIds) {
+    const def = statusDefs?.get(statusId);
+    for (const aid of [...(def?.abilities || []), ...(def?.ability_modifiers || [])]) {
+      if (typeof aid === 'string') warm(abilityTemplates?.get(aid)?.meta?.projectile);
     }
   }
 }

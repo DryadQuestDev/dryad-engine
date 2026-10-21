@@ -23,6 +23,8 @@ A record is a single lore/tutorial entry. It has:
 | `content` | Long HTML shown in the Encyclopedia tab. Falls back to `summary` if empty |
 | `image` | Optional illustration shown above `content` in the Encyclopedia |
 | `auto_discovery` | If true, unlocked from game start. If false, must be discovered first (see Discovery below) |
+| `parent_record` | Makes the record an addendum to another record: it never appears on its own, and once discovered its text is appended to the parent's entry |
+| `character` | The character the record is about. Links the Encyclopedia entry and the character's Gallery page to each other (see Character Links below) |
 | `tags` | Free-form tags for searching/filtering |
 
 Records are authored in the editor under **Narrative > Records**.
@@ -37,11 +39,21 @@ A tree organizes records into a tab. Each tree has:
 |-------|-------------|
 | `tab` | Badge label shown in the Encyclopedia sidebar |
 | `order` | Lower values appear first |
+| `hide_undiscovered_groups` | If true, a group stays out of the sidebar until one of its records is discovered, so a group named after a place or faction gives nothing away early |
 | `groups[]` | Ordered list of groups (a group is a name + ordered list of record references) |
 
 Trees are authored in the editor under **Narrative > Encyclopedia Trees**. A record can appear in zero, one, or multiple trees – the data is reusable.
 
 Records that exist but aren't referenced by any tree work fine inline as tooltips; they just won't show up in the Encyclopedia.
+
+### Character Links
+
+Set a record's `character` to a character template and the record and the character's Gallery page point at each other:
+
+- The Encyclopedia entry shows a character button before its title once the player has met the character.
+- The character's Gallery page shows a book button once the player has discovered the record.
+
+Both need the character template to have a gallery entry. Set `character` on the record listed in the Encyclopedia, not on a `parent_record` addendum. If several records point at one character, the Gallery opens the first discovered one in tree order.
 
 ---
 
@@ -61,7 +73,7 @@ Drop a reference into any text that goes through the text transformation pipelin
 
 `[[!id]]` discovery only fires for branches that survive `if{}` conditional evaluation – `[[!id]]` inside a discarded branch will not unlock the record.
 
-Ids may contain letters, digits, underscores and hyphens – both `[[my_record]]` and `[[my-record]]` resolve. A token whose id matches no record logs an error and falls back to rendering the label.
+Ids may contain letters, digits, underscores, hyphens and dots – `[[my_record]]`, `[[my-record]]` and `[[item:potion.2]]` all resolve. A token whose id matches no record logs an error and falls back to rendering the label.
 
 ### Items and Statuses
 
@@ -179,6 +191,11 @@ if (game.isRecordDiscovered('kingdom_of_luminaria')) { ... }
 
 // Get all encyclopedia trees, sorted by order
 const trees = game.getEncyclopediaTrees();
+
+// Jump between a character's record and their gallery page
+const recordId = game.getCharacterRecordId('alice');
+if (recordId) game.openEncyclopediaForRecord(recordId);
+if (game.isCharacterInGallery('alice')) game.openGalleryForCharacter('alice');
 ```
 
 ---
@@ -197,3 +214,4 @@ const trees = game.getEncyclopediaTrees();
 | Discover a record from an action | Use `{lore: "id"}` |
 | Check discovery in a script | `game.isRecordDiscovered(id)` |
 | Auto-unlock from game start | Set `auto_discovery: true` on the record |
+| Link a record to a character's Gallery page | Set `character` on the record |

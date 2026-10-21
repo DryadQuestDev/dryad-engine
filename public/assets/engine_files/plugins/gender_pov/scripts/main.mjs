@@ -39,7 +39,11 @@ function resolvePronouns(charId) {
 
 // Register generic pronoun placeholders (resolve by character ID)
 for (const key of Object.keys(PRONOUNS)) {
-    game.registerPlaceholder(key, (charId) => resolvePronouns(charId)[key]);
+    game.registerPlaceholder(key, (charId) => resolvePronouns(charId)[key], {
+        help: 'This pronoun for a character: the she form when their gender is female, else the he form.',
+        args: [{ ref: 'character' }],
+        examples: [`|${key}(alice)|`],
+    });
 }
 
 // ============================================================================
@@ -105,7 +109,10 @@ function resolvePOV() {
 
 // Register POV placeholders (no args — global setting)
 for (const key of Object.keys(POV)) {
-    game.registerPlaceholder(key, () => resolvePOV()[key]);
+    game.registerPlaceholder(key, () => resolvePOV()[key], {
+        help: 'This first-person word, or its second-person form when the player picks that point of view.',
+        examples: [`|${key}|`],
+    });
 }
 
 // Export for other scripts

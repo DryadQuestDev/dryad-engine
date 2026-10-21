@@ -13,7 +13,7 @@ Format: `|placeholderName(args)|`
 | `item` | Returns the name of an item, tinted by its rarity. No args = the active item | `You are using \|item(uid, invId)\|` |
 | `from` | Fetches a locale entry and resolves it through the full pipeline | `\|from(greeting_text)\|` |
 | `pick` | Like `from`, but randomly selects from numbered locale variants | `\|pick(greeting_text)\|` |
-| `stat` | Returns a character stat value. Requires `context.character` passed to `resolveString` | `\|stat(power)\|` |
+| `stat` | Returns a character stat value. Requires `context.character` passed to `resolveString`. In a status's description, it reads the holder's stat, or the status's own stat when the card shows it before anyone holds it | `\|stat(power)\|` |
 
 ---
 

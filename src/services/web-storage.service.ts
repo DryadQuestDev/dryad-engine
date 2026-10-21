@@ -195,6 +195,10 @@ export class WebStorageService implements StorageService {
         console.warn('[WebStorage] writeText is not available in web mode');
     }
 
+    async writeBinary(_filePath: string, _data: Uint8Array): Promise<void> {
+        throw new Error('writeBinary is not available in web mode');
+    }
+
     async deleteFile(_filePath: string, _recursive?: boolean): Promise<void> {
         console.warn('[WebStorage] deleteFile is not available in web mode');
     }

@@ -12,15 +12,15 @@ All built-in actions for scenes and choices.
 | `flash` | Display a flash message. Accepts a plain string, or `{ text, class }` to wrap the text in a `<span class="…">` | `"Item received!"` or `{ text: "small note", class: "flash-small" }` | |
 | `state` | Set game states | `"game_state=battle, disable_ui=true"` | |
 | `popup` | Manage the popup stack: `"id"` opens, `"!id"` closes that one, `false` closes all. Comma-separated tokens applied in order; popups stack on top of each other | `"my-popup"`, `"popup1, !popup2"`, or `false` | ✓ |
-| `property` | Modify game properties (`=` set, `>` add, `<` subtract) | `"gold>100, score=0"` | |
+| `property` | Modify game properties (`=` set, `+=` add, `-=` subtract) | `"gold += 100, score = 0"` | |
 | `lore` | Mark one or more lore records as discovered | `"kingdom_of_luminaria"` or `"goblins, orcs, trolls"` | |
 
 ### property Examples
 
 ```javascript
-// String format (= set, > add, < subtract)
-{ property: "gold>100" }           // add 100 to gold
-{ property: "score=0, lives<1" }   // set score to 0, subtract 1 from lives
+// String format (= set, += add, -= subtract)
+{ property: "gold += 100" }              // add 100 to gold
+{ property: "score = 0, lives -= 1" }    // set score to 0, subtract 1 from lives
 
 // Object format (for setting complex values)
 { property: { settings: { volume: 80, theme: "dark" } } }
@@ -35,7 +35,7 @@ All built-in actions for scenes and choices.
 | `asset` | Add, update, or remove assets(!). `false` = remove all (incl. defaults); `clear` = remove all but backdrop; `reset` = clear all + re-stage defaults. Flag an asset `bg=true` to make it a runtime backdrop: staging one replaces the backdrop already on stage, and `clear`/`solo` keep it. Re-staging a visible asset glides it to the new values — see below | `"false, forest(bg=true), pic1"`, `"!bg1"`, `"clear"`, or `"reset"` | |
 | `grade` | Colour-grade the scene, actors and map art. `false` / `none` clears. `#N` sets strength. Presets and fields: ->dungeons.grades | `"night"`, `"night#0.5"`, `false`, or an object | |
 | `ambient` | Particles drifting over scene backgrounds: `fireflies`, `motes`, `embers`. `#N` sets density. `false` clears. See ->dungeons.grades | `"fireflies"`, `"embers#1.5"`, `false` | |
-| `flag` | Set flags (`=` set, `>` add, `<` subtract) | `"gold>10, count=5"` | |
+| `flag` | Set flags (`=` set, `+=` add, `-=` subtract) | `"gold += 10, count = 5"` | |
 | `exit` | Exit current scene | true | ✓ |
 | `enter` | Enter a room in a dungeon | `"room5", "ancient_cave.room10"` | ✓ |
 | `reveal_room` | Mark rooms explored without entering them: their fog lifts and their neighbors show. No room events run. `dungeon.room` reaches another dungeon | `"3, 4"`, `"dungeon2.room3"` | |
@@ -232,14 +232,14 @@ Without a `template`, `reset_character` falls back to the live character's own `
 | Action | Description | Example | Delayed |
 |--------|-------------|---------|---------|
 | `status` | Apply / remove status effects per target. `&` separates items; `!` prefix removes; `(stacks = N, duration = N)` overrides the template's values for that apply, either key alone. Flash notification only for party members | `"alice->buff1 & buff2, bob->!debuff"`, `"alice->poisoned(duration = 3)"`, `"alice->poisoned(stacks = 2, duration = 3)"` | |
-| `char` | Modify character property (`=` set, `>` add, `<` subtract) | `"alice.resource.health>10"` | |
+| `char` | Modify character property (`=` set, `+=` add, `-=` subtract) | `"alice.resource.health += 10"` | |
 | | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle` | `"mc.attribute.belly=2"` | |
 | | `attribute` fallback: if the key is a skin layer id (not an attribute), `true`/`false` toggles the layer's visibility. Attribute wins on id collision | `"mc.attribute.wings=true"` | |
 | `attr` | Shortcut for `char` with `attribute` type (same skin-layer fallback) | `"ane.face = hurt"`, `"mc.wings = true"` | |
 | `trait` | Shortcut for `char` with `trait` type | `"alice.name = Alice"` | |
-| `stat` | Shortcut for `char` with `stat` type (`=` `>` `<`) | `"alice.strength > 5"` | |
-| `resource` | Shortcut for `char` with `resource` type (`=` `>` `<`) | `"alice.health > 10"` | |
-| `skin_style` | Shortcut for `char` with `skinStyle` type (`=` set, `>` add, `<` remove) | `"alice.hat = class1"` | |
+| `stat` | Shortcut for `char` with `stat` type (`=` `+=` `-=`) | `"alice.strength += 5"` | |
+| `resource` | Shortcut for `char` with `resource` type (`=` `+=` `-=`) | `"alice.health += 10"` | |
+| `skin_style` | Shortcut for `char` with `skinStyle` type (`=` set, `+=` add, `-=` remove) | `"alice.hat = class1"` | |
 | `skin` | Add / remove skin layers per target. `&` separates layers; `!` prefix removes | `"alice->armor & helmet, bob->!cloak"` | |
 | `item_slot` | Add / remove equipment slots per target. `&` separates slots; `!` prefix removes | `"alice->ring & necklace, bob->!belt"` | |
 | `ability` | Grant / remove innate abilities per target. `&` separates abilities; `!` prefix removes | `"alice->fireball & ice_bolt, bob->!punch"` | |

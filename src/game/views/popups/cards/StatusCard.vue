@@ -45,6 +45,17 @@ const description = computed(() => {
     return statusLiveInstance.value?.description || statusDef.value?.description || '';
 });
 
+// displayImage resolves a borrowed icon (the item or ability that applied it) on a live instance;
+// a preview has only the template's own image.
+const image = computed((): string => {
+    return statusLiveInstance.value?.displayImage || statusDef.value?.image || '';
+});
+
+// Framed in the polarity colour, like the StatusBrick the card is usually opened from.
+const polarity = computed((): string => {
+    return statusLiveInstance.value?.polarity || statusDef.value?.polarity || 'positive';
+});
+
 const stacks = computed((): number => {
     const live = statusLiveInstance.value;
     if (!live) return 1;
@@ -86,8 +97,9 @@ const mergedStats = computed((): Record<string, number> => {
     const baseStats = (live?.stats ?? statusDef.value?.stats ?? {}) as Record<string, number>;
     const merged: Record<string, number> = { ...baseStats };
     // Not applied yet: the template's numbers may not be what the player will get (a status scaled
-    // by the item that grants it), so the game may rewrite this copy first.
-    if (!live) game.trigger('status_preview', props.statusId, merged, { item: props.sourceItem, character: statusCharacter.value ?? undefined });
+    // by the item that grants it), so the game may rewrite this copy first. The editor's hydrated
+    // preview singleton registers no emitters, so it shows the template's numbers.
+    if (!live && global.engineState.value === 'game') game.trigger('status_preview', props.statusId, merged, { item: props.sourceItem, character: statusCharacter.value ?? undefined });
     const computedKeys = live?.computedStatsKeys ?? statusDef.value?.computed_stats ?? [];
     const char = statusCharacter.value;
     if (computedKeys.length && char) {
@@ -111,6 +123,13 @@ const stacksLabel = computed(() => global.getString('status_card.stacks', { stac
 
 const unknownLabel = computed(() => global.getString('card.unknown', { id: props.statusId }));
 
+// A status nobody holds yet (opened from an ability, an item, a link) has no holder whose stat
+// `|stat(x)|` could print, so it reads the status's own numbers - the same ones its stat lines show.
+const descriptionContext = computed(() => ({
+    character: statusCharacter.value,
+    stats: statusLiveInstance.value ? undefined : mergedStats.value,
+}));
+
 const displayData = computed(() => {
     const live = statusLiveInstance.value;
     return {
@@ -123,8 +142,9 @@ const displayData = computed(() => {
 
 <template>
     <div v-if="statusDef || statusLiveInstance" class="popup-inner">
-        <div class="popup-header">
+        <div class="popup-header status-card-header">
             <span v-if="titleChip" class="popup-title-chip">{{ titleChip }}</span>
+            <img v-if="image" :src="image" alt="" class="status-card-icon" :class="'polarity-' + polarity" />
             <span class="popup-title" :class="rarity ? ['item-name', 'rarity_' + rarity] : []">
                 {{ title }}
                 <span v-if="shownStacks > 1" class="popup-stack-count">{{ stacksLabel }}</span>
@@ -135,7 +155,7 @@ const displayData = computed(() => {
             </span>
         </div>
         <div class="popup-body">
-            <div v-if="description" v-script="{ html: description, context: { character: statusCharacter } }" class="popup-description"></div>
+            <div v-if="description" v-script="{ html: description, context: descriptionContext }" class="popup-description"></div>
             <StatusObjectDisplay :data="displayData" :stacks="shownStacks" :character-id="characterId" />
         </div>
     </div>
@@ -145,6 +165,31 @@ const displayData = computed(() => {
 </template>
 
 <style scoped>
+/* The shared header spreads its children (space-between), which would float the title midway
+   between the icon and the duration; the duration pins itself right by its own margin. */
+.status-card-header {
+    justify-content: flex-start;
+}
+
+.status-card-icon {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    box-sizing: border-box;
+    padding: 1px;
+    border: 1px solid #42b983;
+    border-radius: 4px;
+}
+
+.status-card-icon.polarity-negative {
+    border-color: #e74c3c;
+}
+
+.status-card-icon.polarity-neutral {
+    border-color: #888;
+}
+
 .popup-title-chip {
     display: inline-block;
     vertical-align: middle;

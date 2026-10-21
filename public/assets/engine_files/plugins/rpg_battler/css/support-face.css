@@ -1,51 +1,143 @@
-/* Floating portrait for the acting support combatant (no battlefield slot).
+/* Cut-in band for the acting support combatant (no battlefield slot).
    Anchored inside .rpg-viewport (container-type: size) — cqw/cqh resolve against it.
 
-   The classless state is OFF-SCREEN LEFT: the card mounts there, gets `.is-in` a frame
-   later to glide to its resting spot, and loses it again to glide back out. driveTurns
-   awaits both legs (see showSupportFace / hideSupportFace), so the portrait is never on
-   screen during another combatant's turn. --rpg-support-slide is set per battle-speed. */
+   The classless state is OFF-SCREEN LEFT: the band mounts there, gets `.is-in` a frame
+   later to sweep in, and loses it again to sweep back out. driveTurns awaits both legs
+   (see showSupportFace / hideSupportFace) for --rpg-support-slide, so every piece's
+   delay + duration stays inside that budget. A transition runs with the TARGET state's
+   timing, so the `.is-in` rules time the entrance (band → face → name) and the classless
+   rules time the exit (name → face → band). */
 .rpg-support-face {
+  --slide: var(--rpg-support-slide, 900ms);
   position: absolute;
-  left: 15cqw;
-  top: 44cqh;
-  width: 16cqh;
+  left: 0;
+  top: 42cqh;
+  height: 14cqh;
+  min-width: 26cqw;
   z-index: 5;
   pointer-events: none;
-  /* Far enough left to clear the viewport edge from the resting position. */
-  transform: translateX(-30cqw);
-  opacity: 0;
-  transition:
-    transform var(--rpg-support-slide, 900ms) cubic-bezier(0.22, 0.61, 0.36, 1),
-    opacity calc(var(--rpg-support-slide, 900ms) * 0.55) ease;
 }
 
-.rpg-support-face.is-in {
+/* ── Band ── */
+.rpg-support-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 10cqh;
+  overflow: hidden;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 4cqh) 100%, 0 100%);
+  background:
+    linear-gradient(90deg, rgba(250, 204, 21, 0.9), rgba(250, 204, 21, 0.1) 90%) top left / 100% 0.3cqh no-repeat,
+    linear-gradient(90deg, rgba(250, 204, 21, 0.45), rgba(250, 204, 21, 0) 65%) bottom left / 100% 0.2cqh no-repeat,
+    repeating-linear-gradient(-62deg, rgba(255, 255, 255, 0.04) 0 0.25cqh, transparent 0.25cqh 1.8cqh),
+    linear-gradient(90deg, rgba(10, 9, 14, 0.94), rgba(14, 12, 20, 0.86) 60%, rgba(22, 18, 28, 0.6));
+  transform: translateX(-101%);
+  transition: transform calc(var(--slide) * 0.5) cubic-bezier(0.55, 0, 0.8, 0.4) calc(var(--slide) * 0.38);
+}
+
+.rpg-support-face.is-in .rpg-support-band {
   transform: translateX(0);
-  opacity: 1;
+  transition: transform calc(var(--slide) * 0.42) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.rpg-support-face-inner {
+/* A glint crosses the band once it lands. */
+.rpg-support-band::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 244, 214, 0.28) 50%, transparent 65%);
+  transform: translateX(-100%);
+}
+
+.rpg-support-face.is-in .rpg-support-band::after {
+  animation: rpg-support-glint calc(var(--slide) * 0.55) ease-in-out calc(var(--slide) * 0.38) both;
+}
+
+@keyframes rpg-support-glint {
+  to { transform: translateX(100%); }
+}
+
+/* ── Face + name row ── (in flow, so the band grows with a long name; the right
+   padding clears the band's slanted end) */
+.rpg-support-row {
+  position: relative;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 7cqh 0 8cqw;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.8cqh;
+  align-items: flex-end;
+  gap: 1.2cqw;
+}
+
+.rpg-support-portrait {
+  filter: drop-shadow(0 0.6cqh 1cqh rgba(0, 0, 0, 0.65));
+  opacity: 0;
+  transform: translateX(-9cqw);
+  transition:
+    transform calc(var(--slide) * 0.4) cubic-bezier(0.55, 0, 0.8, 0.4) calc(var(--slide) * 0.12),
+    opacity calc(var(--slide) * 0.3) ease calc(var(--slide) * 0.22);
+}
+
+.rpg-support-face.is-in .rpg-support-portrait {
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    transform calc(var(--slide) * 0.5) cubic-bezier(0.22, 1.25, 0.36, 1) calc(var(--slide) * 0.14),
+    opacity calc(var(--slide) * 0.25) ease calc(var(--slide) * 0.14);
 }
 
 .rpg-support-face .character-content {
-  filter: drop-shadow(0 0 12px rgba(250, 204, 21, 0.35));
+  position: relative;
+}
+
+/* Same parallelogram as the window, nudged left: an amber sliver on the leading edge. */
+.rpg-support-plate,
+.rpg-support-window {
+  clip-path: polygon(16% 0, 100% 0, 84% 100%, 0 100%);
+}
+
+.rpg-support-plate {
+  position: absolute;
+  inset: 0;
+  transform: translateX(-0.6cqh);
+  background: linear-gradient(180deg, #facc15, rgba(234, 179, 8, 0.55));
+}
+
+.rpg-support-window {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 32%, rgba(250, 204, 21, 0.22), transparent 62%),
+    linear-gradient(180deg, #2c2637, #121018);
 }
 
 .rpg-support-face-name {
-  padding: 0.3cqh 1.4cqh;
-  border-radius: 1cqh;
-  background: rgba(20, 20, 24, 0.75);
-  border: 1px solid rgba(250, 204, 21, 0.5);
-  color: #f5e9c9;
-  font-size: 2.4cqh;
+  margin-bottom: 3.4cqh;
+  color: #fff4dc;
+  font-size: 2.6cqh;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   white-space: nowrap;
+  text-shadow: 0 0.2cqh 0.8cqh rgba(0, 0, 0, 0.9);
+  opacity: 0;
+  transform: translateX(-2cqw);
+  transition:
+    transform calc(var(--slide) * 0.25) ease-in,
+    opacity calc(var(--slide) * 0.2) ease;
+}
+
+.rpg-support-face.is-in .rpg-support-face-name {
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    transform calc(var(--slide) * 0.4) cubic-bezier(0.16, 1, 0.3, 1) calc(var(--slide) * 0.4),
+    opacity calc(var(--slide) * 0.3) ease calc(var(--slide) * 0.4);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rpg-support-face { transition-duration: 1ms; }
+  .rpg-support-face *,
+  .rpg-support-face.is-in * { transition-duration: 1ms !important; transition-delay: 0ms !important; }
+  .rpg-support-face.is-in .rpg-support-band::after { animation: none; }
 }

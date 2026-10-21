@@ -4,7 +4,7 @@
  */
 
 /** `[name]…[/name]` letter effects. Each has a `.fx-<name>` rule in style.css. */
-export const TEXT_EFFECTS = ['shake', 'wave', 'bounce', 'pulse', 'rainbow', 'glow', 'spooky', 'flicker', 'blur', 'glitch'] as const;
+export const TEXT_EFFECTS = ['shake', 'wave', 'bounce', 'pulse', 'rainbow', 'glow', 'spooky', 'flicker', 'blur', 'glitch', 'freeze'] as const;
 
 /** `[green]…[/green]` named colours. Each renders as `.text-<name>`, a shade tuned in style.css. */
 export const TEXT_COLORS = ['green', 'red', 'gold', 'pink', 'purple', 'blue', 'grey'] as const;

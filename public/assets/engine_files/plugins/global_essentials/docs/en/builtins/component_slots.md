@@ -55,8 +55,8 @@ Each slot passes **context props** to registered components, giving them access 
 | `navigation-toolbar` | Buttons in map toolbar | |
 | `overlay-navigation` | Navigation map overlay | `dungeon`, `choices` |
 | `overlay-navigation-side` | Side column, 500px down the left edge of the game area in every dungeon type (panel background in text dungeons, transparent and click-through over the art in map/screen) | `dungeon` |
-| `scene-content-top` | Above scene dialogue content (text dungeons) | `sceneId` |
-| `scene-content-bottom` | Below scene choices (text dungeons) | `sceneId` |
+| `scene-content-top` | Inside the dialogue box, above the scene text (every dungeon type) | `sceneId` |
+| `scene-content-bottom` | Inside the dialogue box, below the scene text and choices (every dungeon type) | `sceneId` |
 | `progression-container` | Progression side panel | `activeTab`, `selectedCharacter` |
 | `quests-tab` | Quests panel | `selectedQuest` |
 | `replay-custom-block` | Custom content in replay mode | `replayMode`, `data` |

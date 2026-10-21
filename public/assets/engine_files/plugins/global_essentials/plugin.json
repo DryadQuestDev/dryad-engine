@@ -69,6 +69,35 @@
         "fromFile": "character_views",
         "uid": "jR7fJaZCozgX",
         "description": "View this character is staged with in scenes. Leave empty for the default view - a view the character has no art for falls back to it too. Swapping it mid-scene fades the character across."
+      },
+      {
+        "id": "idle",
+        "type": "chooseOne",
+        "uid": "TWunz83r8l7p",
+        "values": [
+          "blink",
+          "bounce",
+          "breathe",
+          "float",
+          "ghost",
+          "glitch",
+          "glow",
+          "hop",
+          "jitter",
+          "lean",
+          "nod",
+          "pan",
+          "pulse",
+          "rock",
+          "rotate",
+          "shake",
+          "shimmy",
+          "slumped",
+          "sway",
+          "wave",
+          "wiggle"
+        ],
+        "description": "Idle loop this character plays wherever it is staged in a scene – a bat or a moth-girl floats without an idle on every staging line. It applies when neither the staging line nor the slot template sets an idle and the actor has none to keep from an earlier slot; idle=none on a line cancels it. Battle plugins may read it too. Unset = still."
       }
     ],
     "character_views": [

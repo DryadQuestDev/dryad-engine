@@ -130,7 +130,7 @@ export function parseFloatingText(effect) {
     damage: e.isCrit ? `${e.damageType || 'physical'} crit` : (e.damageType || 'physical'),
     status_dot: e.damageType || 'physical', thorns: 'physical', reflect: 'physical',
     heal: 'heal', steal: 'heal', status_hot: 'heal', status_dot_heal: 'heal',
-    dodge: 'dodge', cleanse: 'cleanse', death_defiance: 'death-defiance',
+    dodge: 'dodge', cleanse: 'cleanse', death_defiance: 'death-defiance', merge: 'merge',
   }[e.type] || e.type;
 
   addFloatingText({ characterId: e.targetId, text, cssClass: css });

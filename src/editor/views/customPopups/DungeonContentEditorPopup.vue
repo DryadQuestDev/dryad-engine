@@ -10,6 +10,7 @@ import {
 import Button from 'primevue/button';
 import Textarea from 'primevue/textarea';
 import ToggleSwitch from 'primevue/toggleswitch';
+import Popover from 'primevue/popover';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
 import { startPlaytest, continuePlaytest, openLoadGamePopup } from '../editor-screen/usePlaytest';
@@ -18,11 +19,19 @@ import { parseToAst } from '../../../utility/dungeonEditor/parseToAst';
 import { serializeAst } from '../../../utility/dungeonEditor/serializeAst';
 import { exportDocumentAsHtml, exportDocumentAsText } from '../../../utility/dungeonEditor/exportHtml';
 import { lintDungeonContent, type LintIssue } from '../../../utility/dungeonEditor/lint';
-import { lineStartOffset } from '../../../utility/dungeonEditor/locate';
+import { buildLintContext, forDungeon } from '../../../utility/dungeonEditor/lintContext';
+import { editTarget, withIgnore, withoutIgnore } from '../../../utility/dungeonEditor/applyFix';
+import { blockScopes, indexDungeon, refLabel, type DungeonIndex, type LintContext, type RefFix } from '../../../utility/dungeonEditor/refs';
+import type { AssistMode, AssistPlace, JumpTarget } from '../../../utility/dungeonEditor/assist';
+import { CONTENT_ASSIST, type ContentAssist } from './dungeonEditor/useContentAssist';
+import AssistLayer from './dungeonEditor/AssistLayer.vue';
+import { EDITOR_TABS } from '../../editorTabs';
+import { editorLintIO } from './dungeonEditor/editorLintIO';
+import { blockStartLines, lineStartOffset } from '../../../utility/dungeonEditor/locate';
 import { convertPov } from '../../../utility/dungeonEditor/povConvert';
 import { buildDocumentIndex, type IndexCategory } from '../../../utility/dungeonEditor/index';
 import {
-  readMeta, isMetaStatus, visibleParams,
+  readMeta, writeMeta, isMetaStatus, visibleParams,
   META_STATUSES, META_STATUS_ICON, META_STATUS_LABEL,
   type MetaStatus,
 } from '../../../utility/dungeonEditor/meta';
@@ -45,6 +54,7 @@ import { groupQuestBlocks, questIdOf, questKindOf as questKindOfUtil } from '../
 const props = defineProps<EditorCustomPopupProps>();
 const emit = defineEmits<{
   'update:item': [item: any];
+  'request-save-jump': [payload: { mainTab: string; subTab: string; entityId: string }];
 }>();
 
 const editorInstance = Editor.getInstance();
@@ -113,6 +123,8 @@ function blockMatches(block: Block, needle: string): boolean {
 type DungeonEditorSettings = {
   autoOpen: boolean;
   autosave: boolean;
+  liveChecks: boolean;
+  suggest: boolean;
   autoCurlyQuotes: boolean;
   autoEnDash: boolean;
   selectedBlock: Record<string, BlockAnchor>;
@@ -132,6 +144,8 @@ type ScrollAnchor = BlockAnchor & { offset: number };
 const settings = useStorage<DungeonEditorSettings>('dungeonEditor_settings', {
   autoOpen: false,
   autosave: false,
+  liveChecks: true,
+  suggest: true,
   autoCurlyQuotes: false,
   autoEnDash: false,
   selectedBlock: {},
@@ -144,6 +158,15 @@ const autoOpen = computed({
 const autosave = computed({
   get: () => settings.value.autosave ?? false,
   set: (v) => { settings.value.autosave = v; },
+});
+const suggest = computed({
+  get: () => settings.value.suggest ?? true,
+  set: (v) => { settings.value.suggest = v; },
+});
+const typingMenuRef = ref<InstanceType<typeof Popover> | null>(null);
+const liveChecks = computed({
+  get: () => settings.value.liveChecks ?? true,
+  set: (v) => { settings.value.liveChecks = v; },
 });
 const autoCurlyQuotes = computed({
   get: () => settings.value.autoCurlyQuotes ?? false,
@@ -346,12 +369,111 @@ function onBlocksListScroll() {
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
 // Ctrl+F / Cmd+F focuses the popup's search bar instead of the browser find.
+// Ctrl+C / X / V copy, cut and paste the selected block card while no text field has focus.
 function onGlobalKeydown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
-    if (showRaw.value) return;
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || showRaw.value) return;
+  const key = e.key.toLowerCase();
+  if (key === 'f') {
     e.preventDefault();
     searchInputRef.value?.focus();
     searchInputRef.value?.select();
+    return;
+  }
+  if (key !== 'c' && key !== 'x' && key !== 'v') return;
+  const target = e.target as HTMLElement | null;
+  if (target && (target.closest('input, textarea, select') || target.isContentEditable)) return;
+  if (key === 'v') {
+    if (e.repeat) return;
+    e.preventDefault();
+    pasteBlocks();
+    return;
+  }
+  // Highlighted text copies as text, not as the block it sits in.
+  if (key === 'c' && window.getSelection()?.isCollapsed === false) return;
+  const range = selectedBlockRange();
+  if (!range) return;
+  e.preventDefault();
+  copyBlocks(range, key === 'x');
+}
+
+// Last block text this popup copied: the paste source when the system clipboard can't be read,
+// and the only text whose comment-only blocks paste (stray clipboard text must hold a real block).
+let copiedBlocksText = '';
+
+// A quest is selected as a whole, so it copies as a whole.
+function selectedBlockRange(): [number, number] | null {
+  const idx = selectedIndex.value;
+  if (idx === null || !doc.value.blocks[idx]) return null;
+  for (const item of groupedItems.value) {
+    if (item.kind === 'quest' && idx >= item.group.startIndex && idx < item.group.endIndex) {
+      return [item.group.startIndex, item.group.endIndex];
+    }
+  }
+  return [idx, idx + 1];
+}
+
+function copyBlocks([start, end]: [number, number], cut: boolean) {
+  const blocks = doc.value.blocks;
+  copiedBlocksText = serializeAst({ blocks: blocks.slice(start, end) });
+  navigator.clipboard.writeText(copiedBlocksText).catch((err) => {
+    console.warn('[DungeonContentEditor] Block copy failed:', err);
+  });
+  if (!cut) return;
+  let removed = false;
+  for (let i = end - 1; i >= start; i--) {
+    if (isLockedBlock(blocks[i])) continue;
+    blocks.splice(i, 1);
+    removed = true;
+  }
+  if (!removed) return;
+  selectedIndex.value = null;
+  commit();
+}
+
+async function pasteBlocks() {
+  let text = copiedBlocksText;
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (err) {
+    console.warn('[DungeonContentEditor] Clipboard read failed, pasting the last copied block:', err);
+  }
+  if (!text) return;
+  // The required blocks already exist exactly once.
+  const pasted = parseToAst(text).blocks.filter((b) => !isLockedBlock(b));
+  if (pasted.length === 0) return;
+  if (text !== copiedBlocksText && pasted.every((b) => b.kind === 'raw')) return;
+  renameCollidingQuests(pasted);
+  tagBlocks(pasted);
+  const insertAt = selectedIndex.value !== null
+    ? insertAfterQuestEnd(selectedIndex.value)
+    : doc.value.blocks.length;
+  doc.value.blocks.splice(insertAt, 0, ...pasted);
+  selectedIndex.value = insertAt + pasted.length - 1;
+  commit();
+  nextTick(() => scrollToBlock(insertAt));
+}
+
+// A pasted copy of a quest already in the doc gets the next free `<id>_<n>`; keeping the id
+// would merge both copies into one quest with two titles.
+function renameCollidingQuests(pasted: Block[]) {
+  const taken = new Set<string>();
+  for (const b of doc.value.blocks) {
+    if (b?.kind === 'template' && questIdOf(b.id)) taken.add(questIdOf(b.id));
+  }
+  const renames = new Map<string, string>();
+  for (const b of pasted) {
+    if (b.kind !== 'template' || questKindOfUtil(b.id) !== 'title') continue;
+    const questId = questIdOf(b.id);
+    if (!taken.has(questId) || renames.has(questId)) continue;
+    let n = 2;
+    while (taken.has(`${questId}_${n}`)) n++;
+    renames.set(questId, `${questId}_${n}`);
+    taken.add(`${questId}_${n}`);
+  }
+  for (const b of pasted) {
+    if (b.kind !== 'template') continue;
+    const renamed = renames.get(questIdOf(b.id));
+    if (renamed) b.id = renamed + b.id.slice(questIdOf(b.id).length);
   }
 }
 
@@ -472,8 +594,31 @@ function compactQuestGroups() {
 }
 
 function updateBlock(index: number, block: Block) {
-  doc.value.blocks[index] = block;
+  const blocks = doc.value.blocks;
+  const prev = blocks[index];
+  blocks[index] = block;
+  if (block.kind === 'room' && prev?.kind === 'room') {
+    const before = readMeta(prev.paramsRaw)?.status;
+    const after = readMeta(block.paramsRaw)?.status;
+    if (before !== after) cascadeRoomStatus(index, isMetaStatus(after) ? after : undefined);
+  }
   commit();
+}
+
+// A room's status applies to every block under it, up to the next `^room`.
+// Only blocks with their own status grid are touched (see `statusControllable`):
+// writing into a quest title or `raw` block would leave a status nothing can clear.
+function cascadeRoomStatus(roomIndex: number, status: MetaStatus | undefined) {
+  const blocks = doc.value.blocks;
+  const controllable = statusControllable.value;
+  for (let i = roomIndex + 1; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (!b) continue;
+    if (b.kind === 'room') break;
+    if (b.kind === 'raw' || !controllable[i]) continue;
+    const next = writeMeta(b.paramsRaw, { ...(readMeta(b.paramsRaw) ?? {}), status });
+    if (next !== b.paramsRaw) blocks[i] = { ...b, paramsRaw: next } as Block;
+  }
 }
 
 function removeBlock(index: number) {
@@ -1156,24 +1301,241 @@ function toggleGoalExpanded(goalKey: string) {
 }
 
 const lintIssues = ref<LintIssue[]>([]);
-const lintBannerExpanded = ref(false);
-const lintErrorMode = ref(false);
+/** What blocks ignore: listed in the Ignored tab, never counted as problems. */
+const ignoredIssues = ref<LintIssue[]>([]);
+const lintPanelOpen = ref(false);
+/** The issues match the text as it is: false after an edit while live checks are off. */
+const lintCurrent = ref(false);
+// What the name checks read: the game's data, its scripts and every dungeon. Built in the
+// background; until it lands only the syntax checks run.
+const lintCtx = shallowRef<LintContext | null>(null);
+const lintTexts = shallowRef<Map<string, string>>(new Map());
+let lintCtxSeq = 0;
+let lintCtxBuiltAt = 0;
 
-// While in error mode (activated by a failed save), re-lint on edits so the
-// banner updates as the author fixes things. Once clean, exit error mode and
-// stop watching so typing stays flash-free until the next save.
+async function refreshLintContext() {
+  const id = localItem.value?.id;
+  if (!id) return;
+  const seq = ++lintCtxSeq;
+  try {
+    const built = await buildLintContext(editorLintIO(editorInstance), id);
+    if (seq !== lintCtxSeq) return;
+    lintCtx.value = built.ctx;
+    lintTexts.value = built.texts;
+    lintCtxBuiltAt = Date.now();
+    if (liveChecks.value || lintCurrent.value) runLint();
+  } catch (err) {
+    console.warn('[DungeonContentEditor] Building the check context failed:', err);
+  }
+}
+
+function runLint() {
+  const ctx = lintCtx.value;
+  const id = localItem.value?.id;
+  const all = lintDungeonContent(serialized.value, doc.value, ctx && id ? forDungeon(ctx, id) : null);
+  lintIssues.value = all.filter((i) => !i.ignored);
+  ignoredIssues.value = all.filter((i) => i.ignored);
+  lintCurrent.value = true;
+}
+
+// Scripts and the other dungeons change outside the popup: read them again when the window is back.
+function onWindowFocus() {
+  if (Date.now() - lintCtxBuiltAt > 3000) refreshLintContext();
+}
+
 watchDebounced(
   serialized,
   () => {
-    if (!lintErrorMode.value) return;
-    lintIssues.value = lintDungeonContent(serialized.value, doc.value);
-    if (lintIssues.value.length === 0) {
-      lintErrorMode.value = false;
-      lintBannerExpanded.value = false;
+    if (liveChecks.value) {
+      runLint();
+    } else if (lintCurrent.value) {
+      // Offsets of old results point at the wrong text now.
+      lintIssues.value = [];
+      lintCurrent.value = false;
     }
   },
   { debounce: 300 },
 );
+watch(() => localItem.value?.id, () => refreshLintContext());
+watch(liveChecks, (on) => { if (on) runLint(); });
+onMounted(() => {
+  refreshLintContext();
+  window.addEventListener('focus', onWindowFocus);
+});
+onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus));
+
+const lintCounts = computed(() => {
+  let errors = 0;
+  let warnings = 0;
+  for (const i of lintIssues.value) {
+    if (i.severity === 'error') errors++;
+    else warnings++;
+  }
+  return { errors, warnings };
+});
+
+const lintChipLabel = computed(() => {
+  if (!lintCurrent.value) return 'Check';
+  const { errors, warnings } = lintCounts.value;
+  const parts: string[] = [];
+  if (errors) parts.push(`${errors} ${errors === 1 ? 'error' : 'errors'}`);
+  if (warnings) parts.push(`${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`);
+  return parts.length ? parts.join(' · ') : 'No problems';
+});
+
+function toggleLintPanel() {
+  if (!lintCurrent.value) runLint();
+  lintPanelOpen.value = !lintPanelOpen.value || !lintCurrent.value;
+}
+
+const sameIssue = (a: LintIssue, b: LintIssue) =>
+  a.blockIndex === b.blockIndex && a.message === b.message && a.at?.target === b.at?.target
+  && a.at?.rowIndex === b.at?.rowIndex && a.at?.colIndex === b.at?.colIndex;
+
+/** Apply a one-click fix. The checks run again first, so the fix lands on the text as it is now. */
+function applyLintFix(issue: LintIssue, fix: RefFix) {
+  runLint();
+  const fresh = lintIssues.value.find((i) => sameIssue(i, issue));
+  const f = fresh?.fixes?.find((x) => x.text === fix.text);
+  const block = fresh ? doc.value.blocks[fresh.blockIndex] : undefined;
+  if (!fresh?.at || !f || !block) return;
+  const next = editTarget(block, fresh.at, f.start, f.end, f.text);
+  if (!next) return;
+  updateBlock(fresh.blockIndex, next);
+  runLint();
+}
+
+/** Whether "Ignore here" can be stored: it lives in the block's own `__meta`. */
+function canIgnore(issue: LintIssue): boolean {
+  const block = doc.value.blocks[issue.blockIndex];
+  return !!issue.ignoreKey && !!block && block.kind !== 'raw';
+}
+
+function ignoreLintIssue(issue: LintIssue) {
+  const block = doc.value.blocks[issue.blockIndex];
+  if (!issue.ignoreKey || !block) return;
+  const next = withIgnore(block, issue.ignoreKey);
+  if (!next || next === block) return;
+  updateBlock(issue.blockIndex, next);
+  runLint();
+}
+
+// --- Check game: the same checks over every dungeon --------------------------------------------
+
+type GameIssue = LintIssue & { dungeonId: string; label: string };
+const gameIssues = shallowRef<GameIssue[] | null>(null);
+const gameChecking = ref(false);
+const lintScope = ref<'dungeon' | 'game' | 'ignored'>('dungeon');
+
+type StaleIgnore = { blockIndex: number; key: string; line: number };
+
+/** Ignores no check reports any more: the text was fixed or changed since. */
+const staleIgnores = computed<StaleIgnore[]>(() => {
+  // Without the name checks every ignore would look unused.
+  if (!lintCtx.value || !lintCurrent.value) return [];
+  const used = new Set(ignoredIssues.value.map((i) => `${i.blockIndex}|${i.ignoreKey}`));
+  const starts = blockStartLines(doc.value);
+  const out: StaleIgnore[] = [];
+  doc.value.blocks.forEach((b, i) => {
+    if (!b || !('paramsRaw' in b)) return;
+    const ignore = readMeta(b.paramsRaw)?.ignore;
+    if (!Array.isArray(ignore)) return;
+    for (const key of ignore.map(String)) if (!used.has(`${i}|${key}`)) out.push({ blockIndex: i, key, line: starts[i] ?? 1 });
+  });
+  return out;
+});
+
+const ignoredCount = computed(() => ignoredIssues.value.length + staleIgnores.value.length);
+
+const IGNORE_KIND: Record<string, string> = {
+  flag: 'Flag', scene: 'Scene', anchor: 'Anchor', room: 'Room', dungeon: 'Dungeon', template: 'Template',
+  quest: 'Quest log', attribute: 'Attribute', condition: 'Condition', placeholder: 'Placeholder',
+  effect: 'Text effect', value: 'Value', key: 'Key', action: 'Action',
+};
+
+/** An ignore key's value and what it is: `assets:forrest` → forrest, Asset. */
+function ignoreParts(key: string): { value: string; kind: string } {
+  const at = key.indexOf(':');
+  const kind = key.slice(0, at);
+  return { value: key.slice(at + 1), kind: IGNORE_KIND[kind] ?? refLabel(kind) };
+}
+
+function blockLabel(index: number): string {
+  const b = doc.value.blocks[index];
+  return b ? `${kindSigil[b.kind]}${labelFor(b)}` : `block ${index}`;
+}
+
+/** Report an ignored value in its block again. */
+function unignore(blockIndex: number, key: string | undefined) {
+  const block = doc.value.blocks[blockIndex];
+  if (!block || !key) return;
+  const next = withoutIgnore(block, key);
+  if (!next || next === block) return;
+  updateBlock(blockIndex, next);
+  runLint();
+}
+
+const gameIssueGroups = computed(() => {
+  const groups = new Map<string, GameIssue[]>();
+  for (const i of gameIssues.value ?? []) {
+    if (!groups.has(i.dungeonId)) groups.set(i.dungeonId, []);
+    groups.get(i.dungeonId)!.push(i);
+  }
+  return [...groups].map(([dungeonId, issues]) => ({ dungeonId, issues }));
+});
+
+async function checkGame() {
+  if (gameChecking.value) return;
+  gameChecking.value = true;
+  lintPanelOpen.value = true;
+  lintScope.value = 'game';
+  try {
+    await refreshLintContext();
+    const ctx = lintCtx.value;
+    if (!ctx) return;
+    const current = localItem.value?.id;
+    const out: GameIssue[] = [];
+    for (const [id, text] of lintTexts.value) {
+      // The open dungeon is checked from the editor, unsaved edits included.
+      if (id === current) continue;
+      const other = parseToAst(text);
+      for (const i of lintDungeonContent(text, other, forDungeon(ctx, id))) {
+        if (i.ignored) continue;
+        const block = other.blocks[i.blockIndex];
+        out.push({ ...i, dungeonId: id, label: block ? `${kindSigil[block.kind]}${labelFor(block)}` : '' });
+      }
+      // Let the panel paint between dungeons.
+      await new Promise((r) => setTimeout(r));
+    }
+    runLint();
+    for (const i of lintIssues.value) out.push({ ...i, dungeonId: current ?? '', label: issueLabel(i) });
+    out.sort((a, b) => a.dungeonId.localeCompare(b.dungeonId) || a.line - b.line);
+    gameIssues.value = out;
+  } finally {
+    gameChecking.value = false;
+  }
+}
+
+/** Jump to an issue of any dungeon: another one opens first, which needs the current one saved. */
+async function jumpToGameIssue(issue: GameIssue) {
+  if (issue.dungeonId === localItem.value?.id) {
+    runLint();
+    const fresh = lintIssues.value.find((i) => i.line === issue.line && i.message === issue.message) ?? issue;
+    jumpToIssue(fresh);
+    return;
+  }
+  if (popupDirty.value || editorInstance.hasUnsavedChanges.value) {
+    global.addNotification('Save your changes before opening another dungeon');
+    return;
+  }
+  await editorInstance.setDungeon(issue.dungeonId);
+  if (editorInstance.selectedDungeon !== issue.dungeonId) return;
+  onDungeonChange();
+  await nextTick();
+  runLint();
+  const fresh = lintIssues.value.find((i) => i.line === issue.line && i.message === issue.message);
+  if (fresh) jumpToIssue(fresh);
+}
 
 watchDebounced(
   serialized,
@@ -1223,17 +1585,88 @@ watchDebounced(
   { debounce: 400, deep: true },
 );
 
-function hasLintIssues(): boolean {
-  lintIssues.value = lintDungeonContent(serialized.value, doc.value);
-  if (lintIssues.value.length) {
-    lintErrorMode.value = true;
-    lintBannerExpanded.value = true;
-  } else {
-    lintErrorMode.value = false;
+// --- Completion and hover: what every editable of the popup reads -------------------------------
+
+let assistCache: { key: string; self: DungeonIndex; scopes: ReturnType<typeof blockScopes> } | null = null;
+
+/** The place of the text in `el`: its block (from the `data-block-index` around it) and the checks' context. */
+function assistPlace(el: HTMLElement, mode: AssistMode): AssistPlace | null {
+  const ctx = lintCtx.value;
+  const id = localItem.value?.id;
+  const holder = el.closest('[data-block-index]');
+  if (!ctx || !id || !holder) return null;
+  const index = Number(holder.getAttribute('data-block-index'));
+  const key = serialized.value;
+  if (!assistCache || assistCache.key !== key) {
+    assistCache = { key, self: indexDungeon(doc.value, ctx.dungeons.get(id)?.rooms ?? []), scopes: blockScopes(doc.value) };
   }
-  return lintIssues.value.length > 0;
+  const scope = assistCache.scopes[index];
+  return scope ? { mode, scope, lint: forDungeon(ctx, id), self: assistCache.self } : null;
 }
-defineExpose({ hasLintIssues });
+
+/** The editor tab that holds a data file's entries: a core subtab, or a plugin's own tab. */
+function tabForRef(ref: string): { mainTab: string; subTab: string } | null {
+  for (const tab of EDITOR_TABS) {
+    const sub = tab.subtabs.find((x) => x.file === ref);
+    if (sub) return { mainTab: tab.id, subTab: sub.id };
+  }
+  const plugin = /^plugins_data\/([^/]+)\/(.+)$/.exec(ref);
+  return plugin ? { mainTab: plugin[1], subTab: plugin[2] } : null;
+}
+
+/** The block a jump lands on in the open dungeon, or -1. */
+function blockIndexFor(target: Exclude<JumpTarget, { kind: 'entity' }>): number {
+  const blocks = doc.value.blocks;
+  const rooms = roomByBlockIndex.value;
+  return blocks.findIndex((b, i) => {
+    if (!b) return false;
+    if (target.kind === 'scene') return b.kind === 'scene' && b.id === target.scene && (rooms[i] ?? '') === target.room;
+    if (target.kind === 'template') return b.kind === 'template' && b.id === target.id;
+    if (target.kind === 'room') return b.kind === 'room' && b.id === target.room;
+    if (b.kind !== 'scene') return false;
+    return b.rows.some((r) => r.columns.some((c) => (c.content ?? '').split('\n').some((l) => l.trim() === `&${target.name}`)));
+  });
+}
+
+/** Ctrl+click on an id: an entity opens its tab (saving first), a scene or anchor scrolls to its block. */
+async function jumpToTarget(target: JumpTarget) {
+  if (target.kind === 'entity') {
+    const tab = tabForRef(target.ref);
+    if (!tab) {
+      global.addNotification(`No editor tab holds ${target.ref}`);
+      return;
+    }
+    emit('request-save-jump', { mainTab: tab.mainTab, subTab: tab.subTab, entityId: target.id });
+    return;
+  }
+  if (target.dungeon !== localItem.value?.id) {
+    if (popupDirty.value || editorInstance.hasUnsavedChanges.value) {
+      global.addNotification('Save your changes before opening another dungeon');
+      return;
+    }
+    await editorInstance.setDungeon(target.dungeon);
+    if (editorInstance.selectedDungeon !== target.dungeon) return;
+    onDungeonChange();
+    await nextTick();
+  }
+  const index = blockIndexFor(target);
+  if (index >= 0) jumpToBlock(index);
+}
+
+const activeAssist = shallowRef<ContentAssist | null>(null);
+provide(CONTENT_ASSIST, { place: assistPlace, autoOpen: suggest, jump: jumpToTarget, active: activeAssist });
+
+/** Run the checks now and count the errors: the wrapper asks before saving past any. */
+function lintErrorCount(): number {
+  runLint();
+  const errors = lintCounts.value.errors;
+  if (errors) {
+    lintScope.value = 'dungeon';
+    lintPanelOpen.value = true;
+  }
+  return errors;
+}
+defineExpose({ lintErrorCount });
 
 // A card's `issues` prop must keep its identity between lint passes: a
 // fresh `.filter()` result per render would force every BlockCard with
@@ -1307,6 +1740,15 @@ function copyIssue(issue: LintIssue, i: number) {
 }
 
 function copyAllIssues() {
+  if (lintScope.value === 'game' && gameIssues.value) {
+    copyIssueText(gameIssues.value.map((i) => `${i.dungeonId} L${i.line} ${i.label}: ${i.message}`).join('\n'), 'all');
+    return;
+  }
+  if (lintScope.value === 'ignored') {
+    const stale = staleIgnores.value.map((x) => `L${x.line} ${blockLabel(x.blockIndex)}: ignores ${x.key}, which nothing reports`);
+    copyIssueText([...ignoredIssues.value.map(formatIssue), ...stale].join('\n'), 'all');
+    return;
+  }
   copyIssueText(lintIssues.value.map(formatIssue).join('\n'), 'all');
 }
 
@@ -1502,15 +1944,39 @@ function questKindOf(id: string | undefined): QuestKind | null {
           <ToggleSwitch v-model="autosave" />
           <span class="auto-open-label">Autosave</span>
         </label>
-        <label class="auto-open-toggle"
-          v-tooltip.bottom="'Convert straight quotes to curly quotes as you type (like Google Docs)'">
-          <ToggleSwitch v-model="autoCurlyQuotes" />
-          <span class="auto-open-label">Curly quotes</span>
-        </label>
-        <label class="auto-open-toggle" v-tooltip.bottom="'Convert `--` to en dash `–` as you type'">
-          <ToggleSwitch v-model="autoEnDash" />
-          <span class="auto-open-label">En dash</span>
-        </label>
+        <Button icon="pi pi-sliders-h" label="Typing" size="small" text severity="secondary"
+          v-tooltip.bottom="'Curly quotes, en dashes and suggestions while you type'"
+          @click="(e: Event) => typingMenuRef?.toggle(e)" />
+        <Popover ref="typingMenuRef">
+          <div class="typing-menu">
+            <label class="auto-open-toggle"
+              v-tooltip.right="'Convert straight quotes to curly quotes as you type (like Google Docs)'">
+              <ToggleSwitch v-model="autoCurlyQuotes" />
+              <span class="auto-open-label">Curly quotes</span>
+            </label>
+            <label class="auto-open-toggle" v-tooltip.right="'Convert `--` to en dash `–` as you type'">
+              <ToggleSwitch v-model="autoEnDash" />
+              <span class="auto-open-label">En dash</span>
+            </label>
+            <label class="auto-open-toggle"
+              v-tooltip.right="'Suggest ids and names as you type inside {…}, if{}, |, [[ and [. Ctrl+Space suggests anywhere; hover an id to see it, Ctrl+click to open it.'">
+              <ToggleSwitch v-model="suggest" />
+              <span class="auto-open-label">Suggestions</span>
+            </label>
+          </div>
+        </Popover>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <button type="button" class="lint-chip" :class="{
+          'lint-chip--error': lintCurrent && lintCounts.errors,
+          'lint-chip--warning': lintCurrent && !lintCounts.errors && lintCounts.warnings,
+          'lint-chip--clean': lintCurrent && !lintIssues.length,
+          'lint-chip--open': lintPanelOpen,
+        }" v-tooltip.bottom="lintCurrent ? 'Problems in this dungeon: click for the list' : 'Check this dungeon'"
+          @click="toggleLintPanel">
+          <i class="pi" :class="!lintCurrent ? 'pi-search' : lintCounts.errors ? 'pi-times-circle'
+            : lintCounts.warnings ? 'pi-exclamation-triangle' : 'pi-check-circle'" />
+          <span>{{ lintChipLabel }}</span>
+        </button>
         <span class="toolbar-divider" aria-hidden="true"></span>
         <Button icon="pi pi-play" label="Playtest" size="small"
           :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
@@ -1567,29 +2033,86 @@ function questKindOf(id: string | undefined): QuestKind | null {
       </div>
     </div>
 
-    <div v-if="lintIssues.length" class="lint-banner" :class="{ 'lint-banner--expanded': lintBannerExpanded }">
-      <div class="lint-banner-summary" @click="lintBannerExpanded = !lintBannerExpanded">
-        <span class="lint-icon">⚠</span>
-        <span>{{ lintIssues.length }} {{ lintIssues.length === 1 ? 'issue' : 'issues' }} — click to {{
-          lintBannerExpanded ? 'hide' : 'review' }}</span>
+    <AssistLayer v-if="activeAssist" :state="activeAssist" />
+
+    <div v-if="lintPanelOpen" class="lint-panel">
+      <div class="lint-panel-header">
+        <button type="button" class="lint-tab" :class="{ 'lint-tab--active': lintScope === 'dungeon' }"
+          @click="lintScope = 'dungeon'">This dungeon ({{ lintIssues.length }})</button>
+        <button type="button" class="lint-tab" :class="{ 'lint-tab--active': lintScope === 'game' }"
+          :disabled="gameChecking" v-tooltip.bottom="'Run the same checks over every dungeon of the game'"
+          @click="gameIssues && lintScope !== 'game' ? (lintScope = 'game') : checkGame()">
+          <i v-if="gameChecking" class="pi pi-spin pi-spinner" />
+          Whole game{{ gameIssues ? ` (${gameIssues.length})` : '' }}
+        </button>
+        <button v-if="lintScope === 'game' && gameIssues" type="button" class="lint-copy-all" :disabled="gameChecking"
+          v-tooltip.bottom="'Check the whole game again'" @click="checkGame">
+          <i class="pi pi-refresh" />
+        </button>
+        <button type="button" class="lint-tab" :class="{ 'lint-tab--active': lintScope === 'ignored' }"
+          v-tooltip.bottom="'Warnings this dungeon ignores'" @click="lintScope = 'ignored'">Ignored ({{ ignoredCount }})</button>
         <span class="lint-spacer" />
+        <label class="auto-open-toggle" v-tooltip.bottom="'Check as you type. Off: checks run on save and from the toolbar button.'">
+          <ToggleSwitch v-model="liveChecks" />
+          <span class="auto-open-label">Live checks</span>
+        </label>
         <button type="button" class="lint-copy-all" @click.stop="copyAllIssues"
           v-tooltip.bottom="'Copy every issue as text: line, block, message'">
           <i :class="issueCopied === 'all' ? 'pi pi-check' : 'pi pi-copy'" />
           Copy all
         </button>
+        <button type="button" class="lint-copy-all" title="Close" @click="lintPanelOpen = false">
+          <i class="pi pi-times" />
+        </button>
       </div>
-      <ul v-if="lintBannerExpanded" class="lint-list">
+      <ul v-if="lintScope === 'dungeon'" class="lint-list">
+        <li v-if="!lintIssues.length" class="lint-empty">No problems found.</li>
         <!-- Inline spans with literal separators, so a drag-selection reads
              exactly like `formatIssue`; only the line/block refs jump, the
              message stays a plain selectable span. -->
         <li v-for="(issue, i) in lintIssues" :key="i" class="lint-item" :class="`lint-item--${issue.severity}`">
+          <i class="lint-sev pi" :class="issue.severity === 'error' ? 'pi-times-circle' : 'pi-exclamation-triangle'" />
           <span class="lint-line" @click="jumpToIssue(issue)">L{{ issue.line }}</span> <span class="lint-block-ref" @click="jumpToIssue(issue)">{{ issueLabel(issue) }}</span>: <span class="lint-message">{{ issue.message }}</span>
-          <button type="button" class="lint-item-copy" @click.stop="copyIssue(issue, i)" title="Copy this issue">
-            <i :class="issueCopied === i ? 'pi pi-check' : 'pi pi-copy'" />
-          </button>
+          <span class="lint-actions">
+            <button v-for="fix in issue.fixes ?? []" :key="fix.text" type="button" class="lint-fix"
+              v-tooltip.top="`Replace with ${fix.text}`" @click.stop="applyLintFix(issue, fix)">→ {{ fix.label }}</button>
+            <button v-if="canIgnore(issue)" type="button" class="lint-ignore"
+              v-tooltip.top="'Stop reporting this value in this block'"
+              @click.stop="ignoreLintIssue(issue)">Ignore here</button>
+            <button type="button" class="lint-item-copy" @click.stop="copyIssue(issue, i)" title="Copy this issue">
+              <i :class="issueCopied === i ? 'pi pi-check' : 'pi pi-copy'" />
+            </button>
+          </span>
         </li>
       </ul>
+      <ul v-else-if="lintScope === 'ignored'" class="lint-list">
+        <li v-if="!ignoredCount" class="lint-empty">Nothing is ignored in this dungeon.</li>
+        <li v-for="(issue, i) in ignoredIssues" :key="`i${i}`" class="lint-item lint-item--ignored">
+          <i class="lint-sev pi pi-eye-slash" />
+          <span class="lint-line" @click="jumpToIssue(issue)">L{{ issue.line }}</span> <span class="lint-block-ref" @click="jumpToIssue(issue)">{{ issueLabel(issue) }}</span>: <span class="lint-message">{{ issue.message }}</span>
+          <span class="lint-actions">
+            <button type="button" class="lint-ignore" @click.stop="unignore(issue.blockIndex, issue.ignoreKey)">Stop ignoring</button>
+          </span>
+        </li>
+        <li v-for="(stale, i) in staleIgnores" :key="`s${i}`" class="lint-item lint-item--ignored">
+          <i class="lint-sev pi pi-eye-slash" />
+          <span class="lint-line" @click="jumpToBlock(stale.blockIndex)">L{{ stale.line }}</span> <span class="lint-block-ref" @click="jumpToBlock(stale.blockIndex)">{{ blockLabel(stale.blockIndex) }}</span>: <span class="lint-message">{{ ignoreParts(stale.key).kind }} '{{ ignoreParts(stale.key).value }}' is ignored, but nothing reports it any more</span>
+          <span class="lint-actions">
+            <button type="button" class="lint-ignore" @click.stop="unignore(stale.blockIndex, stale.key)">Remove</button>
+          </span>
+        </li>
+      </ul>
+      <div v-else class="lint-list">
+        <div v-if="gameChecking && !gameIssues" class="lint-empty">Checking every dungeon…</div>
+        <div v-else-if="gameIssues && !gameIssues.length" class="lint-empty">No problems in the whole game.</div>
+        <template v-for="group in gameIssueGroups" :key="group.dungeonId">
+          <div class="lint-group">{{ group.dungeonId }} <span class="lint-group-count">{{ group.issues.length }}</span></div>
+          <div v-for="(issue, i) in group.issues" :key="i" class="lint-item" :class="`lint-item--${issue.severity}`">
+            <i class="lint-sev pi" :class="issue.severity === 'error' ? 'pi-times-circle' : 'pi-exclamation-triangle'" />
+            <span class="lint-line" @click="jumpToGameIssue(issue)">L{{ issue.line }}</span> <span class="lint-block-ref" @click="jumpToGameIssue(issue)">{{ issue.label }}</span>: <span class="lint-message">{{ issue.message }}</span>
+          </div>
+        </template>
+      </div>
     </div>
 
     <div v-if="!showRaw" class="search-row">
@@ -1828,31 +2351,160 @@ function questKindOf(id: string | undefined): QuestKind | null {
   align-items: center;
 }
 
-.lint-banner {
+.typing-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.2rem 0.1rem;
+}
+
+.lint-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--editor-border);
+  background: var(--editor-surface);
+  color: var(--editor-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lint-chip:hover,
+.lint-chip--open {
+  border-color: var(--editor-border-strong);
+}
+
+.lint-chip--clean {
+  color: var(--editor-fg-success);
+  background: var(--editor-tint-success);
+}
+
+.lint-chip--warning {
+  color: var(--editor-fg-warning);
+  background: var(--editor-tint-warning);
+  border-color: var(--editor-ink-amber);
+}
+
+.lint-chip--error {
+  color: var(--editor-fg-danger);
   background: var(--editor-tint-danger);
-  border: 1px solid var(--editor-ink-red);
-  color: var(--editor-ink-red);
-  padding: 0.4rem 0.75rem;
+  border-color: var(--editor-ink-red);
+}
+
+.lint-panel {
+  background: var(--editor-surface-raised);
+  border: 1px solid var(--editor-border);
+  color: var(--editor-text);
+  padding: 0.4rem 0.6rem;
   border-radius: 4px;
   margin: 0 0.25rem 0.5rem;
   flex: 0 0 auto;
 }
 
-.lint-banner-summary {
+.lint-panel-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.lint-tab {
+  font-family: inherit;
+  font-size: 0.8rem;
   font-weight: 600;
+  color: var(--editor-text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.15rem 0.3rem;
   cursor: pointer;
-  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
-.lint-banner-summary:hover {
-  color: var(--editor-fg-danger);
+.lint-tab--active {
+  color: var(--editor-text);
+  border-bottom-color: var(--editor-accent);
 }
 
-.lint-icon {
-  font-size: 1rem;
+.lint-sev {
+  font-size: 0.75rem;
+  margin-right: 0.3rem;
+  vertical-align: -0.05em;
+}
+
+.lint-item--error .lint-sev {
+  color: var(--editor-ink-red);
+}
+
+.lint-item--ignored .lint-sev,
+.lint-item--ignored .lint-message {
+  color: var(--editor-text-muted);
+}
+
+.lint-item--warning .lint-sev {
+  color: var(--editor-ink-amber);
+}
+
+.lint-actions {
+  display: inline-flex;
+  gap: 0.3rem;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.lint-fix,
+.lint-ignore {
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0.05rem 0.45rem;
+  cursor: pointer;
+  border: 1px solid var(--editor-border);
+  background: var(--editor-surface);
+}
+
+.lint-fix {
+  color: var(--editor-ink-green);
+  font-family: var(--font-family-mono, monospace);
+}
+
+.lint-ignore {
+  color: var(--editor-text-muted);
+}
+
+.lint-fix:hover,
+.lint-ignore:hover {
+  border-color: var(--editor-border-strong);
+  background: var(--editor-surface-hover);
+}
+
+.lint-empty {
+  padding: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--editor-text-muted);
+}
+
+.lint-group {
+  margin-top: 0.4rem;
+  padding: 0.15rem 0.35rem;
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--editor-text);
+  border-bottom: 1px solid var(--editor-border);
+}
+
+.lint-group-count {
+  color: var(--editor-text-muted);
+  font-weight: 600;
 }
 
 .lint-spacer {
@@ -1867,9 +2519,9 @@ function questKindOf(id: string | undefined): QuestKind | null {
   font-family: inherit;
   font-size: 0.78rem;
   font-weight: 600;
-  color: var(--editor-ink-red);
-  background: var(--editor-surface-hover);
-  border: 1px solid rgba(183, 28, 28, 0.35);
+  color: var(--editor-text-muted);
+  background: var(--editor-surface);
+  border: 1px solid var(--editor-border);
   border-radius: 3px;
   padding: 0.15rem 0.5rem;
   cursor: pointer;
@@ -1877,8 +2529,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
 .lint-copy-all:hover,
 .lint-item-copy:hover {
-  background: var(--editor-surface);
-  border-color: var(--editor-ink-red);
+  background: var(--editor-surface-hover);
+  border-color: var(--editor-border-strong);
 }
 
 /* The list is the part a dev drags across to copy — keep it selectable. */
@@ -1886,8 +2538,8 @@ function questKindOf(id: string | undefined): QuestKind | null {
   list-style: none;
   padding: 0.5rem 0 0;
   margin: 0.5rem 0 0;
-  border-top: 1px solid rgba(183, 28, 28, 0.2);
-  max-height: 180px;
+  border-top: 1px solid var(--editor-border);
+  max-height: 240px;
   overflow-y: auto;
   user-select: text;
   cursor: text;
@@ -1896,13 +2548,13 @@ function questKindOf(id: string | undefined): QuestKind | null {
 .lint-item {
   display: block;
   position: relative;
-  padding: 0.25rem 2rem 0.25rem 0.35rem;
+  padding: 0.25rem 0.35rem;
   border-radius: 3px;
   font-size: 0.82rem;
 }
 
 .lint-item:hover {
-  background: rgba(183, 28, 28, 0.08);
+  background: var(--editor-surface-hover);
 }
 
 .lint-line {
@@ -1935,11 +2587,7 @@ function questKindOf(id: string | undefined): QuestKind | null {
 }
 
 .lint-item-copy {
-  position: absolute;
-  right: 0.35rem;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 0.1rem 0.35rem;
+  padding: 0.05rem 0.35rem;
   opacity: 0;
 }
 

@@ -24,6 +24,7 @@ The AI evaluates every usable ability against every valid target and picks the h
 | Status setup | +8 | For preparation or combo setup abilities that enable other abilities |
 | Cleanse | +4 per status | For each cleansable battle status on the target |
 | Cooldown refresh | +3 per ability | For each ability currently on cooldown when using a CD-reducing ability |
+| Merge feed | +2 per stack | For a `merge`, per stack of the merge status the target already holds — fills one merged body before starting another |
 
 ## Target Selection
 
@@ -32,6 +33,7 @@ The AI considers target validity based on:
 - **Target type** -- Enemy abilities target enemies, ally abilities target allies, self targets self
 - **Taunt enforcement** -- If any enemy has the `taunt` status, single-target enemy abilities can only target taunters
 - **AoE handling** -- For `all_enemies` / `all_allies`, only one dummy target is evaluated since the ability hits all
+- **Merge** -- A `merge` ability only targets allies it can merge into (same template, or holding the merge status with room left), and is unusable when there are none
 
 For AoE abilities, the AI scores the full set of actual targets even though only one target ID is submitted.
 

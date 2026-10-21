@@ -61,6 +61,8 @@ async function startEdit() {
 
 // Save name
 function saveName() {
+  // The input's blur calls this too, and can land after Enter/Save/Cancel already closed the edit.
+  if (!isEditing.value) return;
   if (!isValid.value) {
     const maxLen = props.maxLength || 50;
     if (!editValue.value.trim()) {
@@ -128,7 +130,9 @@ function handleKeydown(event: KeyboardEvent) {
         @keydown="handleKeydown"
         @blur="saveName"
       />
-      <div class="rename-actions">
+      <!-- mousedown.prevent keeps focus in the input: otherwise pressing Cancel blurs it first, and the
+           blur's save lands before the click — Cancel would save the typed name. -->
+      <div class="rename-actions" @mousedown.prevent>
         <button
           class="rename-action-btn confirm"
           @click="saveName"

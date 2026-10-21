@@ -4,6 +4,7 @@ import {
     pushTransient,
     hideTransient,
     togglePin,
+    pinPopup,
     closePopupsByKey,
 } from '../views/popups/popupStore';
 import HtmlPopupBody from '../views/popups/cards/HtmlPopupBody.vue';
@@ -54,6 +55,24 @@ const PLACEMENT_MODS: Placement[] = ['top', 'bottom', 'left', 'right'];
 const KEY = Symbol('de-popover-key');
 const OPTS = Symbol('de-popover-opts');
 const HANDLERS = Symbol('de-popover-handlers');
+
+// Touch has no hover, so an anchor whose tap is spent on something else (`disableClick` /
+// `dismissOnClick`: an ability row casts, a recipe button selects) had no way to show its card.
+// On those, a long press pins it. Draggable anchors are left alone: a hold there starts a drag.
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
+
+function longPressEligible(el: HTMLElement, opts: Normalized): boolean {
+    return !!opts && (opts.disableClick || opts.dismissOnClick) && !el.draggable;
+}
+
+// No callout menu or text selection on a held anchor (iOS shows both on a long press).
+function syncTouchStyle(el: HTMLElement, opts: Normalized) {
+    const off = longPressEligible(el, opts);
+    el.style.setProperty('-webkit-touch-callout', off ? 'none' : '');
+    el.style.setProperty('-webkit-user-select', off ? 'none' : '');
+    el.style.userSelect = off ? 'none' : '';
+}
 
 let nextKey = 0;
 function getKey(el: HTMLElement): string {
@@ -149,20 +168,75 @@ export const popover: Directive<HTMLElement, PopoverBinding> = {
             if (cur!.dismissOnClick) { closePopupsByKey(entry.key); return; }
             togglePin(entry);
         };
+
+        // Long press (touch/pen only). A finger that moves, or a scroll the browser takes over
+        // (pointercancel), drops the press. Android's own long-press fires `contextmenu`, which
+        // counts as the press too, whichever comes first.
+        let pressTimer: ReturnType<typeof setTimeout> | null = null;
+        let pressX = 0, pressY = 0;
+        let pressFired = false;
+        const clearPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+        const firePress = () => {
+            clearPress();
+            const entry = buildEntry(el, (el as any)[OPTS] as Normalized);
+            if (!entry) return;
+            pressFired = true;
+            pinPopup(entry);
+        };
+        const onDown = (e: PointerEvent) => {
+            pressFired = false;
+            if (e.pointerType === 'mouse' || !longPressEligible(el, (el as any)[OPTS])) return;
+            pressX = e.clientX; pressY = e.clientY;
+            clearPress();
+            pressTimer = setTimeout(firePress, LONG_PRESS_MS);
+        };
+        const onMove = (e: PointerEvent) => {
+            if (pressTimer && Math.hypot(e.clientX - pressX, e.clientY - pressY) > LONG_PRESS_SLOP) clearPress();
+        };
+        const onContextMenu = (e: Event) => {
+            if (pressTimer) firePress();
+            if (pressFired) e.preventDefault();
+        };
+        // The tap that ends a long press must not also do the anchor's own action (cast the
+        // ability, select the recipe) or unpin the card it just opened. Capture, so it runs before
+        // the anchor's handlers on itself and its children.
+        const onClickCapture = (e: MouseEvent) => {
+            if (!pressFired) return;
+            pressFired = false;
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        };
+
         el.addEventListener('pointerenter', onEnter);
         el.addEventListener('pointerleave', onLeave);
         el.addEventListener('click', onClick);
-        (el as any)[HANDLERS] = { onEnter, onLeave, onClick };
+        el.addEventListener('pointerdown', onDown);
+        el.addEventListener('pointermove', onMove);
+        el.addEventListener('pointerup', clearPress);
+        el.addEventListener('pointercancel', clearPress);
+        el.addEventListener('contextmenu', onContextMenu);
+        el.addEventListener('click', onClickCapture, true);
+        syncTouchStyle(el, opts);
+        (el as any)[HANDLERS] = { onEnter, onLeave, onClick, onDown, onMove, clearPress, onContextMenu, onClickCapture };
     },
     updated(el, binding: DirectiveBinding<PopoverBinding>) {
-        (el as any)[OPTS] = normalize(binding.value, binding.modifiers);
+        const opts = normalize(binding.value, binding.modifiers);
+        (el as any)[OPTS] = opts;
+        syncTouchStyle(el, opts);
     },
     unmounted(el) {
-        const h = (el as any)[HANDLERS] as { onEnter: any; onLeave: any; onClick: any } | undefined;
+        const h = (el as any)[HANDLERS] as Record<string, any> | undefined;
         if (h) {
             el.removeEventListener('pointerenter', h.onEnter);
             el.removeEventListener('pointerleave', h.onLeave);
             el.removeEventListener('click', h.onClick);
+            el.removeEventListener('pointerdown', h.onDown);
+            el.removeEventListener('pointermove', h.onMove);
+            el.removeEventListener('pointerup', h.clearPress);
+            el.removeEventListener('pointercancel', h.clearPress);
+            el.removeEventListener('contextmenu', h.onContextMenu);
+            el.removeEventListener('click', h.onClickCapture, true);
+            h.clearPress();
             delete (el as any)[HANDLERS];
         }
         const opts = (el as any)[OPTS] as Normalized;

@@ -7,6 +7,16 @@ export const CharacterTemplateSchema = {
 
     auto_create: { type: 'boolean', tooltip: 'If true, the character will be created automatically.' },
     add_to_party: { type: 'boolean', tooltip: 'If true, the character will be added to the party when the game starts.', show: { auto_create: [true] } },
+    instances: {
+        type: 'schema[]', tooltip: 'Named characters built from this template, for scenes that need several of the same character (guard1, guard2). Each one is its own character with its own id, and differs from the template only where it overrides a trait, attribute or stat.', objects: {
+            id: { type: 'string', required: true, tooltip: 'Character id of this instance, used in content and battles (e.g. guard1). Must not be a template id or another instance id.' },
+            auto_create: { type: 'boolean', defaultValue: true, tooltip: 'Create this instance automatically on a new game, and on load when a save is missing it. Off: it is created only when content or a script creates it by id, e.g. {create_character: "guard1"}.' },
+            add_to_party: { type: 'boolean', tooltip: 'Add this instance to the party when it is created automatically.' },
+            traits: { type: 'schema', fromFile: 'character_traits', fromFileType: 'custom', tooltip: 'Traits that differ from the template, such as the portrait or the name color.' },
+            attributes: { type: 'schema', fromFile: 'character_attributes', fromFileType: 'chooseOne', tooltip: 'Attribute values that differ from the template.' },
+            stats: { type: 'schema', fromFile: 'character_stats', fromFileType: 'number', tooltip: 'Stats that differ from the template.' },
+        }
+    },
     ...BaseStatusSchema,
     item_slots: {
         type: 'schema[]', tooltip: 'Equipment slots configuration for this character.', objects: {

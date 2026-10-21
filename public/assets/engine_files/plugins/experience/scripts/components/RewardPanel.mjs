@@ -266,7 +266,9 @@ const RewardPopup = defineComponent({
   },
   template: /*html*/`
     <div class="reward-popup">
-      <RewardPanel />
+      <div class="reward-popup-body">
+        <RewardPanel />
+      </div>
       <button class="reward-continue" @click="close">{{ continueLabel }}</button>
     </div>
     `,

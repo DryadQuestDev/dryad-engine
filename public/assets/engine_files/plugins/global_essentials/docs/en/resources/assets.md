@@ -143,6 +143,7 @@ Set `default_assets` on room templates to automatically load assets when enterin
 | `asset_render` | When an asset is staged or updated | `(asset)` |
 | `asset_exit` | When a staged asset starts leaving the stage | `(asset)` |
 | `asset_resolve` | While an asset's image layers are built, on every render path | `(asset)` |
+| `gallery_asset_preview` | The first time the gallery shows an asset – sets its starting look | `(asset, seen)` |
 | `spine_event` | When a spine asset's animation passes an event key authored in the rig | `(asset, name, data)` |
 
 Use `asset_render` to modify asset properties dynamically before display.

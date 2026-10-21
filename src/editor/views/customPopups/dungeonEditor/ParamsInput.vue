@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import Textarea from 'primevue/textarea';
+import type { AssistMode } from '../../../../utility/dungeonEditor/assist';
+import { useContentAssist } from './useContentAssist';
 
 /**
  * The `{params}` field.
@@ -17,7 +19,12 @@ import Textarea from 'primevue/textarea';
  * `if:` condition list rather than many keys — which is why wrapping, not
  * one-key-per-line, is what makes them readable in a narrow column.
  */
-const props = defineProps<{ modelValue?: string; placeholder?: string }>();
+const props = defineProps<{
+  modelValue?: string;
+  placeholder?: string;
+  /** Completion and hover for these params, read as this kind; none without. */
+  assist?: AssistMode;
+}>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 
 const fieldRef = ref<any>(null);
@@ -26,6 +33,8 @@ function nativeEl(): HTMLTextAreaElement | null {
   const el = fieldRef.value?.$el ?? fieldRef.value;
   return el instanceof HTMLTextAreaElement ? el : null;
 }
+
+useContentAssist(computed(() => nativeEl()), () => props.assist);
 
 /**
  * Grow to fit the wrapped text.

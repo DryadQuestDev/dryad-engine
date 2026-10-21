@@ -12,9 +12,14 @@ Award XP to characters. Pass a number to award to the MC (`mc_id`) – or to eve
 
 // Award different amounts to specific characters
 { xp: "hero->100, mage->50" }
+
+// Award the XP a battle's victory grants, without its loot
+{ xp: "goblin_ambush" }
 ```
 
 Per-character format: `"characterId->amount, characterId->amount"`.
+
+Battle format: a battle id awards exactly the XP that winning that battle grants (its threat × `threat_xp_coef`, scaled to the current dungeon level) to every levelled party member. It gives no loot and does not mark the battle defeated. Use it for a route that ends an encounter without fighting it, e.g. talking a foe down. For a foe beaten by other means use `win`; to record the clear as well, add rpg_battler's `set_defeated`. Battle ids and per-character parts can share one string.
 
 The action is delayed: the player reads the paragraph first, the continue-click grants the XP and opens the reward popup (with any level-up fanfare). Mid-battle grants skip the popup and surface in the battle victory panel instead.
 

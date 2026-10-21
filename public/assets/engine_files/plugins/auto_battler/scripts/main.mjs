@@ -235,15 +235,24 @@ game.registerService('battle', {
 
 // Condition: _leadership_overflow
 // Usage in dialogue: if{_leadership_overflow = true}
-game.registerCondition('_leadership_overflow', () => checkLeadership().overflow);
+game.registerCondition('_leadership_overflow', () => checkLeadership().overflow, {
+  help: 'Whether the formation costs more leadership than the leader has.',
+  examples: ['_leadership_overflow = true'],
+});
 
 // Condition: _formation_empty
 // True when no characters are placed in the formation grid.
-game.registerCondition('_formation_empty', () => isFormationEmpty());
+game.registerCondition('_formation_empty', () => isFormationEmpty(), {
+  help: 'Whether no characters are placed in the formation grid.',
+  examples: ['_formation_empty = true'],
+});
 
 // Condition: _battle_ready
 // True when formation has characters AND leadership is not overflowing.
-game.registerCondition('_battle_ready', () => !isFormationEmpty() && !checkLeadership().overflow);
+game.registerCondition('_battle_ready', () => !isFormationEmpty() && !checkLeadership().overflow, {
+  help: 'Whether the formation holds characters and stays within the leader\'s leadership.',
+  examples: ['_battle_ready = true'],
+});
 
 function isFormationEmpty() {
   const positions = game.getStore('battle_positions');
@@ -380,11 +389,16 @@ game.registerService('start_battle', {
 
 // Action: battle (thin wrapper for script/dialogue access)
 // Called via game.execute({ battle: "orc, goblin" })
-game.registerAction('battle', (value) => {
-  const enemies = typeof value === 'string'
-    ? value.split(',').map(s => s.trim()).filter(Boolean)
-    : value;
-  game.getService('start_battle').start({ enemies });
+game.registerAction('battle', {
+  help: 'Start a battle against these characters.',
+  value: { list: { ref: 'character', fatal: true } },
+  examples: ['{battle: "orc"}', '{battle: "orc, goblin"}'],
+  action: (value) => {
+    const enemies = typeof value === 'string'
+      ? value.split(',').map(s => s.trim()).filter(Boolean)
+      : value;
+    game.getService('start_battle').start({ enemies });
+  },
 });
 
 /**

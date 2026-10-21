@@ -1,6 +1,6 @@
 /// <reference path="./dtypes.d.ts" />
 
-import { currentRpgBattle, parseFloatingText, addFloatingText, requiredSelfStatuses } from './rpg-battle-state.mjs';
+import { currentRpgBattle, parseFloatingText, addFloatingText, requiredSelfStatuses, getBattleDisplayName } from './rpg-battle-state.mjs';
 import { summonFromTemplate } from './rpg-battle-flow.mjs';
 
 const { game } = window.engine;
@@ -325,6 +325,115 @@ export function isLethallyDefeated(characterId) {
 export function isCharAlive(characterId) {
   const char = game.getCharacter(characterId);
   return char && char.getResource('health') > 0;
+}
+
+// ── Merge ──
+
+/** Base stats a merged body adds to the one it joins. */
+const MERGE_STATS = ['health', 'power'];
+
+/** Statuses that stay with the merging body: per-body build-ups, not afflictions. */
+const MERGE_KEEP_STATUSES = new Set(['stagger', 'stun']);
+
+/**
+ * The status an ability's `merge` aspect names, or null when the ability doesn't merge.
+ * @param {any} ability @returns {string | null}
+ */
+export function abilityMergeStatus(ability) {
+  for (const effectId in ability?.effects || {}) {
+    const statusId = ability.effects[effectId]?.merge;
+    if (statusId) return statusId;
+  }
+  return null;
+}
+
+/**
+ * Whether `casterId` can merge into `targetId`: a living, slotted ally built from the caster's own
+ * template, or one that already holds the merge status with room for another stack (`max_stacks`
+ * caps how many bodies one can take in). A caster holding the status is a merged body itself and
+ * stays where it is.
+ * @param {string} casterId @param {string} targetId @param {string} statusId @returns {boolean}
+ */
+export function canMergeInto(casterId, targetId, statusId) {
+  if (!statusId || casterId === targetId) return false;
+  const caster = game.getCharacter(casterId);
+  const target = game.getCharacter(targetId);
+  if (!caster || !target || !isCharAlive(targetId) || isSupport(targetId)) return false;
+  if (getSide(casterId) !== getSide(targetId)) return false;
+  if (caster.hasStatus(statusId)) return false;
+  const held = getStatusStacks(targetId, statusId);
+  if (!held && target.templateId !== caster.templateId) return false;
+  const max = getStatusDefinitions().get(statusId)?.max_stacks;
+  return !(max > 0 && held >= max);
+}
+
+/**
+ * The allies `casterId` could merge into right now.
+ * @param {string} casterId @param {string} statusId @returns {string[]}
+ */
+export function mergeTargets(casterId, statusId) {
+  return getAliveAllies(casterId).filter(id => canMergeInto(casterId, id, statusId));
+}
+
+/**
+ * Merge `casterId` into `targetId`. The target's base health and power grow by the caster's, so a
+ * scaling layered over base stats lands on the total exactly as it did on each part; its health
+ * becomes the two bodies' remaining health added up; the caster's afflictions move across with it;
+ * and it takes one stack of `statusId` (the merged look). The caster leaves the field at 0 health,
+ * marked `mergedInto` so processDeaths retires it without a defeat.
+ * @param {string} casterId @param {string} targetId @param {string} statusId @param {string} [iconSource]
+ * @returns {RpgEffectResult[]} the merge result first, then what was applied — empty if it could not merge
+ */
+function mergeCombatant(casterId, targetId, statusId, iconSource) {
+  const battle = currentRpgBattle.value;
+  if (!battle || !canMergeInto(casterId, targetId, statusId)) return [];
+  const caster = game.getCharacter(casterId);
+  const target = game.getCharacter(targetId);
+  const results = [];
+  const casterHealth = caster.getResource('health');
+  const targetHealth = target.getResource('health');
+  const mergedName = getBattleDisplayName(casterId);
+
+  const casterBase = caster.getCoreStatus()?.stats || {};
+  const targetBase = target.getCoreStatus()?.stats || {};
+  for (const stat of MERGE_STATS) {
+    if (typeof casterBase[stat] !== 'number') continue;
+    target.setStat(stat, (targetBase[stat] || 0) + casterBase[stat]);
+  }
+
+  const defs = getStatusDefinitions();
+  for (const status of [...caster.getStatuses()]) {
+    if (!status.meta?.is_battle || status.meta?.is_channel || MERGE_KEEP_STATUSES.has(status.id)) continue;
+    if ((status.polarity || defs.get(status.id)?.polarity) !== 'negative') continue;
+    for (const inst of status.getInstances()) {
+      const r = applyStatusInstance(targetId, status.id, inst.stacks, inst.duration, inst.source, status.iconSource);
+      if (r?.applied > 0) {
+        results.push({ type: 'status_apply', targetId, statusId: status.id, statusName: r.name, stacks: r.applied, duration: inst.duration > 0 ? inst.duration : 0 });
+      }
+    }
+  }
+
+  const look = applyStatusEffect(casterId, targetId, statusId, 1, undefined, iconSource);
+  if (look) results.unshift(look);
+
+  // The look may have renamed the target: number it among the living bodies that share its name
+  // now, rather than keep the index it had under its old one ("Merged#3" while it is the only one).
+  const name = target.getTrait('name');
+  const pool = getSide(targetId) === 'player' ? battle.playerParty : battle.enemyParty;
+  const namesakes = pool.filter(id => id !== targetId && id !== casterId && isCharAlive(id)
+    && game.getCharacter(id)?.getTrait('name') === name);
+  battle.charState[targetId].battleIndex = namesakes.length
+    ? Math.max(1, ...namesakes.map(id => battle.charState[id]?.battleIndex || 0)) + 1
+    : 0;
+
+  // Last, over whatever the stat raise and the statuses did to the pool: what both bodies had left.
+  target.setResource('health', Math.min(target.getStat('health'), targetHealth + casterHealth));
+  caster.setResource('health', 0);
+  battle.charState[casterId].mergedInto = targetId;
+  endChannelsBy(casterId);
+
+  results.unshift({ type: 'merge', targetId, mergedId: casterId, mergedName });
+  return results;
 }
 
 // ── Splash (neighbor expansion) ──
@@ -820,7 +929,8 @@ export function resolveAbility(casterId, abilityId, targetId, { isBounce = false
     // below is a no-op and no empty battle_action_apply events fire.
     const hasTargetPayload = !!(aspects.damage || aspects.healing
       || aspects.status_apply_target?.length || aspects.status_remove_target?.length
-      || aspects.cleanse || aspects.cooldown_change || aspects.charges_change || aspects.require_status_target_consume);
+      || aspects.cleanse || aspects.cooldown_change || aspects.charges_change || aspects.require_status_target_consume
+      || (aspects.merge && !isBounce));
 
     const effectTargets = hasTargetPayload ? targets : [];
 
@@ -891,6 +1001,7 @@ export function resolveAbility(casterId, abilityId, targetId, { isBounce = false
         cleanse: !!aspects.cleanse,
         cooldownChange: aspects.cooldown_change || 0,
         chargesChange: aspects.charges_change || 0,
+        merge: (!isBounce && aspects.merge) || null,
       };
 
       if (!game.trigger('battle_action_apply', caster, applyEvent)) continue;
@@ -905,6 +1016,12 @@ export function resolveAbility(casterId, abilityId, targetId, { isBounce = false
         allResults.push(dodgeResult);
         logEffect(battle, casterId, dodgeResult);
         continue;
+      }
+
+      // Merge before the rest of the payload, so it lands on the merged body and the log reads in
+      // order. One body merges once: a later target of the same cast keeps its own payload only.
+      if (applyEvent.merge && !battle.charState[casterId]?.mergedInto) {
+        allResults.push(...mergeCombatant(casterId, tId, applyEvent.merge, abilityIcon));
       }
 
       // Damage
@@ -1123,7 +1240,8 @@ export function resolveAbility(casterId, abilityId, targetId, { isBounce = false
   // effect whose `chance` roll failed still contributes (matching the other cast-bonus stats).
   // Amplified like any heal the caster receives (heal_amplification + heal_received_mult).
   const lifestealPct = (caster.getStat('lifesteal') || 0) + castBonus('lifesteal');
-  if (lifestealPct > 0 && abilityDamage > 0) {
+  // A caster that merged has left the field — healing it would bring it back.
+  if (lifestealPct > 0 && abilityDamage > 0 && !battle.charState[casterId]?.mergedInto) {
     const { healed } = applyHeal(caster, caster, abilityDamage * (lifestealPct / 100));
     if (healed > 0) {
       /** @type {RpgEffectResult} */

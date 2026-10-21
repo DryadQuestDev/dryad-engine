@@ -174,6 +174,9 @@ export function priceScale(/** @type {number} */ level) {
 // Writes the level state ONLY: future battles rescale live (the win handler reads getDungeonLevel),
 // and already-generated inventories are left as-is. No-op while auto_scaling is off.
 game.registerAction('dungeon_level', {
+    help: 'Set a dungeon level: a number or true (the MC\'s level) for this dungeon, or a level for a named dungeon.',
+    value: { oneOf: ['number', 'boolean', { ops: { key: 'any', value: 'number' } }] },
+    examples: ['{dungeon_level: 5}', '{dungeon_level: true}', '{dungeon_level: "ancient_cave = 7"}'],
     action: (/** @type {number|boolean|string} */ value) => {
         if (!autoScalingOn()) return;
         const clamp = (/** @type {number} */ n) => Math.max(1, Math.round(n));
@@ -645,7 +648,7 @@ game.registerEmitter('reward_assemble');
 
 /** XP for defeating a battle: effective threat × threat_xp_coef, granted to every levelled party
  *  member (xp_modifier-aware). Recorded into the pending reward by the resource-change listener. */
-function grantThreatXp(/** @type {number} */ threat) {
+export function grantThreatXp(/** @type {number} */ threat) {
     const coef = getConfig()?.threat_xp_coef ?? 5;
     const amount = Math.round(threat * coef);
     if (amount <= 0) return 0;

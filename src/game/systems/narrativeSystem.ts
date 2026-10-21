@@ -34,6 +34,10 @@ export class NarrativeSystem {
     @Skip()
     public encyclopediaRecordIndex = new Map<string, { treeId: string }>();
 
+    /** Character template id → ids of the encyclopedia records about that character, in tree order. Built with the encyclopedia index. */
+    @Skip()
+    private characterRecordIndex = new Map<string, string[]>();
+
     public discoveredRecords: Set<string> = new Set();
 
     /** Encyclopedia UI state (persisted in save). The Encyclopedia tab binds directly to these. */
@@ -321,10 +325,12 @@ export class NarrativeSystem {
         this.discoveredRecords.add(id);
     }
 
+    /** The reveal_all debug toggle answers true for every record without touching `discoveredRecords`, so nothing reaches the save. */
     public isRecordDiscovered(id: string): boolean {
         const record = this.recordsMap.get(id);
         if (!record) return false;
         if (record.auto_discovery) return true;
+        if (this.game.coreSystem.getDebugSetting('reveal_all')) return true;
         return this.discoveredRecords.has(id);
     }
 
@@ -344,8 +350,9 @@ export class NarrativeSystem {
                 seen.add(id);
             }
         }
+        const revealAll = !!this.game.coreSystem.getDebugSetting('reveal_all');
         for (const r of this.recordsMap.values()) {
-            if (r.parent_record === parentId && r.auto_discovery && !seen.has(r.id)) {
+            if (r.parent_record === parentId && (r.auto_discovery || revealAll) && !seen.has(r.id)) {
                 result.push(r);
             }
         }
@@ -355,12 +362,18 @@ export class NarrativeSystem {
     /** Walk encyclopedia trees once and index each record id → first owning tree. Call after `encyclopediaTreesMap` is populated. */
     public buildEncyclopediaIndex(): void {
         this.encyclopediaRecordIndex.clear();
+        this.characterRecordIndex.clear();
         for (const tree of this.encyclopediaTreesMap.values()) {
             for (const group of tree.groups || []) {
                 for (const entry of group.records || []) {
                     if (!entry.record) continue;
                     if (this.encyclopediaRecordIndex.has(entry.record)) continue;
                     this.encyclopediaRecordIndex.set(entry.record, { treeId: tree.id });
+                    const characterId = this.recordsMap.get(entry.record)?.character;
+                    if (!characterId) continue;
+                    const ids = this.characterRecordIndex.get(characterId);
+                    if (ids) ids.push(entry.record);
+                    else this.characterRecordIndex.set(characterId, [entry.record]);
                 }
             }
         }
@@ -368,6 +381,14 @@ export class NarrativeSystem {
 
     public isRecordInEncyclopedia(id: string): boolean {
         return this.encyclopediaRecordIndex.has(id);
+    }
+
+    /** First discovered encyclopedia record about the character, or null. */
+    public getCharacterRecordId(templateId: string): string | null {
+        for (const id of this.characterRecordIndex.get(templateId) || []) {
+            if (this.isRecordDiscovered(id)) return id;
+        }
+        return null;
     }
 
     public openInEncyclopedia(recordId: string): void {

@@ -233,6 +233,9 @@ const getLayerStyle = (index: number) => {
   const skinLayersMap = Game.getInstance().characterSystem.skinLayersMap;
   const layerId = layers[index]?.layerId;
 
+  const blend = skinLayersMap.get(layerId)?.blend_mode;
+  if (blend && blend !== 'normal') style.mixBlendMode = blend;
+
   // Runtime self-clip (e.g. hair trimmed under a hat, set from a character_render listener).
   // Image-space polygon, same contract as keep masks, so it goes through remapKeepPolygon.
   const runtimeClip = props.character.skinLayerClips?.get(layerId);
@@ -293,6 +296,9 @@ const getLayerStyle = (index: number) => {
   display: inline-block;
   aspect-ratio: v-bind("CHARACTER_VIEWPORT_ASPECT_RATIO");
   pointer-events: none;
+  /* A layer's blend_mode mixes with this character's own layers only – never the room behind
+     her or the UI – whatever stacking context the screen around the doll happens to create. */
+  isolation: isolate;
 }
 
 .character-doll-image {

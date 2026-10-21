@@ -633,7 +633,7 @@ const stateHandlers: StateHandler[] = [
 
 
       if (!event.shiftKey && !event.altKey && !event.ctrlKey && pointToDrag === -1) {
-        polygonPoints.value.push({ x: Math.round(clickX), y: Math.round(clickY) });
+        insertPolygonPoint(polygonPoints.value, { x: Math.round(clickX), y: Math.round(clickY) });
         updateSelectedEncounterPolygon();
       }
     },
@@ -775,7 +775,7 @@ const stateHandlers: StateHandler[] = [
         const nearbyPointIndex = findNearestFogPoint(clickX, clickY, mapThreshold);
         if (nearbyPointIndex === -1) {
           event.stopPropagation();
-          fogPolygonPoints.value.push({ x: Math.round(clickX), y: Math.round(clickY) });
+          insertPolygonPoint(fogPolygonPoints.value, { x: Math.round(clickX), y: Math.round(clickY) });
           updateSelectedRoomFogPolygon();
         } else {
           event.stopPropagation(); // Prevent map pan if clicking near point
@@ -1141,6 +1141,41 @@ function parsePolygonString(polygonString: string | undefined): Point[] {
 
 function stringifyPolygonPoints(points: Point[]): string {
   return points.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(' ');
+}
+
+function distToSegmentSq(p: Point, a: Point, b: Point): number {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const lenSq = abx * abx + aby * aby;
+  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq));
+  const dx = p.x - (a.x + t * abx);
+  const dy = p.y - (a.y + t * aby);
+  return dx * dx + dy * dy;
+}
+
+// Splices the point into the closest edge (closing edge included). A click past a
+// corner is equidistant to both edges meeting there, so ties go to the edge whose
+// detour through the point adds the least perimeter.
+function insertPolygonPoint(points: Point[], point: Point) {
+  if (points.length < 3) {
+    points.push(point);
+    return;
+  }
+  let bestEdge = 0;
+  let bestDist = Infinity;
+  let bestDetour = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    const dist = distToSegmentSq(point, a, b);
+    const detour = Math.hypot(point.x - a.x, point.y - a.y) + Math.hypot(b.x - point.x, b.y - point.y) - Math.hypot(b.x - a.x, b.y - a.y);
+    if (dist < bestDist - 1e-6 || (Math.abs(dist - bestDist) <= 1e-6 && detour < bestDetour)) {
+      bestEdge = i;
+      bestDist = dist;
+      bestDetour = detour;
+    }
+  }
+  points.splice(bestEdge + 1, 0, point);
 }
 
 function findNearestPoint(targetX: number, targetY: number, threshold: number): number {

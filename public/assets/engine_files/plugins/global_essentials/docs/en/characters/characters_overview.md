@@ -153,6 +153,7 @@ Each layer is an image (or set of images) that renders at a specific depth. Lowe
 - **z_index** - Stacking order (negative = behind, positive = in front)
 - **attributes** - Which attributes control this layer's appearance
 - **images** - Different image files for different attribute combinations
+- **blend_mode** - Mix a layer into the ones below it like a Photoshop blend mode – `screen` for glows, smoke and mist, `multiply` for shadows and tints
 
 **How attribute-driven images work:**
 
@@ -232,13 +233,21 @@ A template combines everything above into one package. It defines a character's 
 - **skin_layers** - Which layers to display
 - **item_slots** - Where equipment goes (with positions)
 - **skill_trees** - Which skill trees this character can learn from
+- **instances** - Named characters built from this template (see below)
+
+**Instances:** When a scene needs several of the same character – three guards, a pack of wolves – give their template an **Instances** list instead of a template per copy. Each row is a character id (`guard1`, `guard2`, …) plus only what differs from the template: a few traits (a portrait, a name color), attributes or stats.
+
+- An instance is created on a new game, and on load when a save is missing it. Turn **Auto create** off to create it only when the story needs it, with `{create_character: "guard2"}` or `game.createCharacter("guard2")` – no template needed.
+- Content, battles and scripts use the instance id like any character: `{actor: "guard2->left"}`.
+- Resetting an instance, and the save restore that rebuilds characters from their templates on load, keep its overrides.
+- An instance id must not be a template id or another instance id.
 
 **Art Manager:** Every character template, status, item template and skill slot has an **Art Manager** button beside its title. It opens the doll preview with five tabs – Layers, Attributes, Spine, Face and Offset – so a character's whole look is set in one place without hunting through the form:
 
 - **Layers** – tick skin layers on and off. Each row shows the image or animation key the layer resolves to for the current attributes, red when nothing matches, and the pencil saves and jumps to that layer in Skin Layers.
 - **Attributes** – pick values from dropdowns; the attributes watched by the selected layers come first.
 - **Spine** – add or swap the atlas and skeleton for the selected view, and click an animation or skin chip to force it in the preview.
-- **Face** – set the static face image and its precedence, and drag the purple box to position the face crop.
+- **Face** – set the static face image and its precedence, and drag the purple box to position the face crop. **Bake crop to static face** saves the crop as the preview shows it – static layers or spine, with the selected layers and attributes – as a 300×300 WebP at `faces/<id>.webp` in the game's or mod's assets, and sets it as the static face. It asks before replacing an existing file.
 - **Offset** – drag the doll to move it and scroll over it to scale, per view and per asset.
 
 A status, item or skill slot is drawn on top of a character in the game, so its layers often only resolve with that character's layers and attributes. Pick a template under **Preview on character** and the preview applies the entry over it the way the game does: the template's layers render with the entry's, and where both set an attribute the entry's value wins. The pick is remembered in this browser for every status, item and skill slot, and it is never saved. The Attributes tab then shows two columns – the entry's own values, which are saved, and the character's values, which you can change to preview a state such as `battle_state = cast`. A character value is locked wherever the entry sets that attribute: while the entry is applied, the game ignores the character's own value, so changing it with `setAttribute()` shows nothing.

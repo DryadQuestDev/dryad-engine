@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, shallowRef } from 'vue';
 import { useStorage } from '@vueuse/core';
 import { jsonrepair } from 'jsonrepair';
 import Textarea from 'primevue/textarea';
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
 import { Game } from '../../game';
+import { liveAssist, type LiveAssist } from '../../utils/liveAssist';
+import { useContentAssist, type ContentAssist, type ContentAssistProvider } from '../../../editor/views/customPopups/dungeonEditor/useContentAssist';
+import AssistLayer from '../../../editor/views/customPopups/dungeonEditor/AssistLayer.vue';
 
 const game = Game.getInstance();
 
@@ -20,8 +23,22 @@ const filteredActionNames = computed(() => {
   return actionNames.value.filter(name => name.toLowerCase().includes(query));
 });
 
+// The content editor's suggestions and hover, over what the running game knows.
+// PrimeVue's Textarea renders the native element as its root.
+const inputRef = ref<{ $el: HTMLTextAreaElement } | null>(null);
+const inputEl = computed(() => inputRef.value?.$el ?? null);
+const live = shallowRef<LiveAssist | null>(null);
+const activeAssist = shallowRef<ContentAssist | null>(null);
+const provider: ContentAssistProvider = {
+  place: (_el, mode) => live.value?.place(mode) ?? null,
+  autoOpen: ref(true),
+  active: activeAssist,
+};
+useContentAssist(inputEl, () => 'actions', provider);
+
 onMounted(() => {
   actionNames.value = Array.from(game.logicSystem.actionRegistry.keys()).sort();
+  liveAssist(game).then((l) => { live.value = l; });
 });
 
 function executeActions() {
@@ -57,8 +74,9 @@ function insertAction(name: string) {
 <template>
   <div class="debug-actions">
     <label class="action-runner-label">Run custom actions</label>
-    <Textarea v-model="actionInput" rows="6" class="action-runner-input"
-      placeholder='{ "char": "alice.stat.brawn>1", "flash": "Hello world" }' />
+    <Textarea ref="inputRef" v-model="actionInput" rows="6" class="action-runner-input" @focus="live?.refresh()"
+      placeholder='{ "char": "alice.stat.brawn += 1", "flash": "Hello world" }' />
+    <AssistLayer v-if="activeAssist" :state="activeAssist" />
     <div class="action-runner-row">
       <Button label="Execute" @click="executeActions" />
       <div v-if="actionError" class="action-error">{{ actionError }}</div>

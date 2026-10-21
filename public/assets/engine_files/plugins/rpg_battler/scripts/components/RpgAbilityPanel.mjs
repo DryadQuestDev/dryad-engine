@@ -18,6 +18,10 @@ export const RpgAbilityPanel = defineComponent({
     const panelVisible = ref(false);
     const panelExiting = ref(false);
     const activeTab = ref('');
+    // Folded by the player to see the field behind the panel. Opens again for every new turn, so a
+    // player who forgot folding it never takes an empty-looking turn for "no abilities".
+    const collapsed = ref(false);
+    watch([() => props.activeChar?.id, () => props.battle?.turn], () => { collapsed.value = false; });
 
     // ── Abilities ──
 
@@ -164,21 +168,29 @@ export const RpgAbilityPanel = defineComponent({
 
     return {
       game, activeAbilities, displayedAbilities,
-      abilityPanelRef, panelAnimKey, panelVisible, panelExiting,
+      abilityPanelRef, panelAnimKey, panelVisible, panelExiting, collapsed,
       activeTab, useGroups, availableGroups,
       show, hide, onSelectAbility, setTab, tooltipBinding,
     };
   },
   template: /*html*/`
     <template v-if="panelVisible">
-      <div :key="panelAnimKey" ref="abilityPanelRef"
+      <button v-if="collapsed" type="button" class="rpg-ability-reveal" @click="collapsed = false">
+        <i class="pi pi-eye"></i>{{ game.getLine('ui_show_abilities') }}
+      </button>
+      <div v-else :key="panelAnimKey" ref="abilityPanelRef"
         class="rpg-ability-panel" :class="{ 'panel-exit': panelExiting }">
+        <button type="button" class="rpg-ability-hide" :aria-label="game.getLine('ui_hide_abilities')"
+          v-tooltip.right="game.getLine('ui_hide_abilities')" @click="collapsed = true">
+          <i class="pi pi-eye-slash"></i>
+        </button>
         <CustomComponentContainer :slot="'rpg-ability-panel-top'" :context="{ character: activeChar }" />
         <div v-if="useGroups" class="rpg-ability-tabs">
           <button v-for="g in availableGroups" :key="g.id"
             class="rpg-ability-tab" :class="{ active: activeTab === g.id }"
             @click="setTab(g.id)">{{ g.name }}</button>
         </div>
+        <div class="rpg-ability-list">
         <div v-for="(ab, idx) in displayedAbilities" :key="ab.id"
           class="rpg-ability-item" :class="{ disabled: !ab.usable, 'on-cooldown': ab.cooldown > 0, 'no-charges': ab.charges === 0 }"
           :style="{ '--i': idx }"
@@ -197,6 +209,7 @@ export const RpgAbilityPanel = defineComponent({
               <span v-if="ab.charges >= 0" class="rpg-ability-charges" :class="{ empty: ab.charges === 0 }" :title="ab.charges + ' charges'">{{ ab.charges }}</span>
             </span>
           </span>
+        </div>
         </div>
         <CustomComponentContainer :slot="'rpg-ability-panel-bottom'" :context="{ character: activeChar }" />
       </div>

@@ -652,12 +652,14 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
 .overlay {
   color: white;
 
+  /* Centred, and narrowed on a small screen so it clears the party rail on the left and the staged
+     actors' rail on the right (the tray's width is reserved on both sides). On a tablet the full
+     800px box sat under both rails, which covered its buttons and choice numbers and took their taps. */
   position: absolute;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 80%;
-  max-width: 800px;
+  width: min(80%, 800px, calc(100% - 2 * var(--ui-tray-reserved-left, 120px) - 16px));
   max-height: 80dvh;
   display: flex;
   flex-direction: column;

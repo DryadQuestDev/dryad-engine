@@ -1,6 +1,6 @@
 # Turn System
 
-A global map-turn clock. Every room entry advances a saved `turn` counter by 1, and each turn ticks limited status durations on all characters. Scenes and scripts can pass extra turns (e.g. resting).
+A global map-turn clock. Every room entry advances a saved `turn` counter by 1 (a setting can turn that off), and each turn ticks limited status durations on all characters. Scenes and scripts can pass extra turns (e.g. resting).
 
 ## Quick Setup
 
@@ -53,6 +53,31 @@ You wake at dawn, rested.
 The plugin adds a Wait button to the map toolbar: one click passes one turn where the player stands. Statuses tick, collectables regrow, and the engine re-runs its `discover` scan — so waiting out a buff (or into one) can uncover a hidden encounter without leaving the room.
 
 **Turn Config → Show turn counter** (off by default) renders the current turn number beside the button, turning the toolbar into the clock display.
+
+## Rooms that cost no time
+
+**Turn Config → Advance on room enter** (on by default) is what makes each room entry pass a turn. Turn it off when rooms are places the player moves between freely – the screens of a VN hub, for example – and time should pass only where the story says so: `{turn}`, the service and the Wait button.
+
+```js
+// The forge is its own screen: walking there is free, the work is not
+~Spend the afternoon at the anvil{turn: 1}
+```
+
+Unlike `freeze_timer`, this only removes room entries as a source of time. Everything else still advances the clock and ticks statuses.
+
+## Freezing the clock
+
+Set the `freeze_timer` state to stop time: while it is `true`, nothing advances the clock – room entries, `{turn}`, the service and the Wait button (which hides itself) all leave it alone. No status ticks or bleeds, no collectable regrows and `turn_advanced` does not fire, so anything a game hangs on the clock pauses with it. The state is saved, so a frozen clock stays frozen across a reload.
+
+```js
+// A dream: the body lies still while the player wanders
+The world dissolves around you.
+{state: "freeze_timer=true"}
+
+// ...and wakes
+You open your eyes in the grass.
+{state: "freeze_timer=false"}
+```
 
 ## Reading the clock
 

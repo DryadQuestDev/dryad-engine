@@ -70,7 +70,7 @@ If you ever decide to completely remove this dungeon, you can delete it safely b
 
 #### 4.2 Add Simple Room Content
 
-Normally it’s recommended to write dungeon content in **Google Docs**, but for this first test we’ll set the content directly into 'dungeon_content' field:
+Normally you'd write dungeon content in the ->dungeons.visual_editor, but for this first test we’ll set the content directly into 'dungeon_content' field:
 
 ```text
 ^1
@@ -110,7 +110,7 @@ After writing dungeon content, you should verify that your **rooms** and **encou
 
 @en/images/sync.png
 
-This step is especially useful after editing your Google Doc or adding new rooms and encounters – it catches mismatches before they cause runtime errors.
+This step is especially useful after editing your dungeon content or adding new rooms and encounters – it catches mismatches before they cause runtime errors.
 
 ---
 

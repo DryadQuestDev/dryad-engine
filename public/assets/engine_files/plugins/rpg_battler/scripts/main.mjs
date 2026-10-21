@@ -3,7 +3,7 @@
 import { currentRpgBattle, addFloatingText, pushLog } from './rpg-battle-state.mjs';
 import { isBattleScenePauseActive, teardownBattleScenes, resetBattleScenes } from './rpg-battle-scenes.mjs';
 import { initBattleTracking, summonCombatant, summonFromTemplate, sideAtUnitCap, previewAbilityUsable, spawnEnemies, splitOverflowWaves } from './rpg-battle-flow.mjs';
-import { checkStaggerThreshold, getEffectivePower, applyDefenses, applyDamageInstance, applyHeal, applyStatusEffect, logEffect, getSide, isCharAlive, isSupport } from './rpg-battle-effects.mjs';
+import { checkStaggerThreshold, getEffectivePower, applyDefenses, applyDamageInstance, applyHeal, applyStatusEffect, logEffect, getSide, isCharAlive, isSupport, getStatusDefinitions } from './rpg-battle-effects.mjs';
 import { registerAspectRenderers } from './aspect-renderers.mjs';
 import { RpgBattleScreen } from './components/RpgBattleScreen.mjs';
 import { RpgCombatStats } from './components/RpgCombatStats.mjs';
@@ -100,7 +100,9 @@ registerAspectRenderers(game, { getEffectivePower });
 // Grey out abilities in the engine's AbilityCard when a character couldn't use them on their turn.
 game.registerAbilityUsabilityChecker(previewAbilityUsable);
 
-game.registerState('rpg_battle_log_minimized', false);
+// Starts folded on touch devices: on a phone's short screen the open log covers the acting
+// character's name plate. The player can still unfold it.
+game.registerState('rpg_battle_log_minimized', window.matchMedia('(pointer: coarse)').matches);
 game.registerState('rpg_ability_tabs', {});
 game.registerState('rpg_defeated_battles', []);
 game.registerState('rpg_fought_battles', []);
@@ -120,6 +122,9 @@ game.registerState('rpg_pre_battle_states', null);
 // The single hook for defeat rewards: rpg_defeated_battles is the only tracking state.
 game.registerEmitter('battle_defeated');
 
+/** @type {RefSpec} */
+const BATTLE = { ref: 'plugins_data/rpg_battler/battles', label: 'Battle' };
+
 function addDefeated(battleId) {
   const defeated = game.getState('rpg_defeated_battles') || [];
   if (!defeated.includes(battleId)) {
@@ -134,6 +139,9 @@ function addDefeated(battleId) {
 // after the paragraph is read — letting battle_defeated listeners (e.g. defeat rewards) present
 // their UI over the finished paragraph and gate the scene until dismissed.
 game.registerAction('win', {
+  help: 'Mark a battle won from a scene, as a fight victory would.',
+  value: { oneOf: [BATTLE, 'boolean'] },
+  examples: ['{win: "goblin_camp"}'],
   eventDelayed: true,
   action: (/** @type {string} */ battleId) => {
     // addDefeated only TRACKS the clear (once per definition, for `_defeated` content gates).
@@ -148,8 +156,13 @@ game.registerAction('win', {
 // definition) and announces nothing. For a fight that happens off-page — a golem the player never
 // meets, a foe dealt with by another route — where `win` would be a lie: no rewards popup, no
 // battle_finished, no delay. Already-defeated battles are a no-op.
-game.registerAction('set_defeated', (/** @type {string} */ value) => {
-  for (const battleId of String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean)) addDefeated(battleId);
+game.registerAction('set_defeated', {
+  help: 'Mark battles defeated, with no victory and no rewards.',
+  value: { list: BATTLE },
+  examples: ['{set_defeated: "goblin_camp"}', '{set_defeated: "golem, ogre"}'],
+  action: (/** @type {string} */ value) => {
+    for (const battleId of String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean)) addDefeated(battleId);
+  },
 });
 
 /** @param {string} battleId @returns {boolean} */
@@ -157,7 +170,11 @@ function isDefeated(battleId) {
   return (game.getState('rpg_defeated_battles') || []).includes(battleId);
 }
 
-game.registerCondition('_defeated', isDefeated);
+game.registerCondition('_defeated', isDefeated, {
+  help: 'Whether a battle was defeated, by a fight or a scripted win.',
+  args: [BATTLE],
+  examples: ['_defeated(goblin_camp) = true', '_defeated(goblin_camp) = false'],
+});
 
 // A battle won in actual combat. `_defeated` is also true for a clear by {win} or {set_defeated}
 // (a seduction, a scripted defeat); `_fought` tells a real fight apart. Recorded once per definition.
@@ -174,7 +191,11 @@ function isFought(battleId) {
   return (game.getState('rpg_fought_battles') || []).includes(String(battleId ?? '').trim());
 }
 
-game.registerCondition('_fought', isFought);
+game.registerCondition('_fought', isFought, {
+  help: 'Whether a battle was won in actual combat, not by a scripted win.',
+  args: [BATTLE],
+  examples: ['_fought(goblin_camp) = true'],
+});
 
 // ── Party size helpers ──
 
@@ -241,7 +262,10 @@ game.registerService('rpg_party', {
   isPartyFull() { return game.getParty().length >= getMaxPartySize(); },
 });
 
-game.registerCondition('_party_full', () => game.getParty().length >= getMaxPartySize());
+game.registerCondition('_party_full', () => game.getParty().length >= getMaxPartySize(), {
+  help: 'Whether the party already holds as many members as can fight in a battle.',
+  examples: ['_party_full = true'],
+});
 
 // ── Floating text service ──
 
@@ -325,7 +349,109 @@ function resolveSceneDefaultBackground() {
   return null;
 }
 
+// ── Battle preload: who can receive which status ──
+
+const FRIENDLY_TARGETS = new Set(['self', 'ally', 'self_and_ally', 'all_allies']);
+
+/**
+ * The statuses one ability can put on someone, sorted by who receives them – read from where each
+ * status sits in the effect and from the ability's target: `self` (the caster), `own` (the caster's
+ * side), `other` (the opposing side), and `summonStatuses` for the templates in `summons`.
+ * Takes a final ability (effects keyed by id) or an ability template (effects as an array).
+ * @param {any} ability
+ * @returns {RpgStatusRecipients}
+ */
+export function statusRecipients(ability) {
+  /** @type {RpgStatusRecipients} */
+  const out = { self: [], own: [], other: [], summons: [], summonStatuses: [] };
+  const target = ability?.meta?.target || 'enemy';
+  const effects = Array.isArray(ability?.effects)
+    ? ability.effects.map((/** @type {any} */ e) => e?.aspects || {})
+    : Object.values(ability?.effects || {});
+  for (const a of effects) {
+    out.self.push(...(a.status_apply_self || []));
+    out.own.push(...(a.status_apply_allies || []));
+    out.other.push(...(a.status_apply_enemies || []));
+    const onTarget = a.status_apply_target || [];
+    if (target === 'any' || FRIENDLY_TARGETS.has(target)) out.own.push(...onTarget);
+    if (target === 'any' || !FRIENDLY_TARGETS.has(target)) out.other.push(...onTarget);
+    // A plain merge target shares the caster's template, so the caster's own preload covers it.
+    if (a.merge) out.self.push(a.merge);
+    if (a.summon) out.summons.push(a.summon);
+    out.summonStatuses.push(...(a.summon_status || []));
+  }
+  return out;
+}
+
+/**
+ * What the battle start preloads: every body the fight can field (combatants, later waves' entries,
+ * anything their abilities summon) and, for each, the statuses this fight's abilities can put on it.
+ * A side-wide status reaches every body on that side; a self or summon status only its own body.
+ * @param {RpgBattle} battle @param {RpgBattleEntry[][]} waves
+ * @returns {Map<string, string[]>} preload target (live character id or template id) → status ids
+ */
+export function battlePreloadPlan(battle, waves) {
+  const templates = game.getData('character_templates', true);
+  const abilityTemplates = game.getData('ability_templates', true);
+  const statusDefs = getStatusDefinitions();
+  /** @type {Record<string, Set<string>>} */
+  const sideStatuses = { player: new Set(), enemy: new Set() };
+  /** @type {Map<string, { side: string, statuses: Set<string> }>} */
+  const bodies = new Map();
+
+  const templateAbilities = (/** @type {string} */ templateId) => {
+    const template = templates?.get(templateId);
+    const ids = [...(template?.abilities || [])];
+    for (const s of template?.starting_statuses || []) ids.push(...(statusDefs.get(typeof s === 'string' ? s : s?.id)?.abilities || []));
+    return ids.map(id => abilityTemplates?.get(id)).filter(Boolean);
+  };
+  const liveAbilities = (/** @type {string} */ id) => Object.values(game.getCharacter(id)?.getAbilities() || {});
+
+  /** @param {string} target @param {string} side @param {any[]} abilities */
+  const scan = (target, side, abilities) => {
+    if (bodies.has(target)) return;
+    const body = { side, statuses: new Set() };
+    bodies.set(target, body);
+    const otherSide = side === 'player' ? 'enemy' : 'player';
+    for (const ability of abilities) {
+      const r = statusRecipients(ability);
+      for (const id of r.self) body.statuses.add(id);
+      for (const id of r.own) sideStatuses[side].add(id);
+      for (const id of r.other) sideStatuses[otherSide].add(id);
+      for (const templateId of r.summons) {
+        scan(templateId, side, templateAbilities(templateId));
+        for (const id of r.summonStatuses) bodies.get(templateId)?.statuses.add(id);
+      }
+    }
+  };
+
+  for (const id of [...battle.playerParty, ...battle.enemyParty]) scan(id, battle.charState[id]?.side || 'enemy', liveAbilities(id));
+  for (const wave of waves.slice(1)) {
+    for (const entry of wave) {
+      // preloadCharacterAssets resolves a live character id or a template id alike.
+      if (entry?.is_live_instance) for (const id of entry.live_character_ids || []) scan(id, 'enemy', liveAbilities(id));
+      else if (entry?.character_id) scan(entry.character_id, 'enemy', templateAbilities(entry.character_id));
+    }
+  }
+
+  const plan = new Map();
+  for (const [target, body] of bodies) plan.set(target, [...new Set([...sideStatuses[body.side], ...body.statuses])]);
+  return plan;
+}
+
 // ── Battle service ──
+
+/**
+ * An id list authored either way: `["a", "b"]` or `"a, b"`. A bare string must not reach a for…of,
+ * which would walk it letter by letter.
+ * @param {string | string[] | null | undefined} value
+ * @returns {string[]}
+ */
+function toIdList(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string') return value.split(',').map(s => s.trim()).filter(Boolean);
+  return [];
+}
 
 /**
  * Expand a battle definition into one entry per body. Template entries repeat `amount` times;
@@ -409,6 +535,20 @@ game.registerService('rpg_battle', {
       ? [...params.playerParty]
       : game.getParty().filter(c => !c.getTrait('battle_ignore')).map(c => c.id);
 
+    // Allies fight on the player side for this battle only, without joining the party: the
+    // definition's `allies` plus the action's. They are added like any member, so their own
+    // battle_support trait sends them to the sidelines or into a slot. Re-adding is a no-op,
+    // which keeps the picker re-entry (whose roster already holds them) idempotent.
+    const allyIds = [...new Set([
+      ...toIdList(params.battleId ? game.getData('plugins_data/rpg_battler/battles', true)?.get(params.battleId)?.allies : null),
+      ...toIdList(params.allies),
+    ])].filter(id => {
+      if (game.getCharacter(id)) return true;
+      console.error(`rpg_battler: ally "${id}" has no live character - skipped. Allies must exist before the battle (auto_create, or created by a script).`);
+      return false;
+    });
+    for (const id of allyIds) if (!roster.includes(id)) roster.push(id);
+
     if (roster.length === 0) {
       console.warn('rpg_battler: no player party available');
       return { ok: false, reason: 'no_party' };
@@ -433,7 +573,8 @@ game.registerService('rpg_battle', {
     const max = getMaxPartySize();
     if (roster.length > max) {
       if (!params._partySelected) {
-        const locked = roster.filter(id => game.getCharacter(id)?.getTrait('battle_always'));
+        // Allies are the story's to bring, so the player cannot leave them out either.
+        const locked = roster.filter(id => game.getCharacter(id)?.getTrait('battle_always') || allyIds.includes(id));
         // With locked members alone filling (or overfilling) the roster there is nothing to
         // pick — proceed with them directly. Opening the picker here would soft-lock: locked
         // faces can't be deselected, so Fight could never enable.
@@ -550,8 +691,9 @@ game.registerService('rpg_battle', {
 
     // Opening statuses on the whole player party (e.g. an ambush advantage):
     // { battle: { battleId: "bats", statuses: ["advantage"] } }
-    if (params.statuses?.length) {
-      for (const statusId of params.statuses) {
+    const openingStatuses = toIdList(params.statuses);
+    if (openingStatuses.length) {
+      for (const statusId of openingStatuses) {
         for (const charId of battle.playerParty) {
           if (isSupport(charId)) continue;
           applyStatusEffect(charId, charId, statusId, 1);
@@ -565,30 +707,13 @@ game.registerService('rpg_battle', {
     game.setScreenLoading(true);
     try {
       const battleStates = [...(game.getData('character_attributes', true).get('battle_state')?.values || [])];
-      const preloadTargets = new Set(allCombatants);
-      // Later waves are known upfront, so their art loads behind THIS loading screen —
-      // a wave spawns mid-fight with no pause to fetch images.
-      for (const wave of waves.slice(1)) {
-        // preloadCharacterAssets resolves a live character id or a template id, so a wave's live
-        // entries warm from the same call as its template ones.
-        for (const entry of wave) {
-          if (entry?.is_live_instance) for (const id of entry.live_character_ids || []) preloadTargets.add(id);
-          else if (entry?.character_id) preloadTargets.add(entry.character_id);
-        }
-      }
-      for (const id of allCombatants) {
-        const abilities = game.getCharacter(id)?.getAbilities() || {};
-        for (const abId in abilities) {
-          // FinalAbilities effects: object keyed by effect id, values = aspects
-          const effects = abilities[abId].effects || {};
-          for (const effectId in effects) {
-            if (effects[effectId]?.summon) preloadTargets.add(effects[effectId].summon); // character template id
-          }
-        }
-      }
-      await Promise.allSettled([...preloadTargets].map((target) =>
+      // Every body the fight can field – later waves load behind THIS loading screen, so a wave spawns
+      // with no pause to fetch images – each with the looks of the statuses the fight can give it.
+      const plan = battlePreloadPlan(battle, waves);
+      await Promise.allSettled([...plan].map(([target, statuses]) =>
         game.preloadCharacterAssets(target, {
           simulateAttributes: { battle_state: battleStates },
+          statuses,
           spine: true,
         })
       ));
@@ -891,6 +1016,28 @@ function markFightChoice(choice) {
 // ── Action: battle ──
 
 game.registerAction('battle', {
+  help: 'Start a battle by id, or from an object that adds statuses, allies, a party, enemies or a background.',
+  value: {
+    oneOf: [
+      { ...BATTLE, fatal: true },
+      {
+        fields: {
+          battleId: { ...BATTLE, fatal: true },
+          statuses: { list: { ref: 'character_statuses' } },
+          allies: { list: { ref: 'character' } },
+          playerParty: { list: { ref: 'character' } },
+          background: { ref: 'assets' },
+          enemies: { fields: { character_id: { ref: 'character_template' } } },
+          enemies2: { fields: { character_id: { ref: 'character_template' } } },
+        },
+      },
+    ],
+  },
+  examples: [
+    '{battle: "goblin_camp"}',
+    '{battle: {battleId: "ambush", allies: ["scout"], statuses: "ambushed"}}',
+    '{battle: {enemies: [{character_id: "goblin", amount: 3}], background: "forest"}}',
+  ],
   eventDelayed: true,
   choiceModifier: markFightChoice,
   /** @param {StartBattleActionValue} value */
@@ -908,6 +1055,9 @@ game.registerAction('battle', {
 // the scene it leads to. Starts nothing itself.
 
 game.registerAction('fight', {
+  help: 'Badge a choice as a fight whose battle starts later, in the scene it leads to.',
+  value: 'boolean',
+  examples: ['{fight: true, scene: "ambush"}'],
   /**
    * @param {Choice} choice
    * @param {boolean} value

@@ -1,9 +1,9 @@
 {
   "id": "turn_system",
   "name": "Turn System",
-  "description": "Global map-turn clock. A saved turn counter advances on each room entry (and via the turn action/service), ticking limited status durations and stack_bleeding statuses on all characters and firing turn_advanced. Adds a Wait button to the map toolbar.",
+  "description": "Global map-turn clock. A saved turn counter advances on each room entry (optional) and via the turn action/service, ticking limited status durations and stack_bleeding statuses on all characters and firing turn_advanced. Adds a Wait button to the map toolbar.",
   "author": "Nekon",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "order": -1,
   "scripts": [
     "main.mjs"
@@ -17,6 +17,11 @@
           "type": "boolean",
           "defaultValue": false,
           "tooltip": "Show the current turn number next to the Wait button in the map toolbar."
+        },
+        "advance_on_room_enter": {
+          "type": "boolean",
+          "defaultValue": true,
+          "tooltip": "Each room entry passes one turn. Turn it off when rooms are places the player moves between freely (e.g. VN screens of a hub) and time should only pass through {turn}, the service and the Wait button."
         }
       }
     }

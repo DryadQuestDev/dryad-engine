@@ -74,8 +74,9 @@ When a battle starts:
 3. Ability states are initialized (abilities flagged `cd_on_battle_start` open on cooldown for their `cd`, charges from ability meta)
 4. Statuses with `meta.source` are seeded from the named character stat (e.g., a character with `wind_mantle: 5` starts the fight with the Wind Mantle status at 5 stacks)
 5. The `battle_start` emitter fires (return false to cancel)
-6. Saves are disabled and the battle screen is shown
-7. Round 1 opens like every other round (below) — battle start is not a special case
+6. Behind a loading screen, every body the fight can field is preloaded — combatants, later waves, anything their abilities summon — together with the look of every status the fight's abilities can put on it (a status's attributes, skin layers, face and spine). Each status goes only to the bodies it can land on, read from where it sits in the effect (`status_apply_self` / `_allies` / `_enemies` / `_target` with the ability's `target`, `summon_status`, `merge`). The battle effects of abilities those statuses grant or modify are warmed too, so a transformed combatant's new kit plays without a pause. A status that only scripts apply loads on first use
+7. Saves are disabled and the battle screen is shown
+8. Round 1 opens like every other round (below) — battle start is not a special case
 
 ### Enemy Scaling and Difficulty
 

@@ -116,8 +116,12 @@ function closeProgression() {
   cursor: pointer;
 }
 
+/* Wraps: on a narrow screen (a tablet, with the touch tray's wider left padding) one row of tabs
+   ran past the container's clipped right edge and took Close with it. */
 .tabs {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 5px;
   margin-bottom: 20px;
   border-bottom: 1px solid #444;
 }

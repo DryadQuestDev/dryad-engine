@@ -758,6 +758,29 @@ span.lore-link:focus-visible,
   64% { translate: 0 0; skew: 0deg; text-shadow: none; }
 }
 
+/* Runs once, never loops: each letter shivers as the cold takes it, frosts over from
+   --fx-freeze-from (white unless a game sets it) to ice and holds still. The resting colour is the
+   ice, so the backlog and reduced motion show it frozen. */
+.fx-freeze {
+  color: #dff6ff;
+  text-shadow: 0 0 4px rgba(170, 225, 255, 0.95), 0 0 12px rgba(110, 190, 255, 0.6);
+  animation-name: fx-freeze;
+  animation-duration: 0.9s;
+  animation-timing-function: ease-out;
+  animation-iteration-count: 1;
+  animation-fill-mode: both;
+  animation-delay: calc(var(--i, 0) * 0.07s);
+}
+
+@keyframes fx-freeze {
+  0% { color: var(--fx-freeze-from, #ffffff); text-shadow: none; translate: 0 0; }
+  12% { translate: 1px -1px; }
+  24% { translate: -1px 1px; }
+  36% { translate: 1px 1px; }
+  48% { translate: 0 0; }
+  100% { color: #dff6ff; text-shadow: 0 0 4px rgba(170, 225, 255, 0.95), 0 0 12px rgba(110, 190, 255, 0.6); translate: 0 0; }
+}
+
 /* The invisible layout ghost and the backlog carry the same spans; neither should burn frames. */
 .dialogue-ghost .fx-char,
 .log-text .fx-char {

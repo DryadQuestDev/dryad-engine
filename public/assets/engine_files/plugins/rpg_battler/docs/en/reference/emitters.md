@@ -66,6 +66,7 @@ game.on('battle_action_applied', (caster, event) => {
 | `cleanse` | `boolean` | Whether to polarity-cleanse battle statuses (ally target removes negative, enemy target removes positive) |
 | `cooldownChange` | `number` | Cooldown adjustment on target's abilities |
 | `chargesChange` | `number` | Charges adjustment on target's abilities |
+| `merge` | `string \| null` | The `merge` aspect's status: the caster merges into the target. Set to `null` to cancel the merge |
 
 ## Character Turn
 
@@ -77,7 +78,7 @@ game.on('battle_action_applied', (caster, event) => {
 
 | Emitter | Args | Cancellable | Description |
 |---|---|---|---|
-| `battle_character_defeated` | `(characterId, side)` | No | When a character reaches 0 HP (after death defiance check). `side`: `"player"` or `"enemy"` |
+| `battle_character_defeated` | `(characterId, side)` | No | When a character reaches 0 HP (after death defiance check). `side`: `"player"` or `"enemy"`. Not fired for a character that merged into an ally |
 
 ## Example
 

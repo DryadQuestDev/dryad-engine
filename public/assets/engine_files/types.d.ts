@@ -117,6 +117,27 @@ interface GameEvents {
    * `game.exitScene()` afterward. `skipEvents` is the flag the exit was requested with.
    */
   scene_exit_before: (skipEvents: boolean) => boolean | void;
+  /**
+   * Triggered when the story is about to move on – right before the actions that move the flow
+   * (`scene`, `exit`, `enter`, `battle`, `loot`…) run. A paragraph holds its own until the continue
+   * click, so in a scene this is the moment the player leaves a paragraph; on the map, a choice or a
+   * room's enter actions that move. A choice that moves nothing (only sets a flag) fires nothing.
+   * `actions` holds the moving actions keyed by action id; any others in the same batch have already
+   * run. Return false to hold the flow where it is – none of them run.
+   *
+   * @example
+   * game.on('flow_advance_before', (actions) => {
+   *   if (actions.battle && game.getCharacter('mc').getResource('health') <= 0) return false;
+   * });
+   */
+  flow_advance_before: (actions: Record<string, any>) => boolean | void;
+  /**
+   * Triggered when a gallery replay is about to play its scene: the game is already saved for the
+   * replay and `replay_mode` is on, so whatever a listener changes is undone when the player leaves
+   * replay mode. The stage is already cleared. The place to put characters into the look the scene
+   * expects. Not cancellable.
+   */
+  scene_replay_before: (sceneId: string, dungeonId: string) => boolean | void;
   /** Triggered when an event ends */
   event_end: () => boolean | void;
 
@@ -125,6 +146,9 @@ interface GameEvents {
   character_create: (character: Character) => boolean | void;
   /** Triggered when a character's resource (HP, MP, etc.) changes */
   character_resource_change: (character: Character, statId: string, oldValue: number, newValue: number) => boolean | void;
+  /** Triggered after a character's trait value changes through `setTrait` – the `{trait}` action and scripts alike.
+   *  Not cancellable, and silent while a save loads or migrates. */
+  character_trait_change: (character: Character, traitId: string, oldValue: any, newValue: any) => boolean | void;
   /** Triggered when a character is deleted */
   character_delete: (character: Character) => boolean | void;
   /** Triggered when a character joins the party */
@@ -162,6 +186,21 @@ interface GameEvents {
    * reactive state risks a render loop, and the copy is never staged or saved.
    */
   asset_resolve: (asset: Asset) => boolean | void;
+  /**
+   * Triggered once, the first time the gallery shows an asset, with a throwaway copy and the
+   * skins and animations the player has seen on it. The gallery never stages an asset, so a look
+   * `asset_render` gives it in a scene never reaches the gallery: set the starting look here
+   * (`skins`, `animation`, `slot_colors`). The gallery's pickers show it as selected, and the
+   * player's own picks replace it.
+   * @example
+   * game.on('gallery_asset_preview', (asset, seen) => {
+   *   if (!asset.tags?.includes('hero')) return;
+   *   asset.skins = ['default', 'hair/hair' + game.getCharacter('hero')?.getAttribute('hairstyle')];
+   *   const outfit = seen.skins.find((s) => s.startsWith('outfit/'));
+   *   if (outfit) asset.skins.push(outfit);
+   * });
+   */
+  gallery_asset_preview: (asset: Asset, seen: { skins: string[]; animations: string[] }) => boolean | void;
 
   // Item Events
   /** Triggered when an item is created */
@@ -344,6 +383,94 @@ interface ActionObject {
    * });
    */
   gate?: (value: any, ctx: GateContext) => string | false | null | undefined;
+  /**
+   * One line the editor shows beside the action's name. Without it, the comment right above the
+   * registerAction call is used.
+   */
+  help?: string;
+  /**
+   * What the action's value is. The content editor checks and completes `{id: …}` from it: an id
+   * that is not in its data file gets a "did you mean" fix. Write it as a literal (or a `const`):
+   * the editor reads scripts without running them. Omit it to leave the value unchecked.
+   * @example
+   * game.registerAction('battle', {
+   *   help: 'Start a battle by id.',
+   *   value: { ref: 'plugins_data/my_plugin/battles', label: 'Battle' },
+   *   action: (id) => startBattle(id),
+   * });
+   */
+  value?: ValueSpec;
+  /**
+   * Ways to write the action, as content would. The editor shows them beside the help line.
+   * @example
+   * examples: ['{battle: "goblin_camp"}', '{battle: {battleId: "ambush", allies: ["scout"]}}']
+   */
+  examples?: string[];
+}
+
+/**
+ * What an action's value (or a condition's / placeholder's argument) is, for the content editor.
+ * - `'any'` (not checked), `'text'`, `'number'`, `'boolean'`
+ * - `'condition'` — the condition grammar: `flag = 1, _cond(x) > 2`
+ * - `'scene'` — a scene id, `&anchor`, `next` or `shift:N`
+ * - a {@link RefSpec} for an id, or a list / pair / ops / targeted / oneOf / fields shape
+ * @example
+ * value: { list: { ref: 'item_templates' } }                     // "sword, potion"
+ * value: { pair: [{ ref: 'character' }, { ref: 'item_slots' }] } // "alice->ring"
+ * value: { words: ['left', 'right', 'both'] }                     // one of these words, checked
+ * value: { ops: { target: { ref: 'character' }, key: { ref: 'character_stats' } } } // "alice.brawn += 2"
+ * value: { oneOf: [{ ref: 'records' }, { fields: { id: { ref: 'records' } } }] }     // "x" or { id: "x" }
+ */
+type ValueSpec =
+  | 'any' | 'text' | 'number' | 'boolean' | 'condition' | 'scene'
+  | RefSpec
+  | { words: string[] }
+  | { list: ValueSpec; words?: string[]; prefix?: string }
+  | { pair: [ValueSpec, ValueSpec]; sep?: string; optional?: boolean }
+  | { ops: { target?: ValueSpec; key?: ValueSpec; typed?: Record<string, ValueSpec>; value?: ValueSpec | 'of' } }
+  | { targeted: ValueSpec; target?: ValueSpec; bareRemove?: boolean }
+  | { oneOf: ValueSpec[] }
+  | { fields: Record<string, ValueSpec> };
+
+/**
+ * An id. `ref` names where the ids live: a game data file (`'assets'`, `'item_templates'`,
+ * `'plugins_data/my_plugin/battles'`), or `'character'`, `'character_template'`, `'room'`
+ * (`room` or `dungeon.room`), `'dungeon'`, `'flag'`, `'state'`, `'quest_log'`, `'attribute'`.
+ */
+interface RefSpec {
+  ref: string;
+  /** How messages name the id, e.g. `'Battle'`. */
+  label?: string;
+  /** Words accepted instead of an id, e.g. `['false', 'clear']`. */
+  words?: string[];
+  /** A leading `!` (remove) is allowed; the id after it is checked. */
+  remove?: boolean;
+  /** A leading `!` stops it; what follows is not an id. */
+  stop?: boolean;
+  /** A literal the id must start with, e.g. `'^'`. */
+  prefix?: string;
+  /** A `#N` count may follow the id. */
+  count?: boolean;
+  /** A `(key = value)` tail may follow; a list names its keys, so typos are reported. */
+  props?: true | string[];
+  /** A value with a `/` is a file path, not an id. */
+  paths?: boolean;
+  /** Only the part before the first `.` is the id. */
+  root?: boolean;
+  /** An unknown id stops the game with an error (reported as an error, not a warning). */
+  fatal?: boolean;
+  /** An unknown id is fine when the `(…)` tail sets one of these keys. */
+  newWith?: string[];
+}
+
+/** Help and arguments of a condition or placeholder, for the content editor. */
+interface CallInfo {
+  /** One line the editor shows beside the name; defaults to the comment above the call. */
+  help?: string;
+  /** What each `(…)` argument is, in order. */
+  args?: ValueSpec[];
+  /** Ways to write it, e.g. `_won(goblin_camp) = 1` or `|stat(strength)|`. */
+  examples?: string[];
 }
 
 /** Context handed to an {@link ActionObject.gate} — the paragraph being gated. */
@@ -1546,14 +1673,19 @@ interface Game {
   /**
    * Create a character from a template object or registered template ID.
    * @param characterId - Unique ID for the new character
-   * @param template - Template object with character properties OR a template ID string
+   * @param template - Template object with character properties OR a template ID string. Leave it out when
+   *                   characterId is a template's declared instance: its template and overrides are used.
    * @param skipEvents - If true, skip triggering creation events (for gallery previews, etc.)
    * @returns The created character
-   * @throws Error if template ID string is provided but not found
+   * @throws Error if template ID string is provided but not found, or if it is left out and no template
+   *         declares an instance with this id
    * @example
    * // From a registered template ID
    * const npc = game.createCharacter('shopkeeper', 'shopkeeper_template');
    * game.addCharacter(npc);
+   *
+   * // A declared instance of the `guard` template (Characters > Templates > Instances)
+   * game.addCharacter(game.createCharacter('guard1'));
    *
    * // From a custom template object
    * const customNpc = game.createCharacter('custom_npc', {
@@ -1563,7 +1695,7 @@ interface Game {
    * });
    * game.addCharacter(customNpc);
    */
-  createCharacter(characterId: string, template: any | string, skipEvents?: boolean): Character;
+  createCharacter(characterId: string, template?: any | string, skipEvents?: boolean): Character;
 
   /**
    * Create a status from a template object or registered template ID.
@@ -1600,16 +1732,20 @@ interface Game {
    * Accepts a live Character, a live character id, or a character TEMPLATE id
    * (for not-yet-spawned characters like ability summons).
    * `simulateAttributes` adds extra attribute values to the character's current
-   * ones when enumerating skin-layer image keys; `spine: true` also warms spine
+   * ones when enumerating skin-layer image keys; `statuses` also warms the look
+   * each listed status would give it (its attributes, skin layers, face_static
+   * and spine rigs), beside the current look; `spine: true` also warms spine
    * atlas/skeleton assets. The returned promise never rejects.
    * @example
-   * await game.preloadCharacterAssets('ane', {
+   * await game.preloadCharacterAssets('alice', {
    *   simulateAttributes: { battle_state: ['idle', 'attack', 'hit'] },
+   *   statuses: ['petrified'],
    *   spine: true,
    * });
    */
   preloadCharacterAssets(target: Character | string, options?: {
     simulateAttributes?: Record<string, string[]>;
+    statuses?: string[];
     spine?: boolean;
   }): Promise<void>;
 
@@ -1687,9 +1823,10 @@ interface Game {
    * Rebuild a character from a template under the same id — narratively a fresh entity in
    * the same role. Party membership is kept; statuses, resources, the private inventory and
    * learned skills are discarded. Triggers character_delete then character_create.
-   * When no character with that id is live, the id is treated as a template id and the
-   * character is created, so content can guarantee a pristine character without knowing
-   * whether one exists yet. Throws when there is neither a live character nor a template.
+   * A declared template instance is rebuilt with its overrides. When no character with that id
+   * is live, it is created from its instance declaration, or else the id is treated as a template
+   * id, so content can guarantee a pristine character without knowing whether one exists yet.
+   * Throws when there is neither a live character, an instance nor a template.
    * @param character - Character instance or character ID string
    * @param templateId - optional template to rebuild from, overriding the character's own
    *                     templateId (and the id-as-template-id fallback). Throws if unknown
@@ -1707,28 +1844,28 @@ interface Game {
    * Parse a generic `id<op>value` specification into a typed list of ops.
    * Pure string parsing — no characters, stats, or game data are touched.
    * Plugins use this to avoid hand-rolling regex when accepting the common
-   * `"id>5, id2=3"` shorthand syntax. The same primitive backs the `char`
+   * `"id += 5, id2 = 3"` shorthand syntax. The same primitive backs the `char`
    * content action.
    *
-   * String form: comma-separated `"<id><op><value>"` where op is `=`, `>`, or `<`.
-   * Whitespace around the operator is allowed. The id may contain dots
+   * String form: comma-separated `"<id> <op> <value>"` where op is `=` (set), `+=` (add)
+   * or `-=` (subtract). Whitespace around the operator is optional. The id may contain dots
    * (e.g. `alice.stat.brawn`). Returned `value` is the trimmed string after
    * the operator — consumers coerce as needed.
    *
    * Object form: `{ id: any }`. For numeric values, sign infers the op
-   * (positive `>`, negative `<`, zero `=`) and `value` is the absolute
+   * (positive `+=`, negative `-=`, zero `=`) and `value` is the absolute
    * magnitude. For non-numeric values, op is `=` and the raw value passes
    * through.
    *
    * Invalid specs are logged and skipped.
    *
    * @example
-   * game.parseOpsSpec("alice>5, bob = 3");
-   * // [{ id: 'alice', op: '>', value: '5' }, { id: 'bob', op: '=', value: '3' }]
+   * game.parseOpsSpec("alice += 5, bob = 3");
+   * // [{ id: 'alice', op: '+=', value: '5' }, { id: 'bob', op: '=', value: '3' }]
    * game.parseOpsSpec({ alice: 5, bob: -2 });
-   * // [{ id: 'alice', op: '>', value: 5 }, { id: 'bob', op: '<', value: 2 }]
+   * // [{ id: 'alice', op: '+=', value: 5 }, { id: 'bob', op: '-=', value: 2 }]
    */
-  parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '>' | '<'; value: any }>;
+  parseOpsSpec(data: string | Record<string, any>): Array<{ id: string; op: '=' | '+=' | '-='; value: any }>;
 
   /**
    * Parse a `targetId->item & item & ..., targetId->!item, ...` specification
@@ -2369,8 +2506,14 @@ interface Game {
    * game.registerCondition("has_gold", (amount) => {
    *   return game.getProperty('gold').currentValue >= amount;
    * });
+   * @param info - Help and argument types for the content editor
+   * @example
+   * game.registerCondition("_won", (id) => wonBattles.has(id) ? 1 : 0, {
+   *   help: 'Whether a battle was won: _won(goblin_camp) = 1.',
+   *   args: [{ ref: 'plugins_data/my_plugin/battles', label: 'Battle' }],
+   * });
    */
-  registerCondition(id: string, func: Function): void;
+  registerCondition(id: string, func: Function, info?: CallInfo): void;
 
   /**
    * Register a custom action.
@@ -2388,6 +2531,13 @@ interface Game {
    *   action: (amount) => character.addResource('health', amount),
    *   eventDelayed: true
    * });
+   *
+   * // Described for the content editor: {give: "alice->sword"} is checked as you type
+   * game.registerAction("give", {
+   *   help: 'Give an item to a character: "alice->sword".',
+   *   value: { pair: [{ ref: 'character' }, { ref: 'item_templates' }] },
+   *   action: (spec) => giveItem(spec),
+   * });
    */
   registerAction(id: string, actionObject: ActionObject | Function): void;
 
@@ -2400,8 +2550,9 @@ interface Game {
    * game.registerPlaceholder("player_name", () => {
    *   return game.characterSystem.getPartyLeader().name;
    * });
+   * @param info - Help and argument types for the content editor
    */
-  registerPlaceholder(id: string, func: Function): void;
+  registerPlaceholder(id: string, func: Function, info?: CallInfo): void;
 
   /**
    * Register a custom `[name]…[/name]` text effect for prose and choice labels.
@@ -2457,7 +2608,7 @@ interface Game {
   registerNarrativeState(id: string, evaluator: Function): void;
 
   /** Returns a record by id, or undefined if not found. Records are authored under Narrative > Records in the editor. */
-  getRecord(id: string): { id: string; title: string; summary?: string; content?: string; image?: string; auto_discovery?: boolean; parent_record?: string; tags?: string[] } | undefined;
+  getRecord(id: string): { id: string; title: string; summary?: string; content?: string; image?: string; auto_discovery?: boolean; parent_record?: string; character?: string; tags?: string[] } | undefined;
 
   /** Marks a record as discovered (persists in save). No-op if already discovered or id is unknown. */
   discoverRecord(id: string): void;
@@ -2473,13 +2624,28 @@ interface Game {
   getDiscoveredChildren(parentId: string): { id: string; title: string; summary?: string; content?: string; image?: string; parent_record?: string; tags?: string[] }[];
 
   /** Returns all encyclopedia trees, sorted by `order` ascending. */
-  getEncyclopediaTrees(): { id: string; tab: string; order?: number; groups?: { name: string; records?: { record: string }[] }[] }[];
+  getEncyclopediaTrees(): { id: string; tab: string; order?: number; hide_undiscovered_groups?: boolean; groups?: { name: string; records?: { record: string }[] }[] }[];
 
   /** Returns true if the record is referenced by any encyclopedia tree (i.e., has a full entry to "open"). */
   isRecordInEncyclopedia(id: string): boolean;
 
   /** Switches the progression UI to the Encyclopedia tab and selects the given record. No-op if the record isn't in any tree. */
   openEncyclopediaForRecord(recordId: string): void;
+
+  /**
+   * Returns the id of the first discovered encyclopedia record whose `character` field is this
+   * character template, or null. A record only counts once it is listed in an encyclopedia tree.
+   * @example
+   * const recordId = game.getCharacterRecordId('alice');
+   * if (recordId) game.openEncyclopediaForRecord(recordId);
+   */
+  getCharacterRecordId(templateId: string): string | null;
+
+  /** Returns true if the character template sits in a character gallery and the player has met the character. */
+  isCharacterInGallery(templateId: string): boolean;
+
+  /** Switches the progression UI to the Gallery's Characters tab with the given character selected. No-op if `isCharacterInGallery()` is false. */
+  openGalleryForCharacter(templateId: string): void;
 
   /**
    * Register a stat computer function.
@@ -3322,6 +3488,14 @@ interface Character {
    * character.removeSkinLayers(['armor_plate', 'helmet']);
    */
   removeSkinLayers(layers: string[]): void;
+
+  /**
+   * Put the character's look – attributes and skin layers – back to its template's, keeping
+   * everything else (stats, statuses, traits, inventory). Does nothing for a character with no template.
+   * @example
+   * game.getCharacter('guard')?.resetLooksToTemplate();
+   */
+  resetLooksToTemplate(): void;
 
   /**
    * Add an ability to the character's core status (persists through reevaluate and save/load).
@@ -4791,6 +4965,9 @@ type _GameEvents = GameEvents;
 type _CustomComponent = CustomComponent;
 type _ActionObject = ActionObject;
 type _GateContext = GateContext;
+type _ValueSpec = ValueSpec;
+type _RefSpec = RefSpec;
+type _CallInfo = CallInfo;
 type _Asset = Asset;
 type _DungeonLine = DungeonLine;
 type _DungeonData = DungeonData;
@@ -4825,6 +5002,9 @@ declare global {
   type CustomComponent = _CustomComponent;
   type ActionObject = _ActionObject;
   type GateContext = _GateContext;
+  type ValueSpec = _ValueSpec;
+  type RefSpec = _RefSpec;
+  type CallInfo = _CallInfo;
   type Asset = _Asset;
   type DungeonLine = _DungeonLine;
   type DungeonData = _DungeonData;

@@ -20,6 +20,20 @@ Or pass a full configuration object:
 }}
 ```
 
+| Field | Value |
+|---|---|
+| `battleId` | Battle definition id |
+| `playerParty` | Fight with exactly these characters instead of the party |
+| `allies` | Characters who also fight on the player side, for this battle only, without joining the party. Added to the definition's own `allies`. A `battle_support` ally fights from the sidelines; any other takes a slot and is locked into the party picker |
+| `statuses` | Status ids applied to the player side as the battle opens |
+| `background` | Asset id for the battle backdrop |
+
+`allies` and `statuses` take a list or one comma-separated string:
+
+```js
+{ battle: { battleId: "forest_ambush", allies: ["ranger_scout"], statuses: "advantage" } }
+```
+
 The action is `delayed`, meaning it executes after the current DryadScript sequence completes.
 
 On a choice, `battle` also marks the option as a fight: crossed swords before its label and the
@@ -104,7 +118,7 @@ no-op.
 |---|---|---|
 | `battle_overlay_x_offset` | number | Horizontal fine-adjust (%) for the battle overlay from the slot center. Usually 0 – Art Manager tuning centers the body. Positive = right |
 | `battle_overlay_y_offset` | number | Vertical fine-adjust (%) for the battle overlay from the slot top. Tune per character height. Positive = down |
-| `battle_idle` | chooseOne | Looping idle animation for this character's battle slot — `float`, `bounce`, `hop`, `pan`, `pulse`, `breathe`, `ghost`, `glow`. Unset = still. Applies to enemy and player slots alike, in every battle and wave. The remaining engine idles are left out: they either animate the element the battle tweens own, or duplicate the battler's damage feedback |
+| `battle_idle` | chooseOne | Looping idle animation for this character's battle slot — `float`, `bounce`, `hop`, `pan`, `pulse`, `breathe`, `ghost`, `glow`. Unset = the character's scene `idle` trait when it is one of these, else still – so `idle` alone makes a bat float in scenes and fights. Applies to enemy and player slots alike, in every battle and wave. The remaining engine idles are left out: they either animate the element the battle tweens own, or duplicate the battler's damage feedback |
 
 ## Character Views
 

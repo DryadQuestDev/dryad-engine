@@ -157,11 +157,15 @@ function onLeave(el: Element, done: () => void) {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  /* No overflow on either axis. CSS computes a `visible` axis to `auto` as soon as its partner is
-     scrollable, so an `overflow-y` here silently clips the X axis too — and the enter/leave tween
-     swings each face out on `rotationY`, so it was shaving the sides off mid-animation. A stage
-     crowded enough to run past the bottom edge is the cheaper problem: six faces fit at this size
-     and the busiest authored scene stages four. */
+  /* Scrolls once the stage outgrows the screen — a phone fits four faces, and scenes stage five.
+     CSS computes the `visible` X axis to `auto` alongside it, so it clips too; the enter/leave
+     tween swings each face out on `rotationY`, and the side padding is the room that swing needs
+     (the negative margin keeps the faces where they sat). */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 0 14px;
+  margin: 0 -14px;
 }
 
 /* Collapsed, the container lingers only as long as the leave animations need it. Once the last row
@@ -171,6 +175,8 @@ function onLeave(el: Element, done: () => void) {
 }
 
 .actor-list-item {
+  /* The list scrolls, so without this a crowded rail squeezed the slots instead of overflowing. */
+  flex-shrink: 0;
   position: relative;
     width: 105px;
     height: 115px;

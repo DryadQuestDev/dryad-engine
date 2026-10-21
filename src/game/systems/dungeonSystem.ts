@@ -46,6 +46,9 @@ import { DungeonRoomObject } from "../../schemas/dungeonRoomSchema";
 import { DungeonEncounterObject } from "../../schemas/dungeonEncounterSchema";
 import { parseText } from "../../utility/functions";
 import { DungeonConfigParsed } from "../../editor/editor";
+import { RAW_FLASH_PRESETS, RAW_GRADE_PRESETS } from '../../utility/sceneGradePresets';
+import { AMBIENT_KINDS, ONE_SHOT_ANIMS } from '../../utility/contentVocabulary';
+import type { OpsSpecOp } from "./logicSystem";
 
 // Scene ids are dot-separated and choice ids end in `*N`, so both are full of
 // regex metacharacters. Without escaping, every `.` is a wildcard.
@@ -170,8 +173,6 @@ export type SceneGradeState = {
   duration: number;
 }
 
-/** Ambient particle kinds drawn over the scene backgrounds by SceneAmbient. */
-export const AMBIENT_KINDS = ['fireflies', 'motes', 'embers'] as const;
 export type AmbientKind = typeof AMBIENT_KINDS[number];
 
 /** Saved ambient layer: which particles, and a density multiplier (1 = the kind's default count). */
@@ -257,165 +258,7 @@ export function toneTables(g: SceneGrade): [string, string, string] {
   ];
 }
 
-// Two things learned tuning these against real art:
-//
-// 1. The tint is a linear blend TOWARD a colour — the matrix is scaled by (1 - tint_amount) and the
-//    tint added to the offset column. Any tint therefore drags luminance toward that colour, so a
-//    dark tint darkens. Bright presets use light tint colours; copying a dark-tint preset and merely
-//    raising `brightness` gives muddy grey, not a brighter scene.
-// 2. Pull `saturate` down before leaning on the tint. A source colour that keeps its saturation
-//    fights the blend, so a subtle tint over, say, a yellow-green field reads as no tint at all.
-//    Every preset here that wants a recognisable hue desaturates first.
-const RAW_GRADE_PRESETS: Record<string, Partial<SceneGrade>> = {
-  none: IDENTITY_GRADE,
-
-  // Light & time of day
-  dawn: {
-    brightness: 1.0, saturate: 0.88, contrast: 1.0, hue: 3, r: 255, g: 190, b: 150, tint_amount: 0.1,
-    shadow_r: 70, shadow_g: 80, shadow_b: 140, shadow_amount: 0.25, highlight_r: 255, highlight_g: 200, highlight_b: 170, highlight_amount: 0.35,
-    sky_top_r: 150, sky_top_g: 165, sky_top_b: 215, sky_mid_r: 255, sky_mid_g: 175, sky_mid_b: 140, sky_bottom_r: 110, sky_bottom_g: 105, sky_bottom_b: 140, sky_amount: 0.55,
-    vignette: 0.2, rays: 0.3, rays_angle: 30,
-  },
-  // Low sun: warm amber highlights over cool violet shadows, a sky that is dark violet up top and
-  // glows at the horizon, a soft vignette and slanting rays. Brightness barely drops — dusk is a
-  // colour shift, not a dimmer.
-  dusk: {
-    brightness: 0.9, saturate: 0.92, contrast: 1.1, hue: 0, r: 255, g: 140, b: 70, tint_amount: 0.08,
-    shadow_r: 40, shadow_g: 30, shadow_b: 85, shadow_amount: 0.22,
-    highlight_r: 255, highlight_g: 175, highlight_b: 105, highlight_amount: 0.45,
-    sky_top_r: 55, sky_top_g: 40, sky_top_b: 110, sky_mid_r: 255, sky_mid_g: 125, sky_mid_b: 55,
-    sky_bottom_r: 45, sky_bottom_g: 30, sky_bottom_b: 80, sky_amount: 0.7,
-    vignette: 0.5, rays: 0.5, rays_angle: -25,
-  },
-  night: {
-    brightness: 0.6, saturate: 0.6, contrast: 1.08, hue: -8, r: 25, g: 40, b: 85, tint_amount: 0.18,
-    shadow_r: 10, shadow_g: 18, shadow_b: 50, shadow_amount: 0.35, highlight_r: 150, highlight_g: 175, highlight_b: 230, highlight_amount: 0.25,
-    sky_top_r: 20, sky_top_g: 30, sky_top_b: 70, sky_mid_r: 60, sky_mid_g: 80, sky_mid_b: 140, sky_bottom_r: 15, sky_bottom_g: 20, sky_bottom_b: 45, sky_amount: 0.6,
-    vignette: 0.6,
-  },
-  moonlit: {
-    brightness: 0.8, saturate: 0.45, contrast: 1.12, hue: -12, r: 30, g: 60, b: 125, tint_amount: 0.14,
-    shadow_r: 12, shadow_g: 22, shadow_b: 60, shadow_amount: 0.35, highlight_r: 215, highlight_g: 228, highlight_b: 255, highlight_amount: 0.55,
-    sky_top_r: 120, sky_top_g: 140, sky_top_b: 200, sky_mid_r: 60, sky_mid_g: 80, sky_mid_b: 140, sky_bottom_r: 15, sky_bottom_g: 20, sky_bottom_b: 50, sky_amount: 0.6,
-    vignette: 0.5, rays: 0.35, rays_angle: 15,
-  },
-  sunlit: {
-    brightness: 1.12, saturate: 1.0, contrast: 1.06, hue: 3, r: 255, g: 228, b: 176, tint_amount: 0.12,
-    shadow_r: 90, shadow_g: 70, shadow_b: 60, shadow_amount: 0.12, highlight_r: 255, highlight_g: 235, highlight_b: 190, highlight_amount: 0.3,
-    sky_top_r: 175, sky_top_g: 195, sky_top_b: 235, sky_mid_r: 255, sky_mid_g: 225, sky_mid_b: 170, sky_bottom_r: 140, sky_bottom_g: 120, sky_bottom_b: 95, sky_amount: 0.45,
-    vignette: 0.1, rays: 0.45, rays_angle: 25,
-  },
-  bright: {
-    brightness: 1.3, saturate: 0.65, contrast: 1.15, hue: 0, r: 255, g: 248, b: 232, tint_amount: 0.15,
-    shadow_r: 200, shadow_g: 195, shadow_b: 190, shadow_amount: 0.2, highlight_r: 255, highlight_g: 252, highlight_b: 240, highlight_amount: 0.45,
-    rays: 0.35, rays_angle: 10,
-  },
-
-  // Weather & place
-  overcast: {
-    brightness: 0.94, saturate: 0.5, contrast: 0.95, hue: 0, r: 170, g: 180, b: 192, tint_amount: 0.15,
-    shadow_r: 60, shadow_g: 66, shadow_b: 78, shadow_amount: 0.2, highlight_r: 220, highlight_g: 225, highlight_b: 232, highlight_amount: 0.2,
-    sky_top_r: 175, sky_top_g: 180, sky_top_b: 190, sky_mid_r: 128, sky_mid_g: 128, sky_mid_b: 132, sky_bottom_r: 100, sky_bottom_g: 104, sky_bottom_b: 110, sky_amount: 0.4,
-    vignette: 0.25,
-  },
-  stormy: {
-    brightness: 0.6, saturate: 0.38, contrast: 1.12, hue: 0, r: 42, g: 48, b: 58, tint_amount: 0.18,
-    shadow_r: 20, shadow_g: 26, shadow_b: 38, shadow_amount: 0.35, highlight_r: 175, highlight_g: 190, highlight_b: 205, highlight_amount: 0.25,
-    sky_top_r: 30, sky_top_g: 35, sky_top_b: 50, sky_mid_r: 90, sky_mid_g: 100, sky_mid_b: 115, sky_bottom_r: 40, sky_bottom_g: 45, sky_bottom_b: 55, sky_amount: 0.65,
-    vignette: 0.55,
-  },
-  foggy: {
-    brightness: 1.06, saturate: 0.35, contrast: 0.8, hue: 0, r: 221, g: 227, b: 232, tint_amount: 0.3,
-    shadow_r: 175, shadow_g: 182, shadow_b: 190, shadow_amount: 0.35, highlight_r: 240, highlight_g: 243, highlight_b: 246, highlight_amount: 0.25,
-    sky_top_r: 150, sky_top_g: 155, sky_top_b: 160, sky_mid_r: 200, sky_mid_g: 205, sky_mid_b: 210, sky_bottom_r: 215, sky_bottom_g: 220, sky_bottom_b: 225, sky_amount: 0.6,
-  },
-  underwater: {
-    brightness: 0.72, saturate: 0.55, contrast: 1.02, hue: -10, r: 20, g: 112, b: 126, tint_amount: 0.32,
-    shadow_r: 5, shadow_g: 40, shadow_b: 60, shadow_amount: 0.35, highlight_r: 150, highlight_g: 235, highlight_b: 230, highlight_amount: 0.3,
-    sky_top_r: 120, sky_top_g: 220, sky_top_b: 220, sky_mid_r: 40, sky_mid_g: 120, sky_mid_b: 130, sky_bottom_r: 10, sky_bottom_g: 40, sky_bottom_b: 55, sky_amount: 0.6,
-    vignette: 0.45, rays: 0.45, rays_angle: 8,
-    actor_strength: 0.8
-  },
-
-  // Fire, cold, magic
-  candlelit: {
-    brightness: 0.72, saturate: 0.85, contrast: 1.08, hue: 6, r: 107, g: 58, b: 18, tint_amount: 0.16,
-    shadow_r: 40, shadow_g: 22, shadow_b: 15, shadow_amount: 0.3, highlight_r: 255, highlight_g: 190, highlight_b: 110, highlight_amount: 0.4,
-    vignette: 0.65,
-  },
-  infernal: {
-    brightness: 0.8, saturate: 0.75, contrast: 1.15, hue: -4, r: 160, g: 28, b: 5, tint_amount: 0.3,
-    shadow_r: 60, shadow_g: 5, shadow_b: 0, shadow_amount: 0.35, highlight_r: 255, highlight_g: 170, highlight_b: 60, highlight_amount: 0.4,
-    sky_top_r: 40, sky_top_g: 10, sky_top_b: 10, sky_mid_r: 150, sky_mid_g: 50, sky_mid_b: 20, sky_bottom_r: 255, sky_bottom_g: 120, sky_bottom_b: 40, sky_amount: 0.6,
-    vignette: 0.45,
-  },
-  frozen: {
-    brightness: 1.02, saturate: 0.38, contrast: 1.06, hue: -6, r: 168, g: 220, b: 240, tint_amount: 0.25,
-    shadow_r: 70, shadow_g: 110, shadow_b: 150, shadow_amount: 0.3, highlight_r: 230, highlight_g: 248, highlight_b: 255, highlight_amount: 0.35,
-    sky_top_r: 190, sky_top_g: 225, sky_top_b: 245, sky_mid_r: 160, sky_mid_g: 200, sky_mid_b: 225, sky_bottom_r: 120, sky_bottom_g: 150, sky_bottom_b: 175, sky_amount: 0.45,
-    vignette: 0.25,
-  },
-  arcane: {
-    brightness: 0.82, saturate: 0.55, contrast: 1.1, hue: 0, r: 107, g: 46, b: 168, tint_amount: 0.2,
-    shadow_r: 35, shadow_g: 15, shadow_b: 70, shadow_amount: 0.35, highlight_r: 230, highlight_g: 170, highlight_b: 255, highlight_amount: 0.35,
-    sky_top_r: 60, sky_top_g: 25, sky_top_b: 110, sky_mid_r: 150, sky_mid_g: 90, sky_mid_b: 220, sky_bottom_r: 40, sky_bottom_g: 20, sky_bottom_b: 80, sky_amount: 0.4,
-    vignette: 0.5,
-  },
-  void: {
-    brightness: 0.42, saturate: 0.2, contrast: 1.2, hue: 0, r: 10, g: 6, b: 18, tint_amount: 0.35,
-    shadow_r: 8, shadow_g: 4, shadow_b: 16, shadow_amount: 0.3, highlight_r: 120, highlight_g: 100, highlight_b: 150, highlight_amount: 0.15,
-    sky_top_r: 15, sky_top_g: 10, sky_top_b: 25, sky_mid_r: 40, sky_mid_g: 30, sky_mid_b: 60, sky_bottom_r: 10, sky_bottom_g: 6, sky_bottom_b: 18, sky_amount: 0.5,
-    vignette: 0.8,
-    actor_strength: 0.8
-  },
-
-  // Body & mind
-  sickly: {
-    brightness: 0.75, saturate: 0.6, contrast: 1.08, hue: 30, r: 45, g: 74, b: 30, tint_amount: 0.18,
-    shadow_r: 35, shadow_g: 45, shadow_b: 15, shadow_amount: 0.3, highlight_r: 210, highlight_g: 230, highlight_b: 120, highlight_amount: 0.3,
-    vignette: 0.5,
-  },
-  bloodied: {
-    brightness: 0.72, saturate: 0.55, contrast: 1.12, hue: -4, r: 140, g: 16, b: 16, tint_amount: 0.35,
-    shadow_r: 60, shadow_g: 0, shadow_b: 0, shadow_amount: 0.3, highlight_r: 255, highlight_g: 140, highlight_b: 140, highlight_amount: 0.2,
-    vignette: 0.7,
-  },
-  dream: {
-    brightness: 1.12, saturate: 0.5, contrast: 0.9, hue: 4, r: 255, g: 210, b: 238, tint_amount: 0.2,
-    shadow_r: 200, shadow_g: 170, shadow_b: 215, shadow_amount: 0.28, highlight_r: 255, highlight_g: 240, highlight_b: 250, highlight_amount: 0.35,
-    sky_top_r: 255, sky_top_g: 210, sky_top_b: 240, sky_mid_r: 220, sky_mid_g: 200, sky_mid_b: 240, sky_bottom_r: 200, sky_bottom_g: 190, sky_bottom_b: 230, sky_amount: 0.5,
-    rays: 0.25, rays_angle: 0,
-    actor_strength: 0.8
-  },
-  nightmare: {
-    brightness: 0.48, saturate: 0.25, contrast: 1.3, hue: 0, r: 26, g: 13, b: 20, tint_amount: 0.3,
-    shadow_r: 30, shadow_g: 0, shadow_b: 10, shadow_amount: 0.35, highlight_r: 170, highlight_g: 140, highlight_b: 150, highlight_amount: 0.15,
-    vignette: 0.85,
-    actor_strength: 0.8
-  },
-
-  // Utility
-  memory: {
-    brightness: 0.98, saturate: 0.35, contrast: 0.95, hue: 12, r: 201, g: 168, b: 120, tint_amount: 0.3,
-    shadow_r: 80, shadow_g: 60, shadow_b: 40, shadow_amount: 0.3, highlight_r: 245, highlight_g: 230, highlight_b: 200, highlight_amount: 0.3,
-    vignette: 0.5,
-    actor_strength: 1
-  },
-  noir: {
-    brightness: 0.95, saturate: 0, contrast: 1.25, hue: 0, r: 0, g: 0, b: 0, tint_amount: 0,
-    vignette: 0.55,
-    actor_strength: 1
-  },
-};
-
 export const GRADE_FADE_DURATION = 0.8;
-
-// Colours for {screen_flash}: a short pulse on the grade matrix, then straight back to the saved
-// grade. Any grade preset name also works ("infernal", "arcane#0.6").
-const RAW_FLASH_PRESETS: Record<string, Partial<SceneGrade>> = {
-  red: { brightness: 1.05, saturate: 0.6, contrast: 1.1, hue: 0, r: 200, g: 20, b: 20, tint_amount: 0.55, actor_strength: 1 },
-  white: { brightness: 1.8, saturate: 0.4, contrast: 0.9, hue: 0, r: 255, g: 255, b: 255, tint_amount: 0.55, actor_strength: 1 },
-};
 
 const normalizePresets = (raw: Record<string, Partial<SceneGrade>>): Record<string, SceneGrade> =>
   Object.fromEntries(Object.entries(raw).map(([id, preset]) => [id, fullGrade(preset)]));
@@ -434,8 +277,6 @@ export type ActorAnimRequest = {
 export type ScreenShakeRequest = { intensity: number; duration: number; seq: number };
 export type ScreenFlashRequest = { grade: SceneGrade; duration: number; seq: number };
 
-/** One-shot actor animations (`anim=` / {animate}). Everything else is a looping idle. */
-export const ONE_SHOT_ANIMS = ['lunge', 'recoil', 'hop', 'shake', 'shiver', 'nod', 'bounce', 'flash'];
 
 /** Id of the shared feColorMatrix def; art elements reference it as filter: url(#…). */
 export const GRADE_FILTER_ID = 'scene-grade';
@@ -1555,6 +1396,14 @@ export class DungeonSystem {
 
     //this.talkingCharacterId.value = null;
     this.currentSceneId.value = sceneId;
+
+    // A scene's first paragraph marks its room event as played before the paragraph's own
+    // redirect, gate or skip can send the reader elsewhere. Marked any later, an event whose
+    // opening paragraph redirects is never exhausted, and triggerEvent restarts it every time
+    // the scene ends.
+    if (sceneId.endsWith(".1.1.1")) {
+      this.usedDungeonData.value.addVisitedEvent(sceneId);
+    }
     this.activeRoomId.value = parts[0].slice(1);
     this.activeDungeonId.value = dungeonUsedId;
 
@@ -1562,12 +1411,20 @@ export class DungeonSystem {
     const talk = this.game.logicSystem.resolveTalkingCharacter(output);
     output = talk.text;
 
-    // Skip to the next paragraph when this one resolved to empty (e.g. inline if{} produced
-    // no text), or when it is an `id!:` party line and that character is not in the party —
-    // the latter drops its actions too.
-    if (talk.absent || (!output.trim() && Object.keys(actions).length === 0)) {
-      this.playScene(this.getNextSceneId(sceneId), dungeonUsedId, options);
-      return;
+    // A paragraph is skipped when it resolved to empty (e.g. inline if{} produced no text), or
+    // when it is an `id!:` party line and that character is not in the party — the latter drops
+    // its actions too. A skipped paragraph still owns its menu (its `>` choices, or the next
+    // row's `~` branches when it ends its block): the text already on screen stays and the menu
+    // is offered under it. Without a menu the reader moves straight on.
+    const skipped = talk.absent || (!output.trim() && Object.keys(actions).length === 0);
+    if (skipped) {
+      if (!this.hasOwnMenu(sceneId, dungeonUsedId)) {
+        this.playScene(this.getNextSceneId(sceneId), dungeonUsedId, options);
+        return;
+      }
+      actions = {};
+    } else {
+      this.talkingCharacterId.value = talk.id;
     }
 
     // Check for {redirect} first. If there's then resolve and return immediately.
@@ -1589,34 +1446,45 @@ export class DungeonSystem {
 
     if (isRootScene) {
 
-      // auto-stage the configured dungeon default assets at event start (any dungeon type)
-      if (this.currentDungeon.value?.default_assets?.length) {
-        this.addAssets(this.currentDungeon.value.default_assets);
-      }
-
-      // real scene
+      // real scene: the dungeon's and the current room's default assets
       if (!this.game.getState('replay_mode')) {
-
-        // load default room assets
+        if (this.currentDungeon.value?.default_assets?.length) {
+          this.addAssets(this.currentDungeon.value.default_assets);
+        }
         if (this.currentRoom.value?.defaultAssets && this.currentRoom.value?.defaultAssets.length > 0) {
           this.addAssets(this.currentRoom.value.defaultAssets);
         }
-
       }
 
-      // replay mode
+      // replay mode: a gallery replay never enters the dungeon (no room events, no side effects), so
+      // currentDungeon / currentRoom are still wherever the player is. Read the replayed dungeon's and
+      // room's own defaults from their data instead: assets, music and ambience.
       else {
-        // load from the actual dungeon room
-        let roomObject = this.dungeonRooms.get(dungeonUsedId)?.get(this.activeRoomId.value) || null;
-        if (roomObject && roomObject.default_assets && roomObject.default_assets.length > 0) {
+        const config = this.dungeonLines.get(dungeonUsedId)?.get('_config_')?.params as DungeonConfigParsed;
+        const roomObject = this.dungeonRooms.get(dungeonUsedId)?.get(this.activeRoomId.value) || null;
+
+        if (config?.default_assets?.length) {
+          this.addAssets(config.default_assets);
+        }
+        if (roomObject?.default_assets?.length) {
           this.addAssets(roomObject.default_assets);
         }
-
-        let config = this.dungeonLines.get(dungeonUsedId)?.get('_config_')?.params as DungeonConfigParsed;
-
-        // load default dungeon music
         if (config?.music) {
           this.game.setMusic(config.music);
+        }
+
+        // ambience: the replayed place's default_sounds, not the player's real location's
+        const want = [...new Set([...(config?.default_sounds ?? []), ...(roomObject?.default_sounds ?? [])])];
+        const gone = this.ambienceIds.filter(id => !want.includes(id));
+        if (gone.length) this.game.coreSystem.stopSounds(gone);
+        this.ambienceIds = want;
+        if (want.length) this.game.coreSystem.playSounds(want);
+
+        // A gallery scene reached from another scene inherits that scene's stage in play — who is
+        // there, how they look, what is behind them. A replay starts it cold, so the header's
+        // `replay: {actor: …, attr: …, asset: …}` sets that stage up. It runs in replays only.
+        if (line.params?.replay && typeof line.params.replay === 'object') {
+          this.game.logicSystem.resolveActions(line.params.replay);
         }
       }
     }
@@ -1639,11 +1507,27 @@ export class DungeonSystem {
     // execute actions
     this.game.logicSystem.resolveActions(actions, true);
 
-    this.cachedText.value = output;
+    if (skipped) {
+      // The kept text is already typed out — nothing new to animate.
+      this.currentSceneIdAnimated.value = sceneId;
+    } else {
+      this.cachedText.value = output;
+    }
 
     this.delayedActionObject = this.game.logicSystem.getDelayedActions(actions);
     //console.log("delayedActionObject is set to: ", this.delayedActionObject);
     this.reloadActionObject = this.game.logicSystem.getReloadActions(actions);
+
+    // When the paragraphs right after this one are skipped and one of them carries a menu, the
+    // reader steps onto it now: its menu replaces "continue" under this text, instead of after a
+    // click that changes nothing on screen. Standing on it makes its choices resolve "next" and
+    // shift: from there. Custom {choices_over} menus and delayed actions keep this paragraph.
+    if (this.isChoices !== 2 && !Object.keys(this.delayedActionObject).length) {
+      const menuId = this.findSkippedMenu(sceneId, dungeonUsedId);
+      if (menuId) {
+        this.currentSceneId.value = menuId;
+      }
+    }
 
     this.loadDocChoices();
 
@@ -1662,10 +1546,6 @@ export class DungeonSystem {
 
 
 
-    // if ends with .1.1.1 then it's a scene event
-    if (sceneId.endsWith(".1.1.1")) {
-      this.usedDungeonData.value.addVisitedEvent(sceneId);
-    }
 
     // force overlay-navigation overlay to be shown to show dialogue box
     this.game.coreSystem.setState('overlay_state', 'overlay-navigation');
@@ -1675,7 +1555,9 @@ export class DungeonSystem {
 
 
     // add log for the scene
-    this.addLog(output, false);
+    if (!skipped) {
+      this.addLog(output, false);
+    }
   }
 
   // ignore types
@@ -2083,7 +1965,7 @@ export class DungeonSystem {
     idle: ['idle', 'idle_duration', 'idle_intensity'],
   } as const;
 
-  private resolveInheritedAnimations(incoming: Record<string, any>, previous?: Partial<SceneSlot>): void {
+  private resolveInheritedAnimations(incoming: Record<string, any>, previous?: Partial<SceneSlot>, charId?: string): void {
     for (const anchor of ['enter', 'exit', 'idle'] as const) {
       const val = incoming[anchor];
       if (val !== 'inherit' && val !== undefined) continue;
@@ -2091,6 +1973,17 @@ export class DungeonSystem {
         const prev = previous?.[prop as keyof SceneSlot];
         if (prev !== undefined) incoming[prop] = prev;
         else delete incoming[prop];
+      }
+    }
+    // Nothing set and nothing to inherit: the character's own `idle` trait, so a bat floats wherever
+    // it is staged. Any idle on the staging line or the slot template wins (`none` included), and a
+    // later move inherits what the actor already has, so a cancel sticks. The loop length varies a
+    // little per actor so a flock doesn't bob in step.
+    if (incoming.idle === undefined && charId) {
+      const own = this.game.characterSystem.getCharacter(charId)?.getTrait('idle');
+      if (own && own !== 'none') {
+        incoming.idle = own;
+        incoming.idle_duration = Math.round((2.7 + Math.random() * 0.6) * 100) / 100;
       }
     }
   }
@@ -2107,11 +2000,12 @@ export class DungeonSystem {
       return false;
     }
 
+
     this.takeOneShotProps(slot.char!, slot as any);
 
     // Check if character already exists in scene
     const existingSlot = this.findSlotByChar(slot.char);
-    this.resolveInheritedAnimations(slot as any, existingSlot);
+    this.resolveInheritedAnimations(slot as any, existingSlot, slot.char);
     if (existingSlot) {
       const wasRemoving = !!existingSlot.isRemoving;
       // If character is being removed, cancel the removal
@@ -2209,7 +2103,7 @@ export class DungeonSystem {
     this.takeOneShotProps(charId, updates);
 
     // Update properties directly on the existing reactive object
-    this.resolveInheritedAnimations(updates, existingSlot);
+    this.resolveInheritedAnimations(updates, existingSlot, charId);
     Object.assign(existingSlot, updates);
     gameLogger.info(`[actor] Updated properties for "${charId}":`, updates);
     this.revealActorsFromHideAssets();
@@ -2239,7 +2133,7 @@ export class DungeonSystem {
     // Prepare new slot data (template + inline properties)
     this.takeOneShotProps(charId, inlineProps);
     const newSlotData = { ...targetTemplate, ...inlineProps };
-    this.resolveInheritedAnimations(newSlotData, existingSlot);
+    this.resolveInheritedAnimations(newSlotData, existingSlot, charId);
 
     // Strip enter animations to avoid playing them during slot change
     // But preserve exit animations so the character has correct exit for new slot
@@ -2277,6 +2171,9 @@ export class DungeonSystem {
 
   public exitScene(skipEvents: boolean = false, instant: boolean = false) {
     if (this.game.getState('replay_mode')) {
+      // A replayed scene still ends for the scripts that tidy up after a scene (poses, fluids,
+      // scene-only looks), or the next replay opens on what this one left. The flow goes back to the gallery.
+      this.game.trigger('scene_exit_before', skipEvents);
       this.game.setState('progression_state', 'gallery');
       this.game.setState('gallery_tab', 'scenes');
       return;
@@ -2488,10 +2385,7 @@ export class DungeonSystem {
       // may only be offered once this block is exhausted. Hence two separate
       // lookups: hoisting `~` up here would offer next-row branches while the
       // reader still has paragraphs left to read in this block.
-      let inlineChoiceLines = this.findLines(
-        lines,
-        new RegExp("^>" + escapeRegExp(`${scene_name}.${scene_row}.${scene_block}.${scene_paragraph}`) + "\\*"),
-      );
+      let inlineChoiceLines = this.findInlineChoiceLines(lines, scene_name, scene_row, scene_block, scene_paragraph);
 
       let nextParagraphLine = lines.get(
         this.compileSceneId(scene_name, scene_row, scene_block, nextParagraphId),
@@ -2550,13 +2444,84 @@ export class DungeonSystem {
     return found;
   }
 
+  /** The `>` choices hanging off one paragraph. */
+  private findInlineChoiceLines(lines: Map<string, DungeonLine>, scene_name: string, row: number, block: number, paragraph: number): DungeonLine[] {
+    return this.findLines(lines, new RegExp("^>" + escapeRegExp(`${scene_name}.${row}.${block}.${paragraph}`) + "\\*"));
+  }
+
+  /** The `~` named columns of `row`. */
+  private findBranchLines(lines: Map<string, DungeonLine>, scene_name: string, row: number): DungeonLine[] {
+    return this.findLines(lines, new RegExp("^~" + escapeRegExp(`${scene_name}.${row}.`) + "\\d+$"));
+  }
+
+  /**
+   * Whether a paragraph offers a menu of its own rather than a plain "continue": its `>`
+   * choices, or — when it ends its block — the next row's `~` branches.
+   */
+  private hasOwnMenu(sceneId: string, dungeonId: string): boolean {
+    const lines = this.dungeonLines.get(dungeonId);
+    if (!lines) {
+      return false;
+    }
+    const { name, row, block, paragraph } = this.parseSceneId(sceneId);
+    if (this.findInlineChoiceLines(lines, name, row, block, paragraph).length) {
+      return true;
+    }
+    if (lines.has(this.compileSceneId(name, row, block, paragraph + 1))) {
+      return false;
+    }
+    return this.findBranchLines(lines, name, row + 1).length > 0;
+  }
+
+  /**
+   * The first paragraph after this one in its block that is skipped yet carries a menu,
+   * reached over skipped paragraphs only. Null when this paragraph has `>` choices of its
+   * own or a paragraph that plays comes first.
+   */
+  private findSkippedMenu(sceneId: string, dungeonId: string): string | null {
+    const lines = this.dungeonLines.get(dungeonId);
+    if (!lines) {
+      return null;
+    }
+    const { name, row, block, paragraph } = this.parseSceneId(sceneId);
+    for (let next = paragraph + 1; ; next++) {
+      const id = this.compileSceneId(name, row, block, next);
+      const line = lines.get(id);
+      if (!line || !this.isLookAheadSkipped(line.val)) {
+        return null;
+      }
+      if (this.hasOwnMenu(id, dungeonId)) {
+        return this.findInlineChoiceLines(lines, name, row, block, paragraph).length ? null : id;
+      }
+    }
+  }
+
+  /**
+   * isLineSkipped for a paragraph that is not playing yet. A condition that throws there
+   * counts as "plays", so the error surfaces when that paragraph is reached, as it always
+   * did, instead of breaking the one on screen.
+   */
+  private isLookAheadSkipped(text: string): boolean {
+    try {
+      return this.game.logicSystem.isLineSkipped(text);
+    } catch {
+      return false;
+    }
+  }
+
+  /** `#scene_name.row.block.paragraph` — the scene name may itself contain dots. */
+  private parseSceneId(sceneId: string): { name: string, row: number, block: number, paragraph: number } {
+    const vals = sceneId.split('.');
+    const [row, block, paragraph] = vals.slice(-3).map(v => parseInt(v));
+    return { name: vals.slice(0, -3).join('.').slice(1), row, block, paragraph };
+  }
+
   /**
    * The `~` named columns of `row` — each one a branch the reader can step into.
    * A branch with no navigation action of its own jumps to its own first paragraph.
    */
   private createBranchChoices(lines: Map<string, DungeonLine>, scene_name: string, row: number): Choice[] {
-    let re = new RegExp("^~" + escapeRegExp(`${scene_name}.${row}.`) + "\\d+$");
-    return this.findLines(lines, re).map(line => {
+    return this.findBranchLines(lines, scene_name, row).map(line => {
       let params: Record<string, any> = line.params ? JSON.parse(JSON.stringify(line.params)) : {};
       const branchBlockId = "#" + line.id.slice(1) + ".1";
       const isDelayed = !!Object.keys(this.getDelayedActions(line.params)).length;
@@ -3070,49 +3035,24 @@ export class DungeonSystem {
   /**
    * Process flag actions with operators.
    * Handles both simple flag names and dungeon-scoped flags (dungeonId.flagName).
-   * Supports both object format {a: 1, b: 3} and string format with operators:
-   * - "key=value" - set the flag to value
-   * - "key>value" - add value to the flag
-   * - "key<value" - subtract value from the flag
+   * Supports both object format {a: 1, b: 3} (always sets) and string format with operators:
+   * - "key = value" - set the flag to value
+   * - "key += value" - add value to the flag
+   * - "key -= value" - subtract value from the flag
    * Note: Flags can only be numbers.
    */
   // ignore types
   public processFlagAction(data: string | Record<string, any>): void {
-    type FlagOperation = { key: string; operator: '=' | '>' | '<'; value: number };
+    type FlagOperation = { key: string; operator: OpsSpecOp; value: number };
     let operations: FlagOperation[] = [];
 
     if (typeof data === 'string') {
-      // Parse "key=value, key2>value2" format with operators
-      const pairs = data.split(',').map(s => s.trim());
-      for (const pair of pairs) {
-        // Find the operator and split
-        let operator: '=' | '>' | '<' | null = null;
-        let key: string = '';
-        let rawValue: string = '';
-
-        if (pair.includes('=')) {
-          operator = '=';
-          [key, rawValue] = pair.split('=').map(s => s.trim());
-        } else if (pair.includes('>')) {
-          operator = '>';
-          [key, rawValue] = pair.split('>').map(s => s.trim());
-        } else if (pair.includes('<')) {
-          operator = '<';
-          [key, rawValue] = pair.split('<').map(s => s.trim());
-        }
-
-        if (!operator || !key || rawValue === undefined) {
-          gameLogger.error(`Invalid flag format: "${pair}". Use "key=value", "key>value", or "key<value"`);
-          continue;
-        }
-
-        // Parse numeric value
+      for (const { id: key, op: operator, value: rawValue } of this.game.logicSystem.parseOpsSpec(data)) {
         const value = Number(rawValue);
         if (isNaN(value)) {
           gameLogger.error(`Invalid flag value: "${rawValue}" for key "${key}". Flags must be numbers.`);
           continue;
         }
-
         operations.push({ key, operator, value });
       }
     } else {
@@ -3143,12 +3083,12 @@ export class DungeonSystem {
       // Apply the operation based on operator
       if (operator === '=') {
         dungeonData.setFlag(name, value);
-      } else if (operator === '>') {
+      } else if (operator === '+=') {
         dungeonData.addFlag(name, value);
-      } else if (operator === '<') {
+      } else if (operator === '-=') {
         dungeonData.addFlag(name, -value);
       }
-      applied.push(`${varName}${operator}${varValue}`);
+      applied.push(`${varName} ${operator} ${varValue}`);
     }
     if (applied.length > 0) {
       gameLogger.info(`[flag] ${applied.join(', ')}`);
@@ -4021,6 +3961,7 @@ export class DungeonSystem {
   @Skip()
   replaySceneObject: ReplaySceneObject | null = null;
 
+
   // ignore types
   public getReplaySceneObject(): ReplaySceneObject {
     if (this.replaySceneObject) {
@@ -4103,6 +4044,8 @@ export class DungeonSystem {
     // Leaving replay reloads the save taken just above, which restores whatever grade was live then.
     this.setGrade(false, true);
     this.setAmbient(false);
+    // After the save above, so a listener's changes (putting a cast into the scene's look) end with the replay.
+    this.game.trigger('scene_replay_before', sceneId, dungeonId);
     this.playScene(sceneId, dungeonId);
   }
 

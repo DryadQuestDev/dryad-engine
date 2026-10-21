@@ -4,9 +4,10 @@ import InputText from 'primevue/inputtext';
 import Textarea from 'primevue/textarea';
 import Button from 'primevue/button';
 import type { Row } from '../../../../utility/dungeonEditor/ast';
-import { inputMatchesSearch } from './searchState';
+import { inputMatchesSearch, paramsMatchSearch } from './searchState';
 import { flashElement, focusFieldAt, type RevealRequest } from './reveal';
 import ParamsInput from './ParamsInput.vue';
+import type { Severity } from './issueSeverity';
 
 const props = defineProps<{
   row: Row;
@@ -15,7 +16,7 @@ const props = defineProps<{
   canMoveDown: boolean;
   sceneExists?: boolean;
   /** The row's `{params}` failed lint — outline the input. */
-  paramsError?: boolean;
+  paramsSeverity?: Severity | null;
   /** Focus request aimed at this row; `null` otherwise. */
   reveal?: RevealRequest | null;
 }>();
@@ -88,10 +89,11 @@ function updateField(key: string, value: any) {
         <span class="angle">&gt;</span>
         <ParamsInput
           ref="paramsRef"
+          assist="choice"
           :model-value="row.paramsRaw ?? ''"
           @update:model-value="(v: string) => updateField('paramsRaw', v ? v : undefined)"
           class="params-input"
-          :class="{ 'params-input--error': paramsError, 'input-search-hit': inputMatchesSearch(row.paramsRaw) }"
+          :class="{ 'params-input--error': paramsSeverity === 'error', 'params-input--warning': paramsSeverity === 'warning', 'input-search-hit': paramsMatchSearch(row.paramsRaw) }"
         />
       </template>
 
@@ -235,6 +237,11 @@ function updateField(key: string, value: any) {
 
 .params-input--error {
   outline: 2px solid #d32f2f;
+  outline-offset: -1px;
+}
+
+.params-input--warning {
+  outline: 2px solid #d99a00;
   outline-offset: -1px;
 }
 

@@ -38,7 +38,7 @@ Stamp the current turn into a flag. A dotted key stamps another dungeon's flag.
 
 | State | Type | Description |
 |---|---|---|
-| `turn` | number | The global turn counter. Saved with the game. Starts at 0, +1 per room entry. Read with `game.getState('turn')`. |
+| `turn` | number | The global turn counter. Saved with the game. Starts at 0, +1 per room entry while **Advance on room enter** is on. Read with `game.getState('turn')`. |
 
 ## Locale
 

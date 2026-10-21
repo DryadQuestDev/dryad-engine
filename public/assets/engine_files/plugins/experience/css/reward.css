@@ -289,11 +289,16 @@
    the popup-content wrapper is filtered (= containing block) and collapses around
    absolutely-positioned children, clipping them to nothing. ── */
 
+/* Capped at the popup shell's own 90dvh, with only the body scrolling: uncapped, a long loot list
+   made the whole card scroll inside the shell and pushed Continue below a phone's screen. */
 .reward-popup {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 10px;
+    max-height: 90vh;
+    max-height: 90dvh;
+    box-sizing: border-box;
     padding: 14px 18px 16px;
     background: rgba(16, 20, 28, 0.96);
     border: 2px solid rgba(240, 192, 64, 0.45);
@@ -310,7 +315,19 @@
     to   { transform: scale(1); opacity: 1; }
 }
 
+.reward-popup-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    min-height: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
 .reward-continue {
+    flex-shrink: 0;
     padding: 8px 26px;
     background: #42b983;
     color: #fff;

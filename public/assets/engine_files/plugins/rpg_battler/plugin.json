@@ -181,6 +181,11 @@
           "type": "number",
           "tooltip": "Battle threat on the 1-100 design scale (vermin ~5-9, pack ~15-26, elite ~30-45, boss ~50-65, chapter boss ~80-100; overflow allowed). Added ON TOP of any enemy template `threat` traits summed across all waves — games without per-character threat put the full value here. Drives loot budgets, XP, and threat-priced economies."
         },
+        "allies": {
+          "type": "chooseMany",
+          "fromFile": "character_templates",
+          "tooltip": "Characters who fight on the player side in this battle without joining the party, such as a stranger the story drops into the fight. An ally with the battle_support trait fights from the sidelines; any other takes a party slot and is locked into the party picker. Picks the live character with that id: one created automatically from its template shares the template's id. An ally with no live character is skipped with an error in the console. A battle action can add more with its own `allies`."
+        },
         "enemies": {
           "type": "schema[]",
           "tooltip": "Enemy composition for this battle — the first wave.",
@@ -662,6 +667,15 @@
               "summon",
               "summon_status"
             ]
+          },
+          {
+            "id": "rpg_merge",
+            "name": "Merging",
+            "order": 71,
+            "color": "aed581",
+            "members": [
+              "merge"
+            ]
           }
         ],
         "hints": [
@@ -849,7 +863,7 @@
           "ghost",
           "glow"
         ],
-        "tooltip": "Looping idle animation for this character's battle slot — a bat or a ghost floats in every fight without per-battle authoring. Unset = still. Only the idles that survive a battle are offered: sway, rotate, rock, nod, lean, wave, wiggle and glitch animate the very element the lunge, hit and death tweens own, and shake, shimmy, jitter and blink are the battler's own damage vocabulary — a permanently shaking enemy makes the hit shake unreadable."
+        "tooltip": "Looping idle animation for this character's battle slot — a bat or a ghost floats in every fight without per-battle authoring. Unset = the character's scene idle (the engine's idle trait) when it is one of these, else still – set idle alone and a bat floats in scenes and fights alike; set battle_idle only to give a fight a different loop. Only the idles that survive a battle are offered: sway, rotate, rock, nod, lean, wave, wiggle and glitch animate the very element the lunge, hit and death tweens own, and shake, shimmy, jitter and blink are the battler's own damage vocabulary — a permanently shaking enemy makes the hit shake unreadable."
       },
       {
         "id": "threat",
@@ -1368,6 +1382,14 @@
         "description": "Statuses applied to the combatant(s) summoned THIS cast (by any effect's summon). Every effect carrying it contributes independently, so multiple effects stack rather than dedupe. Stacks set by summon_status_stacks; a status with meta.power_scaling scales its stacks off the caster's power."
       },
       {
+        "id": "merge",
+        "role": "aspect",
+        "type": "chooseOne",
+        "fromFile": "character_statuses",
+        "ingame_description": "Merge into the target – it gains [v:status]",
+        "description": "The caster merges into the target ally and leaves the battle. It is not defeated: no defeat event fires and no death animation plays. The target's base health and power grow by the caster's, its health becomes what both had left, it takes over the caster's negative battle statuses (stagger excepted), and it gains one stack of this status — give the status traits/attributes/static art to change how a merged body looks, and max_stacks to cap how many bodies one can take in. Valid targets are allies made from the caster's own template, or allies already holding this status below its max_stacks; a caster holding the status cannot merge. Ignored on bounces."
+      },
+      {
         "id": "summon_status_stacks",
         "role": "aspect",
         "type": "number",
@@ -1542,6 +1564,14 @@
         "val": "Cancel"
       },
       {
+        "id": "ui_hide_abilities",
+        "val": "Hide abilities"
+      },
+      {
+        "id": "ui_show_abilities",
+        "val": "Abilities"
+      },
+      {
         "id": "ui_choose_target",
         "val": "Choose target for"
       },
@@ -1610,6 +1640,10 @@
         "val": "DEFIED DEATH"
       },
       {
+        "id": "float_merge",
+        "val": "MERGED"
+      },
+      {
         "id": "float_stunned",
         "val": "Stunned!"
       },
@@ -1632,6 +1666,10 @@
       {
         "id": "log_reflect",
         "val": "takes <b class=\"rpg-dmg-physical\">|amount|</b> reflected damage"
+      },
+      {
+        "id": "log_merge",
+        "val": "absorbs <b>|name|</b>"
       },
       {
         "id": "rpg_party_select_title",

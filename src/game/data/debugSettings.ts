@@ -5,6 +5,7 @@ export type DebugSettingsType = {
     disable_fog?: boolean;
     events_zone?: boolean;
     show_hidden_stats?: boolean;
+    reveal_all?: boolean;
     selected_dungeon?: string;
 };
 
@@ -19,6 +20,12 @@ export const DebugSettings: SettingsObject[] = [
         id: 'show_hidden_stats',
         type: 'boolean',
         label: 'Show Hidden Stats',
+        default_value: 'false',
+    },
+    {
+        id: 'reveal_all',
+        type: 'boolean',
+        label: 'Reveal All Records & Gallery',
         default_value: 'false',
     },
     {

@@ -124,4 +124,5 @@ All ship with `meta.is_battle: true`.
 - New combat status? Define it in `character_statuses`, set `meta.is_battle: true`, and pick meta flags that match its behavior.
 - Need a DoT? Set `multi_stack: true`, `meta.power_scaling: true`, and `meta.dot_damage_type` to one of `burn` / `poison` / `bleeding` (mitigated by the matching % resist) or `absolute`. Done — no code needed.
 - Need a custom behavior the meta flags don't cover (e.g., "Composed: ticks down stagger each turn")? Listen on `character_turn_post_tick` or `status_added` in a game script.
+- Want a status to change how its holder looks (a petrified body, a transformed beast)? Give it `attributes`, `skin_layers`, `traits.face_static` or `spine` like a character template — the latest status wins. If an ability applies it, the battle preloads that look at the start on the bodies it can land on.
 - Want a status to start the battle with stacks based on an outside-combat stat? Add a stat in `character_stats`, then set the status's `meta.source` to that stat id.

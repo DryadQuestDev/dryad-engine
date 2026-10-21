@@ -65,6 +65,10 @@ export class ElectronStorageService implements StorageService {
         await this.invokeElectron('write-text', filePath, String(content ?? ''));
     }
 
+    async writeBinary(filePath: string, data: Uint8Array): Promise<void> {
+        await this.invokeElectron('write-binary', filePath, data);
+    }
+
     async listFiles(dirPath: string): Promise<string[]> {
         return this.invokeElectron('list-files', dirPath);
     }

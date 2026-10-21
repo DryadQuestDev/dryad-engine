@@ -9,7 +9,7 @@ import SceneEditor from './SceneEditor.vue';
 import RichContentEditor from './PlainEditor.vue';
 import MetaStatusGrid from './MetaStatusGrid.vue';
 import ParamsInput from './ParamsInput.vue';
-import { inputMatchesSearch } from './searchState';
+import { inputMatchesSearch, paramsMatchSearch } from './searchState';
 import { tagWithUid } from './uid';
 import { focusFieldAt, type RevealRequest } from './reveal';
 
@@ -26,6 +26,7 @@ function sceneExistsForRow(rowIndex: number): boolean {
 }
 import type { Block, Row, SceneBlock } from '../../../../utility/dungeonEditor/ast';
 import { isCommentLine } from '../../../../utility/dungeonEditor/comments';
+import { worse, worstSeverity, type IssueRange, type Severity } from './issueSeverity';
 import type { LintIssue } from '../../../../utility/dungeonEditor/lint';
 import { readMeta, isMetaStatus, visibleParams, mergeAuthoredParams, metaCutSpan, type BlockMeta, type MetaStatus } from '../../../../utility/dungeonEditor/meta';
 
@@ -97,30 +98,31 @@ const metaStatus = computed<MetaStatus | null>(() => {
   return isMetaStatus(s) ? s : null;
 });
 
-const paramsHasIssue = computed(() =>
-  (props.issues ?? []).some((i) => i.field === 'paramsRaw'),
+const paramsSeverity = computed(() =>
+  worstSeverity((props.issues ?? []).filter((i) => i.field === 'paramsRaw')),
 );
+const blockSeverity = computed(() => worstSeverity(props.issues));
 const issueSummary = computed(() =>
   (props.issues ?? []).map((i) => i.message).join('\n'),
 );
 
-const NO_RANGES: Array<[number, number]> = [];
+const NO_RANGES: IssueRange[] = [];
 // Ranges inside the merged prose textarea, in its model coordinates.
-const proseIssueRanges = computed<Array<[number, number]>>(() => {
-  const out: Array<[number, number]> = [];
+const proseIssueRanges = computed<IssueRange[]>(() => {
+  const out: IssueRange[] = [];
   for (const issue of props.issues ?? []) {
     const at = issue.at;
-    if (at?.target === 'prose' && at.start !== undefined) out.push([at.start, at.end ?? at.start + 1]);
+    if (at?.target === 'prose' && at.start !== undefined) out.push([at.start, at.end ?? at.start + 1, issue.severity]);
   }
   return out.length ? out : NO_RANGES;
 });
-const rowParamsErrors = computed(() => {
-  const set = new Set<number>();
+const rowParamsSeverity = computed(() => {
+  const m = new Map<number, Severity>();
   for (const issue of props.issues ?? []) {
     const at = issue.at;
-    if (at?.target === 'row-params' && at.rowIndex !== undefined) set.add(at.rowIndex);
+    if (at?.target === 'row-params' && at.rowIndex !== undefined) m.set(at.rowIndex, worse(m.get(at.rowIndex), issue.severity));
   }
-  return set;
+  return m;
 });
 
 // Route the reveal to whichever child owns the target; children receive
@@ -379,13 +381,13 @@ function onSceneUpdate(newScene: SceneBlock) {
     block.kind === 'encounter' && (block as any).id === 'description' ? 'block--encounter-description' : '',
     block.kind === 'scene' && !((block as any).id ?? '').includes('~') ? 'block--scene-event' : '',
     questKind ? `block--quest-${questKind.replace('_', '-')}` : '',
-    issues && issues.length ? 'block--has-issues' : '',
+    blockSeverity === 'error' ? 'block--has-issues' : blockSeverity === 'warning' ? 'block--has-warnings' : '',
     metaStatus ? `block--status-${metaStatus}` : '',
   ]">
     <div class="block-header">
       <span class="kind-badge">
         <span class="sigil" v-tooltip.top="labelTooltip">{{ kindSigil[block.kind] }}</span>
-        <span v-if="issues && issues.length" class="lint-badge" :title="issueSummary">
+        <span v-if="issues && issues.length" class="lint-badge" :class="{ 'lint-badge--warning': blockSeverity === 'warning' }" :title="issueSummary">
           ⚠ {{ issues.length }}
         </span>
       </span>
@@ -393,10 +395,10 @@ function onSceneUpdate(newScene: SceneBlock) {
         <InputText :model-value="(block as any).id" @update:model-value="(v: any) => updateHeader('id', v ?? '')"
           placeholder="id" class="id-input" :disabled="locked"
           :class="{ 'input-search-hit': !!(block as any).id && inputMatchesSearch(kindSigil[block.kind] + (block as any).id) }" />
-        <ParamsInput v-if="block.kind !== 'room'" ref="paramsInputRef" :model-value="authorParams"
+        <ParamsInput v-if="block.kind !== 'room'" ref="paramsInputRef" :model-value="authorParams" assist="header"
           @update:model-value="(v: string) => updateParams(v)"
           class="params-input"
-          :class="{ 'params-input--error': paramsHasIssue, 'input-search-hit': inputMatchesSearch(authorParams) }" />
+          :class="{ 'params-input--error': paramsSeverity === 'error', 'params-input--warning': paramsSeverity === 'warning', 'input-search-hit': paramsMatchSearch(authorParams) }" />
         <!-- Not gated on `locked`: that guards structure (move / remove), and the
              params input beside it is not gated either, so a locked block can
              already carry `__meta` typed by hand. Gating only the click would
@@ -434,7 +436,7 @@ function onSceneUpdate(newScene: SceneBlock) {
         <div v-if="group.kind === 'text'" class="text-group">
           <RichContentEditor :model-value="group.value"
             @update:model-value="(v: string) => updateTextGroup(v)"
-            placeholder="content…" class="text-group-area"
+            placeholder="content…" class="text-group-area" assist="prose"
             :issue-ranges="proseIssueRanges" :reveal="proseReveal" />
         </div>
         <RowEditor v-else :row="(block.rows[group.rowIndex] as Row)" :index="group.rowIndex"
@@ -442,7 +444,7 @@ function onSceneUpdate(newScene: SceneBlock) {
           @update:row="(r: Row) => updateRow(group.rowIndex, r)" @remove="removeRow(group.rowIndex)"
           @move-up="moveRow(group.rowIndex, -1)" @move-down="moveRow(group.rowIndex, 1)"
           :scene-exists="sceneExistsForRow(group.rowIndex)"
-          :params-error="rowParamsErrors.has(group.rowIndex)" :reveal="rowReveal(group.rowIndex)"
+          :params-severity="rowParamsSeverity.get(group.rowIndex) ?? null" :reveal="rowReveal(group.rowIndex)"
           @insert-scene="onInsertSceneForChoice(group.rowIndex)"
           v-bind="{ 'data-row-kind': (block.rows[group.rowIndex] as Row).kind, 'data-row-uid': (block.rows[group.rowIndex] as any).__uid }" />
       </template>
@@ -555,6 +557,10 @@ function onSceneUpdate(newScene: SceneBlock) {
   box-shadow: 0 0 0 2px rgba(211, 47, 47, 0.55), 0 1px 3px rgba(211, 47, 47, 0.15);
 }
 
+.block--has-warnings {
+  box-shadow: 0 0 0 2px rgba(217, 154, 0, 0.5), 0 1px 3px rgba(217, 154, 0, 0.15);
+}
+
 /* Author status claims the left gutter, never the ring: the ring is lint's
    (red) and the outline is selection's (blue), so the two stay tellable
    apart on a card that is both broken-by-the-author and failing lint. */
@@ -591,8 +597,17 @@ function onSceneUpdate(newScene: SceneBlock) {
   white-space: pre-line;
 }
 
+.lint-badge--warning {
+  background: #d99a00;
+}
+
 .params-input--error {
   outline: 2px solid #d32f2f;
+  outline-offset: -1px;
+}
+
+.params-input--warning {
+  outline: 2px solid #d99a00;
   outline-offset: -1px;
 }
 

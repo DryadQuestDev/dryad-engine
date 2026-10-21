@@ -5,6 +5,7 @@ import {
   resolveAbility, processStatusEffects, getStatusStacks,
   removeStatusStacks, getStatusDefinitions, isCharAlive, isSupport,
   getSide, isAIControlled, checkStaggerThreshold, computeEffectiveThreshold, logEffect, endChannelsBy,
+  abilityMergeStatus, mergeTargets,
 } from './rpg-battle-effects.mjs';
 import { setIdleState } from './rpg-battle-anims.mjs';
 
@@ -235,6 +236,9 @@ function passesStaticGates(char, ability, state) {
   if (requiredSelf.length && !requiredSelf.some((id) => getStatusStacks(char.id, id) > 0)) return false;
   if (meta.caster_min_health && char.getResourceRatio('health') * 100 < meta.caster_min_health) return false;
   if (meta.caster_max_health && char.getResourceRatio('health') * 100 > meta.caster_max_health) return false;
+  // A body that already holds its merge status is a merged one — it takes others in, it doesn't leave.
+  const mergeStatus = abilityMergeStatus(ability);
+  if (mergeStatus && char.hasStatus(mergeStatus)) return false;
   return true;
 }
 
@@ -260,6 +264,9 @@ export function canUseAbility(characterId, abilityId) {
   // Summon abilities are unusable at the caster side's unit cap — this is what stops the AI
   // from casting into full ranks (getUsableAbilities routes through here) and greys the button.
   if (abilityHasSummon(ability) && sideAtUnitCap(battle.charState[characterId].side)) return false;
+  // Merge needs an ally to merge into; without one the AI would spend its turn on nothing.
+  const mergeStatus = abilityMergeStatus(ability);
+  if (mergeStatus && !mergeTargets(characterId, mergeStatus).length) return false;
   return true;
 }
 
@@ -648,6 +655,12 @@ export function processDeaths() {
     const allChars = [...battle.playerParty, ...battle.enemyParty];
     for (const charId of allChars) {
       if (!isCharAlive(charId) && !battle.charState[charId]?.defeated) {
+        // A merged body left the field into an ally: no defeat, so no defeat listeners and no
+        // death defiance.
+        if (battle.charState[charId].mergedInto) {
+          battle.charState[charId].defeated = true;
+          continue;
+        }
         handleDeath(charId);
         sweepAgain = true;
       }

@@ -3,7 +3,7 @@
 import { currentRpgBattle, getBattleDisplayName, requiredSelfStatuses } from './rpg-battle-state.mjs';
 import {
   calculateRawDamage, applyDefenses, getStatusStacks, getStatusDefinitions,
-  getSide, getAliveEnemies, getAliveAllies, isCharAlive,
+  getSide, getAliveEnemies, getAliveAllies, isCharAlive, abilityMergeStatus, canMergeInto,
 } from './rpg-battle-effects.mjs';
 import { getUsableAbilities, canUseAbility, sideFreeSlots } from './rpg-battle-flow.mjs';
 
@@ -23,6 +23,7 @@ const WEIGHTS = {
   STUN_VS_CHANNEL: 8,
   SUMMON_BASE: 30,
   SUMMON_OVERFLOW: -28,
+  MERGE_FEED: 2,
 };
 
 /**
@@ -129,6 +130,10 @@ export function getValidTargets(characterId, abilityId) {
     }
   }
 
+  // Merge only goes into an ally that can take the caster in (same kind, room left).
+  const mergeStatus = abilityMergeStatus(ability);
+  if (mergeStatus) targets = targets.filter(id => canMergeInto(characterId, id, mergeStatus));
+
   // Health threshold filtering
   const meta = ability.meta;
   if (meta.target_min_health || meta.target_max_health) {
@@ -209,6 +214,9 @@ function scoreAbilityTarget(characterId, abilityId, targetId) {
       const overflow = Math.max(0, amount - sideFreeSlots(getSide(characterId)));
       score += WEIGHTS.SUMMON_BASE + WEIGHTS.SUMMON_OVERFLOW * overflow;
     }
+
+    // Merging: feed a body that has already taken others in, so each fills before a new one starts.
+    if (aspects.merge) score += WEIGHTS.MERGE_FEED * getStatusStacks(targetId, aspects.merge);
 
     // AoE bonus
     if (scoreTargets.length > 1) {

@@ -15,6 +15,7 @@ const clearSearchLabel = computed(() => global.getString('encyclopedia.clear_sea
 const noMatchesLabel = computed(() => global.getString('encyclopedia.no_matches'));
 const emptyLabel = computed(() => global.getString('encyclopedia.empty'));
 const noSelectionLabel = computed(() => global.getString('encyclopedia.no_selection'));
+const openInGalleryLabel = computed(() => global.getString('encyclopedia.open_in_gallery'));
 
 const trees = computed(() => game.getEncyclopediaTrees());
 
@@ -137,6 +138,17 @@ const contentSource = computed(() => {
     return r.content || r.summary || '';
 });
 
+// The character the selected record is about, once the player has met them in the gallery
+const galleryCharacterId = computed(() => {
+    const characterId = selectedRecord.value?.character;
+    if (!characterId || !isSelectedDiscovered.value) return null;
+    return game.isCharacterInGallery(characterId) ? characterId : null;
+});
+
+function openCharacterInGallery() {
+    if (galleryCharacterId.value) game.openGalleryForCharacter(galleryCharacterId.value);
+}
+
 const discoveredChildren = computed(() => {
     if (!selectedRecordId.value) return [];
     return game.getDiscoveredChildren(selectedRecordId.value);
@@ -217,6 +229,16 @@ function isGroupCollapsed(treeId: string, groupName: string): boolean {
     return collapsedGroups.value.has(`${treeId}::${groupName}`);
 }
 
+// Groups of the selected tree that the sidebar lists. A tree with hide_undiscovered_groups keeps a group
+// out until one of its records is discovered.
+const visibleGroups = computed(() => {
+    const tree = selectedTree.value;
+    if (!tree) return [];
+    const groups = tree.groups || [];
+    if (!tree.hide_undiscovered_groups) return groups;
+    return groups.filter(g => (g.records || []).some(r => narrative.isRecordDiscovered(r.record)));
+});
+
 function getRecordTitle(recordId: string): string {
     const r = narrative.getRecord(recordId);
     if (!r) return recordId;
@@ -279,7 +301,7 @@ function onLinkNavigate(recordId: string) {
 
                     <!-- Default tree view -->
                     <template v-else-if="selectedTree">
-                        <div v-for="group in selectedTree.groups || []" :key="group.name" class="group">
+                        <div v-for="group in visibleGroups" :key="group.name" class="group">
                             <div class="group-header"
                                 :class="{ collapsed: isGroupCollapsed(selectedTree.id, group.name) }"
                                 @click="toggleGroup(selectedTree.id, group.name)">
@@ -307,7 +329,13 @@ function onLinkNavigate(recordId: string) {
             <div class="encyclopedia-content">
                 <div v-if="selectedRecord && isSelectedDiscovered">
                     <img v-if="selectedRecord.image" :src="selectedRecord.image" class="record-image" />
-                    <h2 class="record-title">{{ selectedRecord.title }}</h2>
+                    <div class="record-title-row">
+                        <button v-if="galleryCharacterId" class="record-action" @click="openCharacterInGallery"
+                            v-tooltip.bottom="openInGalleryLabel" :aria-label="openInGalleryLabel">
+                            <i class="pi pi-user"></i>
+                        </button>
+                        <h2 class="record-title">{{ selectedRecord.title }}</h2>
+                    </div>
                     <div v-script="{ html: contentSource, navMode: true, onNavigate: onLinkNavigate }"
                         class="record-body"></div>
                     <template v-for="child in discoveredChildren" :key="child.id">
@@ -400,6 +428,8 @@ function onLinkNavigate(recordId: string) {
 
 .search-input {
     flex: 1;
+    /* An input's intrinsic width won't shrink below its size attribute without this. */
+    min-width: 0;
     padding: 6px 28px 6px 28px;
     border-radius: 6px;
     background-color: #2a2a2a;
@@ -577,12 +607,41 @@ function onLinkNavigate(recordId: string) {
     border: 1px solid #3a3a3a;
 }
 
-.record-title {
-    font-size: 1.8em;
-    color: var(--theme-primary, #5dadec);
+.record-title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     margin: 0 0 16px 0;
     padding-bottom: 10px;
     border-bottom: 2px solid #3a3a3a;
+}
+
+.record-title {
+    flex: 1;
+    font-size: 1.8em;
+    color: var(--theme-primary, #5dadec);
+    margin: 0;
+}
+
+.record-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background-color: #2a2a2a;
+    color: #d1d5db;
+    border: 1px solid #3a3a3a;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.record-action:hover {
+    background-color: #333;
+    border-color: var(--theme-primary, #5dadec);
+    color: var(--theme-primary, #5dadec);
 }
 
 .record-body {

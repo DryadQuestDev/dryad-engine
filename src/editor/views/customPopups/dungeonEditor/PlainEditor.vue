@@ -2,16 +2,18 @@
 import { ref, shallowRef, computed, nextTick, onBeforeUnmount, watch } from 'vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { useStorage } from '@vueuse/core';
-import { dungeonSearchQuery, dungeonStructuredFilter } from './searchState';
+import { dungeonSearchQuery, dungeonStructuredFilter, findStructuredRanges } from './searchState';
 import { useLazyMount } from './useLazyMount';
 import { measureOffsetTop } from './textareaMeasure';
 import type { RevealRequest } from './reveal';
+import type { IssueRange } from './issueSeverity';
+import type { AssistMode } from '../../../../utility/dungeonEditor/assist';
+import { useContentAssist } from './useContentAssist';
 import {
   HL_BG, HL_COLORS, modelToInnerOffset, parseModelValue, serializeModelValue, shiftHighlight,
   type Highlight, type HighlightColor,
 } from './highlightMarkup';
 import { RESERVED_TEXT_TAGS, TEXT_TAG_REGEX_SOURCE } from '../../../../utility/textTags';
-import type { IndexCategory } from '../../../../utility/dungeonEditor/index';
 
 const editorSettings = useStorage<{ autoCurlyQuotes?: boolean; autoEnDash?: boolean }>('dungeonEditor_settings', {});
 
@@ -22,9 +24,11 @@ const props = defineProps<{
    * Lint ranges to underline, in modelValue coordinates (highlight markup
    * included) — the editor maps them onto the text it displays.
    */
-  issueRanges?: Array<[number, number]>;
+  issueRanges?: IssueRange[];
   /** Focus request for this editor; `null` for every editor that isn't the target. */
   reveal?: RevealRequest | null;
+  /** Completion and hover for this text, and how to read it; none without. */
+  assist?: AssistMode;
 }>();
 
 const emit = defineEmits<{
@@ -177,40 +181,6 @@ function findSearchRanges(text: string, query: string): Array<[number, number]> 
   return ranges;
 }
 
-// Structured-filter highlight: match `name` only in its indexed role (see
-// utility/dungeonEditor/index.ts), never as a plain substring — the word
-// "actor" in prose must not match the `actor` action.
-function findStructuredRanges(text: string, kind: IndexCategory, name: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  if (!name) return ranges;
-  const esc = escapeRegex(name);
-  if (kind === 'anchor') {
-    const re = new RegExp(`(^|\\n)&${esc}(?!\\w)`, 'g');
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      const lead = m[1] ? 1 : 0;
-      ranges.push([m.index + lead, m.index + m[0].length]);
-    }
-    return ranges;
-  }
-  const keyRe = new RegExp(`(^|[{,\\s"'])${esc}(?=\\s*["']?\\s*:)`, 'g');
-  const wordRe = new RegExp(`(^|[^\\w.])${esc}(?![\\w.])`, 'g');
-  for (const [s, e] of findBalancedBraces(text)) {
-    // A range starting off `{` was pulled back over a condition keyword —
-    // condition braces hold flag checks, never actions.
-    if (kind === 'action' && text[s] !== '{') continue;
-    const re = kind === 'action' ? keyRe : wordRe;
-    const seg = text.slice(s, e);
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(seg)) !== null) {
-      const start = s + m.index + m[1].length;
-      ranges.push([start, start + name.length]);
-    }
-  }
-  return ranges;
-}
-
 function findEmphasisRanges(text: string): { double: Array<[number, number]>; single: Array<[number, number]> } {
   const double: Array<[number, number]> = [];
   const single: Array<[number, number]> = [];
@@ -280,6 +250,7 @@ const STYLE_ALTERED = `color:#c95500;${FAUX_BOLD}`;
 // Lint marks are paint-only (underline + tint) so glyph metrics stay identical
 // to the textarea's.
 const STYLE_ISSUE = 'text-decoration:underline wavy #d32f2f;text-decoration-skip-ink:none;background:rgba(211,47,47,0.14)';
+const STYLE_WARNING = 'text-decoration:underline wavy #d99a00;text-decoration-skip-ink:none;background:rgba(232,165,0,0.16)';
 
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -288,7 +259,7 @@ function escHtml(s: string): string {
 function renderOverlay(
   text: string,
   hls: Highlight[],
-  issues: Array<[number, number]>,
+  issues: IssueRange[],
   flash: [number, number] | null,
 ): string {
   if (!text) return '';
@@ -297,15 +268,21 @@ function renderOverlay(
   const emStyle: Array<string | null> = new Array(len).fill(null);
   const strongStyle: Array<string | null> = new Array(len).fill(null);
   const hlBg: Array<string | null> = new Array(len).fill(null);
-  // 0 = plain, 1 = lint issue, 2 = lint issue being revealed (gets the flash class).
+  // 0 = plain, 1 = lint error, 2 = lint warning; an error wins where the two overlap. The issue
+  // being revealed also flashes, in its own severity's color (an error's where it has none).
   const issueMark = new Uint8Array(len);
-  for (const [s, e] of issues) {
+  const flashMark = new Uint8Array(len);
+  for (const [s, e, sev] of issues) {
     const last = Math.min(e, len);
-    for (let i = Math.max(s, 0); i < last; i++) issueMark[i] = 1;
+    const mark = sev === 'warning' ? 2 : 1;
+    for (let i = Math.max(s, 0); i < last; i++) if (issueMark[i] !== 1) issueMark[i] = mark;
   }
   if (flash) {
     const last = Math.min(flash[1], len);
-    for (let i = Math.max(flash[0], 0); i < last; i++) issueMark[i] = 2;
+    for (let i = Math.max(flash[0], 0); i < last; i++) {
+      flashMark[i] = 1;
+      if (!issueMark[i]) issueMark[i] = 1;
+    }
   }
 
   for (const r of hls) {
@@ -367,13 +344,15 @@ function renderOverlay(
     const sS = strongStyle[i];
     const h = hlBg[i];
     const im = issueMark[i];
+    const fm = flashMark[i];
     let j = i + 1;
     while (j < len
       && tokenStyle[j] === t
       && emStyle[j] === eS
       && strongStyle[j] === sS
       && hlBg[j] === h
-      && issueMark[j] === im) {
+      && issueMark[j] === im
+      && flashMark[j] === fm) {
       j++;
     }
     const chunk = escHtml(text.slice(i, j));
@@ -382,12 +361,12 @@ function renderOverlay(
     if (eS && !t) parts.push(eS);  // token color wins over emphasis color
     if (sS && !t) parts.push(sS);  // token bold wins; emph bold otherwise
     if (h) parts.push(`background-color:${h}`);
-    if (im) parts.push(STYLE_ISSUE);
+    if (im) parts.push(im === 2 ? STYLE_WARNING : STYLE_ISSUE);
     // Search chunks carry a real class so the popup's match counter and
     // prev/next navigation can find them via querySelectorAll('.at-search').
     const classes: string[] = [];
     if (t === STYLE_SEARCH) classes.push('at-search');
-    if (im === 2) classes.push('at-issue-flash');
+    if (fm) classes.push(im === 2 ? 'at-issue-flash at-issue-flash--warning' : 'at-issue-flash');
     const cls = classes.length ? ` class="${classes.join(' ')}"` : '';
     out += parts.length ? `<span${cls} style="${parts.join(';')}">${chunk}</span>` : chunk;
     i = j;
@@ -433,16 +412,16 @@ function commitState(newText: string, newHls: Highlight[]) {
 // incoming markup. Lazy: only evaluated while there are ranges to place.
 const removedSpans = computed(() => parseModelValue(lastEmitted.value).removed);
 
-const NO_RANGES: Array<[number, number]> = [];
-const innerIssueRanges = computed<Array<[number, number]>>(() => {
+const NO_RANGES: IssueRange[] = [];
+const innerIssueRanges = computed<IssueRange[]>(() => {
   const ranges = props.issueRanges;
   if (!ranges || ranges.length === 0) return NO_RANGES;
   const spans = removedSpans.value;
   const len = innerText.value.length;
-  return ranges.map(([s, e]) => {
+  return ranges.map(([s, e, sev]) => {
     const is = modelToInnerOffset(spans, s, len);
     const ie = Math.max(is + 1, modelToInnerOffset(spans, e, len));
-    return [is, ie] as [number, number];
+    return [is, ie, sev] as IssueRange;
   });
 });
 
@@ -569,6 +548,8 @@ function syncScroll() {
 // =====================================================================
 // Floating selection toolbar (manual highlight + bold/italic wrap)
 // =====================================================================
+
+useContentAssist(taRef, () => props.assist);
 
 const floatingRef = ref<HTMLElement | null>(null);
 const showToolbar = ref(false);
@@ -862,6 +843,16 @@ onBeforeUnmount(() => {
   0% { background-color: rgba(255, 82, 82, 0.8); }
   40% { background-color: rgba(255, 82, 82, 0.6); }
   100% { background-color: rgba(211, 47, 47, 0.14); }
+}
+
+.at-issue-flash--warning {
+  animation-name: at-issue-flash-warning;
+}
+
+@keyframes at-issue-flash-warning {
+  0% { background-color: rgba(255, 190, 40, 0.85); }
+  40% { background-color: rgba(255, 190, 40, 0.6); }
+  100% { background-color: rgba(232, 165, 0, 0.16); }
 }
 
 /* Floating selection toolbar — teleported to <body>, so styles must be

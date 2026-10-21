@@ -9,6 +9,10 @@ import './components/WaitButton.mjs';
 // The global map-turn counter (saved).
 game.registerState('turn', 0);
 
+// While true the clock stands still (saved): nothing advances it — room entry, {turn}, the service,
+// the Wait button — so no status ticks, no collectable regrows and turn_advanced never fires.
+game.registerState('freeze_timer', false);
+
 // ── Emitter ──
 
 // Emitter: turn_advanced
@@ -53,11 +57,12 @@ function tickStatuses(turns) {
 /**
  * Advance the clock: increment the turn counter, tick limited status durations on all
  * characters, re-run the discover scan (a status that just expired can change what the party
- * spots), and fire `turn_advanced`.
+ * spots), and fire `turn_advanced`. Does nothing while `freeze_timer` is on.
  * @param {number} [turns]
- * @returns {number} the new turn number
+ * @returns {number} the new turn number (the current one while frozen)
  */
 function advance(turns = 1) {
+    if (game.getState('freeze_timer')) return game.getState('turn') || 0;
     const amount = Math.max(1, Math.floor(Number(turns) || 1));
     const newTurn = (game.getState('turn') || 0) + amount;
     game.setState('turn', newTurn);
@@ -78,19 +83,29 @@ game.registerService('turns', {
 // ── Action ──
 
 // {turn: 1} / {turn: 5} — advance the clock from scene text (e.g. resting passes time).
-game.registerAction('turn', (/** @type {number} */ value) => {
-    advance(value);
+game.registerAction('turn', {
+    help: 'Advance the clock by that many turns.',
+    value: 'number',
+    examples: ['{turn: 5}'],
+    action: (/** @type {number} */ value) => {
+        advance(value);
+    },
 });
 
 // {timestamp: "last_rest"} — stamp the current turn into a flag (a dotted key stamps another
 // dungeon's flag). Pair it with _turns_since to make something come back after a wait.
-game.registerAction('timestamp', (/** @type {string} */ value) => {
-    const key = String(value).trim();
-    if (!key) {
-        console.error('[timestamp] expects a flag name');
-        return;
-    }
-    game.setFlag(key, game.getState('turn') || 0);
+game.registerAction('timestamp', {
+    help: 'Stamp the current turn into a flag, for _turns_since; a dotted key stamps another dungeon\'s flag.',
+    value: { ref: 'flag' },
+    examples: ['{timestamp: "last_rest"}', '{timestamp: "dungeon2.last_rest"}'],
+    action: (/** @type {string} */ value) => {
+        const key = String(value).trim();
+        if (!key) {
+            console.error('[timestamp] expects a flag name');
+            return;
+        }
+        game.setFlag(key, game.getState('turn') || 0);
+    },
 });
 
 // Condition: _turns_since(last_rest) — turns elapsed since that flag was stamped. A flag never
@@ -99,12 +114,14 @@ game.registerCondition('_turns_since', (/** @type {string} */ key) => {
     const stamp = Number(game.getFlag(String(key).trim())) || 0;
     if (!stamp) return Number.MAX_SAFE_INTEGER;
     return (game.getState('turn') || 0) - stamp;
-});
+}, { help: 'Turns since a flag was stamped; never stamped reads as forever.', args: [{ ref: 'flag' }], examples: ['_turns_since(last_rest) >= 5'] });
 
 // ── Room movement ──
 
-// Each room entry costs one turn.
+// Each room entry costs one turn, unless the game turned advance_on_room_enter off.
+// `=== false`: a game with no config file keeps room entries ticking.
 game.on('room_enter_after', () => {
+    if (game.getData('plugins_data/turn_system/config_turns')?.advance_on_room_enter === false) return;
     advance(1);
 });
 

@@ -120,9 +120,9 @@ Volume: |property(settings.volume)|%
 ### Actions
 
 ```js
-// String format (= set, > add, < subtract)
-{ property: "gold>100" }           // add 100 to gold
-{ property: "score=0, lives<1" }   // set score to 0, subtract 1 from lives
+// String format (= set, += add, -= subtract)
+{ property: "gold += 100" }              // add 100 to gold
+{ property: "score = 0, lives -= 1" }    // set score to 0, subtract 1 from lives
 
 // Object format (for setting complex values)
 { property: { settings: { volume: 80, theme: "dark" } } }
