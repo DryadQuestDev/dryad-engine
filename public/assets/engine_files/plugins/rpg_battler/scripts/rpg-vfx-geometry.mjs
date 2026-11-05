@@ -6,7 +6,7 @@
 // ── Battle layout ──
 // A slot's x/y put the body's centre at (50 + x)% of the viewport's width and (50 + y)% of its
 // height; `scale` is the body's height as a share of the viewport height (CharacterSlot scales the
-// body about its centre). The review server's arenas tab parses these names out of this file.
+// body about its centre).
 export const LAYOUT = {
   // Enemies: the front row stands on the floor line; each row farther back stacks upward and is
   // smaller by DEPTH_SCALE (size only).
@@ -70,6 +70,10 @@ export const SINGLE_HIT_MS = 400;
 // The attack lunge: toward the target by `reach` of the centre-to-centre distance in `out`
 // seconds, a `hold`, then back in `back` seconds. A melee impact plays at the end of `out`.
 export const LUNGE = { reach: 0.15, out: 0.2, hold: 0.5, back: 0.2 };
+// The cast gesture of a caster with no cast pose: rise by `lift` of its height while gathering for
+// `charge` seconds, push toward the target by `push` of its width in `release` (the effect goes off
+// at the end of it), then `settle` back.
+export const CAST_GESTURE = { lift: 0.035, push: 0.06, charge: 0.25, release: 0.09, settle: 0.22 };
 
 /**
  * On-screen px from a percentage of the viewport height (`fallback` when `pct` is unset), never

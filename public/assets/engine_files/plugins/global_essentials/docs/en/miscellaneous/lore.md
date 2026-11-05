@@ -25,6 +25,7 @@ A record is a single lore/tutorial entry. It has:
 | `auto_discovery` | If true, unlocked from game start. If false, must be discovered first (see Discovery below) |
 | `parent_record` | Makes the record an addendum to another record: it never appears on its own, and once discovered its text is appended to the parent's entry |
 | `character` | The character the record is about. Links the Encyclopedia entry and the character's Gallery page to each other (see Character Links below) |
+| `reveal` | Shown when `character` is set. `talk` discovers the record the first time that character speaks a line in a scene; `appear` the first time they are staged with `{actor}` or speak, whichever comes first |
 | `tags` | Free-form tags for searching/filtering |
 
 Records are authored in the editor under **Narrative > Records**.
@@ -102,6 +103,7 @@ A record is "discovered" if any of these is true:
 1. Its `auto_discovery` field is `true`.
 2. A `[[!id]]` link in some rendered text marked it discovered.
 3. A `{lore: id}` action ran (see below).
+4. Its `reveal` is `talk` and its `character` has spoken a line (`alice: “…”`) in a scene, or it is `appear` and the character has been staged or has spoken.
 
 Discovered records render their inline links and appear with full content in the Encyclopedia. Undiscovered records:
 
@@ -215,3 +217,5 @@ if (game.isCharacterInGallery('alice')) game.openGalleryForCharacter('alice');
 | Check discovery in a script | `game.isRecordDiscovered(id)` |
 | Auto-unlock from game start | Set `auto_discovery: true` on the record |
 | Link a record to a character's Gallery page | Set `character` on the record |
+| Discover a character's record when they first speak | Set `character` and `reveal: talk` |
+| Discover it when they first appear on stage or speak | Set `character` and `reveal: appear` |

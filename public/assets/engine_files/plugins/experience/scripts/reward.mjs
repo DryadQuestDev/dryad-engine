@@ -477,10 +477,6 @@ export function openRewardPopup() {
 
 // ── Loot grant — single point, on first-time defeat ──
 
-function priceOf(/** @type {any} */ template) {
-    return Object.values(template?.price || {})[0] || 0;
-}
-
 /** Whether a template may be GENERATED at `level` (spawn_min/spawn_max item traits; missing
  *  bounds are open-ended). Tiered-by-id items (small/medium/big potions) use this to gate where
  *  they appear; authored drop tables and inventories are never window-checked. */
@@ -499,63 +495,57 @@ export function isKnownRecipe(/** @type {any} */ template) {
     return !!recipeId && game.getLearnedRecipes().has(recipeId);
 }
 
-/** Spend a budget on items from `candidates` (mutates nothing; calls `grant` per pick).
- *  Each roll only shops with a random 40-100% of the budget; the reserve is returned unspent, so
- *  the caller's gold payout absorbs it — the same battle sometimes drops one big item, sometimes
- *  two mid ones, sometimes mostly gold. Slot 0 picks within the top price band (>= 75% of the
- *  best affordable price) instead of pinning the exact maximum; later slots floor-fill
- *  (minPrice = remaining / slotsLeft, relaxed when nothing clears the floor). Returns the
- *  unspent budget, reserve included. */
-function rollLootBudget(/** @type {number} */ budget, /** @type {any[]} */ candidates, /** @type {number} */ maxItems, /** @type {(template: any) => void} */ grant) {
-    let remaining = budget * (0.4 + 0.6 * Math.random());
-    let spent = 0;
-    for (let slot = 0; slot < maxItems; slot++) {
-        const affordable = candidates.filter(t => priceOf(t) <= remaining);
-        if (!affordable.length) break;
-        let pool;
-        if (slot === 0) {
-            const top = Math.max(...affordable.map(priceOf));
-            pool = affordable.filter(t => priceOf(t) >= top * 0.75);
-        } else {
-            const floor = remaining / (maxItems - slot);
-            const preferred = affordable.filter(t => priceOf(t) >= floor);
-            pool = preferred.length ? preferred : affordable;
+/** Draw a pool ref (pool_entries ids as an array or a comma-separated string) in chance mode at
+ *  `level`. Spawn windows and learned recipes are filtered out of the source first, so tiered items
+ *  only appear inside their band, and drawn currency quantities scale by the level. Returns what to
+ *  create; the caller creates the items, which scale to the generation or dungeon level. */
+export function drawPool(/** @type {string|string[]} */ poolRef, /** @type {number} */ level) {
+    const templates = game.getData('item_templates', true);
+    const source = [...(templates?.values() || [])].filter(t => inSpawnWindow(t, level) && !isKnownRecipe(t));
+    // Two authoring shapes reach here: the `pool` inventory trait is chooseMany (an array), while
+    // inline {loot: "^a,b"} refs arrive as the raw comma string the engine sliced off the caret.
+    const entryIds = (Array.isArray(poolRef) ? poolRef : String(poolRef || '').split(','))
+        .map(s => String(s).trim()).filter(Boolean);
+    const out = [];
+    for (const entryId of entryIds) {
+        for (const draw of game.drawFromPool(entryId, { type: 'chance', customData: source })) {
+            const template = templates?.get(draw.id);
+            if (!template) continue;
+            const quantity = template.is_currency
+                ? Math.max(1, Math.round(draw.quantity * dungeonScale(level)))
+                : draw.quantity;
+            out.push({ template, quantity });
         }
-        const pick = pool[Math.floor(Math.random() * pool.length)];
-        remaining -= priceOf(pick);
-        spent += priceOf(pick);
-        grant(pick);
     }
-    return budget - spent;
+    return out;
 }
 
-/** Grant a battle's defeat loot into the party inventory:
- *  1. The hand-authored drop table — the battle's loot inventory read as pure TEMPLATE data
- *     (never instantiated, so battle-loot inventories need no auto_create). Ignores threat.
- *  2. Equipment group — budget = BASE threat × loot_equipment_coef. Deliberately NOT level-scaled:
- *     candidates are priced at their level-1 baseline and the created instances scale their own
- *     stats/price to the dungeon level (item_create listener above) — a scaled budget would
- *     double-dip. The unspent remainder (price-point quantization, low spend-target rolls) flows
- *     into the income pot instead of evaporating — no battle pays less than its full budget.
- *  3. Income group — budget = EFFECTIVE threat × loot_income_coef (the only level-scaled budget;
- *     junk/currency values are static) + the equipment remainder. loot_gold_share of the pot is
- *     paid straight out as the currency item; the rest rolls items, and THAT remainder pays out
- *     1:1 as currency too.
- *  Both groups roll only whitelisted categories; currency, no_drop, test-tagged, and unpriced
- *  templates never drop. */
-/** @param {{inventory?: any, record?: boolean}} [opts] target override for the drop simulator */
-function grantLoot(/** @type {string} */ battleId, /** @type {number} */ baseThreat, /** @type {number} */ scaledThreat, opts = {}) {
-    const debug = { equipBudget: 0, incomeBudget: 0, currencyPayout: 0 };
+/** The pool a battle's reward draws: the `battle_loot_pools` band with the highest `min_threat` at
+ *  or below the battle's base threat. Null when no band applies. */
+export function battlePool(/** @type {number} */ baseThreat) {
+    let best = null;
+    for (const band of getConfig()?.battle_loot_pools || []) {
+        if (!band?.pool || (band.min_threat || 0) > baseThreat) continue;
+        if (!best || (band.min_threat || 0) > (best.min_threat || 0)) best = band;
+    }
+    return best?.pool || null;
+}
+
+/** Grant a battle's defeat loot into the party inventory: the hand-authored drop table (the
+ *  battle's loot inventory read as pure TEMPLATE data, so battle-loot inventories need no
+ *  auto_create), then a draw of the battle's threat-band pool at the dungeon level. */
+/** @param {{inventory?: any, record?: boolean, onGrant?: (template: any, quantity: number, source: 'authored'|'pool') => void}} [opts] target override for the drop simulator */
+function grantLoot(/** @type {string} */ battleId, /** @type {number} */ baseThreat, opts = {}) {
+    const pool = battlePool(baseThreat);
     const partyInventory = opts.inventory || game.getInventory('_party_inventory');
-    if (!partyInventory) return debug;
+    if (!partyInventory) return { pool };
     const itemTemplates = game.getData('item_templates', true);
 
-    let phase = 'authored';   // set per section below; reported to opts.onGrant for the simulator
-    const grant = (/** @type {any} */ template, /** @type {number} */ quantity = 1) => {
+    const grant = (/** @type {any} */ template, /** @type {number} */ quantity, /** @type {'authored'|'pool'} */ source) => {
         const item = game.createItem(template.id);
         if (!item) return;
         partyInventory.addItem(item, quantity);
-        opts.onGrant?.(template, quantity, phase);
+        opts.onGrant?.(template, quantity, source);
         if (opts.record === false) return;   // dry run: no reward panel entry
         recordItem({ id: template.id, name: template.traits?.name || template.id, image: template.traits?.image || '' }, quantity);
     };
@@ -566,57 +556,24 @@ function grantLoot(/** @type {string} */ battleId, /** @type {number} */ baseThr
         if (!entry?.item_id) continue;
         const template = itemTemplates?.get(entry.item_id);
         if (!template) continue;
-        grant(template, entry.quantity || 1);
+        grant(template, entry.quantity || 1, 'authored');
     }
 
-    const config = getConfig();
-    const maxItems = config?.loot_max_items || 3;
-    const level = getDungeonLevel();
-    // `quest` rarity means never-generated, matching what pool entries already exclude — otherwise a
-    // quest consumable in a whitelisted category (they usually are) becomes an ordinary enemy drop,
-    // and every game has to remember to pair the rarity with no_drop by hand on every such item.
-    const eligible = [...(itemTemplates?.values() || [])].filter(t =>
-        priceOf(t) > 0 && !t.is_currency && !t.traits?.no_drop && !t.tags?.includes('test')
-        && t.traits?.rarity !== 'quest'
-        && inSpawnWindow(t, level) && !isKnownRecipe(t));
-
-    phase = 'equipment';
-    const equipBudget = Math.round(baseThreat * (config?.loot_equipment_coef || 0));
-    debug.equipBudget = equipBudget;
-    let equipRemainder = 0;
-    if (equipBudget > 0) {
-        const categories = equipmentCategories();
-        equipRemainder = rollLootBudget(equipBudget, eligible.filter(t => categories.includes(t.category)), maxItems, grant);
+    if (pool) {
+        for (const { template, quantity } of drawPool(pool, getDungeonLevel())) grant(template, quantity, 'pool');
     }
-
-    phase = 'income';
-    const incomeBudget = Math.round(scaledThreat * (config?.loot_income_coef || 0)) + equipRemainder;
-    debug.incomeBudget = incomeBudget;
-    if (incomeBudget > 0) {
-        const goldShare = Math.min(1, Math.max(0, config?.loot_gold_share || 0));
-        const goldReserve = incomeBudget * goldShare;
-        const categories = config?.loot_income_categories || [];
-        const remaining = rollLootBudget(incomeBudget - goldReserve, eligible.filter(t => categories.includes(t.category)), maxItems, grant);
-        const currencyTemplate = config?.loot_currency_item ? itemTemplates?.get(config.loot_currency_item) : null;
-        const payout = Math.round(goldReserve + remaining);
-        phase = 'currency';
-        if (currencyTemplate && payout > 0) {
-            grant(currencyTemplate, payout);
-            debug.currencyPayout = payout;
-        }
-    }
-    return debug;
+    return { pool };
 }
 
 /**
  * Roll battle loot exactly as a victory would, into a throwaway inventory.
  * Reuses grantLoot itself, so the simulator can never drift from what the game actually grants.
  * @param {{level: number, threat: number, rolls?: number, battleId?: string}} opts
- * @returns {{level: number, threat: number, rolls: string[][], budgets: any}}
+ * @returns {{level: number, threat: number, rolls: any[][], pool: string|null}}
  */
 export function simulateBattleLoot({ level, threat, rolls = 20, battleId = '__sim' }) {
     const out = [];
-    let budgets = null;
+    let pool = null;
     setSimulatedLevel(level);
     try {
         for (let n = 0; n < rolls; n++) {
@@ -624,8 +581,8 @@ export function simulateBattleLoot({ level, threat, rolls = 20, battleId = '__si
             if (game.getInventory(invId)) game.itemSystem.removeInventory(invId);
             const inv = game.createInventory(invId);
             const source = {};
-            budgets = grantLoot(battleId, threat, threat * dungeonScale(level),
-                { inventory: inv, record: false, onGrant: (t, _q, phase) => { source[t.id] ??= phase; } });
+            ({ pool } = grantLoot(battleId, threat,
+                { inventory: inv, record: false, onGrant: (t, _q, from) => { source[t.id] ??= from; } }));
             out.push(inv.items.map(i => ({ id: i.id, quantity: i.quantity || 1,
                                            price: Object.values(i.price || {})[0] || 0,
                                            itemLevel: i.traits?.item_level,
@@ -635,7 +592,7 @@ export function simulateBattleLoot({ level, threat, rolls = 20, battleId = '__si
     } finally {
         setSimulatedLevel(null);
     }
-    return { level, threat, rolls: out, budgets };
+    return { level, threat, rolls: out, pool };
 }
 
 // Games hook their own economics in here (e.g. refunding a resource on fight victories):
@@ -676,7 +633,7 @@ if (game.hasPlugin('rpg_battler')) {
         const base = rpgBattle()?.getThreat?.(battleId) || 0;
         const level = getDungeonLevel();
         const threat = base * dungeonScale(level);
-        const lootDebug = grantLoot(battleId, base, threat);
+        const lootDebug = grantLoot(battleId, base);
         const threatXp = grantThreatXp(threat);
         if (game.isDevMode()) {
             setPending({

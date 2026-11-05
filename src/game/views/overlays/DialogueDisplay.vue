@@ -128,13 +128,13 @@ onBeforeUnmount(() => { segments = []; links = []; arrowEl = null; });
 <template>
   <div class="dialogue-stack" :class="{ selecting: selectable }">
     <div class="dialogue-content event-content dialogue-ghost" :style="contentStyle" aria-hidden="true">
-      <span v-if="showInlineName" class="inline-character-name" :style="nameStyle">{{ speakerPrefix }}</span>
+      <span v-if="showInlineName" class="inline-character-name notranslate" :style="nameStyle">{{ speakerPrefix }}</span>
       <span v-script="{ html: content, resolver: false, disabled: true }" style="display:inline"></span><span>{{ ARROW }}</span>
     </div>
 
     <div class="dialogue-live is-overlay">
       <div class="dialogue-content event-content" :style="contentStyle">
-        <span v-if="showInlineName" class="inline-character-name" :style="nameStyle">{{ speakerPrefix }}</span>
+        <span v-if="showInlineName" class="inline-character-name notranslate" :style="nameStyle">{{ speakerPrefix }}</span>
         <span ref="liveEl" v-script="{ html: null }" style="display:inline"></span>
       </div>
     </div>

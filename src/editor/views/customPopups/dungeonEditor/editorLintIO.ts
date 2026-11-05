@@ -31,6 +31,18 @@ export function editorLintIO(editor: Editor): LintIO {
       }
       return null;
     },
+    dungeonLayerTexts: async (id) => {
+      const texts: string[] = [];
+      for (const layer of [...layers].reverse()) {
+        const path = dungeonFile(layer, id, 'content_raw.txt');
+        try {
+          if (!await global.pathExists(path)) continue;
+          const text = await global.readText(path);
+          if (text) texts.push(text);
+        } catch { /* not in this layer */ }
+      }
+      return texts;
+    },
     dungeonRooms: async (id) => {
       const byId = new Map<string, any>();
       for (const layer of [...layers].reverse()) {

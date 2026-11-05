@@ -14,6 +14,7 @@ import {
   type Highlight, type HighlightColor,
 } from './highlightMarkup';
 import { RESERVED_TEXT_TAGS, TEXT_TAG_REGEX_SOURCE } from '../../../../utility/textTags';
+import { isCommentLine, stripCodeBlocks } from '../../../../utility/dungeonEditor/comments';
 
 const editorSettings = useStorage<{ autoCurlyQuotes?: boolean; autoEnDash?: boolean }>('dungeonEditor_settings', {});
 
@@ -165,6 +166,30 @@ function findCommentRanges(text: string): Array<[number, number]> {
   return ranges;
 }
 
+/**
+ * `id:` / `id!:` opening the first line a paragraph shows: its speaker, read as the checks read it.
+ * Comment lines drop out without breaking the paragraph; anchors, choices, row numbers and
+ * action-only lines are passed over.
+ */
+function findSpeakerRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let atParagraphStart = true;
+  let offset = 0;
+  for (const line of stripCodeBlocks(text).split('\n')) {
+    const t = line.trim();
+    if (isCommentLine(line)) { /* dropped */ }
+    else if (!t) atParagraphStart = true;
+    else if (t.startsWith('&') || t.startsWith('>') || /^\d+$/.test(t) || (t.startsWith('{') && t.endsWith('}'))) { /* not prose */ }
+    else if (atParagraphStart) {
+      atParagraphStart = false;
+      const m = /^(\w+)!?:(?=\s)/.exec(line);
+      if (m && !/^\d+$/.test(m[1])) ranges.push([offset, offset + m[0].length]);
+    }
+    offset += line.length + 1;
+  }
+  return ranges;
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -225,7 +250,7 @@ function findStateRanges(text: string): { altered: Array<[number, number]>; init
 // Per-token visual style strings (paint into the overlay).
 //
 // IMPORTANT: paint-only properties here (color, background, text-shadow,
-// text-decoration). Anything that changes the font — `font-style`,
+// box-shadow, border-radius, text-decoration). Anything that changes the font — `font-style`,
 // `font-weight`, `font-variant`… — starts a new shaping run in the overlay,
 // while the textarea shapes the line as one run. Kerning and contextual
 // alternates then differ at the boundary (Inter swaps `*` for the 2px wider
@@ -244,6 +269,9 @@ const STYLE_PLACEHOLDER = `color:var(--editor-ink-green);${FAUX_BOLD}`;
 const STYLE_RECORD = `color:var(--editor-ink-blue);${FAUX_BOLD}`;
 const STYLE_COMMENT = 'color:var(--editor-text-faint)';
 const STYLE_CHOICE = `color:var(--editor-ink-red);${FAUX_BOLD}`;
+// A name tag: a tinted chip, padded by a spread shadow so no glyph moves.
+const SPEAKER_TINT = 'color-mix(in srgb, var(--editor-ink-pink) 14%, transparent)';
+const STYLE_SPEAKER = `color:var(--editor-ink-pink);background:${SPEAKER_TINT};box-shadow:0 0 0 2px ${SPEAKER_TINT};border-radius:3px;${FAUX_BOLD}`;
 const STYLE_SEARCH = 'background:#fff59d;color:#000';
 const STYLE_INITIAL = `color:#a100ff;${FAUX_BOLD}`;
 const STYLE_ALTERED = `color:#c95500;${FAUX_BOLD}`;
@@ -313,6 +341,7 @@ function renderOverlay(
   setTok(STYLE_PLACEHOLDER, findPlaceholderRanges(text));
   setTok(STYLE_RECORD, findRecordRanges(text));
   setTok(STYLE_COMMENT, findCommentRanges(text));
+  setTok(STYLE_SPEAKER, findSpeakerRanges(text));
 
   const sq = dungeonSearchQuery.value.trim();
   if (sq) setTok(STYLE_SEARCH, findSearchRanges(text, sq));

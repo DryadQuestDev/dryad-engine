@@ -11,6 +11,8 @@ export const RpgHealthOverlay = defineComponent({
       if (!props.character) return 0;
       /** @type {Character} */
       const character = props.character;
+      // No health at all is not a combatant (a game whose cast never fights): nothing was lost.
+      if (!(character.getStat('health') > 0)) return 0;
       const ratio = character.getResourceRatio('health');
       return Math.max(0, 1 - ratio);
     });

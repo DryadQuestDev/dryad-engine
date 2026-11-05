@@ -24,16 +24,22 @@ import DebugOptions from '../views/debug_containers/DebugOptions.vue';
 import DebugDungeons from '../views/debug_containers/DebugDungeons.vue';
 import DebugCharacters from '../views/debug_containers/DebugCharacters.vue';
 import DebugChoices from '../views/debug_containers/DebugChoices.vue';
-import DebugActions from '../views/debug_containers/DebugActions.vue';
+import DebugConsole from '../views/debug_containers/DebugConsole.vue';
 import DebugRegistry from '../views/debug_containers/DebugRegistry.vue';
 import DebugInventories from '../views/debug_containers/DebugInventories.vue';
+import DebugQuests from '../views/debug_containers/DebugQuests.vue';
 import DebugStores from '../views/debug_containers/DebugStores.vue';
 import DebugProperties from '../views/debug_containers/DebugProperties.vue';
 import DebugActors from '../views/debug_containers/DebugActors.vue';
+import DebugScene from '../views/debug_containers/DebugScene.vue';
+import DebugVariables from '../views/debug_containers/DebugVariables.vue';
+import DebugLog from '../views/debug_containers/DebugLog.vue';
+import DebugProblems from '../views/debug_containers/DebugProblems.vue';
 import OverlayNavigation from '../views/overlays/OverlayNavigation.vue';
 import OverlayExchange from '../views/overlays/OverlayExchange.vue';
 import DropItemPopup from '../views/popups/DropItemPopup.vue';
 import ChooseItemPopup from '../views/popups/ChooseItemPopup.vue';
+import ReadablePopup from '../views/popups/ReadablePopup.vue';
 import BackComponent from '../views/navigation-toolbar/Back.vue';
 import EncounterNavComponent from '../views/navigation-toolbar/EncounterNav.vue';
 import DungeonNameComponent from '../views/navigation-toolbar/DungeonName.vue';
@@ -43,6 +49,7 @@ import CenterRoomComponent from '../views/navigation-toolbar/CenterRoom.vue';
 import MinimizeToolbarComponent from '../views/navigation-toolbar/MinimizeToolbar.vue';
 import LogsButtonComponent from '../views/navigation-toolbar/LogsButton.vue';
 import CharacterListComponent from '../views/ui-container/CharacterList.vue';
+import ScenePointLookButton from '../views/ScenePointLookButton.vue';
 import { PARTY_INVENTORY_ID } from './itemSystem';
 import { Item } from '../core/character/item';
 import { ItemSlot } from '../core/character/itemSlot';
@@ -88,10 +95,13 @@ export const CORE_EMITTER_SIGNATURES = {
     "room_enter_before": (roomId: string, dungeonId: string, fromRoomId: string, fromDungeonId: string): boolean | void => { },
     "room_enter_after": (roomId: string, dungeonId: string, fromRoomId: string, fromDungeonId: string): boolean | void => { },
     "encounter_selected": (encounterId: string, dungeonId: string): boolean | void => { }, // an encounter was selected — clicked on the map / screen, or cycled to with the toolbar. Props never fire. Return false to block the selection.
+    // a scene point was clicked: the choice bound to it is about to run (and the frame to zoom toward it).
+    // Return false to refuse the pick: nothing runs.
+    "scene_point_pick": (layoutId: string, pointId: string, choice: Choice): boolean | void => { },
     "encounter_discovered": (encounterId: string, dungeonId: string): boolean | void => { }, // a hidden `@x{discover: "perception#6"}` encounter was revealed; fires once, on the room entry that reveals it.
     "encounter_collected": (encounterId: string, itemSpec: string, dungeonId: string): boolean | void => { }, // a collectable encounter was collected. Regrow needs no listener — time plugins call game.tickCollectables instead.
     "collectable_resolve": (request: { dungeonId: string, encounterId: string, pool: string, itemId: string | null }): boolean | void => { }, // a collectable with a collect_pool asks for its item during dungeon creation (so also on save load). A listener claims the request by setting request.itemId to an item template id; listeners must skip requests already carrying one. An unanswered request degrades the encounter to a plain one with a logged error.
-    "item_discovered": (itemId: string): boolean | void => { }, // an item was discovered (recipe learned from its scroll, book read to the last page, painting viewed). Fires once per item per save; drives the item-card check mark.
+    "item_discovered": (itemId: string): boolean | void => { }, // an item was discovered (recipe learned from its scroll, readable opened (a Scene one: read to its last page), painting viewed). Fires once per item per save; drives the item-card check mark.
     "key_used": (keyItemId: string, targetId: string): boolean | void => { }, // a key was auto-used on a locked room or inventory. targetId is "dungeonId.roomId" for rooms, the inventory id for chests. Informational — the unlock already happened.
     // `anchor` is the &name the line was reached by — '' for a plain scene root — so a listener can
     // tell a branch apart without resolving the raw line id.
@@ -169,11 +179,12 @@ export const CORE_EMITTER_SIGNATURES = {
     // those UIs checks alongside this.
     // Pure predicate: it runs on every render, so listeners must only return, never act.
     "item_discard_render": (item: Item, character?: Character): boolean | void => { },
-    // Fired while an item card compares an unequipped item against the slots it fits
-    // (Character.compareItem), once per slot. `stats` holds per-unit COPIES of both items' stats —
-    // rewrite keys there when a game renames an item's stats on equip, so the two sides line up.
-    // Pure: it runs on every render, so listeners may only edit the copies.
-    "item_compare": (item: Item, equipped: Item | null, slot: ItemSlot, character: Character, stats: { item: Record<string, number>; equipped: Record<string, number> }): boolean | void => { },
+    // Fired whenever the engine works out the stats an item grants (Game.getItemStats): when it is
+    // equipped, on its item card, and for both sides of a comparison. `stats` is a COPY of the
+    // item's own stats — rewrite it to make them depend on where the item sits. `slot` and
+    // `character` are where it sits (or would sit), both null for a loose item.
+    // Pure: it runs on every render, so listeners may only edit the copy.
+    "item_stats": (item: Item, stats: Record<string, number>, slot: ItemSlot | null, character: Character | null): boolean | void => { },
     //"item_destroy": (item: Item): boolean | void => { },
     "item_equip_before": (item: Item, character: Character): boolean | void => { },
     "item_equip_after": (item: Item, character: Character): boolean | void => { },
@@ -182,7 +193,7 @@ export const CORE_EMITTER_SIGNATURES = {
     "item_consume_before": (item: Item, character: Character): boolean | void => { },
     "item_consume_after": (item: Item, character: Character): boolean | void => { },
     // "item_pickup": (item: Item, character: Character): boolean | void => { },
-    "inventory_open": (inventory: Inventory): boolean | void => { },
+    "inventory_open": (inventory: Inventory, mode: 'loot' | 'trade'): boolean | void => { },
     "inventory_close": (inventory: Inventory): boolean | void => { },
     "inventory_apply": (inventory: Inventory): boolean | void => { },
     "inventory_transfer": (inventory: Inventory, targetInventory: Inventory, item: Item, quantity: number, isTrade: boolean): boolean | void => { },
@@ -370,6 +381,7 @@ export class InitSystem {
         this.game.registerState('active_inventory', null);
         this.game.registerState('active_item', null);
         this.game.registerState('viewed_item', null); // uid shown by the item_view action, cleared on event_end
+        this.game.registerState('inspect', null); // scene point layout in force + zoom ({inspect}, {zoom}), cleared on event_end
         this.game.registerState('popup_state', []);
         this.game.registerState('overlay_state', 'overlay-navigation');
         this.game.registerState('previous_overlay_state', null);
@@ -408,22 +420,6 @@ export class InitSystem {
     /**
      * Register all core event emitters
      */
-    // Open a book page: update the reading state + bookmark, then play the page's scene.
-    // The last page (no following paragraph line) discovers the item and clears the bookmark.
-    private playBookPage(itemId: string, dungeonId: string, base: string, page: number): void {
-        this.game.setState('reading_book', { itemId, dungeonId, base, page });
-        const bookmarks = { ...((this.game.getState('book_bookmarks') || {}) as Record<string, number>) };
-        const nextPageExists = !!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.${page + 1}`);
-        if (nextPageExists) {
-            bookmarks[itemId] = page;
-        } else {
-            delete bookmarks[itemId];
-            this.game.itemSystem.discoverItem(itemId);
-        }
-        this.game.setState('book_bookmarks', bookmarks);
-        this.game.dungeonSystem.playSceneResolver(`${base}.1.1.${page}`, dungeonId);
-    }
-
     private registerEmitters(): void {
         const coreEmitters = Object.keys(CORE_EMITTER_SIGNATURES) as string[];
         for (const emitterName of coreEmitters) {
@@ -501,6 +497,15 @@ export class InitSystem {
             id: 'choose_item_popup',
             slot: 'popup',
             component: ChooseItemPopup
+        });
+
+        // Reader for Book and Scroll readables (itemSystem.readItem). It has no panel of its own, so a
+        // deeper mask keeps the game UI behind its title and page count out of the way.
+        this.game.coreSystem.addComponent({
+            id: 'readable_popup',
+            slot: 'popup',
+            component: ReadablePopup,
+            mask: 'rgba(0, 0, 0, 0.85)'
         });
     }
 
@@ -592,84 +597,26 @@ export class InitSystem {
     private registerDebugComponents(): void {
         const global = Global.getInstance();
 
-        this.game.coreSystem.addComponent({
-            id: 'debug-options',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.options'),
-            component: DebugOptions,
-            order: 1
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-dungeons',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.dungeons'),
-            component: DebugDungeons,
-            order: 2
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-characters',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.characters'),
-            component: DebugCharacters,
-            order: 3
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-choices',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.choices'),
-            component: DebugChoices,
-            order: 4
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-actions',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.actions'),
-            component: DebugActions,
-            order: 5
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-registry',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.registry'),
-            component: DebugRegistry,
-            order: 5
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-inventories',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.inventories'),
-            component: DebugInventories,
-            order: 6
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-stores',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.stores'),
-            component: DebugStores,
-            order: 7
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-properties',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.properties'),
-            component: DebugProperties,
-            order: 8
-        });
-
-        this.game.coreSystem.addComponent({
-            id: 'debug-actors',
-            slot: 'debug-tabs',
-            title: global.getString('debug.tab.actors'),
-            component: DebugActors,
-            order: 9
+        // Ordered by task: what is happening now first, the world next, tools and settings last.
+        const tabs: [string, string, any][] = [
+            ['debug-scene', 'debug.tab.scene', DebugScene],
+            ['debug-variables', 'debug.tab.variables', DebugVariables],
+            ['debug-log', 'debug.tab.log', DebugLog],
+            ['debug-problems', 'debug.tab.problems', DebugProblems],
+            ['debug-console', 'debug.tab.console', DebugConsole],
+            ['debug-choices', 'debug.tab.choices', DebugChoices],
+            ['debug-characters', 'debug.tab.characters', DebugCharacters],
+            ['debug-inventories', 'debug.tab.inventories', DebugInventories],
+            ['debug-quests', 'debug.tab.quests', DebugQuests],
+            ['debug-actors', 'debug.tab.actors', DebugActors],
+            ['debug-dungeons', 'debug.tab.dungeons', DebugDungeons],
+            ['debug-stores', 'debug.tab.stores', DebugStores],
+            ['debug-properties', 'debug.tab.properties', DebugProperties],
+            ['debug-registry', 'debug.tab.registry', DebugRegistry],
+            ['debug-options', 'debug.tab.options', DebugOptions],
+        ];
+        tabs.forEach(([id, title, component], i) => {
+            this.game.coreSystem.addComponent({ id, slot: 'debug-tabs', title: global.getString(title), component, order: i + 1 });
         });
     }
 
@@ -747,6 +694,15 @@ export class InitSystem {
             component: CharacterListComponent,
             order: 1
         });
+
+        // Scene points: the Look around button of a look_button layout. Late in the stack, so a game's own
+        // top-middle widgets keep their place when it appears.
+        this.game.coreSystem.addComponent({
+            id: 'scene-look-around',
+            slot: 'ui-top-center',
+            component: ScenePointLookButton,
+            order: 100
+        });
     }
 
     // ============================================
@@ -809,9 +765,9 @@ export class InitSystem {
             return this.game.getState('chosen_item_id') === param;
         }, { help: 'Whether the last item pick was this item.', args: [{ ref: 'item_templates' }], examples: ['_chosen_item(rusty_key) = true'] });
 
-        // Usage: _in_party(ane) = true — whether a character is currently in the party.
-        // A companion's own optional line is the `ane!:` speaker tag (resolveTalkingCharacter);
-        // this condition covers everything else, e.g. a line that plays only when Ane is away.
+        // Usage: _in_party(alice) = true — whether a character is currently in the party.
+        // A companion's own optional line is the `alice!:` speaker tag (resolveTalkingCharacter);
+        // this condition covers everything else, e.g. a line that plays only when Alice is away.
         this.game.registerCondition("_in_party", (charId: string) => {
             return this.game.getParty().some(c => c.id === String(charId ?? '').trim());
         }, { help: 'Whether a character is in the party.', args: [CHARACTER], examples: ['_in_party(alice) = true'] });
@@ -1453,6 +1409,29 @@ export class InitSystem {
             }
         });
 
+        // Scene points: a layout from the scene_points data, its points drawn as markers for the choices bound to them.
+        this.game.registerAction("inspect", {
+            help: 'Switch a scene point layout on: choices with {point} are drawn on the picture at their points. Back on its menu, it zooms the picture out again. false switches it off.',
+            value: { oneOf: [{ ref: 'scene_points' }, 'boolean'] },
+            examples: ['{inspect: "wren_study"}', '{inspect: false}'],
+            action: (value: unknown) => this.game.scenePointSystem.inspect(value),
+        });
+        this.game.registerAction("point", {
+            help: 'On a choice: draw it on the picture at this point of the layout {inspect} switched on, instead of in the menu. Picking it zooms the picture toward the point.',
+            value: 'text',
+            examples: ['~Look at the desk{point: "desk", scene: "&look_desk"}'],
+            action: (pointId: unknown) => { this.game.scenePointSystem.zoomTo(String(pointId)); },
+        });
+        this.game.registerAction("zoom", {
+            help: 'Zoom the picture toward a point of the layout in force, or back out (false).',
+            value: { oneOf: ['text', 'boolean'] },
+            examples: ['{zoom: "desk"}', '{zoom: false}'],
+            action: (value: unknown) => {
+                if (value === false || value === 'false') this.game.scenePointSystem.zoomOut();
+                else this.game.scenePointSystem.zoomTo(String(value));
+            },
+        });
+
         this.game.registerAction("asset", {
             help: 'Stage, update or remove assets. false removes all, clear keeps the backdrop, reset re-stages the defaults.',
             value: { oneOf: [{ list: { ref: 'assets', remove: true, props: true }, words: ['false', 'clear', 'reset'] }, { fields: { id: { ref: 'assets' } } }, 'boolean'] },
@@ -1563,9 +1542,9 @@ export class InitSystem {
         // The same thing rides in actor props as `anim=` ("chimera(anim=lunge)"). Not saved and not
         // re-run on load — a lunge happens once, when its paragraph plays.
         this.game.registerAction("animate", {
-            help: 'Play a one-shot actor animation.',
-            value: { list: { pair: [CHARACTER, { ref: 'actor_animations', props: ['intensity', 'duration'] }], sep: ' ' } },
-            examples: ['{animate: "chimera lunge"}', '{animate: "chimera lunge, mc recoil(intensity=1.3)"}'],
+            help: 'Play a one-shot actor animation. facing aims lunge, recoil and hurt at a character on stage (or left / right): a lunge goes toward it, a recoil away from it.',
+            value: { list: { pair: [CHARACTER, { ref: 'actor_animations', props: ['intensity', 'duration', 'facing'] }], sep: ' ' } },
+            examples: ['{animate: "chimera lunge"}', '{animate: "chimera lunge, mc recoil(intensity=1.3)"}', '{animate: "mc lunge(facing=bram), bram hurt(facing=mc)"}'],
             action: (data: string) => {
                 for (const spec of this.game.logicSystem.getParts(String(data ?? ''))) {
                     const m = spec.trim().match(/^([\w-]+)\s+([\w-]+)\s*(?:\(([^)]*)\))?$/);
@@ -1579,7 +1558,7 @@ export class InitSystem {
                         continue;
                     }
                     const props: Record<string, any> = propsString ? this.game.dungeonSystem.parseInlineProperties(propsString) : {};
-                    this.game.dungeonSystem.playActorAnim(charId, anim, { duration: props.duration, intensity: props.intensity });
+                    this.game.dungeonSystem.playActorAnim(charId, anim, { duration: props.duration, intensity: props.intensity, facing: props.facing != null ? String(props.facing) : undefined });
                 }
             }
         });
@@ -2225,9 +2204,9 @@ export class InitSystem {
         });
 
         // Shortcuts for the char action with the type segment implied.
-        // Usage: attr: "ane.face = hurt" ≡ char: "ane.attribute.face = hurt"
+        // Usage: attr: "alice.face = hurt" ≡ char: "alice.attribute.face = hurt"
         const charShortcuts: Record<string, { type: keyof typeof CHAR_KEYS; help: string; examples: string[] }> = {
-            attr: { type: 'attribute', help: 'Set attributes; a skin layer takes true or false.', examples: ['{attr: "ane.face = hurt"}', '{attr: "mc.wings = true"}'] },
+            attr: { type: 'attribute', help: 'Set attributes; a skin layer takes true or false.', examples: ['{attr: "alice.face = hurt"}', '{attr: "alice.cape = true"}'] },
             trait: { type: 'trait', help: 'Set traits.', examples: ['{trait: "alice.name = Alice"}'] },
             stat: { type: 'stat', help: 'Change stats.', examples: ['{stat: "alice.strength += 5"}'] },
             resource: { type: 'resource', help: 'Change resources.', examples: ['{resource: "alice.health -= 10"}'] },
@@ -2410,6 +2389,18 @@ export class InitSystem {
                 .map(id => templateFromId ? { id, template: this.game.characterSystem.instancesMap.get(id)?.template ?? id } : { id });
         }
         return [data || {}];
+    }
+
+    /**
+     * Badge a choice that opens a window: its glyph before the label (style.css `.loot-icon`,
+     * `.trade-icon`, `.choose-item-icon`) and `<kind>-choice` on the row. Same shape as
+     * rpg_battler's fight badge, so a game styles all of them alike.
+     */
+    private badgeChoice(choice: Choice, kind: 'loot' | 'trade' | 'choose-item'): void {
+        const label = choice.nameComputed;
+        choice.nameComputed = computed(() =>
+            `<span class="${kind}-badge"><span class="${kind}-icon"></span></span> ${label ? label.value : choice.name}`);
+        choice.className = `${kind}-choice`;
     }
 
     /**
@@ -2747,6 +2738,7 @@ export class InitSystem {
             value: { oneOf: [{ ref: 'item_categories', words: ['all'] }, { fields: { category: { ref: 'item_categories' }, remove: 'boolean', scene: 'scene' } }, 'boolean'] },
             examples: ['{choose_item: "all"}', '{choose_item: "keys"}', '{choose_item: {tags: ["herb"], remove: true, scene: "fed"}}'],
             eventDelayed: true,
+            choiceModifier: (choice: Choice) => this.badgeChoice(choice, 'choose-item'),
             action: (value: string | { id?: string | string[]; category?: string | string[]; tags?: string | string[]; remove?: boolean; scene?: string; title?: string }) => {
                 let pending: Record<string, any>;
                 if (typeof value === 'string' || value === true as any) {
@@ -2761,11 +2753,13 @@ export class InitSystem {
             },
         });
 
-        // ── Books & paintings ──
-        // A book item (trait `book` = scene id in the global dungeon, e.g. "books.eilfiel") reads
-        // through the scene system: paragraphs are pages, choices are Next/Previous/Read again/
-        // Close (created in dungeonSystem.createBookChoices while reading_book is set). Bookmarks
-        // persist per item; finishing the last page discovers the item and clears the bookmark.
+        // ── Readables & paintings ──
+        // An item's `readable` field opens its text (itemSystem.readItem). Book and Scroll show a
+        // $template in the readable_popup (reading_item = { id, uid }). A Scene reads through the
+        // scene system: paragraphs are pages, choices are Next/Previous/Read again/Close (created in
+        // dungeonSystem.createBookChoices while reading_book is set). Scene bookmarks persist per
+        // item; finishing the last page discovers the item and clears the bookmark.
+        this.game.registerState('reading_item', null);
         this.game.registerState('reading_book', null);
         this.game.registerState('book_bookmarks', {});
 
@@ -2780,49 +2774,38 @@ export class InitSystem {
             return null;
         };
 
-        this.game.registerAction("read_book", {
-            help: 'Open the book reader for the active item or a book item.',
+        this.game.registerAction("read_item", {
+            help: 'Open a readable item: the active item, or an item by id (it need not be carried).',
             value: { oneOf: [{ ref: 'item_templates' }, 'boolean'] },
-            examples: ['{read_book: true}', '{read_book: "old_diary"}'],
+            examples: ['{read_item: true}', '{read_item: "old_diary"}'],
             action: (value: any) => {
+                if (typeof value === 'string') {
+                    this.game.itemSystem.readItem(value);
+                    return;
+                }
                 const item = resolveItemValue(value);
-                const ref = (item?.traits as any)?.book;
-                if (!item || !ref) {
-                    gameLogger.warn(`[read_book] no item with a book trait resolved from`, value);
+                if (!item) {
+                    gameLogger.warn(`[read_item] no item resolved from`, value);
                     return;
                 }
-                // The engine's scene-reference grammar owns the parsing — the trait takes anything
-                // the scene action takes (dungeon.room.scene, room.scene, full #ids, &anchors).
-                const resolved = this.game.dungeonSystem.resolveSceneId(String(ref));
-                if (!resolved.sceneId) {
-                    gameLogger.error(`[read_book] book trait "${ref}" on "${item.id}" did not resolve to a scene.`);
-                    return;
-                }
-                const dungeonId = resolved.dungeonId || this.game.dungeonSystem.currentDungeonId.value || '';
-                const base = resolved.sceneId.replace(/^#/, '').split('.').slice(0, -3).join('.');
-                if (!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.1`)) {
-                    gameLogger.error(`[read_book] scene "#${base}.1.1.1" not found in dungeon "${dungeonId}" (book trait on "${item.id}").`);
-                    return;
-                }
-                const bookmarks = (this.game.getState('book_bookmarks') || {}) as Record<string, number>;
-                this.playBookPage(item.id, dungeonId, base, bookmarks[item.id] || 1);
+                this.game.itemSystem.readItem(item);
             }
         });
 
         this.game.registerAction("read_page", {
-            help: 'Turn the book reader to a page (internal).',
+            help: 'Turn a Scene readable to a page (internal).',
             value: 'any',
             action: (page: number) => {
                 const reading = this.game.getState('reading_book') as { itemId: string; dungeonId: string; base: string; page: number } | null;
                 if (!reading || typeof page !== 'number') {
                     return;
                 }
-                this.playBookPage(reading.itemId, reading.dungeonId, reading.base, page);
+                this.game.itemSystem.playBookPage(reading.itemId, reading.dungeonId, reading.base, page);
             }
         });
 
         this.game.registerAction("read_close", {
-            help: 'Close the book reader (internal).',
+            help: 'Close a Scene readable (internal).',
             value: 'any',
             action: () => {
                 this.game.setState('reading_book', null);
@@ -2984,6 +2967,7 @@ export class InitSystem {
                 help: 'Open a loot exchange: an inventory, or ^pool for a generated one.',
                 value: { oneOf: [{ list: { ref: 'pool_entries' }, prefix: '^' }, { ref: 'item_inventories' }] },
                 examples: ['{loot: "chest_inventory"}', '{loot: "^chest_common"}', '{loot: "^herbs1,fungi1"}'],
+                choiceModifier: (choice: Choice) => this.badgeChoice(choice, 'loot'),
                 action: (inventoryId: string) => {
                     this.game.itemSystem.openExchange(inventoryId, 'loot');
                 },
@@ -2996,6 +2980,7 @@ export class InitSystem {
                 help: 'Open a trade exchange: an inventory, or ^pool for generated stock.',
                 value: { oneOf: [{ list: { ref: 'pool_entries' }, prefix: '^' }, { ref: 'item_inventories' }] },
                 examples: ['{trade: "merchant_inventory"}', '{trade: "^merchant_basic"}'],
+                choiceModifier: (choice: Choice) => this.badgeChoice(choice, 'trade'),
                 action: (inventoryId: string) => {
                     this.game.itemSystem.openExchange(inventoryId, 'trade');
                 },

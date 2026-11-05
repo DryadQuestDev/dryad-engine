@@ -32,7 +32,7 @@ Note: if your character animation is not playing, make sure you've filled in bot
 
 A spine-rendered view can be temporarily replaced by a static image. If you define a static layer that matches the same view (e.g. an `attack` layer keyed by a `battle_state` attribute), the engine hides the spine while the static frame is showing — typically used for hand-drawn action frames during attacks, hits, and casts. When the action ends and the attribute returns to idle, the spine resumes.
 
-Worked example: Ane's `back` view has both a back spine and a `ane_back` static layer with images for `attack`, `cast`, `hit`. While `battle_state=idle`, the back spine plays. When she's hit, `battle_state=hit` activates the `ane_back_hit.webp` frame and the spine is hidden until the action ends.
+Worked example: Alice's `back` view has both a back spine and an `alice_back` static layer with images for `attack`, `cast`, `hit`. While `battle_state=idle`, the back spine plays. When she's hit, `battle_state=hit` activates the `alice_back_hit.webp` frame and the spine is hidden until the action ends.
 
 ## API
 

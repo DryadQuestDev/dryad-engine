@@ -60,7 +60,7 @@ game.on("save_load_before", (saveData) => {
 
 ### save_migrated
 
-Triggered inside the save-migration pass (`registerSaveMigration`), after every declared section has synced and every `item_migrate` has fired, before equip statuses are re-bound and resource pools put back. Fires on an old save, or any load in dev mode — even when no migration is registered.
+Triggered inside the save restoration pass, after every section has synced and every `item_migrate` has fired, before equip statuses are re-bound and resource pools put back. Fires on an old save, or any load in dev mode — even when every section is off. Character writes made here are not recorded in `coreWrites`.
 
 **Use cases:**
 - Repair states, stores and flags the generic pass can't express
@@ -247,6 +247,25 @@ game.on("encounter_selected", (encounterId, dungeonId) => {
   if (game.getFlag("has_key")) return;
   game.showNotification("The door will not budge.");
   return false; // the encounter stays unselected
+});
+```
+
+### scene_point_pick
+
+Triggered when the player clicks a scene point marker, before its choice runs and the picture zooms toward it. Return `false` to refuse the pick: nothing runs. See ->dungeons.scene_points.
+
+**Parameters:**
+- `layoutId` - The layout in force (`inspect`)
+- `pointId` - The point clicked
+- `choice` - The choice bound to it
+
+**Use cases:**
+- Limit how many points a moment allows, and refuse the rest
+- Remember which points were studied, for free second looks
+
+```js
+game.on("scene_point_pick", (layoutId, pointId, choice) => {
+  if (layoutId === "ritual" && game.getFlag("glances_left") <= 0) return false;
 });
 ```
 
@@ -683,20 +702,22 @@ game.on("item_discard_render", (item) => {
 });
 ```
 
-### item_compare
+### item_stats
 
-Triggered while an item card compares an unequipped item against the slots it fits (`character.compareItem()`), once per slot. `stats.item` and `stats.equipped` are per-unit copies of both items' stats — rewrite keys there so the two sides line up.
+Triggered whenever the engine works out the stats an item grants (`game.getItemStats()`): when it is equipped, on its item card, and for both sides of an item comparison. `stats` is a copy of the item's own stats — rewrite it to make them depend on where the item sits. `slot` and `character` are where it sits, or would sit; both are `null` for a loose item.
 
-Pure: it runs on every render, so listeners may only edit the copies.
+Pure: it runs on every render, so listeners may only edit the copy. The item itself is never changed, so nothing needs undoing on unequip.
 
 **Use cases:**
-- A game that renames an item's stats on equip (a gem whose neutral power becomes the power of the socket it sits in)
+- A gem whose power goes to the socket it sits in
+- An off-hand slot that halves a weapon's damage
 
 ```js
-game.on("item_compare", (item, equipped, slot, character, stats) => {
-  if (equipped?.slots.includes("socket")) {
-    stats.equipped.power = stats.equipped[`power_${slot.id}`];
-    delete stats.equipped[`power_${slot.id}`];
+game.on("item_stats", (item, stats, slot, character) => {
+  if (!item.slots.includes("socket") || !stats.power) return;
+  if (slot) {
+    stats[`power_${slot.id}`] = stats.power;
+    delete stats.power;
   }
 });
 ```
@@ -798,9 +819,13 @@ Triggered when an inventory is opened.
 - Pause game time
 - Track inventory usage
 
+**Parameters:**
+- `inventory` - The inventory being opened
+- `mode` - `"loot"` or `"trade"`, the exchange window that opens
+
 ```js
-game.on("inventory_open", (inv) => {
-  game.playSounds("bag_open");
+game.on("inventory_open", (inv, mode) => {
+  game.playSounds(mode === "trade" ? "coins" : "bag_open");
 });
 ```
 
@@ -967,8 +992,8 @@ game.on("recipe_learned", (id) => {
 
 ### item_discovered
 
-Triggered once per save when an item is discovered — its recipe learned from the scroll, the book
-read to its last page, the painting viewed. Drives the check mark on item cards.
+Triggered once per save when an item is discovered — its recipe learned from the scroll, its
+readable opened (a Scene readable: read to its last page), the painting viewed. Drives the check mark on item cards.
 
 ```js
 game.on("item_discovered", (itemId) => {

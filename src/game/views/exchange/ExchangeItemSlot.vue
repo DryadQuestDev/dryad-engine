@@ -3,6 +3,7 @@ import { computed, markRaw } from 'vue';
 import { Item } from '../../core/character/item';
 import { Inventory } from '../../core/character/inventory';
 import { Game } from '../../game';
+import { Global } from '../../../global/global';
 import { TradeContext } from '../../systems/itemSystem';
 import ItemPopupCard from '../popups/cards/ItemPopupCard.vue';
 import { popover as vPopover, type PopoverBinding } from '../../directives/popoverDirective';
@@ -77,15 +78,12 @@ const formattedPrice = computed(() => {
   });
 });
 
-// Calculate total weight for this item (weight * quantity)
-const weight = computed(() => {
-  const itemWeight = props.item.getTrait('weight');
-  if (itemWeight && itemWeight > 0) {
-    const totalWeight = itemWeight * props.item.quantity;
-    return totalWeight.toFixed(1);
-  }
-  return null;
+// Generic `item_level` trait (stamped by whatever scales the item), same tag as the item card
+const itemLevel = computed(() => {
+  const value = props.item.traits?.item_level;
+  return typeof value === 'number' && value > 0 ? value : 0;
 });
+const levelTag = computed(() => Global.getInstance().getString('item.level_short', { level: itemLevel.value }));
 
 function handleClick(event: MouseEvent) {
   emit('click', event);
@@ -108,11 +106,11 @@ function handleClick(event: MouseEvent) {
       />
       <span v-else class="item-name-fallback">{{ item.getTrait('name') || item.id }}</span>
 
-      <!-- Weight indicator (bottom-left) -->
-      <span v-if="weight !== null" class="item-weight">{{ weight }}</span>
-
       <!-- Quantity indicator (bottom-right) -->
       <span class="item-quantity" v-if="item.maxStack() !== 1">{{ item.quantity }}</span>
+
+      <!-- Level tag (bottom-left) -->
+      <span v-if="itemLevel" class="item-level">{{ levelTag }}</span>
 
       <!-- Trade Price Overlay (top-left) -->
       <div v-if="formattedPrice.length > 0" class="trade-price-overlay">
@@ -188,21 +186,6 @@ function handleClick(event: MouseEvent) {
   color: #42b983;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   line-height: 1;
-}
-
-/* Weight indicator */
-.item-weight {
-  position: absolute;
-  bottom: 2px;
-  left: 2px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #999;
-  padding: 2px 4px;
-  font-size: 9px;
-  border-radius: 2px;
-  font-weight: normal;
-  pointer-events: none;
-  z-index: 2;
 }
 
 /* Quantity indicator */

@@ -335,6 +335,13 @@ Displays detailed item information in a popup card. Shows name, description, sta
 
 **Props:**
 - `item` (Item, required) - The item to display details for
+- `characterId` (string, optional) - The character the card is shown for
+- `compare` (boolean, optional) - Show stat deltas against `characterId`'s equipped gear
+- `inSlot` (ItemSlot | null, optional) - Show the stats as they would be in this slot of `characterId`'s character; `null` shows them loose. Default: where the item sits
+
+```html
+<ItemCard :item="preview" :character-id="wearer.id" :in-slot="slot" />
+```
 
 ---
 

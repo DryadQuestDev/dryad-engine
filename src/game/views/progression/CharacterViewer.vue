@@ -95,7 +95,7 @@ function goToPage(next: number) {
 
 <template>
     <div class="character-viewer dark-scrollbar" v-if="selectedCharacter">
-        <!-- Header: Character faces to switch (auto-hidden for single) -->
+        <!-- Left column: Character faces to switch (auto-hidden for single) -->
         <div class="viewer-header" v-if="showFaceList">
             <div class="viewer-faces">
                 <div v-for="entry in pagedCharacters" :key="entry.character.id" class="viewer-face-item"
@@ -147,29 +147,38 @@ function goToPage(next: number) {
 <style scoped>
 .character-viewer {
     display: flex;
-    flex-direction: column;
     height: 100%;
     overflow: hidden;
 }
 
 .viewer-header {
     flex-shrink: 0;
-    padding-bottom: 1.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    margin-bottom: 1rem;
-    padding-left: 10px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding-right: 1rem;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    margin-right: 1rem;
 }
 
+/* Side padding leaves room for the name badge, which is wider than the face and
+   hangs below it, so neither it nor the selection outline is clipped by the scroll box. */
 .viewer-faces {
+    flex: 1;
+    min-height: 0;
     display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-    padding: 5px;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 5px 12px 15px;
     color: white;
 }
 
 .viewer-face-item {
     position: relative;
+    flex-shrink: 0;
     cursor: pointer;
 }
 
@@ -190,11 +199,12 @@ function goToPage(next: number) {
 }
 
 .viewer-pagination {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: center;
     gap: 0.75rem;
-    padding: 0 5px;
+    padding-top: 0.75rem;
     color: white;
 }
 
@@ -231,6 +241,7 @@ function goToPage(next: number) {
 .viewer-body {
     display: flex;
     flex: 1;
+    min-width: 0;
     min-height: 0;
     gap: 1rem;
     container-type: size;

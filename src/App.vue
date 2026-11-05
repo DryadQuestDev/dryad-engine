@@ -12,6 +12,7 @@ import gsap from 'gsap';
 
 import { Global } from './global/global';
 import { useMobile } from './global/composables/useMobile';
+import { takePlayFrom, finishPlayFrom, dropPlayFrom } from './game/utils/devPlaytest';
 
 // Define the notification item structure (can also be imported if defined elsewhere)
 interface NotificationItem {
@@ -80,8 +81,12 @@ else if (localStorage.getItem('game_starting_new') && localStorage.getItem('game
     }
   }
 
+  // Dev Play from here: taken before the game starts, so its starting room holds its own scene.
+  const playFrom = takePlayFrom(loadingGameId, null);
+
   // Create new game
   await global.createNewGame(gameManifest, modList);
+  if (playFrom) finishPlayFrom(playFrom);
 }
 // loading the game from the game scene after refresh
 else if (localStorage.getItem('game_loading_slot') && localStorage.getItem('game_loading_game_id')) {
@@ -91,11 +96,13 @@ else if (localStorage.getItem('game_loading_slot') && localStorage.getItem('game
   localStorage.removeItem('game_loading_slot');
   localStorage.removeItem('game_loading_game_id');
 
+  const playFrom = takePlayFrom(loadingGameId, loadingSlot);
   const loadedGame = await global.loadGame(loadingGameId, loadingSlot);
 
   if (loadedGame) {
     // Game loaded successfully
     global.engineState.value = 'game';
+    if (playFrom) finishPlayFrom(playFrom);
 
     if (loadingSlot === '__load_temporary_save__') {
       try {
@@ -108,6 +115,7 @@ else if (localStorage.getItem('game_loading_slot') && localStorage.getItem('game
       }
     }
   } else {
+    if (playFrom) dropPlayFrom();
     // Failed to load game, check if we should return to editor or main menu
     const isDevMode = localStorage.getItem('devMode') === 'true';
     if (isDevMode) {
@@ -137,12 +145,19 @@ const handleTooltipKey = (event: KeyboardEvent) => {
   global.addNotificationId(next ? 'interactive_tooltips.on' : 'interactive_tooltips.off');
 };
 
+// PrimeVue closes these on Escape from its own document listener without marking the event, and
+// is still in the DOM when it reaches the window, so its presence means the Escape was its.
+const ESC_OVERLAYS = '.p-popover, .p-dialog, .p-select-overlay, .p-multiselect-overlay, .p-autocomplete-overlay, .p-datepicker-panel, .p-contextmenu, .p-tieredmenu-overlay, .p-menu-overlay';
+
 const handleEscKey = (event: KeyboardEvent) => {
   // A component that consumed Escape itself (cancelling a rename) marks it handled.
   if (event.defaultPrevented) return;
-  if (event.key === 'Escape') {
-    global.toggleMenu();
-  }
+  if (event.key !== 'Escape') return;
+  // In a text field Escape cancels or closes suggestions; it never means the menu.
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable) return;
+  if (document.querySelector(ESC_OVERLAYS)) return;
+  global.toggleMenu();
 };
 
 const setNotificationRef = (el: any, id: number) => {

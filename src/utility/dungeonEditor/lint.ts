@@ -563,7 +563,7 @@ export function lintDungeonContent(source: string, doc: Document, ctx?: LintCont
       }
       if (t.startsWith('&') || /^\d+$/.test(t)) continue;
       if (!filling) {
-        // Untrimmed, like the engine: an indented `ane!:` prints as text, it is no party line.
+        // Untrimmed, like the engine: an indented `alice!:` prints as text, it is no party line.
         const tag = /^(\w+)!:/.exec(line);
         party = tag ? { id: tag[1], start: lineStart, end: lineStart + line.length } : null;
         filling = true;

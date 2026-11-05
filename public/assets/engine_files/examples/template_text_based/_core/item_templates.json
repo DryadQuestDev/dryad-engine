@@ -13,7 +13,7 @@
       "riko_boots"
     ],
     "traits": {
-      "image": "assets/games_assets/tutorial/_core/items/riko/shoes_engine.webp",
+      "image": "assets/engine_files/template_assets/items/riko/shoes_engine.webp",
       "name": "Riko's Boots",
       "description": "<p>Sturdy dark boots with purple laces, built for Riko's engine-room work.</p>"
     },
@@ -23,7 +23,7 @@
     "id": "riko_outfit_engine1",
     "traits": {
       "name": "Riko's Engine Outfit",
-      "image": "assets/games_assets/tutorial/_core/items/riko/outfit_engine1.webp",
+      "image": "assets/engine_files/template_assets/items/riko/outfit_engine1.webp",
       "description": "<p>A practical engine-room outfit with a cropped top, jacket and utility belt.</p>"
     },
     "slots": [
@@ -54,7 +54,7 @@
     },
     "uid": "3mk7fIBHtd0p",
     "traits": {
-      "image": "assets/games_assets/tutorial/_core/items/riko/underwear_black.webp",
+      "image": "assets/engine_files/template_assets/items/riko/underwear_black.webp",
       "name": "Riko's Underwear",
       "description": "<p>Simple black panties Riko wears beneath her gear.</p>"
     }

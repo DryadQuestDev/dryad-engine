@@ -148,6 +148,10 @@ All formulas with similar early pacing (roughly 100 XP at level 1):
 
 Choose based on your game's level cap and intended grind curve.
 
+With `auto_scaling` on, fight XP and numeric `xp` grants grow linearly with the dungeon level (`power_scale_per_level`). A threshold that grows faster makes each level take more fights than the last. `linear_percent` with `xp_growth` equal to `power_scale_per_level` × 100 keeps the number of fights per level constant.
+
+A retuned curve reaches existing saves when they load. A character saved on another curve keeps their level and the same fill of their XP bar: 95% toward the next level stays 95% of the current threshold.
+
 ---
 
 ## Overflow

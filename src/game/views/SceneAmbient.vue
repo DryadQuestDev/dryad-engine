@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { Game } from '../game';
+import { Global } from '../../global/global';
 import type { AmbientKind, SceneAmbientState } from '../systems/dungeonSystem';
 
 // Ambient particles over the scene BACKGROUNDS ({ambient: "fireflies"} / "motes" / "embers"), on one
@@ -240,6 +241,9 @@ function resize() {
   if (kind) populate({ kind, density: game.dungeonSystem.sceneAmbient.value?.density ?? 1 });
 }
 
+// Visual effects: Reduced skips the particles: they redraw a full-screen canvas every frame.
+const shownAmbient = computed(() => Global.getInstance().reducedEffects ? null : game.dungeonSystem.sceneAmbient.value);
+
 onMounted(() => {
   const canvas = canvasRef.value;
   if (!canvas) return;
@@ -247,9 +251,9 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(canvas);
   resize();
-  applyAmbient(game.dungeonSystem.sceneAmbient.value, true);
+  applyAmbient(shownAmbient.value, true);
 });
-watch(() => game.dungeonSystem.sceneAmbient.value, (state) => applyAmbient(state));
+watch(shownAmbient, (state) => applyAmbient(state));
 onUnmounted(() => {
   if (raf) cancelAnimationFrame(raf);
   raf = 0;

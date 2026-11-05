@@ -56,7 +56,7 @@ Use these helpers whenever your dungeon starts getting big – they're there to 
 Once your dungeon content is ready, you have two options to get it into the engine:
 
 **Option 1: Copy and Paste (No Setup Required)**
-Simply select all content in your Google Doc (`Ctrl+A`), copy it (`Ctrl+C`), and paste it directly into the `dungeon_content` field in your dungeon's config. This works immediately with no additional setup.
+Simply select all content in your Google Doc (`Ctrl+A`), copy it (`Ctrl+C`), and paste it into the **Raw** view of your dungeon's **Content** subtab. This works immediately with no additional setup.
 
 **Option 2: Google Docs API Integration**
 For a more streamlined workflow where the engine fetches your document directly, you can set up the Google Docs API integration. This requires a one-time setup but allows you to pull content updates without manual copy-pasting.

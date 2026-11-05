@@ -13,7 +13,7 @@ You can think of a dungeon as a **playable document**: you write content once, a
 When you create a dungeon, you choose its **type**:
 
  - **Map** – an explorable 2D map with rooms, paths, fog of war, and clickable encounters.  
- - **Screen** – a single background image (or “scene”) with hotspots the player can interact with. A Screen dungeon always has exactly one room with the special ID `main`.  
+ - **Screen** – a background image (or “scene”) with hotspots the player can interact with. A Screen dungeon without rooms plays in one implicit room with the special ID `main`. Give it rooms and doors, and each room shows its own picture with its own hotspots, while the player moves between rooms on a room map, as in a Text dungeon.  
  - **Text** – a text‑based dungeon where navigation, encounters, and choices are all driven by narrative.
 
 Under the hood, all three work the same way: the dungeon is made of **rooms**, **encounters**, and **scripted content**, just presented differently.
@@ -27,9 +27,11 @@ A **room** is a single location inside a dungeon – a tile on a map, a node in 
 - A room can have:
   - Default **assets** (background decorations, props).  
   - **Fog of war** settings (what’s visible to the player).  
-  - **Room events** that fire when the player enters.
+  - **Room events** that fire when the player enters.  
+  - In a Screen dungeon, its own **image**: the picture shown while the player is in the room. Rooms without one show the dungeon's image.
 
 On the editor side, rooms live in the **Rooms** tab of a dungeon, and visually on the dungeon map (see the map editor).  
+In a Screen dungeon, the Rooms tab draws the rooms as a graph, which only feeds the in-game room map, and the Encounters tab shows one room's picture at a time: pick the room at the top of the map, and new encounters you place there belong to it.  
 At runtime, rooms are managed by the **Exploration** state which keep track of the current room, visited rooms, and visibility.
 
 ## Encounters: Things You Interact With
@@ -74,7 +76,7 @@ You have two options, both driven by the same DryadScript markup under the hood:
 
 The in-engine **Visual Editor** is the default starting point for most authors. It turns DryadScript into editable block cards – rooms, encounters, scenes, templates – with lint on save, auto-highlighting of syntactic tokens, drag-to-reorder table of contents, and autosave. No external setup.
 
-Open it at **Dungeons → Config → Content Editor**.
+Open it at **Dungeons → Content**.
 
 See ->dungeons.visual_editor for the full walkthrough.
 
@@ -82,7 +84,7 @@ See ->dungeons.visual_editor for the full walkthrough.
 
 For story-heavy games with multiple writers, or when you already have a long Docs draft, author in **Google Docs** and import via the engine's document tools. Docs gives you comments, suggestions, and revision history that the in-editor surface doesn't.
 
-The engine fetches the Google Doc, converts it into plain DryadScript, and imports it into your dungeon's `dungeon_content` field – after which the normal parsing pipeline takes over.
+The engine fetches the Google Doc, converts it into plain DryadScript, and imports it into your dungeon's **Content** subtab – after which the normal parsing pipeline takes over.
 
 See ->dungeons.dungeon_template and ->dungeons.google_docs_integration to get set up.
 

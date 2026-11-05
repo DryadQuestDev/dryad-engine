@@ -24,7 +24,8 @@ const collapsedGoals = ref<Set<string>>(new Set());
 
 const selectedQuest = computed(() => {
   if (!selectedQuestKey.value) return null;
-  return dungeonSystem.quests.value.get(selectedQuestKey.value);
+  const quest = dungeonSystem.quests.value.get(selectedQuestKey.value);
+  return quest && dungeonSystem.hasQuestDefinition(quest.dungeonId, quest.id) ? quest : null;
 });
 
 // Auto-select first quest when quests become available
@@ -39,7 +40,7 @@ watch(() => dungeonSystem.questsByDungeon.value, (questsByDungeon) => {
   }
 
   // If the currently selected quest no longer exists, clear selection or select first available
-  if (selectedQuestKey.value && !dungeonSystem.quests.value.has(selectedQuestKey.value)) {
+  if (selectedQuestKey.value && !selectedQuest.value) {
     if (questsByDungeon.size > 0) {
       const firstDungeonQuests = questsByDungeon.values().next().value;
       if (firstDungeonQuests && firstDungeonQuests.length > 0) {
@@ -84,15 +85,22 @@ function getLogText(dungeonId: string, questId: string, goalId: string, logId: s
   return game.logicSystem.resolveString(line.val).output;
 }
 
+// A log the content no longer defines stays in older saves; it is hidden, not shown as its raw id.
+function visibleLogs(goalId: string, logs: string[]): string[] {
+  const quest = selectedQuest.value;
+  if (!quest) return [];
+  return logs.filter(logId => dungeonSystem.getQuestLine(quest.dungeonId, quest.id, goalId, logId));
+}
+
 function getMainLogs() {
   if (!selectedQuest.value) return [];
   const mainGoal = selectedQuest.value.goals.find(g => g.id === 'main');
-  return mainGoal?.logs || [];
+  return visibleLogs('main', mainGoal?.logs || []);
 }
 
 function getOtherGoals() {
   if (!selectedQuest.value) return [];
-  return selectedQuest.value.goals.filter(g => g.id !== 'main');
+  return selectedQuest.value.goals.filter(g => g.id !== 'main' && visibleLogs(g.id, g.logs).length);
 }
 
 function isQuestCompleted(quest: any): boolean {
@@ -169,7 +177,7 @@ function isGoalCompleted(goalId: string): boolean {
               </div>
 
               <div v-if="!isGoalCollapsed(goal.id)" class="goal-logs">
-                <div v-for="logId in goal.logs" :key="logId" class="log-entry"
+                <div v-for="logId in visibleLogs(goal.id, goal.logs)" :key="logId" class="log-entry"
                   v-script="{ html: getLogText(selectedQuest.dungeonId, selectedQuest.id, goal.id, logId), resolver: false }">
                 </div>
               </div>

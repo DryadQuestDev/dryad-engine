@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 export type EditorTheme = 'light' | 'dark';
 
@@ -24,6 +24,10 @@ export function applyEditorTheme(): void {
 export function clearEditorTheme(): void {
   document.documentElement.classList.remove(EDITOR_DARK_CLASS);
 }
+
+/** For a PrimeVue overlay opened from the game's dev panel, which themes only its own subtree:
+    the overlay teleports to <body>, out of it, so it carries the class itself. */
+export const panelOverlayClass = computed(() => editorTheme.value === 'dark' ? EDITOR_DARK_CLASS : '');
 
 export function toggleEditorTheme(): void {
   editorTheme.value = editorTheme.value === 'dark' ? 'light' : 'dark';

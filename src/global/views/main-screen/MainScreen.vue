@@ -16,6 +16,7 @@ import ModsStrip from './ModsStrip.vue';
 import LandingWidgets from './LandingWidgets.vue';
 import ManifestPanel from './ManifestPanel.vue';
 import ScreenshotsOverlay from './ScreenshotsOverlay.vue';
+import ChangelogOverlay from './ChangelogOverlay.vue';
 import SavesDrawer from './SavesDrawer.vue';
 import EngineLogo from './EngineLogo.vue';
 import InstallGamesModal from './InstallGamesModal.vue';
@@ -29,6 +30,7 @@ const showPwaModal = ref(false);
 const showInstallModal = ref(false);
 const showSavesDrawer = ref(false);
 const screenshotsManifest = ref<ManifestObject | null>(null);
+const changelogManifest = ref<ManifestObject | null>(null);
 
 const games = ref<ManifestObject[]>([]);
 const mods = ref<ManifestObject[]>([]);
@@ -487,6 +489,7 @@ onUnmounted(() => {
         <ManifestPanel
           :manifest="selectedGame"
           @screenshots="screenshotsManifest = selectedGame"
+          @changelog="changelogManifest = selectedGame"
         >
           <div v-if="!gameCompatibility.isCompatible" class="main-screen-warning">
             <i class="pi pi-exclamation-triangle"></i>
@@ -536,6 +539,7 @@ onUnmounted(() => {
           :active="activeMods.some(m => m.id === selectedMod?.id)"
           closable
           @screenshots="screenshotsManifest = selectedMod"
+          @changelog="changelogManifest = selectedMod"
           @toggle="selectedMod && onToggleMod(selectedMod)"
           @close="selectedMod = null"
         />
@@ -548,6 +552,12 @@ onUnmounted(() => {
       v-if="screenshotsManifest"
       :assets="screenshotsManifest.cover_assets || []"
       @close="screenshotsManifest = null"
+    />
+
+    <ChangelogOverlay
+      v-if="changelogManifest"
+      :manifest="changelogManifest"
+      @close="changelogManifest = null"
     />
 
     <SavesDrawer

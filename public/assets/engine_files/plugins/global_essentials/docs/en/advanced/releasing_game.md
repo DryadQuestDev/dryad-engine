@@ -15,6 +15,7 @@ Go to **General → Manifest** and verify all fields are correctly filled:
 | `author` | Your name or studio name |
 | `version` | Version number in `a.b.c` format (e.g., `1.0.0`, `0.3.42`) |
 | `description` | Rich text description shown on the game selection screen |
+| `changelog` | Release notes players open from **What's new** next to the version (see below) |
 | `cover_assets` | Cover images or videos for the selection screen |
 
 ### Version Format
@@ -46,6 +47,8 @@ List all folders containing your game's assets. Only these folders will be inclu
 ## Step 3: Export
 
 Press the **Export game as ZIP** button in Dev Settings.
+
+Before it zips, the export brings every dungeon whose `content_raw.txt` changed outside the editor up to date, so the archive always plays the content its text says.
 
 The engine will create a `.zip` file in the `/assets` folder.
 
@@ -84,7 +87,39 @@ Widgets are positioned inside a centered 16:9 stage that letterboxes to fit the 
 }
 ```
 
+A widget's `html` can hold `[changes]` too: it shows the newest changelog entry of the manifest that wrote the widget, so a base-game widget shows the base game's notes.
+
 Widgets stack across active manifests in load order, just like `landing_bg_asset`. Keep in mind that inactive mods contribute nothing to the landing page – a banner promoting a mod belongs in the **base game's** manifest, since the whole point is showing it before the mod is activated.
+
+---
+
+## Changelog (What's New)
+
+Add an entry to the `changelog` field in **General → Manifest** for every release. The landing page shows **What's new** next to your game's version; it opens the list with the newest release expanded and older ones folded below, and **Expand all** opens every release at once.
+
+| Field | Description |
+|-------|-------------|
+| `version` | The release this entry describes, in the same `a.b.c` format as `version` |
+| `date` | Release date, picked from a calendar |
+| `title` | Optional headline, e.g. the release's main new area |
+| `image` | Optional picture shown above the notes |
+| `notes` | Rich text: headings such as *New*, *Changes* and *Fixes* over bullet lists read well |
+
+Entries are sorted by version, newest first, whatever their order in the form. When a player comes back after an update, **What's new** carries a dot until they open it; a first-time player sees no dot. Dates are shown in the player's language.
+
+A mod keeps its own changelog in its own manifest, and its panel on the landing page gets the same **What's new** link.
+
+### Showing the latest release in the description
+
+Put `[changes]` on its own line in `description` and the landing page shows your newest changelog entry there: a **New in 0.23.0** heading (in the player's language) over that entry's notes. Write each release's notes once, in `changelog`, and the description keeps up by itself:
+
+```html
+<p>Play as a dryad who …</p>
+<p>[changes]</p>
+<h3>Already in the game</h3>
+```
+
+With no changelog entries the token simply disappears. The editor's Start page cards leave it out, since they are too small for a release's notes.
 
 ---
 

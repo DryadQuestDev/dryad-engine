@@ -448,7 +448,7 @@
             "melee",
             "cast"
           ],
-          "tooltip": "How the caster moves. melee: lunges at the target in the attack pose; the impact plays on contact, and a travel sprite launches at the lunge's peak (a throw). cast: stays in place in the cast pose. Empty: a self or ally ability casts; a hostile one lunges when this has no images and casts with a travel sprite or an impact."
+          "tooltip": "How the caster moves. melee: lunges at the target in the attack pose; the impact plays on contact, and a travel sprite launches at the lunge's peak (a throw). cast: stays in place in the cast pose (a character with no cast pose plays a default gesture: it rises, brightens and pushes toward the target as the effect goes off). Empty: a self or ally ability casts; a hostile one lunges when this has no images and casts with a travel sprite or an impact."
         },
         "css_class": {
           "type": "string",
@@ -1558,6 +1558,10 @@
       {
         "id": "ui_win_battle",
         "val": "Win Battle"
+      },
+      {
+        "id": "ui_lose_battle",
+        "val": "Lose Battle"
       },
       {
         "id": "ui_cancel",

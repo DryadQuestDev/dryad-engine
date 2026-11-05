@@ -223,12 +223,17 @@ const HTML_ELEMENTS = new Set([
   'ul', 'var', 'video', 'wbr',
 ]);
 
-/** SVG elements that might appear in templates. */
+/** SVG 2 elements, lowercased (the template's tag is compared lowercased). */
 const SVG_ELEMENTS = new Set([
-  'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'text', 'tspan',
-  'g', 'defs', 'use', 'symbol', 'clippath', 'mask', 'pattern', 'image', 'foreignobject',
-  'lineargradient', 'radialgradient', 'stop', 'filter', 'fegaussianblur', 'feoffset',
-  'feblend', 'fecolormatrix', 'fecomposite', 'feflood', 'femerge', 'femergenode',
+  'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'text', 'tspan', 'textpath',
+  'g', 'defs', 'use', 'symbol', 'clippath', 'mask', 'pattern', 'image', 'foreignobject', 'marker',
+  'switch', 'view', 'desc', 'title', 'metadata', 'a',
+  'lineargradient', 'radialgradient', 'stop',
+  'animate', 'animatemotion', 'animatetransform', 'mpath', 'set',
+  'filter', 'feblend', 'fecolormatrix', 'fecomponenttransfer', 'fecomposite', 'feconvolvematrix',
+  'fediffuselighting', 'fedisplacementmap', 'fedistantlight', 'fedropshadow', 'feflood',
+  'fefunca', 'fefuncb', 'fefuncg', 'fefuncr', 'fegaussianblur', 'feimage', 'femerge', 'femergenode',
+  'femorphology', 'feoffset', 'fepointlight', 'fespecularlighting', 'fespotlight', 'fetile', 'feturbulence',
 ]);
 
 /** Vue built-in components that don't need registration. */

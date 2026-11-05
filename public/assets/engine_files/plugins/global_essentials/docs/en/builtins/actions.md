@@ -35,6 +35,8 @@ All built-in actions for scenes and choices.
 | `asset` | Add, update, or remove assets(!). `false` = remove all (incl. defaults); `clear` = remove all but backdrop; `reset` = clear all + re-stage defaults. Flag an asset `bg=true` to make it a runtime backdrop: staging one replaces the backdrop already on stage, and `clear`/`solo` keep it. Re-staging a visible asset glides it to the new values — see below | `"false, forest(bg=true), pic1"`, `"!bg1"`, `"clear"`, or `"reset"` | |
 | `grade` | Colour-grade the scene, actors and map art. `false` / `none` clears. `#N` sets strength. Presets and fields: ->dungeons.grades | `"night"`, `"night#0.5"`, `false`, or an object | |
 | `ambient` | Particles drifting over scene backgrounds: `fireflies`, `motes`, `embers`. `#N` sets density. `false` clears. See ->dungeons.grades | `"fireflies"`, `"embers#1.5"`, `false` | |
+| `inspect` | Switch a scene point layout on: choices with `point` draw on the picture at their points. Back on the layout's menu, a zoomed picture zooms out. `false` switches it off. See ->dungeons.scene_points | `"wren_study"`, `false` | |
+| `zoom` | Zoom the picture toward a point of the layout in force, or back out | `"desk"`, `false` | |
 | `flag` | Set flags (`=` set, `+=` add, `-=` subtract) | `"gold += 10, count = 5"` | |
 | `exit` | Exit current scene | true | ✓ |
 | `enter` | Enter a room in a dungeon | `"room5", "ancient_cave.room10"` | ✓ |
@@ -45,7 +47,7 @@ All built-in actions for scenes and choices.
 | `choices_over` | Load choices (override mode: hide default scene ~choices) | `"&choice_scene"` | |
 | `ignore_replay` | Beside `choices` / `choices_over`: skip that menu in a gallery replay, so the replay ends with the scene instead of leading back into play (a conversation hub) | `{choices: "&talk_hub", ignore_replay: true}` | |
 | `actor` | Add, move, or remove actors(!). `false` = remove all actors instantly; `clear` = remove all with exit animations | `"alice->center, bob->left"`, `"!alice"`, or `"false, alice->right"` | |
-| `animate` | One-shot actor animation, not saved: `lunge`, `recoil`, `hop`, `shake`, `shiver`, `nod`, `bounce`, `flash`. Same as `anim=` in `actor` props | `"chimera lunge"`, `"chimera lunge, mc recoil(intensity=1.3)"` | |
+| `animate` | One-shot actor animation, not saved: `lunge`, `recoil`, `hurt`, `hop`, `shake`, `shiver`, `nod`, `bounce`, `flash`. Same as `anim=` in `actor` props | `"chimera lunge"`, `"chimera lunge, mc recoil(intensity=1.3)"`, `"bram hurt(facing=mc)"` | |
 | `screen_shake` | Shake the scene art (background + actors); dialogue stays still. One-shot | `0.5`, `true`, `{intensity: 1, duration: 0.6}` | |
 | `screen_flash` | Pulse the scene art to a colour and back to the current grade. `red`, `white` or any grade preset. One-shot | `"red"`, `"white#0.6"`, `{color: "red", duration: 0.8}` | |
 | `panel_actor` | List a character in the scene's actor panel without staging art. `!id` removes; `false` clears. Staged actors are listed automatically | `"alice"`, `"alice, bob"`, `"!alice"`, `false` | |
@@ -113,6 +115,7 @@ Params on an `@` encounter line. These are not actions — they configure the en
 | `if` / `ifOr` | Show the encounter only while the condition holds. Re-evaluated live | `{if: "_defeated(bats) = false"}` |
 | `rooms` | Also place this encounter in other rooms | `{rooms: "3, 4, 6"}` |
 | `discover` | Hide the encounter until the party meets a stat threshold. Permanent once met | `{discover: "perception#6"}` |
+| `title` | The label a `spot` encounter shows on the map | `{title: "Old well"}` |
 
 ### discover
 
@@ -146,6 +149,7 @@ Params on a choice (`!`, `~` or `>`). These are not actions — they configure t
 | `clue` | Highlight the choice until the player takes it | `{clue: true}` |
 | `no_visited` | Never mark the choice visited (it stays undimmed) — for options meant to be picked repeatedly, e.g. a sequence puzzle | `{no_visited: true}` |
 | `wip` | Mark a branch as unwritten: greys the choice out permanently and prefixes `[wip]` to its label | `{wip: true}` |
+| `point` | Draw the choice on the picture at a point of the layout `inspect` switched on, instead of in the menu. Picking it zooms the picture toward the point. See ->dungeons.scene_points | `{point: "desk", scene: "&look_desk"}` |
 
 ### wip
 
@@ -235,7 +239,7 @@ Without a `template`, `reset_character` falls back to the live character's own `
 | `char` | Modify character property (`=` set, `+=` add, `-=` subtract) | `"alice.resource.health += 10"` | |
 | | Types: `trait`, `attribute`, `stat`, `resource`, `skinStyle` | `"mc.attribute.belly=2"` | |
 | | `attribute` fallback: if the key is a skin layer id (not an attribute), `true`/`false` toggles the layer's visibility. Attribute wins on id collision | `"mc.attribute.wings=true"` | |
-| `attr` | Shortcut for `char` with `attribute` type (same skin-layer fallback) | `"ane.face = hurt"`, `"mc.wings = true"` | |
+| `attr` | Shortcut for `char` with `attribute` type (same skin-layer fallback) | `"alice.face = hurt"`, `"alice.cape = true"` | |
 | `trait` | Shortcut for `char` with `trait` type | `"alice.name = Alice"` | |
 | `stat` | Shortcut for `char` with `stat` type (`=` `+=` `-=`) | `"alice.strength += 5"` | |
 | `resource` | Shortcut for `char` with `resource` type (`=` `+=` `-=`) | `"alice.health += 10"` | |
@@ -275,7 +279,7 @@ silently. `skin`, `item_slot`, and `ability` never flash.
 
 | Action | Description | Example | Delayed |
 |--------|-------------|---------|---------|
-| `equip` | Equip/unequip items by character + item id | `"ordelia -> armor1, ane -> !sword1"` | |
+| `equip` | Equip/unequip items by character + item id | `"bob -> armor1, alice -> !sword1"` | |
 | `equip_item` | Equip the **active item** (uid) — internal/advanced | `true` | |
 | `unequip_item` | Unequip the **active item** (uid) — internal/advanced | `true` | |
 | `add_item` | Add item to inventory | `"sword, potion#5"` | |
@@ -283,13 +287,13 @@ silently. `skin`, `item_slot`, and `ability` never flash.
 | `transfer_item` | Move items between inventories (source defaults to party; aborts if the source lacks the quantity) | `"gold#200 -> merchant"`, `"chest.gold#5 -> _party_inventory"` | |
 | `item_view` | Show an item card under the dialogue text until the event ends | `true` (active item), `"healing_herb"` (party item), `false` (hide) | |
 | `collect` | Collect the current collectable encounter: grants its item(s) and hides it (see Collectables in the ->dungeons.glossary). Auto-attached to `collectable` encounters; use on a custom `!` choice for a custom label | `"berry#2"` | |
-| `loot` | Open loot exchange. A `^pool` value opens a placement-unique pooled inventory (requires the experience plugin with auto_scaling – see its Rewards & Scaling guide) | `"chest_inventory"`, `"^chest_common"` | ✓ |
-| `trade` | Open trade exchange. `^pool` values work as for `loot`, with stock re-rolled when the MC's level changes | `"merchant_inventory"`, `"^merchant_basic"` | ✓ |
+| `loot` | Open loot exchange. A `^pool` value opens a placement-unique pooled inventory (requires the experience plugin with auto_scaling – see its Rewards & Scaling guide). On a choice: chest badge, `loot-choice` row class | `"chest_inventory"`, `"^chest_common"` | ✓ |
+| `trade` | Open trade exchange. `^pool` values work as for `loot`, with stock re-rolled when the MC's level changes. On a choice: scales badge, `trade-choice` row class | `"merchant_inventory"`, `"^merchant_basic"` | ✓ |
 | `learn_recipe` | Learn a crafting recipe (one id, or comma-separated) | `"iron_sword, steel_sword"` | |
 | `learn_recipe_item` | Learn the recipe named by the active item's `learn_recipe` field, then consume the item (notifies; "already known" if learned). Powers the auto "Learn" choice on recipe-scroll items. Discovers the item (item-card check mark) | `true` | |
-| `choose_item` | Item picker popup (pauses the scene). Pick lands in `active_item` + `chosen_item_id`; branch with `_chosen_item(id)`. `remove: true` consumes the pick; `scene` plays after; cancel only closes the popup, leaving the story on the choice that opened it (`chosen_item_id` `''`) | `"all"`, `"keys"`, `{tags: ["herb"], remove: true, scene: "fed"}` | ✓ |
-| `read_book` | Open the paged book reader for an item with the `book` trait (`dungeon_id.room_id.scene_id`; pages = that scene's paragraphs; Next/Previous/Read again/Close choices). Resumes at the bookmark; finishing the last page discovers the item. Powers the auto "Read" choice | `true` (active item), `"book_eilfiel"` | |
-| `read_page` / `read_close` | Internal paging actions of the book reader (its choices dispatch them) | `2` / `true` | |
+| `choose_item` | Item picker popup (pauses the scene). Pick lands in `active_item` + `chosen_item_id`; branch with `_chosen_item(id)`. `remove: true` consumes the pick; `scene` plays after; cancel only closes the popup, leaving the story on the choice that opened it (`chosen_item_id` `''`). On a choice: backpack badge, `choose-item-choice` row class | `"all"`, `"keys"`, `{tags: ["herb"], remove: true, scene: "fed"}` | ✓ |
+| `read_item` | Open an item's `readable` text: a Book or Scroll in the reader (discovers the item at once), a Scene in the dialogue box from its bookmark (discovers it on the last page). An id need not be carried, so a letter can be read where it lies. Powers the auto "Read" choice | `true` (active item), `"old_diary"` | |
+| `read_page` / `read_close` | Internal paging actions of a Scene readable (its choices dispatch them) | `2` / `true` | |
 | `view_painting` | Open an item's painting scene: the registered asset named by the `painting` trait full-screen, the item description as the text (a runtime-synthesized one-paragraph scene in the current dungeon). Discovers the item. Powers the auto "View" choice | `true` (active item), `"painting_ane"` | |
 | `use_scene` | Open the scene named by an item's `use_scene` trait, with that item as the active one (so the scene reads `|item|` and can end with `{remove_item: true}`). Powers the auto "Use" choice on usable items | `true` (active item), `"lockpick"` | |
 
@@ -310,11 +314,11 @@ template and the `item.added` flash shows (same as `add_item`); equipping an ins
 inventory stays silent. Invalid ids/slots log a console warning and skip that spec — the scene continues.
 
 ```javascript
-{ equip: "ordelia -> armor1 & ring1" }        // equip both (auto slot)
-{ equip: "ordelia.trinket_ordelia -> ring1" } // equip into a slot type
-{ equip: "ordelia -> !armor1" }               // unequip by item id
-{ equip: "!ordelia.outfit_ordelia" }          // clear a slot type
-{ equip: "!ordelia" }                         // clear all equipment
+{ equip: "bob -> armor1 & ring1" }            // equip both (auto slot)
+{ equip: "bob.trinket_bob -> ring1" }         // equip into a slot type
+{ equip: "bob -> !armor1" }                   // unequip by item id
+{ equip: "!bob.outfit_bob" }                  // clear a slot type
+{ equip: "!bob" }                             // clear all equipment
 ```
 
 > **`equip` vs `equip_item`/`unequip_item`:** prefer `equip` for scripting — it uses stable ids.

@@ -79,6 +79,7 @@ Each field in your schema defines one form input:
 | `schema` | Nested object |
 | `schema[]` | Array of nested objects |
 | `color` | Color picker |
+| `date` | Calendar picker, stored as `YYYY-MM-DD` text |
 
 For `chooseOne` and `chooseMany`, you can:
 - Provide static `options` array

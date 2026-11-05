@@ -3,7 +3,7 @@
   "name": "Experience",
   "description": "XP and leveling system. Characters with a 'level' trait gain XP and level up automatically.",
   "author": "Nekon",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "order": 1,
   "scripts": [
     "main.mjs"
@@ -41,63 +41,33 @@
           "type": "number",
           "tooltip": "Price growth per level for scaled equipment, independent of the power curve. Empty = twice power_scale_per_level (gear value climbs faster than its power, so old gear sells for less relative to replacements). Set equal to power_scale_per_level to weld value to power."
         },
-        "loot_equipment_coef": {
-          "type": "number",
-          "defaultValue": 0,
-          "tooltip": "Equipment loot budget = BASE battle threat x this. Not level-scaled: created equipment instances scale their own stats/value to the dungeon level. 0 disables the group."
-        },
-        "loot_income_coef": {
-          "type": "number",
-          "defaultValue": 0,
-          "tooltip": "Income loot budget = EFFECTIVE battle threat (level-scaled) x this, plus the equipment group's unspent remainder; spent on income-category items, and whatever stays unspent pays out as the currency item. 0 disables the group (a pure equipment remainder still pays out)."
-        },
-        "loot_gold_share": {
-          "type": "number",
-          "defaultValue": 0,
-          "tooltip": "Fraction (0-1) of the income pot paid straight out as the currency item before item rolls — battles visibly pay gold instead of converting the whole budget into items."
-        },
-        "loot_max_items": {
-          "type": "number",
-          "defaultValue": 3,
-          "tooltip": "Maximum items each loot group can roll per reward."
+        "battle_loot_pools": {
+          "type": "schema[]",
+          "tooltip": "Loot a won battle draws, by threat band: the band with the highest min_threat at or below the battle's base threat names the pool_entries entry to draw (chance mode, at the dungeon level). No band = no generated loot; the battle's own drop table always pays.",
+          "objects": {
+            "min_threat": {
+              "type": "number",
+              "defaultValue": 0,
+              "required": true,
+              "tooltip": "Lowest base threat this band covers. Applies until the next band."
+            },
+            "pool": {
+              "type": "chooseOne",
+              "fromFile": "pool_entries",
+              "required": true,
+              "tooltip": "Pool entry drawn for battles in this band."
+            }
+          }
         },
         "gather_lower_tier_weight": {
           "type": "number",
           "defaultValue": 40,
-          "tooltip": "Gather spots (collect_pool: \"gather\"): weight in % kept by each ingredient tier below the dungeon level's own tier. Tiers open at level 1/4/7/10; e.g. at 40, a level-7 dungeon rolls tier 3 at weight 100, tier 2 at 40, tier 1 at 16."
-        },
-        "smith_break_divisor": {
-          "type": "number",
-          "defaultValue": 3,
-          "tooltip": "Smith station break-down yield = floor(item level / this) \u00d7 the item's rarity cost. Items below this level refund no stones and stay ordinary sellables."
-        },
-        "smith_sound_upgrade": {
-          "type": "chooseOne",
-          "fromFile": "sounds",
-          "tooltip": "Sound played when an item is reforged at the smith station. Empty = silent."
-        },
-        "smith_sound_break": {
-          "type": "chooseOne",
-          "fromFile": "sounds",
-          "tooltip": "Sound played when an item is broken down at the smith station. Empty = silent."
+          "tooltip": "Gather spots (collect_pool: \"gather\"): weight in % kept by each ingredient tier below the dungeon level's own tier. Level 1 and each distinct spawn_min among the foragable items open a tier; e.g. at 40, a dungeon in the third tier rolls tier 3 at weight 100, tier 2 at 40, tier 1 at 16."
         },
         "loot_equipment_categories": {
           "type": "chooseMany",
           "fromFile": "item_categories",
-          "tooltip": "Item categories the equipment loot group rolls from (and that scale to the dungeon level on creation)."
-        },
-        "loot_income_categories": {
-          "type": "chooseMany",
-          "fromFile": "item_categories",
-          "tooltip": "Item categories the income loot group rolls from (e.g. sellable junk). Empty = the whole income budget pays out as the currency item."
-        },
-        "loot_currency_item": {
-          "type": "chooseOne",
-          "fromFile": "item_templates",
-          "fromFileTypeAnd": {
-            "is_currency": true
-          },
-          "tooltip": "Currency item paid out from the leftover income budget."
+          "tooltip": "Item categories treated as equipment: created instances scale to the dungeon level, and the smith station works them."
         },
         "reward_sound_open": {
           "type": "chooseOne",
@@ -196,6 +166,32 @@
           "type": "chooseMany",
           "fromFile": "item_categories",
           "tooltip": "Item categories a gather spot may yield. Empty = reagents + ingredient. Items still need a herb/fungus tag and a matching environment."
+        }
+      }
+    },
+    {
+      "id": "smith",
+      "name": "Smithy",
+      "schema": {
+        "break_divisor": {
+          "type": "number",
+          "defaultValue": 3,
+          "tooltip": "Break-down yield = floor(item level / this) \u00d7 the item's rarity cost. Items below this level refund no stones and stay ordinary sellables."
+        },
+        "sound_open": {
+          "type": "chooseOne",
+          "fromFile": "sounds",
+          "tooltip": "Sound played when the smith station opens. Empty = silent."
+        },
+        "sound_upgrade": {
+          "type": "chooseOne",
+          "fromFile": "sounds",
+          "tooltip": "Sound played when gear is reforged (once for Upgrade equipped, however many pieces it reforges). Empty = silent."
+        },
+        "sound_break": {
+          "type": "chooseOne",
+          "fromFile": "sounds",
+          "tooltip": "Sound played when gear is broken down (once per Break, however many pieces). Empty = silent."
         }
       }
     },
@@ -332,7 +328,7 @@
       },
       {
         "id": "smith_need_stones",
-        "val": "The forge is cold \u2013 bring smith stones."
+        "val": "The forge is cold. Bring more stones."
       },
       {
         "id": "smith_max_badge",
@@ -340,7 +336,67 @@
       },
       {
         "id": "smith_empty",
-        "val": "The smith works on what is in the bag \u2013 bring unequipped leveled gear."
+        "val": "Nothing here for the smith to work on."
+      },
+      {
+        "id": "smith_hint_upgrade",
+        "val": "Pick a piece of gear to reforge it to a higher level, up to your own. Each level costs stones, and rarer gear costs more. \u25b2 marks bag gear that beats what you wear."
+      },
+      {
+        "id": "smith_hint_break",
+        "val": "Select the gear you no longer need, then break it all down at once for stones. Higher level and rarer gear gives more. Worn gear is left out, and \u25b2 marks pieces that beat what you wear."
+      },
+      {
+        "id": "smith_filter_all",
+        "val": "All"
+      },
+      {
+        "id": "smith_filter_equipped",
+        "val": "Equipped"
+      },
+      {
+        "id": "smith_filter_unequipped",
+        "val": "Unequipped"
+      },
+      {
+        "id": "smith_equipped_tag",
+        "val": "E"
+      },
+      {
+        "id": "smith_equipped_by",
+        "val": "Equipped by |name|"
+      },
+      {
+        "id": "smith_select_all",
+        "val": "Select all"
+      },
+      {
+        "id": "smith_select_clear",
+        "val": "Clear"
+      },
+      {
+        "id": "smith_selected_count",
+        "val": "|count| selected"
+      },
+      {
+        "id": "smith_select_up_to",
+        "val": "Up to Lv |level|"
+      },
+      {
+        "id": "smith_upgrade_all_button",
+        "val": "Upgrade equipped"
+      },
+      {
+        "id": "smith_equipped_below_cap",
+        "val": "Equipped gear below the cap: |count|"
+      },
+      {
+        "id": "smith_upgrade_all_entry",
+        "val": "|item| Lv |from| \u2192 |to|"
+      },
+      {
+        "id": "smith_upgrade_all_warning",
+        "val": "Reforge your equipped gear for |amount| stones? |list|"
       },
       {
         "id": "smith_search",
@@ -356,7 +412,11 @@
       },
       {
         "id": "smith_break_warning",
-        "val": "|item| will be destroyed \u2013 there is no way to undo this. Break it down for |amount| smith stones?"
+        "val": "|item| will be destroyed for good. Break it down for |amount| stones?"
+      },
+      {
+        "id": "smith_break_warning_many",
+        "val": "|count| pieces of gear will be destroyed for good. Break them down for |amount| stones?"
       }
     ],
     "dungeon_traits": [

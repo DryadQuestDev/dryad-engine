@@ -6,9 +6,7 @@ import { Schema, Schemable, SchemaToType, dropHiddenFields, getFileExtensions, i
 import { EditorMap } from "./editorMap";
 import { debounceTime, switchMap, startWith, catchError, map, tap } from 'rxjs/operators';
 import { ref, reactive, Ref, watch, nextTick, computed, Component } from "vue";
-import { getImageDimensions, parseText } from "../utility/functions";
-import { stripHighlights } from "../utility/dungeonEditor/stripHighlights";
-import { stripMeta } from "../utility/dungeonEditor/meta";
+import { writeContentParsed, refreshStaleContent } from "../services/contentFreshness";
 import { DevEncountersDefaultObject, DevEncountersDefaultSchema } from "../schemas/devEncountersDefaultSchema";
 import ShortUniqueId from 'short-unique-id';
 import { EDITOR_TABS, EditorTab, registerEditorCustomComponents } from "./editorTabs";
@@ -18,6 +16,8 @@ import { showConfirm, showAlert } from "../services/dialogService";
 import { FilterPresetManager, FILTER_PRESETS_FILE } from "./filterPresets";
 import { DevSettingsObject } from "../schemas/devSettings";
 import { jsonrepair } from 'jsonrepair';
+import { setHideEmpty } from './hideEmptyTabs';
+import { enableFirstSteps } from './firstSteps';
 
 export type DungeonConfigBonus = {
   map_width?: number;
@@ -244,7 +244,7 @@ export class Editor {
 
     // Initialize selectedSubTabs from saved state or as an empty object
     const selectedSubTabs = loadedState.selectedSubTabs || {};
-    const defaultMainTab = 'general'; // Define default
+    const defaultMainTab = 'start'; // A fresh editor opens on the Start page
 
     // Ensure default subtabs are set for all main tabs
     this.getAllTabs().forEach(tab => {
@@ -552,6 +552,11 @@ export class Editor {
       await this.setMod(this.mods[0].id, true);
     }
 
+    // Text edited outside the editor (an AI, VS Code, a Docs pipeline) leaves its parsed file stale.
+    refreshStaleContent(game, this.mods.map(mod => mod.id)).then((updated) => {
+      if (updated.length) this.global.addNotification(`Updated ${updated.length} ${updated.length === 1 ? 'dungeon' : 'dungeons'} changed outside the editor`);
+    }).catch((error) => console.error('[Editor] Refreshing parsed content failed:', error));
+
 
   }
   public async setMod(mod: string, skipUnsavedPrompt: boolean = false): Promise<void> {
@@ -743,6 +748,9 @@ export class Editor {
 
   coreObject: Ref<any | null> = ref(null);
   customPopups: Ref<string[] | null> = ref(null);
+  // The current subtab's `view` and `hideFields` (see EditorTab), published with its schema.
+  view: Ref<string | null> = ref(null);
+  hideFields: Ref<string[]> = ref([]);
 
   pluginObjects: Ref<any | null> = ref(null);
 
@@ -799,11 +807,15 @@ export class Editor {
     this.ignoreDefaultValues = settings?.ignoreDefaultValues ?? false;
     this.showMap.value = settings?.showMap ?? false;
     if (!this.selectedGame && !settings?.create) {
+      this.view.value = null;
+      this.hideFields.value = [];
       return;
     }
 
     // Special handling for plugins tab
     if (settings?.isPlugins && this.selectedGame && this.selectedMod) {
+      this.view.value = null;
+      this.hideFields.value = [];
       await this.loadPluginsTab(isStale);
       return;
     }
@@ -824,6 +836,8 @@ export class Editor {
     if (!fileName && !settings?.create) {
       console.warn(`No file associated with mainTab: ${this.mainTab}, secondaryTab: ${this.secondaryTab}`);
       this.schema.value = settings?.schema ?? null;
+      this.view.value = settings?.view ?? null;
+      this.hideFields.value = settings?.hideFields ?? [];
       this.title.value = settings?.name ?? Global.getInstance().getString(settings?.title ?? '');
       this.create = settings?.create ?? null;
       this.activeObject.value = null;
@@ -905,6 +919,10 @@ export class Editor {
     if (isStale()) return;
 
     this.schema.value = currentSchema;
+    // Set here, not with showMap above: activeObject is already null, so a view that stays
+    // (the same subtab of another dungeon) never sees the previous tab's object.
+    this.view.value = settings?.view ?? null;
+    this.hideFields.value = settings?.hideFields ?? [];
     this.isArray.value = settings?.isArray ?? false;
     this.disableId.value = settings?.disableId ?? false;
     this.title.value = settings?.name ?? Global.getInstance().getString(settings?.title ?? '');
@@ -1329,7 +1347,9 @@ export class Editor {
         return true;
     }
 
-    if (this.mainTab === 'dungeons' && this.secondaryTab === 'config' && !this.create) {
+    // Every subtab of the dungeon config file, not just 'config': the content tab saves it too.
+    const isDungeonConfigSave = this.mainTab === 'dungeons' && settings?.file === '[dungeon]/config';
+    if (isDungeonConfigSave && !this.create) {
       if (this.activeObject.value?.id !== this.selectedDungeon) {
         this.global.addNotificationId('dungeon_id_folder_mismatch', {
           id: this.activeObject.value?.id ?? '',
@@ -1346,7 +1366,6 @@ export class Editor {
     const saveFilePath = this.filePath;
     const saveObject = this.activeObject.value;
     const saveExternals = this.getExternalFileFields();
-    const isDungeonConfigSave = this.mainTab === 'dungeons' && this.secondaryTab === 'config';
     const isManifestSave = this.mainTab === 'general' && this.secondaryTab === 'manifest';
     const saveFile = settings?.file ?? '';
     const saveOnDisk = this.savedEntries;
@@ -1515,33 +1534,15 @@ export class Editor {
     //console.log("dungeonConfig:", this.dungeonConfig.value);
 
 
-    // parse and save the content
-    let content = savedConfig.dungeon_content;
+    await this.writeContentParsed(selected_game, selected_mod, selected_dungeon);
+  }
 
-    // `__meta` is editor-only authoring state. It must not reach the runtime:
-    // `^` is absent from parseText's brace-strip list, so an un-stripped room
-    // param becomes part of `room_id` and renames every id beneath it.
-    let parsedContent = parseText(stripMeta(stripHighlights(content)));
-    let path = `games_files/${selected_game}/${selected_mod}/dungeons/${selected_dungeon}/content_parsed.json`;
-
-
-    // write the config
-    let parsedConfig: DungeonConfigParsed = JSON.parse(JSON.stringify(savedConfig)) as DungeonConfigParsed;
-    delete parsedConfig.dungeon_content;
-    if (savedConfig.dungeon_type !== 'text' && savedConfig.image) {
-      let { width, height } = await getImageDimensions(savedConfig.image);
-      parsedConfig.map_width = width;
-      parsedConfig.map_height = height;
-    }
-    let objectToWrite = {
-      id: "_config_",
-      params: parsedConfig
-    }
-    //console.log("objectToWrite:", objectToWrite);
-    parsedContent.unshift(objectToWrite);
-
-
-    await this.global.writeJson(path, parsedContent);
+  /**
+   * Write a dungeon's content_parsed.json from its saved content_raw.txt and config.json, with
+   * their hash (see contentFreshness.ts).
+   */
+  private async writeContentParsed(gameId: string, layer: string, dungeonId: string): Promise<void> {
+    await writeContentParsed(gameId, layer, dungeonId, (image) => this.global.addNotification(`Image not found: ${image}`));
   }
 
   // Helper to check for "empty" values (null, '', {})
@@ -1658,74 +1659,60 @@ export class Editor {
     }
   }
 
-  async createGameFromTemplate(templateId: string, gameId: string, gameName: string, author: string, dungeonId: string): Promise<boolean> {
+  /**
+   * Create a game from a template in engine_files/examples (Quick Start). The copy owns its art:
+   * every template_assets folder the template references is copied into the game's games_assets
+   * and its paths are rewritten. Ends on the starting dungeon's Content tab, with Hide empty tabs and
+   * the First steps banner on.
+   */
+  async createGameFromTemplate(opts: { templateId: string; gameId: string; gameName: string; author?: string; dungeonId: string; dungeonName: string }): Promise<boolean> {
+    const { templateId, gameId, gameName, dungeonId, dungeonName } = opts;
+    const author = opts.author?.trim();
     if (this.global.isWebSite) {
       this.global.addNotification('Creating content is not available in the web demo. Download the app to edit games.');
       return false;
     }
 
     try {
-      // Check if game already exists
-      const exists = await this.global.pathExists(`games_files/${gameId}`);
-      if (exists) {
+      if (await this.global.pathExists(`games_files/${gameId}`)) {
         this.global.addNotification(`Game "${gameId}" already exists.`);
         return false;
       }
 
-      // Copy entire template folder
-      const result = await this.global.copyDir(
-        `engine_files/examples/${templateId}`,
-        `games_files/${gameId}`
-      );
+      const result = await this.global.copyDir(`engine_files/examples/${templateId}`, `games_files/${gameId}`);
       if (!result.success) {
         this.global.addNotification(`Failed to copy template: ${result.error}`);
         return false;
       }
+      // The template's catalog entry (order, you_get) is not part of the game.
+      if (await this.global.pathExists(`games_files/${gameId}/template.json`)) {
+        await this.global.deleteFile(`games_files/${gameId}/template.json`);
+      }
 
-      // Read and patch the manifest
       const manifestPath = `games_files/${gameId}/_core/manifest.json`;
       const manifest = await this.global.readJson(manifestPath) as ManifestObject;
-
       const oldDungeonId = manifest.starting_dungeon_id;
       manifest.id = gameId;
       manifest.name = gameName;
-      manifest.author = author;
+      if (author) manifest.author = author;
+      else delete manifest.author;
       manifest.starting_dungeon_id = dungeonId;
       manifest.version = '0.1.0';
-
-      // Rewrite manifest script/css paths: template-rooted → new game's games_assets location
-      const oldAssetPrefix = `assets/engine_files/examples/${templateId}/`;
-      const newAssetPrefix = `assets/games_assets/${gameId}/`;
-      const rewriteAssetPath = (p: string) => p.startsWith(oldAssetPrefix) ? newAssetPrefix + p.slice(oldAssetPrefix.length) : p;
-      if (Array.isArray(manifest.scripts)) manifest.scripts = manifest.scripts.map(rewriteAssetPath);
-      if (Array.isArray(manifest.css)) manifest.css = manifest.css.map(rewriteAssetPath);
-
+      // The template's catalog text and cover would become the new game's landing page.
+      delete manifest.description;
+      delete manifest.cover_assets;
       await this.global.writeJson(manifestPath, manifest);
 
-      // Rename dungeon folder if needed
-      if (oldDungeonId && oldDungeonId !== dungeonId) {
-        const dungeonBasePath = `games_files/${gameId}/_core/dungeons`;
-        const oldDungeonExists = await this.global.pathExists(`${dungeonBasePath}/${oldDungeonId}`);
-        if (oldDungeonExists) {
-          await this.global.copyDir(`${dungeonBasePath}/${oldDungeonId}`, `${dungeonBasePath}/${dungeonId}`);
-          await this.global.deleteFile(`${dungeonBasePath}/${oldDungeonId}`, true);
-
-          // Patch dungeon config.json
-          const configPath = `${dungeonBasePath}/${dungeonId}/config.json`;
-          const config = await this.global.readJson(configPath);
-          config.id = dungeonId;
-          await this.global.writeJson(configPath, config);
-
-          // Patch content_parsed.json _config_ entry
-          const contentPath = `${dungeonBasePath}/${dungeonId}/content_parsed.json`;
-          const content = await this.global.readJson(contentPath);
-          const configEntry = content?.find((e: any) => e.id === '_config_');
-          if (configEntry?.params) configEntry.params.id = dungeonId;
-          await this.global.writeJson(contentPath, content);
-        }
+      const dungeonBasePath = `games_files/${gameId}/_core/dungeons`;
+      if (oldDungeonId && oldDungeonId !== dungeonId && await this.global.pathExists(`${dungeonBasePath}/${oldDungeonId}`)) {
+        await this.global.copyDir(`${dungeonBasePath}/${oldDungeonId}`, `${dungeonBasePath}/${dungeonId}`);
+        await this.global.deleteFile(`${dungeonBasePath}/${oldDungeonId}`, true);
+        const configPath = `${dungeonBasePath}/${dungeonId}/config.json`;
+        const config = await this.global.readJson(configPath);
+        config.id = dungeonId;
+        await this.global.writeJson(configPath, config);
       }
 
-      // Create empty assets folder
       await this.global.createDir(`games_assets/${gameId}/_core`);
 
       // Move scripts/ and css/ out of games_files into games_assets (matches production convention)
@@ -1737,37 +1724,83 @@ export class Editor {
         }
       }
 
-      // Update dev_settings with correct asset_folders
-      const devSettingsPath = `games_files/${gameId}/_core/dev/dev_settings.json`;
-      const devSettingsExists = await this.global.pathExists(devSettingsPath);
-      if (devSettingsExists) {
-        const devSettings = await this.global.readJson(devSettingsPath);
-        devSettings.asset_folders = [`${gameId}/_core`];
-        devSettings.narrow_file_search = true;
-        await this.global.writeJson(devSettingsPath, devSettings);
-      } else {
-        await this.global.createDir(`games_files/${gameId}/_core/dev`);
-        await this.global.writeJson(devSettingsPath, {
-          uid: `${gameId}_core_dev_settings`,
-          asset_folders: [`${gameId}/_core`],
-          narrow_file_search: true
-        });
+      await this.copyTemplateAssets(templateId, gameId);
+
+      // The typed dungeon name is its display name, the line under $dungeon_name.
+      for (const dungeon of await this.global.listFolders(dungeonBasePath)) {
+        const rawPath = `${dungeonBasePath}/${dungeon}/content_raw.txt`;
+        let raw = await this.global.readText(rawPath);
+        if (raw === null) continue;
+        if (dungeon === dungeonId) raw = raw.replace(/^(\$dungeon_name[^\n]*\n)[^\n]*/m, (_, head) => head + dungeonName);
+        await this.global.writeText(rawPath, raw);
+        const config = await this.global.readJson(`${dungeonBasePath}/${dungeon}/config.json`);
+        if (config) await this.writeContentParsed(gameId, '_core', dungeon);
       }
 
-      // Update editor state
-      this.addGame(manifest);
-      this.global.addNotificationId("game_created");
+      const devSettingsPath = `games_files/${gameId}/_core/dev/dev_settings.json`;
+      const devSettings = await this.global.readJson(devSettingsPath) ?? { uid: `${gameId}_core_dev_settings` };
+      devSettings.asset_folders = [`${gameId}/_core`];
+      devSettings.narrow_file_search = true;
+      await this.global.writeJson(devSettingsPath, devSettings);
 
-      // Navigate to General → Manifest
-      await this.setMainTab('general');
+      this.games.push(manifest);
+      this.setFilteredGames('');
       this.hasUnsavedChanges.value = false;
+      await this.setGame(gameId, true);
 
+      setHideEmpty(gameId, true);
+      enableFirstSteps(gameId);
+      this.state.selectedSubTabs['dungeons'] = 'content';
+      await this.setDungeon(dungeonId, true);
+      await this.setMainTab('dungeons');
+      this.global.addNotificationId('game_created');
       return true;
-
     } catch (error) {
       console.error("Error creating game from template:", error);
       this.global.addNotificationId("create_error");
       return false;
+    }
+  }
+
+  /**
+   * Copy into a new game the template_assets folders its files reference, and rewrite every
+   * template-rooted path (template_assets and the template folder itself) to the game's own
+   * games_assets folder.
+   */
+  private async copyTemplateAssets(templateId: string, gameId: string): Promise<void> {
+    const sharedPrefix = 'assets/engine_files/template_assets/';
+    const templatePrefix = `assets/engine_files/examples/${templateId}/`;
+    const gamePrefix = `assets/games_assets/${gameId}/`;
+    const root = `games_files/${gameId}`;
+
+    const files: string[] = [];
+    const walk = async (dir: string) => {
+      for (const name of await this.global.listFiles(dir)) {
+        if (/\.(json|txt)$/i.test(name)) files.push(`${dir}/${name}`);
+      }
+      for (const sub of await this.global.listFolders(dir)) await walk(`${dir}/${sub}`);
+    };
+    await walk(root);
+
+    const folders = new Set<string>();
+    // The folder of every referenced file: assets/engine_files/template_assets/<folder>/<file>
+    const pathPattern = /assets\/engine_files\/template_assets\/([^"'\s\\]+)\/[^/"'\s\\]+/g;
+    const texts = new Map<string, string>();
+    for (const file of files) {
+      const text = await this.global.readText(file);
+      if (text === null) continue;
+      texts.set(file, text);
+      for (const m of text.matchAll(pathPattern)) folders.add(m[1]);
+    }
+
+    for (const folder of folders) {
+      const res = await this.global.copyDir(`engine_files/template_assets/${folder}`, `games_assets/${gameId}/_core/${folder}`);
+      if (!res.success) console.warn(`[Editor] Template asset folder ${folder} not copied: ${res.error}`);
+    }
+
+    for (const [file, text] of texts) {
+      const rewritten = text.split(sharedPrefix).join(`${gamePrefix}_core/`).split(templatePrefix).join(gamePrefix);
+      if (rewritten !== text) await this.global.writeText(file, rewritten);
     }
   }
 
@@ -2463,7 +2496,7 @@ export class Editor {
   private getShemaRecord(fieldSchema: Schemable, item: any): Schemable {
     if (fieldSchema.fromFileType === 'custom') {
       let itemType = item.type;
-      // 'number', 'string', 'textarea', 'htmlarea', 'boolean', 'color', 'image', 'array'
+      // 'number', 'string', 'textarea', 'htmlarea', 'boolean', 'color', 'date', 'image', 'array'
       switch (itemType) {
         case 'number':
           return { type: 'number', };
@@ -2477,6 +2510,8 @@ export class Editor {
           return { type: 'boolean', };
         case 'color':
           return { type: 'color', };
+        case 'date':
+          return { type: 'date', };
         case 'image':
           return { type: 'file', fileType: 'image' };
         case 'video':

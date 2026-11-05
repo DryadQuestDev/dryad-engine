@@ -8,8 +8,10 @@ import ChoiceList from '../ChoiceList.vue';
 import Toolbar from '../Toolbar.vue';
 import CharacterFace from '../CharacterFace.vue';
 import { useTypingAnimation } from '../../../composables/useTypingAnimation';
+import { usePageTranslated } from '../../../composables/usePageTranslated';
 import gsap from 'gsap';
 import TextEncounter from '../TextEncounter.vue';
+import TextMap from '../TextMap.vue';
 import DialogueDisplay from './DialogueDisplay.vue';
 
 const global = Global.getInstance();
@@ -222,6 +224,10 @@ const characterName = computed(() => {
   return game.dungeonSystem.talkingCharacter.value?.getTrait('name') ?? '';
 });
 
+// Dev playtests only: a speaker prefix naming no character gets a placeholder tag where the name goes.
+const missingSpeaker = computed(() => game.dungeonSystem.missingSpeakerId.value);
+const hasSpeakerTag = computed(() => !!characterName.value || !!missingSpeaker.value);
+
 const talkingCharacterHasNoArt = computed(() => {
   const c = game.dungeonSystem.talkingCharacter.value;
   return !!c && !c.hasArt();
@@ -285,7 +291,11 @@ const processedEventContent = computed(() => {
 });
 
 // Typing animation setup
+const pageTranslated = usePageTranslated();
 const typingSpeed = computed(() => {
+  // A translator works on the text that is on the page: a paragraph still typing gets translated
+  // half-written. On a translated page the text lands whole, whatever the setting says.
+  if (pageTranslated.value) return 0;
   const speedSetting = global.userSettings.value.typing_speed || 'fast';
 
   // Map string values to numeric speeds
@@ -421,6 +431,13 @@ const hasConnectedRooms = computed(() => {
   return currentRoom && currentRoom.neighborsWithDirection && currentRoom.neighborsWithDirection.length > 0;
 });
 */
+// A screen dungeon with several rooms gets the text dungeons' room map and neighbour arrows.
+const hasRoomMap = computed(() => {
+  const dungeon = game.dungeonSystem.currentDungeon.value;
+  return dungeon?.dungeon_type === 'screen' && dungeon.rooms.size > 1;
+});
+const isFullMapOpen = ref(false);
+
 function navigateToNeighbor(neighborRoom: any) {
   if (game.coreSystem.getState('disable_ui')) {
     return;
@@ -466,7 +483,7 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
 
       <!-- Choices in normal position: when NOT scene OR when scene with character name (not for text dungeons - they show choices inline) -->
       <ChoiceList
-        v-if="choicesReady && !isTextDungeon && !isEventLayerHidden && !game.coreSystem.isTextUIContent.value && (game.dungeonSystem.choiceType.value !== 'scene' || characterName)" />
+        v-if="choicesReady && !isTextDungeon && !isEventLayerHidden && !game.coreSystem.isTextUIContent.value && (game.dungeonSystem.choiceType.value !== 'scene' || hasSpeakerTag)" />
 
       <Toolbar v-if="game.dungeonSystem.choiceType.value === 'encounter'" />
 
@@ -479,8 +496,11 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
         v-if="game.dungeonSystem.choiceType.value === 'scene' && !isEventLayerHidden"
         class="dialogue-header">
         <!-- Character name OR choices in left column -->
-        <div v-if="characterName && !game.coreSystem.isTextUIContent.value" class="character-name"
+        <div v-if="characterName && !game.coreSystem.isTextUIContent.value" class="character-name notranslate"
           :style="characterNameStyle">{{ characterName }}</div>
+        <div v-else-if="missingSpeaker" class="character-name missing-speaker notranslate">
+          {{ missingSpeaker }}?<span class="missing-speaker-label">not in the game</span>
+        </div>
         <div v-else class="dialogue-header-left">
           <!-- Choices inside header when it's a scene with no character name -->
           <ChoiceList v-if="choicesReady && !game.coreSystem.isTextUIContent.value" />
@@ -568,7 +588,7 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
               <!-- Map/Screen dungeon: original layout -->
               <div class="encounter-content-layout">
                 <!-- Direction arrows for room navigation -->
-                <div class="direction-arrows" v-if="game.dungeonSystem.currentDungeon.value?.dungeon_type !== 'screen'">
+                <div class="direction-arrows" v-if="game.dungeonSystem.currentDungeon.value?.dungeon_type !== 'screen' || hasRoomMap">
                   <template v-for="neighbor in game.dungeonSystem.currentRoom.value?.neighborsWithDirection"
                     :key="neighbor.angle">
                     <div class="direction-arrow" :style="{ '--rotation': neighbor.angle + 'deg' }"
@@ -578,6 +598,8 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
                 </div>
 
                 <div class="encounter-text" v-script="{ html: encounterContent, resolver: false }"></div>
+                <TextMap v-if="hasRoomMap" mode="mini" class="screen-mini-map"
+                  @openFullMap="isFullMapOpen = true" @closeFullMap="isFullMapOpen = false" />
               </div>
             </div>
             <!-- flash (scene + encounter): follows the text inside .content-scroll, so a long run of
@@ -600,6 +622,12 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
          block for anything positioned inside it. `defer` waits for #overlay-wrapper to be in the
          document (it mounts in the same tick, further up the tree). Mounted for the whole dungeon:
          putting the UI away must not tear down the slot's components. -->
+    <Teleport to="body">
+      <div v-if="isFullMapOpen && hasRoomMap" class="full-map-overlay" @click.self="isFullMapOpen = false">
+        <TextMap mode="full" @openFullMap="isFullMapOpen = true" @closeFullMap="isFullMapOpen = false" />
+      </div>
+    </Teleport>
+
     <Teleport defer to="#overlay-wrapper">
       <div class="overlay-navigation-side" :class="[
         isTextDungeon ? 'overlay-navigation-side--text' : 'overlay-navigation-side--screen',
@@ -858,6 +886,28 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
   font-weight: bold;
 }
 
+/* Dev-only stand-in for a speaker that is not a character: loud on purpose. */
+.character-name.missing-speaker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f1400;
+  background: repeating-linear-gradient(135deg, #ffb300 0 7px, #e08a00 7px 14px);
+  border-color: #ffd54f;
+  text-shadow: 0 0 2px #ffd54f;
+}
+
+.missing-speaker-label {
+  font-size: 0.75em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-shadow: none;
+  color: #ffd54f;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .dialogue-header-left {
   flex: 1;
   display: flex;
@@ -881,6 +931,23 @@ const overEncumberedLabel = computed(() => global.getString('over_encumbered_lab
 
 .encounter-text {
   flex: 1;
+}
+
+.encounter-content-layout > .screen-mini-map.mini {
+  flex: none;
+  align-self: flex-start;
+  width: 150px;
+  height: 150px;
+}
+
+.full-map-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
 }
 
 .encounter-discover-cue {

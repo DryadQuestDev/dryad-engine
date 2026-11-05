@@ -175,8 +175,8 @@ export const RpgBattleScreen = defineComponent({
     // fast mouseenter lands before the flip — gate the hover on isTargeting and it gets swallowed, and
     // mouseenter never re-fires for a mouse already inside the slot (the "no highlight until re-hover" bug).
     // The watch recomputes the preview on hover change AND on the phase flip AND on ability change, so a
-    // remembered hover lights up the moment targeting actually begins. getAbility() (the reliable fresh merge —
-    // the getAbilities() ref is stale) runs only on those transitions, never per render: no churn.
+    // remembered hover lights up the moment targeting actually begins. getAbility() (a fresh merge) runs only on
+    // those transitions, never per render: no churn.
     const hoveredTargetId = ref(null);
     const splashTargetIds = ref([]);
 
@@ -842,8 +842,16 @@ export const RpgBattleScreen = defineComponent({
       game.trigger('battle_finished', 'victory', b.battleId || null);
     }
 
+    function loseBattle() {
+      const b = battle.value;
+      if (!b || b.phase === 'finished') return;
+      b.result = 'defeat';
+      b.phase = 'finished';
+      game.trigger('battle_finished', 'defeat', b.battleId || null);
+    }
+
     // Result-overlay Continue: ends with the battle's actual result so defeat
-    // reaches battle_end/battle_closed_before listeners (winBattle is the dev force-win only).
+    // reaches battle_end/battle_closed_before listeners (winBattle/loseBattle are the dev force-finishes only).
     function closeBattle() {
       endRpgBattle(battle.value?.result || 'victory');
     }
@@ -924,7 +932,7 @@ export const RpgBattleScreen = defineComponent({
       abilityPanelRef, viewerCharacters, viewerInitialIndex,
       isEnemyTargetable, onEnemyTargetClick,
       onSelectAbility, selectTarget, cancelTarget, onSlotClick, closeViewer,
-      winBattle, closeBattle, onEndTurn, toggleZoom, cycleBattleState, game,
+      winBattle, loseBattle, closeBattle, onEndTurn, toggleZoom, cycleBattleState, game,
     };
   },
   template: /*html*/`
@@ -1028,6 +1036,7 @@ export const RpgBattleScreen = defineComponent({
 
           <div v-if="game.isDevMode()" class="rpg-battle-controls">
             <button class="rpg-btn rpg-btn-win" @click="winBattle">{{ game.getLine('ui_win_battle') }}</button>
+            <button class="rpg-btn rpg-btn-lose" @click="loseBattle">{{ game.getLine('ui_lose_battle') }}</button>
             <button v-if="isPlayerTurn && !activeSupportChar" class="rpg-btn rpg-btn-zoom" @click="toggleZoom">
               {{ forceZoomOut ? 'Zoom In' : 'Zoom Out' }}
             </button>

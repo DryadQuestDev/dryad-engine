@@ -21,7 +21,7 @@ import type { NameKind } from './scriptVocabulary';
 
 /** What one dungeon offers to references from anywhere. */
 export type DungeonIndex = {
-  /** Room ids: rooms.json, the content's `^room` blocks, and `main` for a screen dungeon. */
+  /** Room ids: rooms.json, the content's `^room` blocks, and `main` for a screen dungeon without rooms. */
   rooms: Set<string>;
   /** Scene ids (`#id` blocks) per content room. */
   scenesByRoom: Map<string, Set<string>>;
@@ -607,7 +607,7 @@ function checkFlagWrite(c: Ctx, p: Piece) {
 }
 
 /**
- * An attribute key (`face` in `ane.face = hurt`): its values follow, or a skin layer takes
+ * An attribute key (`face` in `alice.face = hurt`): its values follow, or a skin layer takes
  * true / false (the runtime's fallback). Returns the values the key accepts, or null for any.
  */
 function checkAttributeKey(c: Ctx, p: Piece): string[] | null {

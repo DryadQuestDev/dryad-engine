@@ -194,6 +194,14 @@ The engine includes built-in color classes that shift red-colored assets to othe
 
 You can define your own color classes in your game's CSS file using the `.character-doll-image.classname` selector with CSS filter properties.
 
+Each character on stage carries its id on its slot as `data-char-id`, so your game's CSS can style one character alone:
+
+```css
+.character-slot[data-char-id="nell"] .character-doll-wrapper {
+  filter: drop-shadow(0 0 8px violet);
+}
+```
+
 ---
 
 ### Character Statuses

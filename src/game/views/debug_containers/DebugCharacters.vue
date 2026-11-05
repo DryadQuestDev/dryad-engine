@@ -1,26 +1,31 @@
 <script setup lang="ts">
 import { Game } from '../../game';
-import { ref, shallowRef, computed, reactive, watch, isRef } from 'vue';
-import type { ComputedRef } from 'vue';
+import { ref, shallowRef, computed, watch } from 'vue';
 import { useStorage } from '@vueuse/core';
 import Select from 'primevue/select';
+import { panelOverlayClass } from '../../../editor/editorTheme';
 import InputText from 'primevue/inputtext';
-import InputNumber from 'primevue/inputnumber';
 import Button from 'primevue/button';
 import FloatLabel from 'primevue/floatlabel';
-import type { Character, FinalAbilities } from '../../core/character/character';
+import type { Character } from '../../core/character/character';
 import { debugSerialize } from '../../../utility/debug-serializer';
-import { Status } from '../../core/character/status';
+import { Global } from '../../../global/global';
 import CharacterFace from '../CharacterFace.vue';
 import CharacterViewerPopup from '../progression/CharacterViewerPopup.vue';
+import DebugChangesBox from './DebugChangesBox.vue';
+import DebugEditField, { type EditFieldEditor } from './DebugEditField.vue';
+import DebugPicker, { type PickerOption } from './DebugPicker.vue';
+import {
+  devChanges, devSet, devStatus, findDevChange, isInEffect, loadDevChanges, undoDevChanges,
+  type DevChange, type DevValue,
+} from '../../utils/devChanges';
 
 const game = Game.getInstance();
 
+loadDevChanges();
+
 const selectedTemplate = ref<string | null>(null);
 const newCharacterId = ref<string>('');
-const selectedStatus = ref<string | null>(null);
-const selectedResource = ref<string | null>(null);
-const resourceAmount = ref<number>(10);
 
 type SortKey = 'id' | 'name' | 'template';
 type TagMode = 'or' | 'and';
@@ -42,14 +47,6 @@ const filters = useStorage('debug-characters-filters', {
   sort: 'id' as SortKey,
 }, localStorage, { mergeDefaults: true });
 
-const resourceStats = computed(() => {
-  const stats: string[] = [];
-  for (const [id, stat] of game.characterSystem.statsMap) {
-    if (stat.is_resource) stats.push(id);
-  }
-  return stats;
-});
-
 const characters = computed<Character[]>(() => {
   return Array.from(game.characterSystem.characters.value.values());
 });
@@ -67,12 +64,7 @@ function characterName(character: Character): string {
 }
 
 function hasAbilities(character: Character): boolean {
-  // Characters in the map are reactive proxies, and Vue unwraps refs held on a reactive object —
-  // so getAbilities() hands back the plain FinalAbilities here, not the ComputedRef it declares.
-  // isRef covers both, since an unproxied instance really does return the ref.
-  const abilities = character.getAbilities() as ComputedRef<FinalAbilities> | FinalAbilities;
-  const final = isRef(abilities) ? abilities.value : abilities;
-  return Object.keys(final ?? {}).length > 0;
+  return Object.keys(character.getAbilities()).length > 0;
 }
 
 function matchesTags(character: Character, selected: string[]): boolean {
@@ -240,38 +232,266 @@ function createCharacter() {
   }
 }
 
-function addStatusToCharacter(character: Character, statusId: string | null) {
-  if (!statusId) {
-    console.warn('No status selected');
-    return;
+// --- Inspect: editable fields ---------------------------------------------
+// Every edit runs the action content would use (devChanges), so it behaves exactly as a line in a
+// scene would, and adds up into the changes box below the fields.
+type FieldKind = 'attr' | 'trait' | 'stat' | 'resource';
+
+type FieldRow = {
+  kind: FieldKind;
+  key: string;
+  /** The value on the character's core status, which is what the action sets. */
+  value: DevValue;
+  editor: EditFieldEditor;
+  options?: string[];
+  /** Set when a status (an equipped item, a buff) makes the character show something else. */
+  note?: string;
+  max?: number;
+  /** Set when the game wrote this field: save restoration replays it over the template. */
+  written?: { text: string; title: string };
+};
+
+const FORGET_HINT = 'Click to forget it: from the next load the field follows the template.';
+
+function signed(n: number): string {
+  return n < 0 ? String(n) : `+${n}`;
+}
+
+function shown(value: unknown): string {
+  if (value === undefined || value === null) return 'nothing';
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+/** The tag for a field the game wrote: what save restoration does with it, and what the template says. */
+function writtenTag(character: Character, kind: FieldKind, key: string): FieldRow['written'] {
+  const writes = character.coreWrites;
+  const template = game.characterSystem.getCharacterTemplate(character.id, character.templateId) as any;
+  if (kind === 'stat') {
+    const pin = writes.statPins[key];
+    const change = writes.stats[key];
+    if (pin === undefined && change === undefined) return undefined;
+    const text = [pin !== undefined ? `=${pin}` : '', change !== undefined ? signed(change) : ''].filter(Boolean).join(' ');
+    const base = template?.stats?.[key];
+    const restored = pin === undefined
+      ? `The story added ${signed(change!)}, restored on top of the template's ${shown(base)}.`
+      : `Set by the story to ${pin}${change !== undefined ? `, then ${signed(change)}` : ''}. Kept there when the template changes (it says ${shown(base)}).`;
+    return { text, title: `${restored}\n${FORGET_HINT}` };
   }
+  const record = kind === 'trait' ? writes.traits : kind === 'attr' ? writes.attributes : null;
+  if (!record || !(key in record)) return undefined;
+  const base = template?.[kind === 'trait' ? 'traits' : 'attributes']?.[key];
+  return { text: 'story', title: `Set by the story. The template says ${shown(base)}.\n${FORGET_HINT}` };
+}
 
-  const statusTemplate = game.characterSystem.statusesMap.get(statusId);
-  if (!statusTemplate) {
-    console.error(`Status template "${statusId}" not found`);
-    return;
+function forgetWrite(row: FieldRow) {
+  const writes = debugCharacter.value?.coreWrites;
+  if (!writes) return;
+  if (row.kind === 'stat') {
+    delete writes.statPins[row.key];
+    delete writes.stats[row.key];
+  } else if (row.kind === 'trait') {
+    delete writes.traits[row.key];
+  } else if (row.kind === 'attr') {
+    delete writes.attributes[row.key];
   }
-
-  // Create a new Status instance
-  const status = reactive(new Status());
-  status.id = statusId;
-  status.setValues(statusTemplate);
-
-  // Add status to character
-  character.addStatus(status);
-
-  console.log(`Added status "${statusId}" to character "${character.id}"`);
 }
 
-function addResourceToCharacter(character: Character, statId: string | null, amount: number) {
-  if (!statId) return;
-  character.addResource(statId, amount);
-  console.log(`Added ${amount} "${statId}" to character "${character.id}"`);
+type StatusRow = { id: string; name: string; image: string; stacks: number; removed: boolean };
+
+/** Lets a long snake_case name wrap at its underscores rather than mid-word. */
+function nameParts(name: string): string[] {
+  return name.split(/(?<=_)/);
 }
 
-function formatCharacterData(character: any) {
-  return debugSerialize(character, 1);
+function byOrder(keys: string[], defs: Map<string, { order?: number }>): string[] {
+  return keys.sort((a, b) => (defs.get(a)?.order ?? 0) - (defs.get(b)?.order ?? 0) || a.localeCompare(b));
 }
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
+}
+
+function statusLabel(character: Character, statusId: string): string {
+  // An equipped item grants its status as "item_<uid>"; name the item instead.
+  const item = statusId.startsWith('item_') ? character.getEquippedItems().find(i => `item_${i.uid}` === statusId) : null;
+  return item?.getName() || character.getStatus(statusId)?.name || statusId;
+}
+
+function overrideNote(character: Character, field: 'attributes' | 'traits', key: string, coreValue: DevValue): string | undefined {
+  const shown = character[field][key];
+  if (sameValue(shown ?? null, coreValue)) return undefined;
+  const [, ...statuses] = character.getStatuses();
+  const source = [...statuses].reverse().find(status => key in (status[field] ?? {}));
+  const text = typeof shown === 'object' && shown !== null ? JSON.stringify(shown) : String(shown ?? 'nothing');
+  return source ? `shows ${text} · from ${statusLabel(character, source.id)}` : `shows ${text}`;
+}
+
+const attributeRows = computed<FieldRow[]>(() => {
+  const character = debugCharacter.value;
+  if (!character) return [];
+  const core = character.getCoreStatus();
+  const defs = game.characterSystem.attributesMap;
+  const keys = [...new Set([...Object.keys(core.attributes), ...Object.keys(character.attributes)])].filter(k => defs.has(k));
+  return byOrder(keys, defs).map(key => {
+    const value = core.attributes[key] ?? null;
+    const options = defs.get(key)?.values ?? [];
+    return {
+      kind: 'attr', key, value, editor: options.length ? 'select' : 'text', options,
+      note: overrideNote(character, 'attributes', key, value),
+      written: writtenTag(character, 'attr', key),
+    };
+  });
+});
+
+const characterStatKeys = computed<string[]>(() => {
+  const character = debugCharacter.value;
+  if (!character) return [];
+  const core = character.getCoreStatus();
+  const defs = game.characterSystem.statsMap;
+  return byOrder([...defs.keys()].filter(k => k in core.stats || character.hasStat(k)), defs);
+});
+
+const statRows = computed<FieldRow[]>(() => {
+  const character = debugCharacter.value;
+  if (!character) return [];
+  const core = character.getCoreStatus();
+  return characterStatKeys.value.map(key => {
+    const value = core.stats[key] ?? 0;
+    const total = character.getStat(key);
+    return {
+      kind: 'stat', key, value, editor: 'number', note: total !== value ? `total ${total} with statuses` : undefined,
+      written: writtenTag(character, 'stat', key),
+    };
+  });
+});
+
+const resourceRows = computed<FieldRow[]>(() => {
+  const character = debugCharacter.value;
+  if (!character) return [];
+  return characterStatKeys.value
+    .filter(key => game.characterSystem.statsMap.get(key)?.is_resource)
+    .map(key => ({ kind: 'resource', key, value: character.getResource(key), editor: 'number', max: character.getStat(key) }));
+});
+
+const TEXT_TRAITS = ['string', 'textarea', 'color', 'image', 'video', 'htmlarea', 'chooseOne'];
+
+const traitRows = computed<FieldRow[]>(() => {
+  const character = debugCharacter.value;
+  if (!character) return [];
+  const core = character.getCoreStatus();
+  const defs = game.characterSystem.traitsMap;
+  const keys = [...new Set([...Object.keys(core.traits), ...Object.keys(character.traits)])].filter(k => defs.has(k));
+  return byOrder(keys, defs).map(key => {
+    const def = defs.get(key)!;
+    const value = core.traits[key] ?? null;
+    const values = def.type === 'chooseOne' ? def.values ?? [] : [];
+    let editor: EditFieldEditor = def.type === 'number' || def.type === 'range' ? 'number'
+      : def.type === 'boolean' ? 'boolean'
+        : values.length ? 'select'
+          : TEXT_TRAITS.includes(def.type ?? 'string') ? 'text' : 'readonly';
+    // Lists and objects have no ops form to set them by.
+    if (typeof value === 'object' && value !== null) editor = 'readonly';
+    return {
+      kind: 'trait', key, value, editor, options: values, note: overrideNote(character, 'traits', key, value),
+      written: writtenTag(character, 'trait', key),
+    };
+  });
+});
+
+const characterChanges = computed<DevChange[]>(() => {
+  const id = debugCharacter.value?.id;
+  return devChanges.value.filter(c => c.kind !== 'item' && c.owner === id);
+});
+
+const statusRows = computed<StatusRow[]>(() => {
+  const character = debugCharacter.value;
+  if (!character) return [];
+  // The first status is the character's own core; "item_" ones are what equipped items grant.
+  const [, ...statuses] = character.getStatuses();
+  const rows: StatusRow[] = statuses.filter(s => !s.id.startsWith('item_')).map(s => ({
+    id: s.id, name: s.name || s.id, image: s.displayImage, stacks: s.currentStacks, removed: false,
+  }));
+  // A status removed here stays listed, so the removal can be seen and put back.
+  for (const change of characterChanges.value) {
+    if (change.kind !== 'status' || change.value !== 0 || !isInEffect(change)) continue;
+    const template = game.characterSystem.statusesMap.get(change.key);
+    rows.push({ id: change.key, name: template?.name || change.key, image: template?.image || '', stacks: 0, removed: true });
+  }
+  return rows;
+});
+
+// Kept when switching characters, so the same field can be compared across them.
+const fieldSearch = ref('');
+
+function matchesFieldSearch(...texts: string[]): boolean {
+  const query = fieldSearch.value.trim().toLowerCase();
+  return !query || texts.some(text => text.toLowerCase().includes(query));
+}
+
+const fieldSections = computed(() => [
+  { title: 'Attributes', rows: attributeRows.value },
+  { title: 'Stats', rows: statRows.value },
+  { title: 'Resources', rows: resourceRows.value },
+  { title: 'Traits', rows: traitRows.value },
+].map(section => ({ ...section, rows: section.rows.filter(row => matchesFieldSearch(row.key)) })));
+
+const shownStatusRows = computed(() => statusRows.value.filter(status => matchesFieldSearch(status.id, status.name)));
+
+const equippedStatusCount = computed(() =>
+  debugCharacter.value?.getStatuses().filter(s => s.id.startsWith('item_')).length ?? 0);
+
+const statusOptions = computed<PickerOption[]>(() =>
+  [...game.characterSystem.statusesMap.values()].map(s => ({ id: s.id, name: s.name || s.id, image: s.image || undefined })));
+
+const addingStatus = ref(false);
+
+const allCharacterChanges = computed(() => devChanges.value.filter(c => c.kind !== 'item'));
+
+const changedCharacterIds = computed(() => new Set(allCharacterChanges.value.map(c => c.owner)));
+
+/** The change behind a field, while the game still holds what it set. */
+function activeChange(kind: DevChange['kind'], key: string): DevChange | undefined {
+  const id = debugCharacter.value?.id;
+  if (!id) return undefined;
+  const change = findDevChange({ kind, owner: id, key });
+  return change && isInEffect(change) ? change : undefined;
+}
+
+function wasText(change: DevChange): string {
+  if (change.kind === 'status') return change.original === 0 ? 'new' : `was ×${change.original}`;
+  return change.original === null ? 'was unset' : `was ${change.original}`;
+}
+
+function report(error: string | null) {
+  if (error) Global.getInstance().addNotification(error);
+}
+
+function commitField(row: FieldRow, value: string | number | boolean) {
+  const character = debugCharacter.value;
+  if (character) report(devSet({ kind: row.kind, owner: character.id, key: row.key }, value));
+}
+
+function addStatus(statusId: string) {
+  const character = debugCharacter.value;
+  if (character) report(devStatus(character.id, statusId, true));
+  addingStatus.value = false;
+}
+
+function removeStatus(statusId: string) {
+  const character = debugCharacter.value;
+  if (character) report(devStatus(character.id, statusId, false));
+}
+
+function undoChange(change: DevChange | undefined) {
+  if (change) report(undoDevChanges([change]));
+}
+
+// Serializing a whole character is not cheap, so only while Raw data is open.
+const rawOpen = ref(false);
+
+const rawData = computed(() => rawOpen.value && debugCharacter.value ? debugSerialize(debugCharacter.value, 1) : '');
+
+watch(debugId, () => { addingStatus.value = false; });
 </script>
 
 <template>
@@ -280,7 +500,7 @@ function formatCharacterData(character: any) {
       <summary>Create New Character</summary>
       <div class="create-character-form">
         <Select v-model="selectedTemplate" :options="Array.from(game.characterSystem.templatesMap.keys())"
-          placeholder="Select a template" filter class="input-control" />
+          placeholder="Select a template" filter class="input-control" :overlayClass="panelOverlayClass" />
         <FloatLabel variant="on">
           <!-- @vue-ignore -->
           <InputText v-model="newCharacterId" class="input-control" />
@@ -330,7 +550,7 @@ function formatCharacterData(character: any) {
         </div>
 
         <Select v-model="filters.sort" :options="SORT_OPTIONS" optionLabel="label" optionValue="value"
-          class="filter-control" />
+          class="filter-control" :overlayClass="panelOverlayClass" />
       </div>
 
       <div v-if="pagedCharacters.length" class="character-grid">
@@ -345,6 +565,7 @@ function formatCharacterData(character: any) {
             </span>
           </div>
           <button class="tile-id" :title="`Debug info: ${character.id}`" @click="inspectCharacter(character)">
+            <span v-if="changedCharacterIds.has(character.id)" class="tile-changed" title="Changed this playtest"></span>
             {{ character.id }}
           </button>
         </div>
@@ -358,6 +579,8 @@ function formatCharacterData(character: any) {
         <span class="page-label">{{ page + 1 }} / {{ pageCount }}</span>
         <button class="page-button" :disabled="page >= pageCount - 1" @click="goToPage(page + 1)">&rsaquo;</button>
       </div>
+
+      <DebugChangesBox :changes="allCharacterChanges" />
     </div>
 
     <!-- Inspect mode: the grid and filters give way to the one clicked face and its data -->
@@ -376,26 +599,64 @@ function formatCharacterData(character: any) {
         </div>
       </div>
 
-      <div class="character-actions">
-        <h4>Add Status Effect</h4>
-        <div class="status-controls">
-          <Select v-model="selectedStatus" :options="Array.from(game.characterSystem.statusesMap.keys())"
-            placeholder="Select status" filter class="status-select" />
-          <Button label="Add Status" size="small" @click="addStatusToCharacter(debugCharacter, selectedStatus)" />
-        </div>
+      <InputText v-model="fieldSearch" placeholder="Search fields and statuses" class="filter-search inspect-search" />
 
-        <h4>Add Resource</h4>
-        <div class="status-controls">
-          <Select v-model="selectedResource" :options="resourceStats" placeholder="Select resource"
-            class="status-select" />
-          <!-- @vue-ignore -->
-          <InputNumber v-model="resourceAmount" class="resource-amount" />
-          <Button label="Add" size="small"
-            @click="addResourceToCharacter(debugCharacter, selectedResource, resourceAmount)" />
-        </div>
-      </div>
+      <template v-for="section in fieldSections" :key="section.title">
+        <section v-if="section.rows.length" class="field-section">
+          <h4 class="section-title">{{ section.title }}</h4>
+          <div v-for="row in section.rows" :key="row.key" class="field-row"
+            :class="{ changed: activeChange(row.kind, row.key) }">
+            <label class="field-label" :title="row.key">
+              <template v-for="(part, i) in nameParts(row.key)" :key="i">{{ part }}<wbr></template>
+            </label>
+            <div class="field-control">
+              <DebugEditField :editor="row.editor" :value="row.value" :options="row.options"
+                @commit="commitField(row, $event)" />
+              <span v-if="row.max !== undefined" class="field-max">/ {{ row.max }}</span>
+              <button v-if="row.written" class="field-written" :title="row.written.title"
+                @click="forgetWrite(row)">{{ row.written.text }}</button>
+            </div>
+            <button v-if="activeChange(row.kind, row.key)" class="field-was" title="Put it back"
+              @click="undoChange(activeChange(row.kind, row.key))">{{ wasText(activeChange(row.kind, row.key)!) }}</button>
+            <span v-if="row.note" class="field-note">{{ row.note }}</span>
+          </div>
+        </section>
+      </template>
 
-      <pre class="character-data">{{ formatCharacterData(debugCharacter) }}</pre>
+      <section class="field-section">
+        <h4 class="section-title">
+          Statuses
+          <button v-if="statusOptions.length" class="section-link" @click="addingStatus = !addingStatus">
+            {{ addingStatus ? 'Cancel' : '+ Add status' }}
+          </button>
+        </h4>
+        <DebugPicker v-if="addingStatus" :options="statusOptions" placeholder="Search statuses" autofocus
+          @pick="addStatus" />
+        <div v-for="status in shownStatusRows" :key="status.id" class="field-row status-row"
+          :class="{ changed: activeChange('status', status.id), removed: status.removed }">
+          <img v-if="status.image" class="status-icon" :src="status.image" alt="" />
+          <span class="status-name" :title="status.id">
+            {{ status.name }}<span v-if="status.stacks > 1" class="status-stacks"> ×{{ status.stacks }}</span>
+          </span>
+          <button v-if="activeChange('status', status.id)" class="field-was" title="Put it back"
+            @click="undoChange(activeChange('status', status.id))">
+            {{ status.removed ? 'removed' : wasText(activeChange('status', status.id)!) }}
+          </button>
+          <button v-if="!status.removed" class="row-remove" :title="`Remove ${status.id}`"
+            @click="removeStatus(status.id)"><i class="pi pi-times"></i></button>
+        </div>
+        <p v-if="!shownStatusRows.length" class="field-empty">{{ statusRows.length ? 'No match' : 'None' }}</p>
+        <p v-if="equippedStatusCount" class="field-empty">
+          {{ equippedStatusCount }} more from equipped items
+        </p>
+      </section>
+
+      <DebugChangesBox :changes="characterChanges" />
+
+      <details class="raw-data" @toggle="rawOpen = ($event.target as HTMLDetailsElement).open">
+        <summary>Raw data</summary>
+        <pre v-if="rawOpen" class="character-data">{{ rawData }}</pre>
+      </details>
     </div>
 
     <CharacterViewerPopup v-if="viewerIndex !== null" :characters="viewerCharacters" :initialIndex="viewerIndex"
@@ -463,6 +724,10 @@ function formatCharacterData(character: any) {
 .filter-search,
 .filter-control {
   width: 100%;
+}
+
+.inspect-search {
+  margin-bottom: 0.25rem;
 }
 
 .filter-chips {
@@ -708,32 +973,202 @@ function formatCharacterData(character: any) {
   font-size: 0.85em;
 }
 
-.character-actions {
+/* --- Inspect fields --- */
+.field-section,
+.raw-data {
+  font-size: 0.875rem;
+}
+
+.field-section {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  background-color: var(--editor-surface-hover);
-  border: 1px solid var(--editor-border);
+  gap: 0.35rem;
+}
+
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0.25rem 0 0;
+  color: var(--editor-text-muted);
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.section-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--editor-fg-success);
+  font: inherit;
+  font-size: 1.1em;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.section-link:hover {
+  text-decoration: underline;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 6rem) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.45rem;
+  row-gap: 0.15rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--dp-border, var(--editor-border));
+  border-left: 4px solid var(--dp-border, var(--editor-border));
   border-radius: 4px;
+  background: var(--dp-control, var(--editor-surface-sunken));
+  font-size: 0.9em;
 }
 
-.character-actions h4 {
-  margin: 0;
-  font-size: 0.95em;
-  font-weight: 600;
+.field-row.changed {
+  border-left-color: var(--editor-ink-amber);
+  background: var(--editor-tint-warning);
 }
 
-.status-controls {
+.field-label {
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+.field-control {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: flex-start;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
 }
 
-.status-select {
-  width: 100%;
-  max-width: 14rem;
+.field-max {
+  flex-shrink: 0;
+  color: var(--editor-text-muted);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-was {
+  max-width: 6rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--editor-fg-warning);
+  font: inherit;
+  font-size: 0.85em;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.field-was:hover {
+  text-decoration: line-through;
+}
+
+.field-written {
+  flex-shrink: 0;
+  max-width: 7rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--editor-fg-info);
+  border-radius: 3px;
+  background: var(--editor-tint-info);
+  color: var(--editor-fg-info);
+  font: inherit;
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.8em;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.field-written:hover {
+  text-decoration: line-through;
+}
+
+.field-note {
+  grid-column: 2 / -1;
+  color: var(--editor-text-faint);
+  font-size: 0.8em;
+  overflow-wrap: anywhere;
+}
+
+.field-empty {
+  margin: 0;
+  padding: 0 0.3rem;
+  color: var(--editor-text-faint);
+  font-size: 0.85em;
+}
+
+.status-row {
+  display: flex;
+  min-height: 2rem;
+  box-sizing: border-box;
+}
+
+.status-row.removed .status-name {
+  color: var(--editor-text-faint);
+  text-decoration: line-through;
+}
+
+.status-icon {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+.status-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-stacks {
+  color: var(--editor-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-remove {
+  padding: 0.1rem 0.25rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--editor-text-faint);
+  cursor: pointer;
+}
+
+.row-remove:hover {
+  background: var(--editor-tint-danger);
+  color: var(--editor-fg-danger);
+}
+
+.raw-data summary {
+  color: var(--editor-text-muted);
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.raw-data[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+.tile-changed {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.2rem;
+  border-radius: 50%;
+  background: var(--editor-ink-amber);
+  vertical-align: middle;
 }
 
 .character-data {

@@ -258,6 +258,14 @@ export class ElectronStorageService implements StorageService {
         return this.invokeElectron('show-file-in-folder', filePath);
     }
 
+    async statFile(path: string): Promise<{ mtimeMs: number; size: number } | null> {
+        try {
+            return await this.invokeElectron('stat-file', path);
+        } catch {
+            return null;
+        }
+    }
+
     // --- WebP Conversion Methods ---
     async getFileSize(path: string): Promise<number> {
         if (typeof path !== 'string' || path.trim() === '') {

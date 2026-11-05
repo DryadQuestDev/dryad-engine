@@ -31,6 +31,11 @@ function scheduleDrain() {
   });
 }
 
+/** Activate everything still waiting, at once: a search must count every editor's matches. */
+export function activateAllLazy(): void {
+  while (pendingQueue.length > 0) pendingQueue.shift()!.activate();
+}
+
 export function useLazyMount(
   targetRef: Ref<HTMLElement | null>,
   opts: { rootMargin?: string } = {},

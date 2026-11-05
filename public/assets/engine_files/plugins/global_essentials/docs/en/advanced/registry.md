@@ -10,7 +10,7 @@ This page explains each registry type in simple terms. For complete lists and ex
 
 During development, you can inspect all registered items in real-time using the **Debug Registry** panel. When you playtest your game from the Engine Editor, the debug panel is visible automatically. Navigate to the **Registry** tab to see all registered emitters, states, actions, conditions, placeholders, stat computers, and components - including any custom ones you've added via scripts.
 
-@en/images/registry.png
+@en/images/registry.webp
 
 ---
 

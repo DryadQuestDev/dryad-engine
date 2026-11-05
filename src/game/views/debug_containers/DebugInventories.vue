@@ -1,650 +1,461 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { computed } from 'vue';
+import { useStorage } from '@vueuse/core';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
-import Accordion from 'primevue/accordion';
-import AccordionPanel from 'primevue/accordionpanel';
-import AccordionHeader from 'primevue/accordionheader';
-import AccordionContent from 'primevue/accordioncontent';
-import InputText from 'primevue/inputtext';
-import InputNumber from 'primevue/inputnumber';
-import Select from 'primevue/select';
-import Button from 'primevue/button';
 import type { Inventory } from '../../core/character/inventory';
 import { PARTY_INVENTORY_ID } from '../../systems/itemSystem';
+import DebugChangesBox from './DebugChangesBox.vue';
+import DebugEditField from './DebugEditField.vue';
+import DebugPicker, { type PickerOption } from './DebugPicker.vue';
+import { devChanges, devSet, findDevChange, isInEffect, loadDevChanges, undoDevChanges, type DevChange } from '../../utils/devChanges';
 
 const game = Game.getInstance();
-const global = Global.getInstance();
 
-// Search query
-const searchQuery = ref<string>('');
+loadDevChanges();
 
-// All inventories
-const inventories = ref<Inventory[]>([]);
-
-// Form state for each inventory (using inventory id as key)
-const selectedItemTemplates = ref<Record<string, string>>({});
-const itemQuantities = ref<Record<string, number>>({});
-
-// Filtered inventories based on search query
-const filteredInventories = computed(() => {
-  if (!searchQuery.value) return inventories.value;
-  const query = searchQuery.value.toLowerCase();
-  return inventories.value.filter(inv =>
-    inv.id.toLowerCase().includes(query) ||
-    inv.name.toLowerCase().includes(query)
-  );
-});
-
-// Get all item templates as options
-const itemTemplateOptions = computed(() => {
-  return Array.from(game.itemSystem.itemTemplatesMap.entries()).map(([id, template]) => {
-    const name = (template.traits as any)?.name;
-    const label = name ? `${id} (${name})` : id;
-    return {
-      value: id,
-      label: label
-    };
-  }).sort((a, b) => a.label.localeCompare(b.label));
-});
-
-// Add item to inventory
-const addItemToInventory = (inventoryId: string) => {
-  const inventory = game.itemSystem.getInventory(inventoryId);
-  if (!inventory) {
-    global.addNotification('Inventory not found');
-    return;
-  }
-
-  const templateId = selectedItemTemplates.value[inventoryId];
-  const quantity = itemQuantities.value[inventoryId] || 1;
-
-  if (!templateId) {
-    global.addNotification('Please select an item template');
-    return;
-  }
-
-  try {
-    const item = game.itemSystem.createItem(templateId);
-    inventory.addItem(item, quantity);
-
-    // Success notification
-    const itemName = item.getName();
-    global.addNotification(`Added ${quantity}x ${itemName} to ${inventory.name || inventory.id}`);
-
-    // Reset form
-    itemQuantities.value[inventoryId] = 1;
-  } catch (error) {
-    console.error('Failed to add item:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    global.addNotification(`Failed to add item: ${errorMessage}`);
-  }
+/** One row per item id: stacks of the same item add up, since add_item and remove_item count by id. */
+type ItemRow = {
+  id: string;
+  name: string;
+  image: string;
+  count: number;
+  equipped: boolean;
+  /** Removed here this playtest, kept listed so the removal can be seen and put back. */
+  removed: boolean;
 };
 
-onMounted(() => {
-  // Collect all inventories
-  inventories.value = Array.from(game.itemSystem.inventories.value.values());
+const selectedId = useStorage('debug-inventories-selected', PARTY_INVENTORY_ID);
 
-  // Sort by id, party inventory always first
-  inventories.value.sort((a, b) => {
-    if (a.id === PARTY_INVENTORY_ID) return -1;
-    if (b.id === PARTY_INVENTORY_ID) return 1;
-    return a.id.localeCompare(b.id);
-  });
+const inventories = computed<Inventory[]>(() => [...game.itemSystem.inventories.value.values()].sort((a, b) => {
+  if (a.id === PARTY_INVENTORY_ID) return -1;
+  if (b.id === PARTY_INVENTORY_ID) return 1;
+  return a.id.localeCompare(b.id);
+}));
 
-  // Initialize form state for each inventory
-  inventories.value.forEach(inv => {
-    itemQuantities.value[inv.id] = 1;
-  });
+// The stored pick can name an inventory this game or this run does not have.
+const inventory = computed<Inventory | null>(() =>
+  game.itemSystem.inventories.value.get(selectedId.value) ?? inventories.value[0] ?? null);
+
+function templateTraits(itemId: string): Record<string, any> {
+  return (game.itemSystem.itemTemplatesMap.get(itemId)?.traits as Record<string, any>) ?? {};
+}
+
+const itemChanges = computed<DevChange[]>(() => devChanges.value.filter(c => c.kind === 'item'));
+
+const itemRows = computed<ItemRow[]>(() => {
+  const inv = inventory.value;
+  if (!inv) return [];
+  const rows = new Map<string, ItemRow>();
+  for (const item of inv.items) {
+    const row = rows.get(item.id);
+    if (row) {
+      row.count += item.quantity;
+      row.equipped ||= item.isEquipped;
+      continue;
+    }
+    rows.set(item.id, {
+      id: item.id, name: item.getName(), image: item.getImage(), count: item.quantity, equipped: item.isEquipped, removed: false,
+    });
+  }
+  for (const change of itemChanges.value) {
+    if (change.owner !== inv.id || change.value !== 0 || rows.has(change.key) || !isInEffect(change)) continue;
+    const traits = templateTraits(change.key);
+    rows.set(change.key, { id: change.key, name: traits.name || change.key, image: traits.image || '', count: 0, equipped: false, removed: true });
+  }
+  return [...rows.values()];
 });
+
+const itemOptions = computed<PickerOption[]>(() => [...game.itemSystem.itemTemplatesMap.entries()].map(([id, template]) => {
+  const traits = (template.traits as Record<string, any>) ?? {};
+  return { id, name: traits.name || id, image: traits.image || undefined };
+}));
+
+/** The change behind a row, while the game still holds what it set. */
+function activeChange(itemId: string): DevChange | undefined {
+  const inv = inventory.value;
+  if (!inv) return undefined;
+  const change = findDevChange({ kind: 'item', owner: inv.id, key: itemId });
+  return change && isInEffect(change) ? change : undefined;
+}
+
+function deltaText(change: DevChange): string {
+  const delta = Number(change.value) - Number(change.original);
+  return delta > 0 ? `+${delta}` : `−${-delta}`;
+}
+
+function report(error: string | null) {
+  if (error) Global.getInstance().addNotification(error);
+}
+
+function setCount(itemId: string, count: number) {
+  const inv = inventory.value;
+  if (inv) report(devSet({ kind: 'item', owner: inv.id, key: itemId }, Math.max(0, Math.round(count))));
+}
+
+function addItem(itemId: string) {
+  const row = itemRows.value.find(r => r.id === itemId);
+  setCount(itemId, (row?.count ?? 0) + 1);
+}
+
+function undoChange(change: DevChange | undefined) {
+  if (change) report(undoDevChanges([change]));
+}
+
+const exchangeOpen = computed(() => game.getState('overlay_state') === 'overlay-exchange');
+
+// Opens the window the {loot} / {trade} actions open, so closing it continues the scene as it
+// would after that action.
+function openExchange(mode: 'loot' | 'trade') {
+  const inv = inventory.value;
+  if (!inv) return;
+  try {
+    game.openExchange(inv.id, mode);
+  } catch (error) {
+    report(error instanceof Error ? error.message : String(error));
+  }
+}
 </script>
 
 <template>
   <div class="debug-inventories">
-    <!-- Search Toolbar -->
-    <div class="search-toolbar">
-      <InputText v-model="searchQuery" class="search-input" />
-      <span v-if="searchQuery" class="search-clear" @click="searchQuery = ''">✕</span>
-    </div>
+    <select class="inventory-select" :value="inventory?.id" :disabled="!inventories.length"
+      @change="selectedId = ($event.target as HTMLSelectElement).value">
+      <option v-for="inv in inventories" :key="inv.id" :value="inv.id">
+        {{ inv.id }} · {{ inv.items.length }} {{ inv.items.length === 1 ? 'item' : 'items' }}
+      </option>
+    </select>
 
-    <!-- Inventory Count -->
-    <div class="inventory-count">
-      {{ filteredInventories.length }} {{ filteredInventories.length === 1 ? 'Inventory' : 'Inventories' }}
-      {{ searchQuery ? ` (filtered from ${inventories.length})` : '' }}
-    </div>
+    <template v-if="inventory">
+      <div v-if="inventory.id !== PARTY_INVENTORY_ID" class="exchange-buttons">
+        <button class="exchange-button" :disabled="exchangeOpen"
+          :title="exchangeOpen ? 'An exchange is already open' : 'Open it as a loot window, like {loot}'"
+          @click="openExchange('loot')">
+          <i class="pi pi-box"></i> Loot
+        </button>
+        <button class="exchange-button" :disabled="exchangeOpen"
+          :title="exchangeOpen ? 'An exchange is already open' : 'Open it as a trade window, like {trade}'"
+          @click="openExchange('trade')">
+          <i class="pi pi-shopping-cart"></i> Trade
+        </button>
+      </div>
 
-    <!-- Inventories Accordion -->
-    <Accordion multiple>
-      <AccordionPanel v-for="inventory in filteredInventories" :key="inventory.id" :value="inventory.id">
-        <AccordionHeader>
-          <div class="inventory-header">
-            <span class="inventory-id">{{ inventory.id }}</span>
-            <span v-if="inventory.name && inventory.name !== inventory.id" class="inventory-name">
-              ({{ inventory.name }})
-            </span>
-            <span class="item-count-badge">{{ inventory.items.length }} items</span>
-          </div>
-        </AccordionHeader>
-        <AccordionContent>
-          <!-- Add Item Form -->
-          <div class="add-item-form">
-            <h4 class="form-title">Add Item</h4>
-            <div class="form-fields">
-              <div class="form-field">
-                <label class="field-label">Item Template</label>
-                <Select v-model="selectedItemTemplates[inventory.id]" :options="itemTemplateOptions" optionLabel="label"
-                  optionValue="value" placeholder="Select item..." class="field-select" filter />
-              </div>
-              <div class="form-field">
-                <label class="field-label">Quantity</label>
-                <InputNumber v-model="itemQuantities[inventory.id]" :min="1" :max="9999" class="field-input" />
-              </div>
-              <Button label="Add Item" @click="addItemToInventory(inventory.id)" class="add-button" size="small" />
-            </div>
-          </div>
+      <details class="inventory-details">
+        <summary>Details</summary>
+        <dl>
+          <template v-if="inventory.name && inventory.name !== inventory.id">
+            <dt>Name</dt>
+            <dd>{{ inventory.name }}</dd>
+          </template>
+          <dt>Max size</dt>
+          <dd>{{ inventory.maxSize === 0 ? 'Unlimited' : inventory.maxSize }}</dd>
+          <template v-if="inventory.interactive">
+            <dt>Interactive</dt>
+            <dd>{{ inventory.interactive }}</dd>
+          </template>
+          <template v-if="inventory.recipes.size">
+            <dt>Recipes</dt>
+            <dd>{{ Array.from(inventory.recipes).join(', ') }}</dd>
+          </template>
+        </dl>
+      </details>
 
-          <!-- Inventory Info -->
-          <div class="inventory-info">
-            <div class="info-row">
-              <span class="info-label">ID:</span>
-              <span class="info-value">{{ inventory.id }}</span>
-            </div>
-            <div v-if="inventory.name" class="info-row">
-              <span class="info-label">Name:</span>
-              <span class="info-value">{{ inventory.name }}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Max Size:</span>
-              <span class="info-value">{{ inventory.maxSize === 0 ? 'Unlimited' : inventory.maxSize }}</span>
-            </div>
-            <div v-if="inventory.interactive" class="info-row">
-              <span class="info-label">Interactive:</span>
-              <span class="info-value">{{ inventory.interactive }}</span>
-            </div>
-            <div v-if="inventory.recipes.size > 0" class="info-row">
-              <span class="info-label">Recipes:</span>
-              <span class="info-value">{{ Array.from(inventory.recipes).join(', ') }}</span>
-            </div>
-          </div>
+      <section class="add-item">
+        <h4 class="section-title">Add item</h4>
+        <DebugPicker :options="itemOptions" placeholder="Search items" @pick="addItem" />
+      </section>
 
-          <!-- Items List -->
-          <div v-if="inventory.items.length > 0" class="items-section">
-            <h4 class="section-title">Items ({{ inventory.items.length }})</h4>
-            <div class="items-list">
-              <div v-for="item in inventory.items" :key="item.uid" class="item-card">
-                <!-- Item Header -->
-                <div class="item-header">
-                  <div class="item-main-info">
-                    <img v-if="item.getImage()" :src="item.getImage()" class="item-icon" :alt="item.getName()" />
-                    <div class="item-title-group">
-                      <span class="item-name">{{ item.getName() }}</span>
-                      <span class="item-id">({{ item.id }})</span>
-                    </div>
-                  </div>
-                  <span v-if="item.quantity > 1" class="item-stack-count">
-                    x{{ item.quantity }}
-                  </span>
-                </div>
+      <div v-if="itemRows.length" class="item-list">
+        <div v-for="row in itemRows" :key="row.id" class="item-row"
+          :class="{ changed: activeChange(row.id), removed: row.removed }">
+          <span class="item-icon">
+            <img v-if="row.image" :src="row.image" alt="" />
+            <i v-if="row.equipped" class="pi pi-check item-equipped" title="Equipped"></i>
+          </span>
+          <span class="item-title">
+            <span class="item-name">{{ row.name }}</span>
+            <code class="item-id" :title="row.id">{{ row.id }}</code>
+          </span>
+          <span class="item-qty">
+            <button class="qty-step" :disabled="row.count === 0" title="Remove one" @click="setCount(row.id, row.count - 1)">
+              <i class="pi pi-minus"></i>
+            </button>
+            <DebugEditField class="qty-input" editor="number" :value="row.count" @commit="setCount(row.id, Number($event))" />
+            <button class="qty-step" title="Add one" @click="setCount(row.id, row.count + 1)">
+              <i class="pi pi-plus"></i>
+            </button>
+          </span>
+          <span class="item-end">
+            <button v-if="activeChange(row.id)" class="item-delta" title="Put it back"
+              @click="undoChange(activeChange(row.id))">{{ deltaText(activeChange(row.id)!) }}</button>
+            <button v-if="!row.removed" class="item-remove" :title="`Remove every ${row.id}`" @click="setCount(row.id, 0)">
+              <i class="pi pi-times"></i>
+            </button>
+          </span>
+        </div>
+      </div>
+      <p v-else class="empty">This inventory is empty</p>
+    </template>
+    <p v-else class="empty">No inventories found</p>
 
-                <!-- Item Details -->
-                <div class="item-details">
-                  <div class="detail-row">
-                    <span class="detail-label">UID:</span>
-                    <span class="detail-value">{{ item.uid }}</span>
-                  </div>
-
-
-                  <!-- Tags -->
-                  <div v-if="item.tags.length > 0" class="detail-row">
-                    <span class="detail-label">Tags:</span>
-                    <div class="tags-list">
-                      <span v-for="tag in item.tags" :key="tag" class="tag">{{ tag }}</span>
-                    </div>
-                  </div>
-
-                  <!-- Currency -->
-                  <div v-if="item.is_currency" class="detail-row">
-                    <span class="currency-badge">Currency</span>
-                  </div>
-
-                  <!-- Price -->
-                  <div v-if="Object.keys(item.price).length > 0" class="detail-row">
-                    <span class="detail-label">Price:</span>
-                    <div class="price-list">
-                      <span v-for="(amount, currency) in item.price" :key="currency" class="price-item">
-                        {{ currency }}: {{ amount }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Empty State -->
-          <div v-else class="empty-inventory">
-            <p>This inventory is empty</p>
-          </div>
-        </AccordionContent>
-      </AccordionPanel>
-    </Accordion>
-
-    <!-- No Results -->
-    <div v-if="filteredInventories.length === 0" class="no-results">
-      <p v-if="searchQuery">No inventories match your search</p>
-      <p v-else>No inventories found</p>
-    </div>
+    <DebugChangesBox :changes="itemChanges" />
   </div>
 </template>
 
 <style scoped>
+/* Painted against the host debug panel (Debug.vue), which follows the editor's theme. */
 .debug-inventories {
-  padding: 1rem;
-  overflow-y: auto;
-  /*max-height: calc(100vh - 200px);*/
-}
-
-/* Search Toolbar */
-.search-toolbar {
-  position: relative;
-  margin-bottom: 1rem;
   display: flex;
-  align-items: center;
-}
-
-.search-input {
-  width: 100%;
-  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.5rem;
+  color: var(--editor-text);
+  /* The game sets a large body font; the panel is narrow, so size from the root instead. */
   font-size: 0.875rem;
-  border: 1px solid var(--editor-border);
-  border-radius: 0.375rem;
 }
 
-.search-input:focus {
-  outline: none;
-  border-color: var(--editor-ink-blue);
-  box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
-}
-
-.search-clear {
-  position: absolute;
-  right: 0.75rem;
+.inventory-select {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--dp-border, var(--editor-border));
+  border-radius: 5px;
+  background: var(--dp-control-hover, var(--editor-surface));
+  color: var(--editor-text);
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.95em;
   cursor: pointer;
+}
+
+.inventory-select:focus {
+  outline: none;
+  border-color: var(--editor-accent);
+}
+
+.exchange-buttons {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.exchange-button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--dp-border, var(--editor-border));
+  border-radius: 5px;
+  background: var(--dp-control-hover, var(--editor-surface));
+  color: var(--editor-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.exchange-button:hover:not(:disabled) {
+  border-color: var(--editor-accent);
+}
+
+.exchange-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.inventory-details summary {
+  color: var(--editor-text-muted);
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.inventory-details dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.2rem 0.6rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.9em;
+}
+
+.inventory-details dt {
+  color: var(--editor-text-muted);
+}
+
+.inventory-details dd {
+  margin: 0;
+  font-family: var(--font-family-mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+.item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.item-row {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--dp-border, var(--editor-border));
+  border-left: 4px solid var(--dp-border, var(--editor-border));
+  border-radius: 4px;
+  background: var(--dp-control, var(--editor-surface-sunken));
+}
+
+.item-row.changed {
+  border-left-color: var(--editor-ink-amber);
+  background: var(--editor-tint-warning);
+}
+
+.item-row.removed .item-name {
   color: var(--editor-text-faint);
-  font-size: 1.125rem;
-  padding: 0.25rem;
-  line-height: 1;
-  user-select: none;
+  text-decoration: line-through;
 }
 
-.search-clear:hover {
-  color: var(--editor-text);
-}
-
-/* Inventory Count */
-.inventory-count {
-  font-size: 0.875rem;
-  color: var(--editor-text-muted);
-  margin-bottom: 1rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--editor-surface-raised);
-  border-radius: 0.375rem;
-  font-weight: 500;
-}
-
-/* Inventory Header */
-.inventory-header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 100%;
-}
-
-.inventory-id {
-  font-family: var(--font-family-mono);
-  font-weight: 600;
-  color: var(--editor-ink-blue);
-  font-size: 1rem;
-}
-
-.inventory-name {
-  color: var(--editor-text-muted);
-  font-style: italic;
-  font-size: 0.875rem;
-  padding-left: 0.5rem;
-}
-
-.item-count-badge {
-  background: var(--editor-tint-success);
-  color: var(--editor-fg-success);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  align-self: flex-start;
-}
-
-/* Add Item Form */
-.add-item-form {
-  background: var(--editor-tint-info);
-  padding: 1rem;
-  border-radius: 0.375rem;
-  margin-bottom: 1rem;
-  border: 1px solid var(--editor-ink-blue);
-}
-
-.form-title {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--editor-fg-info);
-  margin: 0 0 0.75rem 0;
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
-}
-
-.form-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.field-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--editor-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
-}
-
-.field-select {
-  width: 100%;
-}
-
-.field-input {
-  width: 100%;
-}
-
-.add-button {
-  width: 100%;
-}
-
-/* Inventory Info */
-.inventory-info {
-  background: var(--editor-surface-raised);
-  padding: 1rem;
-  border-radius: 0.375rem;
-  margin-bottom: 1rem;
-}
-
-.info-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
-  font-size: 0.875rem;
-}
-
-.info-row:last-child {
-  margin-bottom: 0;
-}
-
-.info-label {
-  font-weight: 600;
-  color: var(--editor-text-muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
-}
-
-.info-value {
-  font-family: var(--font-family-mono);
-  color: var(--editor-text);
-  word-break: break-all;
-  padding-left: 0.5rem;
-  border-left: 2px solid var(--editor-border);
-}
-
-/* Items Section */
-.items-section {
-  margin-top: 1rem;
-}
-
-.section-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--editor-text);
-  margin: 0 0 0.75rem 0;
-  padding-left: 0.5rem;
-  border-left: 3px solid var(--editor-ink-blue);
-}
-
-.items-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-/* Item Card */
-.item-card {
-  background: var(--editor-surface);
-  border: 1px solid var(--editor-border);
-  border-radius: 0.375rem;
-  padding: 0.75rem;
-  transition: box-shadow 0.2s;
-}
-
-.item-card:hover {
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.item-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--editor-border);
-}
-
-.item-main-info {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+.item-row.removed .item-icon {
+  opacity: 0.45;
 }
 
 .item-icon {
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-  border-radius: 0.25rem;
-  background: var(--editor-surface-raised);
-  padding: 0.25rem;
+  position: relative;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 4px;
+  background: #1e293b;
 }
 
-.item-title-group {
+.item-icon img {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.item-title {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  min-width: 0;
 }
 
 .item-name {
   font-weight: 600;
-  color: var(--editor-text);
-  font-size: 0.95rem;
+  overflow-wrap: anywhere;
 }
 
 .item-id {
-  font-family: var(--font-family-mono);
-  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--editor-text-faint);
+  font-size: 0.8em;
 }
 
-.item-stack-count {
-  background: var(--editor-surface-sunken);
+.item-equipped {
+  position: absolute;
+  right: -0.3rem;
+  bottom: -0.3rem;
+  padding: 0.15rem;
+  border-radius: 50%;
+  background: var(--editor-ink-green);
+  color: var(--editor-surface);
+  font-size: 0.55rem;
+}
+
+.item-qty {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--dp-border, var(--editor-border));
+  border-radius: 4px;
+  background: var(--dp-control-hover, var(--editor-surface));
+  overflow: hidden;
+}
+
+.qty-step {
+  padding: 0 0.3rem;
+  border: none;
+  background: none;
+  color: var(--editor-text-muted);
+  font-size: 0.7em;
+  cursor: pointer;
+}
+
+.qty-step:hover:not(:disabled) {
+  background: var(--editor-surface-hover);
   color: var(--editor-text);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-weight: 600;
-  font-size: 0.875rem;
 }
 
-/* Item Details */
-.item-details {
+.qty-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.item-qty .qty-input {
+  width: 2.2rem;
+  padding: 0.15rem 0.2rem;
+  border-width: 0 1px;
+  border-radius: 0;
+  background: transparent;
+  font-weight: 700;
+  text-align: center !important;
+}
+
+.item-end {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 1.2rem;
 }
 
-.detail-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.875rem;
-}
-
-.detail-label {
-  font-weight: 600;
-  color: var(--editor-text-muted);
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
-}
-
-.detail-value {
-  font-family: var(--font-family-mono);
-  color: var(--editor-text-faint);
-  font-size: 0.8rem;
-}
-
-/* Properties Grid */
-.properties-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-.property-item {
-  background: var(--editor-surface-raised);
-  padding: 0.375rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.8rem;
-  display: flex;
-  justify-content: space-between;
-}
-
-.property-name {
-  font-weight: 500;
-  color: var(--editor-text-muted);
-}
-
-.property-value {
-  font-family: var(--font-family-mono);
-  color: var(--editor-ink-green);
-  font-weight: 600;
-}
-
-/* Attributes List */
-.attributes-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-.attribute-tag {
-  background: var(--editor-tint-warning);
+.item-delta {
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--editor-fg-warning);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 500;
+  font: inherit;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
 
-/* Tags List */
-.tags-list {
+.item-delta:hover {
+  text-decoration: line-through;
+}
+
+.item-remove {
+  padding: 0.1rem 0.2rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--editor-text-faint);
+  cursor: pointer;
+}
+
+.item-remove:hover {
+  background: var(--editor-tint-danger);
+  color: var(--editor-fg-danger);
+}
+
+.add-item {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
-.tag {
-  background: var(--editor-tint-info);
-  color: var(--editor-fg-info);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-/* Currency Badge */
-.currency-badge {
-  display: inline-block;
-  background: var(--editor-tint-success);
-  color: var(--editor-fg-success);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 600;
+.section-title {
+  margin: 0.25rem 0 0;
+  color: var(--editor-text-muted);
+  font-size: 0.85em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.025em;
 }
 
-/* Price List */
-.price-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-.price-item {
-  background: var(--editor-surface-sunken);
-  color: var(--editor-text);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-/* Empty States */
-.empty-inventory {
-  padding: 2rem;
-  text-align: center;
+.empty {
+  margin: 0;
+  padding: 1rem 0;
   color: var(--editor-text-faint);
   font-style: italic;
-}
-
-.no-results {
-  padding: 2rem;
   text-align: center;
-  color: var(--editor-text-faint);
-  font-style: italic;
-}
-
-/* Scrollbar styling */
-.debug-inventories::-webkit-scrollbar {
-  width: 8px;
-}
-
-.debug-inventories::-webkit-scrollbar-track {
-  background: var(--editor-surface-raised);
-  border-radius: 4px;
-}
-
-.debug-inventories::-webkit-scrollbar-thumb {
-  background: var(--editor-border-strong);
-  border-radius: 4px;
-}
-
-.debug-inventories::-webkit-scrollbar-thumb:hover {
-  background: var(--editor-text-faint);
 }
 </style>

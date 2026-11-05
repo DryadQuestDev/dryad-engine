@@ -273,9 +273,26 @@ type RpgBattleLogService = {
   push(actorId: string | null, text: string, targetId?: string): void;
 };
 
+type RpgProjectileService = {
+  /**
+   * Fly a Projectiles-tab effect between two viewport points outside a battle (a spell cast in a scene):
+   * the travel sprite, then the impact and its burst and sparks where it lands. The caller animates the
+   * bodies. `toRect` (the target's box) places a feet/head hit_anchor; `scale` multiplies the sizes, for a
+   * stage whose bodies are drawn bigger than the battle's. Resolves when it arrives, with the landing
+   * point; null for an unknown effect.
+   */
+  play(projectileId: string, o: {
+    from?: { x: number; y: number } | null;
+    to: { x: number; y: number };
+    toRect?: { left: number; top: number; width: number; height: number; bottom: number } | null;
+    scale?: number;
+  }): Promise<{ x: number; y: number } | null>;
+};
+
 // ── Service overloads (declaration merging) ──
 
 interface Game {
+  getService(id: 'rpg_projectile'): RpgProjectileService;
   getService(id: 'rpg_floating_text'): RpgFloatingTextService;
   getService(id: 'rpg_party'): RpgPartyService;
   getService(id: 'rpg_battle'): RpgBattleService;

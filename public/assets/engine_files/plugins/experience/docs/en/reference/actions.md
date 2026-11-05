@@ -19,6 +19,8 @@ Award XP to characters. Pass a number to award to the MC (`mc_id`) – or to eve
 
 Per-character format: `"characterId->amount, characterId->amount"`.
 
+With `auto_scaling` on, numeric amounts (plain and per-character) are written for level 1 and multiply by the reward scale at each receiver's own level, the same curve fight XP rides: `{ xp: 75 }` grants 150 to a level-5 character at the default `power_scale_per_level`. The battle form follows the dungeon level, like the fight it stands for.
+
 Battle format: a battle id awards exactly the XP that winning that battle grants (its threat × `threat_xp_coef`, scaled to the current dungeon level) to every levelled party member. It gives no loot and does not mark the battle defeated. Use it for a route that ends an encounter without fighting it, e.g. talking a foe down. For a foe beaten by other means use `win`; to record the clear as well, add rpg_battler's `set_defeated`. Battle ids and per-character parts can share one string.
 
 The action is delayed: the player reads the paragraph first, the continue-click grants the XP and opens the reward popup (with any level-up fanfare). Mid-battle grants skip the popup and surface in the battle victory panel instead.
@@ -56,11 +58,19 @@ The `auto_scaling` flag and the reward/loot keys (`power_scale_per_level`, `loot
 
 ### `smith`
 
-Open the Smith Station overlay (upgrade / break down unequipped leveled equipment for smith stones — see the Rewards & Scaling guide). Event-delayed: the overlay opens after the paragraph finishes.
+Open the Smith Station overlay (upgrade leveled equipment, worn or not, or break down unequipped pieces for smith stones – see the Rewards & Scaling guide). Event-delayed: the overlay opens after the paragraph finishes.
 
 ```text
 !use<Forge>{smith: true}
 ```
+
+On a choice, `smith` also marks the option: an anvil before its label and the `smith-choice` class on the row.
+
+| Selector | Element |
+|---|---|
+| `.choice-list .choice.smith-choice` | The whole option row |
+| `.smith-badge` | Badge wrapper (unmasked; its `::before` / `::after` can bracket the icon) |
+| `.smith-icon` | The anvil glyph, painted in the text colour |
 
 ### `level_up_rewards`
 

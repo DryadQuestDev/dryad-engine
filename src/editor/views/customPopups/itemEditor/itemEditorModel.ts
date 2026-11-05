@@ -104,6 +104,11 @@ export function lintItem(item: any, schema: Schema, categoryIds: Set<string>): I
     if (missing.length) out.push({ level: 'warn', text: `${key} points at ${missing.join(', ')}, which no longer exist.` });
   }
 
+  const readableSource = String(item.readable?.source ?? '').trim();
+  if (readableSource && (item.readable.type || 'book') !== 'scene' && !/^[^.]+\.[^.]/.test(readableSource)) {
+    out.push({ level: 'warn', text: `Readable source "${readableSource}" needs a dungeon id and a $template id, e.g. global.${readableSource}.` });
+  }
+
   const currencies = Object.keys(schema.price?.objects ?? {});
   for (const currency of Object.keys(item.price ?? {})) {
     if (currencies.length && !currencies.includes(currency)) out.push({ level: 'warn', text: `Price uses "${currency}", which is not a currency item.` });

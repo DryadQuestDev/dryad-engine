@@ -89,6 +89,19 @@ const merchant = game.getInventory("merchant_shop");
 game.closeExchangeInventory(merchant);
 ```
 
+### exchangeItem(item, source, target, quantity, silent?)
+
+Move an item across the open exchange, exactly as clicking it there does. In a trade the receiving side pays the item's trade price and the giving side is paid. Returns `false` and changes nothing if the buyer can't pay or has no room. Pass `silent: true` to skip the failure notifications and report once yourself.
+
+```js
+const party = game.getPartyInventory();
+let sold = 0;
+for (const item of party.getUnequippedItems()) {
+  if (item.category !== "junk") continue;
+  if (game.exchangeItem(item, party, merchant, item.quantity, true)) sold++;
+}
+```
+
 ### canUseItems()
 
 Check if item usage is currently allowed. Returns false when party inventory is blocked.
@@ -384,9 +397,9 @@ game.on("item_consume_after", (item, character) => {
 ### Inventory Events
 
 ```js
-// Inventory opened
-game.on("inventory_open", (inventory) => {
-  console.log("Opened:", inventory.name);
+// Inventory opened (mode is "loot" or "trade")
+game.on("inventory_open", (inventory, mode) => {
+  console.log("Opened:", inventory.name, mode);
 });
 
 // Inventory closed

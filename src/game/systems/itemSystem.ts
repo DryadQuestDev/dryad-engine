@@ -1,15 +1,16 @@
 import { Inventory } from "../core/character/inventory";
 import { Game } from "../game";
 import { Populate } from "../../utility/save-system";
-import { reactive, Ref, ref } from "vue";
+import { reactive, Ref, ref, shallowRef, ShallowRef } from "vue";
 import { ItemTemplateObject } from "../../schemas/itemTemplateSchema";
-import { Item } from "../core/character/item";
+import { Item, ItemReadable, ItemReadableType } from "../core/character/item";
 import { Skip } from "../../utility/save-system";
 import { ItemInventoryObject } from "../../schemas/itemInventorySchema";
 import { EntityTraitObject } from "../../schemas/entityTraitSchema";
 import { ItemSlotObject } from "../../schemas/itemSlotSchema";
 import { ItemCategoryObject } from "../../schemas/itemCategorySchema";
 import { ItemSlot } from "../core/character/itemSlot";
+import type { Character } from "../core/character/character";
 import { ItemRecipeObject } from "../../schemas/itemRecipeSchema";
 import { RecipeGroupObject } from "../../schemas/recipeGroupSchema";
 import { Global } from "../../global/global";
@@ -83,8 +84,13 @@ export class ItemSystem {
         return this.learnedRecipes.value;
     }
 
+    // The item the reader popup shows. Held here, not looked up by uid, because a readable made from
+    // an inline template object sits in no inventory; transient, so a load never reopens a stale one.
+    @Skip()
+    public readingItem: ShallowRef<Item | null> = shallowRef(null);
+
     // Discovered collectables — item ids the player has "experienced" (recipe learned from the
-    // scroll, book read to its last page, painting scene viewed). Drives the check mark on item
+    // scroll, readable opened (a Scene one: read to its last page), painting scene viewed). Drives the check mark on item
     // cards. A Set of template ids; serializes as an array like learnedRecipes.
     discoveredItems = ref<Set<string>>(new Set());
     public discoverItem(itemId: string): void {
@@ -104,6 +110,94 @@ export class ItemSystem {
     }
     public getDiscoveredItems(): Set<string> {
         return this.discoveredItems.value;
+    }
+
+    /**
+     * Open an item's text. A Book or Scroll opens the reader popup and marks the item read at once;
+     * a Scene plays in the dialogue box from its bookmark and is marked read on its last page.
+     * An id is looked up in the party inventory and then the templates, so a letter can be read
+     * where it lies without being carried.
+     */
+    public readItem(itemOrId: Item | string): boolean {
+        const item = typeof itemOrId === 'string'
+            ? this.getInventory(PARTY_INVENTORY_ID)?.getItemsById(itemOrId)[0] || null
+            : itemOrId;
+        const itemId = item ? item.id : itemOrId as string;
+        const readable = item ? item.getReadable() : this.getTemplateReadable(itemId);
+        if (!readable) {
+            gameLogger.warn(`[read_item] "${itemId}" has no readable source.`);
+            return false;
+        }
+        if (readable.type === 'scene') {
+            return this.openReadableScene(itemId, readable.source);
+        }
+        if (this.getReadableText(readable) === null) {
+            gameLogger.error(`[read_item] template "${readable.source}" on "${itemId}" not found (expected dungeon_id.template_id).`);
+            return false;
+        }
+        if (this.itemTemplatesMap.has(itemId)) {
+            this.discoverItem(itemId);
+        }
+        this.readingItem.value = item;
+        this.game.setState('reading_item', { id: itemId, uid: item?.uid || '' });
+        this.game.openPopup('readable_popup');
+        return true;
+    }
+
+    /** A registered template's readable definition, or null when it has none. */
+    public getTemplateReadable(itemId: string): ItemReadable | null {
+        const readable = this.itemTemplatesMap.get(itemId)?.readable;
+        if (!readable?.source) return null;
+        return { type: (readable.type || 'book') as ItemReadableType, source: readable.source };
+    }
+
+    /**
+     * The resolved text of a Book or Scroll: the `$template` its source names (split at the first
+     * dot, since template ids may contain dots), with placeholders and styles applied and actions
+     * left unrun. Null when the template does not exist.
+     */
+    public getReadableText(readable: ItemReadable): string | null {
+        const dot = readable.source.indexOf('.');
+        if (dot < 1) return null;
+        const dungeonId = readable.source.slice(0, dot);
+        const line = this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get('$' + readable.source.slice(dot + 1));
+        if (!line) return null;
+        return this.game.resolveString(line.val ?? '', true).output;
+    }
+
+    private openReadableScene(itemId: string, ref: string): boolean {
+        // The engine's scene-reference grammar owns the parsing — the source takes anything the
+        // scene action takes (dungeon.room.scene, room.scene, full #ids, &anchors).
+        const resolved = this.game.dungeonSystem.resolveSceneId(ref);
+        if (!resolved.sceneId) {
+            gameLogger.error(`[read_item] scene "${ref}" on "${itemId}" did not resolve.`);
+            return false;
+        }
+        const dungeonId = resolved.dungeonId || this.game.dungeonSystem.currentDungeonId.value || '';
+        const base = resolved.sceneId.replace(/^#/, '').split('.').slice(0, -3).join('.');
+        if (!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.1`)) {
+            gameLogger.error(`[read_item] scene "#${base}.1.1.1" not found in dungeon "${dungeonId}" (readable on "${itemId}").`);
+            return false;
+        }
+        const bookmarks = (this.game.getState('book_bookmarks') || {}) as Record<string, number>;
+        this.playBookPage(itemId, dungeonId, base, bookmarks[itemId] || 1);
+        return true;
+    }
+
+    // Open a Scene readable's page: update the reading state + bookmark, then play the page's scene.
+    // The last page (no following paragraph line) discovers the item and clears the bookmark.
+    public playBookPage(itemId: string, dungeonId: string, base: string, page: number): void {
+        this.game.setState('reading_book', { itemId, dungeonId, base, page });
+        const bookmarks = { ...((this.game.getState('book_bookmarks') || {}) as Record<string, number>) };
+        const nextPageExists = !!this.game.dungeonSystem.dungeonLines.get(dungeonId)?.get(`#${base}.1.1.${page + 1}`);
+        if (nextPageExists) {
+            bookmarks[itemId] = page;
+        } else {
+            delete bookmarks[itemId];
+            this.discoverItem(itemId);
+        }
+        this.game.setState('book_bookmarks', bookmarks);
+        this.game.dungeonSystem.playSceneResolver(`${base}.1.1.${page}`, dungeonId);
     }
 
     // Key-locked inventories (chests) that have been opened — locks stay open for the save.
@@ -247,7 +341,7 @@ export class ItemSystem {
 
         gameLogger.info(`[exchange] Opened ${state} exchange with inventory "${inventoryId}"`);
         this.game.itemSystem.exchangeState.value = state;
-        this.game.trigger("inventory_open", inventory);
+        this.game.trigger("inventory_open", inventory, state);
         this.game.itemSystem.exchangeInventoryId.value = inventoryId;
 
         // Initialize trade prices for all items in both inventories
@@ -297,6 +391,32 @@ export class ItemSystem {
     }
 
     /**
+     * The stats an item grants where it sits: a copy of its own stats, passed through the
+     * `item_stats` emitter so a game can make them depend on the slot. With no `slot`, a worn item
+     * resolves in the slot it is in and a loose one in none; pass a slot (null for none) to ask
+     * how it would be there instead.
+     */
+    public getItemStats(item: Item, slot?: ItemSlot | null, character?: Character | null): Record<string, number> {
+        if (slot === undefined) {
+            slot = null;
+            character = null;
+            if (item.isEquipped) {
+                for (const candidate of this.game.getAllCharacters()) {
+                    const worn = candidate.getItemSlotByItemUid(item.uid);
+                    if (worn) {
+                        slot = worn;
+                        character = candidate;
+                        break;
+                    }
+                }
+            }
+        }
+        const stats: Record<string, number> = { ...(item.statusObject?.stats || {}) };
+        this.game.trigger('item_stats', item, stats, slot, character ?? null);
+        return stats;
+    }
+
+    /**
      * Copy every template-owned field onto an item: everything except identity (id, uid), traits
      * (synced per trait id, so instance-owned ones can be skipped) and per-instance state (quantity,
      * equipped flag, trade prices). `createItem` builds a fresh instance with it and the save
@@ -313,6 +433,7 @@ export class ItemSystem {
         item.price = obj.price || {};
         item.is_currency = obj.is_currency || false;
         item.learn_recipe = obj.learn_recipe || "";
+        item.readable = (obj.readable?.source ? obj.readable : null) as Item['readable'];
         item.apply_statuses_on_consume = obj.apply_statuses_on_consume || [];
         item.consume_percentage = obj.consume_percentage || {};
         item.consume_absolute = obj.consume_absolute || {};
@@ -603,6 +724,58 @@ export class ItemSystem {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Move an item across the open exchange, exactly as clicking it in the exchange window does.
+     * In a trade, an item priced in that direction is bought or sold: the receiving side pays its
+     * trade price × quantity and the giving side is paid. A refused move (buyer short of currency,
+     * no room, an `inventory_transfer` listener) changes nothing on either side.
+     * @param silent Suppress the failure notifications, for batch moves that report once at the end.
+     * @returns true if the item moved.
+     */
+    public exchangeItem(item: Item, source: Inventory, target: Inventory, quantity: number, silent: boolean = false): boolean {
+        if (this.exchangeState.value === 'trade') {
+            // The party giving the item means the trader is buying, at the player-side price.
+            const context: TradeContext = source.id === PARTY_INVENTORY_ID ? 'player' : 'trader';
+
+            if (item.isTradableInContext(context)) {
+                const totalPrice: Record<string, number> = {};
+                for (const [currencyId, amount] of Object.entries(item.getTradePriceInContext(context))) {
+                    totalPrice[currencyId] = amount * quantity;
+                }
+
+                if (!target.canAffordPrice(totalPrice)) {
+                    if (!silent) {
+                        Global.getInstance().addNotificationId('not_enough_currency', { currency: this.getCurrencyName(totalPrice) });
+                    }
+                    return false;
+                }
+
+                // The item moves first, so a refused transfer leaves both purses untouched.
+                if (!source.transferTo(target, item, quantity, silent)) {
+                    return false;
+                }
+
+                // Affordability was checked above, so this only pays.
+                target.deductCurrency(totalPrice);
+
+                // Paid even past the seller's weight/size limit — the sale already happened.
+                for (const [currencyId, amount] of Object.entries(totalPrice)) {
+                    source.addItem(this.createItem(currencyId), amount, true);
+                    this.game.trigger('currency_change', source, currencyId, amount);
+                }
+
+                return true;
+            }
+        }
+
+        return source.transferTo(target, item, quantity, silent);
+    }
+
+    private getCurrencyName(price: Record<string, number>): string {
+        const id = Object.keys(price)[0];
+        return (this.itemTemplatesMap.get(id)?.traits as any)?.name || id;
     }
 
     public closeExchangeInventory(exchangeInventory: Inventory): void {

@@ -113,7 +113,7 @@ export type CallEntry = { help?: string; args?: ValueSpec[]; examples?: string[]
 export const AMBIENT_KINDS = ['fireflies', 'motes', 'embers'] as const;
 
 /** One-shot actor animations (`anim=` / {animate}). Everything else is a looping idle. */
-export const ONE_SHOT_ANIMS = ['lunge', 'recoil', 'hop', 'shake', 'shiver', 'nod', 'bounce', 'flash'];
+export const ONE_SHOT_ANIMS = ['lunge', 'recoil', 'hurt', 'hop', 'shake', 'shiver', 'nod', 'bounce', 'flash'];
 
 /** The named lists a `ref` can point at besides game data. */
 export const BUILTIN_LISTS: Record<string, readonly string[]> = {
@@ -157,6 +157,7 @@ export const HEADER_KEYS: Record<'room' | 'encounter' | 'scene' | 'template', Re
     ifOr: { help: 'Show the encounter while any clause holds.', value: 'condition' },
     rooms: { help: 'Also place the encounter in these rooms.', value: { list: { ref: 'room' } } },
     discover: { help: 'Hide the encounter until the party meets a stat: "perception#6".', value: { ref: 'character_stats', count: true } },
+    title: { help: 'The label a spot encounter shows on the map.', value: 'text' },
     __meta: DATA_KEYS.__meta,
   },
   scene: {

@@ -1,6 +1,6 @@
 {
   "name": "dryad-engine",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "main": "electron/main.cjs",
   "description": "Dryad Engine - A Vue 3 and Electron based application for making modern 2D text-based games",
   "author": {
@@ -13,7 +13,8 @@
     "dev-server": "node dev-server.cjs",
     "start": "vite",
     "start2": "cross-env NO_WATCH=true vite",
-    "build": "vue-tsc -b && vite build",
+    "build": "vue-tsc -b && node scripts/build-cli.mjs && vite build",
+    "build:cli": "node scripts/build-cli.mjs",
     "preview": "vite preview",
     "electron": "electron --no-sandbox .",
     "electron-dev": "npm run build && electron --no-sandbox .",

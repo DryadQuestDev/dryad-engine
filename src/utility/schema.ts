@@ -2,7 +2,7 @@
  * Represents the definition for a single field within a schema.
  */
 export interface Schemable {
-  type: 'uid' | 'string' | 'number' | 'boolean' | 'textarea' | 'htmlarea' | 'chooseOne' | 'chooseMany' | 'string[]' | 'number[]' | 'file' | 'file[]' | 'schema' | 'schema[]' | 'color' | 'range' | 'incorrect';
+  type: 'uid' | 'string' | 'number' | 'boolean' | 'textarea' | 'htmlarea' | 'chooseOne' | 'chooseMany' | 'string[]' | 'number[]' | 'file' | 'file[]' | 'schema' | 'schema[]' | 'color' | 'date' | 'range' | 'incorrect';
   label?: string;
   tooltip?: string;
   options?: any[];
@@ -80,7 +80,7 @@ type OptionalKeys<T extends Schema> = Exclude<keyof T, RequiredKeys<T>>;
 // Map schema types to base types without considering required/optional yet
 type MappedBaseType<T extends Schema> = {
   [K in keyof T]:
-  T[K]['type'] extends 'uid' | 'string' | 'file' | 'textarea' | 'htmlarea' | 'chooseOne' | 'color' ? string :
+  T[K]['type'] extends 'uid' | 'string' | 'file' | 'textarea' | 'htmlarea' | 'chooseOne' | 'color' | 'date' ? string :
   T[K]['type'] extends 'number' ? number :
   T[K]['type'] extends 'boolean' ? boolean :
   T[K]['type'] extends 'string[]' | 'file[]' | 'chooseMany' ? string[] :

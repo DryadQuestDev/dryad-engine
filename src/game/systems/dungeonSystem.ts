@@ -1,9 +1,11 @@
-import { ref, Ref, computed, nextTick, toRaw, type ComputedRef } from "vue";
+import { ref, Ref, computed, nextTick, toRaw, reactive, type ComputedRef } from "vue";
+import { reportDevProblem } from '../utils/devProblems';
+import { devLogOn, devLogParagraph } from '../utils/devLog';
 import gsap from 'gsap';
 
 import { DungeonData } from "../core/dungeon/dungeonData";
 import { Skip } from "../../utility/save-system";
-import { DEV_PREV_SCENE_SLOT } from "../../services/indexeddb-save.service";
+import { nextCheckpointSlot } from "../../services/devCheckpoints";
 export type DungeonLine = {
   id: string;
   val: string;
@@ -12,6 +14,25 @@ export type DungeonLine = {
 }
 
 export type ChoiceType = 'encounter' | 'text' | 'scene';
+
+/**
+ * Where a choice on screen comes from: the paragraph's `~` branches or `>` inline choices, an
+ * encounter's `!` choices, or a menu pulled in with {choices} / {choices_over}.
+ */
+export type DevChoiceKind = '~' | '>' | '!' | 'menu';
+
+/** A choice on screen before the choice list filters it, for the debug panel. */
+export type DevChoice = {
+  choice: Choice;
+  id: string;
+  /** The resolved label as plain text. */
+  label: string;
+  kind: DevChoiceKind;
+  if?: string | boolean;
+  ifOr?: string;
+  active?: string | boolean;
+  activeOr?: string;
+};
 
 // A shadow dungeon's definition — the persisted source it is materialized from.
 export interface ShadowDungeonDefinition {
@@ -44,7 +65,7 @@ import { warmImages } from "../utils/assetPreloader";
 import { CharacterSceneSlotObject } from "../../schemas/characterSceneSlotSchema";
 import { DungeonRoomObject } from "../../schemas/dungeonRoomSchema";
 import { DungeonEncounterObject } from "../../schemas/dungeonEncounterSchema";
-import { parseText } from "../../utility/functions";
+import { getImageDimensions, parseText } from "../../utility/functions";
 import { DungeonConfigParsed } from "../../editor/editor";
 import { RAW_FLASH_PRESETS, RAW_GRADE_PRESETS } from '../../utility/sceneGradePresets';
 import { AMBIENT_KINDS, ONE_SHOT_ANIMS } from '../../utility/contentVocabulary';
@@ -103,6 +124,7 @@ export type SceneAsset = AssetObject & {
   isRemoving?: boolean; // Flag to trigger exit animation before removal
   removalTimeoutId?: number; // Pending removal timer, cleared if the asset is re-staged
   silentExit?: boolean; // With isRemoving: leave without an exit animation (a background covered by its replacement)
+  missing?: boolean; // Dev playtest stand-in for an id with no asset template, drawn as a placeholder
 }
 
 /** One image plate of a stacked asset, after asset_resolve has had its say. */
@@ -270,6 +292,8 @@ export type ActorAnimRequest = {
   anim: string;
   duration?: number;
   intensity?: number;
+  /** What a directional one-shot is aimed by: a character on stage, `left` or `right`. Unset: the stage center. */
+  facing?: string;
   seq: number;
 };
 
@@ -409,6 +433,33 @@ export class DungeonSystem {
   // toolbar shows a spinner in place of the dungeon name until every image has decoded.
   @Skip()
   public dungeonAssetsLoaded: Ref<boolean> = ref(true);
+
+  // Natural sizes of screen-dungeon room pictures, loaded with the dungeon's art. A room's
+  // encounters are placed in its own picture's pixels, which need not match the dungeon image.
+  @Skip()
+  public screenPictureSizes = reactive(new Map<string, { width: number; height: number }>());
+
+  /**
+   * The picture a screen dungeon shows right now, scaled: the current room's own, else the
+   * dungeon image. `sized` is false while a room picture's size is still unknown (a save loaded
+   * straight into the room skips the preload); the view records it from the image's load.
+   * Null outside screen dungeons.
+   */
+  @Skip()
+  public screenPicture: ComputedRef<{ src: string; width: number; height: number; sized: boolean } | null> = computed(() => {
+    const dungeon = this.currentDungeon.value;
+    if (!dungeon || dungeon.dungeon_type !== 'screen') return null;
+    // Not this.currentRoom: it throws while currentRoomId still names the room of the dungeon just left.
+    const room = this.currentRoomId.value ? dungeon.rooms.get(this.currentRoomId.value) : undefined;
+    if (!room?.image || room.image === dungeon.image) {
+      return { src: dungeon.image, width: dungeon.widthBackground, height: dungeon.heightBackground, sized: true };
+    }
+    const size = this.screenPictureSizes.get(room.image);
+    const scale = dungeon.image_scaling || 1;
+    return size
+      ? { src: room.image, width: size.width * scale, height: size.height * scale, sized: true }
+      : { src: room.image, width: dungeon.widthBackground, height: dungeon.heightBackground, sized: false };
+  });
 
   // Dungeons whose art has already been warmed — re-entering one never shows the spinner.
   @Skip()
@@ -657,6 +708,38 @@ export class DungeonSystem {
     return plates;
   }
 
+  @Skip()
+  private warnedAssetIds = new Set<string>();
+
+  /**
+   * Stand-in for an id with no asset template. A dev playtest stages a placeholder flagged
+   * `missing` in its place, so the gap shows on stage; it lives only on the stage (and so in
+   * saves), never in assetsMap. Outside dev mode the id is skipped.
+   */
+  private missingAssetTemplate(id: string): SceneAsset | null {
+    const devMode = this.game.isDevMode();
+    if (!this.warnedAssetIds.has(id)) {
+      this.warnedAssetIds.add(id);
+      gameLogger.warn(`[addAsset] Asset "${id}" not found.${devMode ? ' Staging a placeholder.' : ' Skipping.'}`);
+    }
+    if (devMode) reportDevProblem('asset', `No asset '${id}'`);
+    return devMode ? { id, missing: true } as SceneAsset : null;
+  }
+
+  /**
+   * A placeholder restored from a save becomes the real asset once its template exists, keeping
+   * the props it was staged with. Call after a save load, when assetsMap holds the current data.
+   */
+  public resolveMissingAssets(): void {
+    if (!this.assets.value.some(a => a.missing && this.assetsMap.has(a.id))) return;
+    this.assets.value = this.assets.value.map(asset => {
+      const template = asset.missing ? this.assetsMap.get(asset.id) : undefined;
+      if (!template) return asset;
+      const { missing, ...props } = asset;
+      return { ...template, ...props };
+    });
+  }
+
   // Method to handle asset adding logic
   public addAssets(data: string[] | string | (Partial<AssetObject> & { id: string })): void {
     let assetIds: string[] = [];
@@ -687,10 +770,8 @@ export class DungeonSystem {
       assetIds = assetIds.filter(id => id !== 'false' && id !== 'reset' && id !== 'clear');
 
       for (const assetId of assetIds) {
-        const template = this.assetsMap.get(assetId);
-
+        const template: SceneAsset | null = this.assetsMap.get(assetId) ?? this.missingAssetTemplate(assetId);
         if (!template) {
-          gameLogger.error(`Asset template with id "${assetId}" not found in assetsMap. Skipping.`);
           continue;
         }
 
@@ -714,7 +795,7 @@ export class DungeonSystem {
         }
 
         // Create asset from template
-        const asset: AssetObject = { ...template };
+        const asset: SceneAsset = { ...template };
 
         // Allow final mutations before adding
         this.game.trigger('asset_render', asset);
@@ -725,7 +806,7 @@ export class DungeonSystem {
         this.markUnpainted(asset);
 
         // add to discovered assets for the gallery system
-        this.game.coreSystem.addAssetToGallery(asset);
+        if (!asset.missing) this.game.coreSystem.addAssetToGallery(asset);
         gameLogger.info(`[addAsset] Added asset: "${assetId}"`);
       }
       return;
@@ -734,10 +815,9 @@ export class DungeonSystem {
     if (data && typeof data === 'object' && 'id' in data) {
 
       // Handle object input (original behavior)
-      const template = this.assetsMap.get(data.id);
-
+      const template: SceneAsset | null = this.assetsMap.get(data.id) ?? this.missingAssetTemplate(data.id);
       if (!template) {
-        throw new Error(`Asset template with id "${data.id}" not found in assetsMap.`);
+        return;
       }
 
       // Check if asset already exists
@@ -753,14 +833,14 @@ export class DungeonSystem {
         this.applySoloAsset(existingAsset);
         this.applyBgAsset(existingAsset);
         // add to discovered assets for the gallery system
-        this.game.coreSystem.addAssetToGallery(existingAsset);
+        if (!existingAsset.missing) this.game.coreSystem.addAssetToGallery(existingAsset);
         gameLogger.info(`[addAsset] Updated existing asset: "${data.id}"`);
         return;
       }
 
       // Create a new asset by merging template with user-provided properties
       // User-provided properties override template properties
-      const asset: AssetObject = {
+      const asset: SceneAsset = {
         ...template,
         ...data
       };
@@ -774,7 +854,7 @@ export class DungeonSystem {
       this.markUnpainted(asset);
 
       // add to discovered assets for the gallery system
-      this.game.coreSystem.addAssetToGallery(asset);
+      if (!asset.missing) this.game.coreSystem.addAssetToGallery(asset);
       gameLogger.info(`[addAsset] Added asset: "${data.id}"`);
     }
     else {
@@ -894,14 +974,14 @@ export class DungeonSystem {
   private fxSeq = 0;
 
   /** Play a one-shot animation on a staged actor: lunge, recoil, hop, shake, shiver, nod, bounce, flash. */
-  public playActorAnim(charId: string, anim: string, opts: { duration?: number; intensity?: number } = {}): void {
+  public playActorAnim(charId: string, anim: string, opts: { duration?: number; intensity?: number; facing?: string } = {}): void {
     if (!ONE_SHOT_ANIMS.includes(anim)) {
       gameLogger.warn(`[animate] Unknown animation "${anim}" for "${charId}". Valid: ${ONE_SHOT_ANIMS.join(', ')}`);
       return;
     }
     this.actorAnimRequests.value = {
       ...this.actorAnimRequests.value,
-      [charId]: { anim, duration: opts.duration, intensity: opts.intensity, seq: ++this.fxSeq },
+      [charId]: { anim, duration: opts.duration, intensity: opts.intensity, facing: opts.facing, seq: ++this.fxSeq },
     };
   }
 
@@ -913,13 +993,13 @@ export class DungeonSystem {
     this.actorAnimRequests.value = rest;
   }
 
-  // `anim`, `anim_duration` and `anim_intensity` ride along in actor props ("chimera(anim=lunge)")
+  // `anim`, `anim_duration`, `anim_intensity` and `anim_facing` ride along in actor props ("chimera(anim=lunge)")
   // but must never land on the saved slot — strip them here and queue the one-shot instead.
   private takeOneShotProps(charId: string, props: Record<string, any> | undefined): void {
     if (!props || props.anim === undefined) return;
     const anim = String(props.anim);
-    const opts = { duration: props.anim_duration, intensity: props.anim_intensity };
-    delete props.anim; delete props.anim_duration; delete props.anim_intensity;
+    const opts = { duration: props.anim_duration, intensity: props.anim_intensity, facing: props.anim_facing != null ? String(props.anim_facing) : undefined };
+    delete props.anim; delete props.anim_duration; delete props.anim_intensity; delete props.anim_facing;
     if (anim && anim !== 'none') this.playActorAnim(charId, anim, opts);
   }
 
@@ -1111,15 +1191,32 @@ export class DungeonSystem {
   public characterSlotTemplates: Map<string, Partial<CharacterSceneSlotObject>> = new Map();
 
   @Skip()
+  private warnedSpeakerIds = new Set<string>();
+
+  // Null, never a throw, for an id that names no live character: the overlay reads this while it
+  // renders, and a save can carry a speaker its game no longer has.
+  @Skip()
   public talkingCharacter: ComputedRef<Character | null> = computed(() => {
-    if (!this.talkingCharacterId.value) {
+    const id = this.talkingCharacterId.value;
+    if (!id) {
       return null;
     }
-    let character = this.game.characterSystem.characters.value.get(this.talkingCharacterId.value);
-    if (!character) {
-      throw new Error(`Character with id "${this.talkingCharacterId.value}" not found.`);
+    const character = this.game.characterSystem.characters.value.get(id);
+    if (!character && !this.warnedSpeakerIds.has(id)) {
+      this.warnedSpeakerIds.add(id);
+      gameLogger.warn(`Speaker "${id}" is not a character in the game.`);
     }
-    return character;
+    return character ?? null;
+  });
+
+  /** Dev playtests: the speaker id of a line whose speaker is not in the game, shown as a placeholder tag. */
+  @Skip()
+  public missingSpeakerId: ComputedRef<string | null> = computed(() => {
+    const id = this.talkingCharacterId.value;
+    if (!id || this.talkingCharacter.value || !this.game.isDevMode()) {
+      return null;
+    }
+    return id;
   });
 
   // Where the story resumes once a delayed branch action (battle, exchange…) finishes.
@@ -1252,7 +1349,7 @@ export class DungeonSystem {
       // anchors (`&x` before a `~choice` block) carry no `line.anchor`; they resolve via the
       // "#<room>.&x.1.1.1" form that createChoices() understands, so falling through is REQUIRED
       // (returning null here would break every {choices:"&x"} menu). A genuinely-missing anchor
-      // therefore fails downstream rather than here — the static ref-checker (notes/tools) catches those.
+      // therefore fails downstream rather than here.
     }
 
 
@@ -1408,6 +1505,7 @@ export class DungeonSystem {
     this.activeDungeonId.value = dungeonUsedId;
 
     let { output, actions } = this.game.logicSystem.resolveString(line.val, true);
+    const prefixedOutput = output;
     const talk = this.game.logicSystem.resolveTalkingCharacter(output);
     output = talk.text;
 
@@ -1443,6 +1541,8 @@ export class DungeonSystem {
       this.playSceneResolver(gateTarget, dungeonUsedId);
       return;
     }
+
+    if (devLogOn) devLogParagraph(sceneId, dungeonUsedId, skipped ? null : talk.id, skipped ? '' : output);
 
     if (isRootScene) {
 
@@ -1497,15 +1597,32 @@ export class DungeonSystem {
     // captured at the top, before it was reset above.
     this.game.trigger('scene_play', sceneId, dungeonUsedId, isRootScene, line.anchor ?? '');
 
-    // Dev-only rolling checkpoint: snapshot the state BEFORE this scene's actions fire, so
-    // Hard Scene Reset can reload and re-enter the scene once on clean state. Fire-and-forget —
-    // save(game) serializes synchronously here before any await, so no mutation race.
-    if (localStorage.getItem('devMode') === 'true') {
-      this.game.saveGame(DEV_PREV_SCENE_SLOT, { hidden: true, noNotification: true, forceSave: true });
+    // Dev-only per-paragraph checkpoint: snapshot the state BEFORE this paragraph's actions fire,
+    // so Replay paragraph and Back one paragraph can reload and replay it once on clean state.
+    // Fire-and-forget — save(game) serializes synchronously here before any await, so no mutation race.
+    if (this.game.isDevMode()) {
+      this.game.saveGame(nextCheckpointSlot(this.game.coreSystem.gameId), { hidden: true, noNotification: true, forceSave: true });
     }
 
     // execute actions
     this.game.logicSystem.resolveActions(actions, true);
+
+    // Only now is it known whether the prefix names a speaker: the paragraph's own actions or a
+    // scene_play listener may have just created that character. A dev playtest keeps an id-like
+    // prefix (lowercase, not only digits) as a placeholder speaker; prose such as `Note:` or `10:`
+    // reads as narration there too, as it does in the real game.
+    const idLike = /^[a-z0-9_]*[a-z_][a-z0-9_]*$/.test(talk.id ?? '');
+    if (!skipped && talk.id && this.talkingCharacterId.value === talk.id
+      && !this.game.characterSystem.characters.value.has(talk.id) && (!this.game.isDevMode() || !idLike)) {
+      gameLogger.warn(`[scene] "${sceneId}": "${talk.id}:" names no character, shown as narration.`);
+      this.talkingCharacterId.value = null;
+      output = prefixedOutput;
+    } else if (!skipped && talk.id && this.talkingCharacterId.value === talk.id
+      && !this.game.characterSystem.characters.value.has(talk.id)) {
+      reportDevProblem('speaker', `No character '${talk.id}'`, { sceneId, dungeonId: dungeonUsedId });
+    } else if (talk.id && this.talkingCharacterId.value === talk.id) {
+      this.game.narrativeSystem.revealOnTalk(talk.id);
+    }
 
     if (skipped) {
       // The kept text is already typed out — nothing new to animate.
@@ -1576,9 +1693,13 @@ export class DungeonSystem {
   }
 
   // ignore types
+  /** Dev Play from here: while set, entering a room plays none of its events, so the jump lands on the chosen scene. */
+  @Skip()
+  public holdRoomEvents = false;
+
   public triggerEvent() {
 
-    if (this.currentSceneId.value) {
+    if (this.currentSceneId.value || this.holdRoomEvents) {
       return;
     }
     let room = this.currentRoom.value;
@@ -1652,6 +1773,8 @@ export class DungeonSystem {
 
     // The item_view card lives only for the event that showed it.
     this.game.coreSystem.setState('viewed_item', null);
+    // Scene points live with the scene: its assets (and any zoom) are gone.
+    this.game.scenePointSystem.reset();
 
     this.isRootScene.value = true;
     //console.warn("setting isRootScene to true", this.isRootScene.value);
@@ -1999,6 +2122,7 @@ export class DungeonSystem {
       gameLogger.error(`[actor] Character ${slot.char} not found`);
       return false;
     }
+    this.game.narrativeSystem.revealOnAppear(character.id);
 
 
     this.takeOneShotProps(slot.char!, slot as any);
@@ -2536,6 +2660,48 @@ export class DungeonSystem {
         choice.resumeSceneId = branchBlockId;
       }
       return choice;
+    });
+  }
+
+  /**
+   * Dev tooling: every choice on screen before the choice list filters it, hidden ones included.
+   * These are the Choice objects the list renders, in its order; nameless continues are left out.
+   */
+  public getDevChoices(): DevChoice[] {
+    const raw = this.relevantChoices.value;
+    const choices = !raw ? [] : Array.isArray(raw) ? raw : [raw];
+    const sceneId = this.currentSceneId.value;
+
+    // The paragraph's own `>` and `~` lines. Any other choice in a scene came from a menu.
+    const own = new Set<string>();
+    const lines = sceneId ? this.dungeonLines.get(this.activeDungeonId.value || this.currentDungeonId.value || '') : undefined;
+    if (sceneId && lines) {
+      const { name, row, block, paragraph } = this.parseSceneId(sceneId);
+      for (const line of [...this.findInlineChoiceLines(lines, name, row, block, paragraph), ...this.findBranchLines(lines, name, row + 1)]) {
+        own.add(line.id);
+      }
+    }
+
+    return choices.filter(choice => choice && (choice.name || choice.nameKey)).map(choice => {
+      const params = choice.params ?? {};
+      const kind: DevChoiceKind = !sceneId ? '!' : !own.has(choice.id) ? 'menu' : choice.id.startsWith('>') ? '>' : '~';
+      // Reached through the reactive proxy nameComputed is already the string.
+      let label: string;
+      try {
+        label = (typeof choice.nameComputed === 'string' ? choice.nameComputed : choice.nameComputed?.value) || choice.name;
+      } catch {
+        label = choice.name;
+      }
+      return {
+        choice,
+        id: choice.id,
+        label: label.replace(/<[^>]*>/g, ''),
+        kind,
+        if: params.if,
+        ifOr: params.ifOr,
+        active: params.active,
+        activeOr: params.activeOr,
+      };
     });
   }
 
@@ -3172,6 +3338,11 @@ export class DungeonSystem {
     for (const encounter of dungeon.encounters.values()) {
       images.push(encounter.image);
     }
+    const pictures = dungeon.dungeon_type === 'screen'
+      ? [...new Set([...dungeon.rooms.values()].map((room) => room.image).filter(Boolean))]
+      : [];
+    images.push(...pictures);
+    const unsized = pictures.filter((url) => !this.screenPictureSizes.has(url));
 
     // Residency decides whether the player waits, not a set of already-warmed dungeon ids: that
     // set never learned about eviction, so a revisit skipped the warm and the map drew itself
@@ -3180,14 +3351,19 @@ export class DungeonSystem {
     // v-persist and the fog is an SVG <image>, so nothing re-references them and they would
     // otherwise sink to the eviction end while doll and item art keeps getting promoted.
     const core = this.game.coreSystem;
-    if (images.every((url) => !url || core.hasImage(url))) {
+    if (!unsized.length && images.every((url) => !url || core.hasImage(url))) {
       this.dungeonAssetsLoaded.value = true;
       void warmImages(images);
       return;
     }
 
     this.dungeonAssetsLoaded.value = false;
-    await warmImages(images);
+    await Promise.all([
+      warmImages(images),
+      ...unsized.map((url) => getImageDimensions(url)
+        .then((size) => { this.screenPictureSizes.set(url, size); })
+        .catch(() => { })),
+    ]);
     // The player may have travelled on while the art was loading.
     if (this.currentDungeonId.value !== dungeon.id) return;
 
@@ -3762,7 +3938,7 @@ export class DungeonSystem {
 
   @Skip()
   public questsByDungeon: ComputedRef<Map<string, QuestObject[]>> = computed(() => {
-    const allQuests = Array.from(this.quests.value.values());
+    const allQuests = Array.from(this.quests.value.values()).filter(q => this.hasQuestDefinition(q.dungeonId, q.id));
 
     // Filter out completed quests if toggle is off
     const questsToShow = this.game.coreSystem.getState<boolean>('is_show_completed_quests')
@@ -3853,6 +4029,34 @@ export class DungeonSystem {
     return this.dungeonLines.get(dungeonId)?.get('_config_')?.params as DungeonConfigParsed | undefined;
   }
 
+  /**
+   * Whether the content still defines this quest (its `$quest.main` title line). Saves keep quest
+   * progress by id, so a quest the content renamed, merged or removed is still in an older save;
+   * the quest log hides it instead of listing its raw id.
+   */
+  public hasQuestDefinition(dungeonId: string, questId: string): boolean {
+    const lines = this.dungeonLines.get(dungeonId);
+    return !!lines && (lines.has(`$${questId}.main`) || lines.has(`$${questId}.main.`));
+  }
+
+  /** Dev playtests: name every saved quest and log entry the content no longer defines (Problems tab). */
+  public reportOrphanQuests(): void {
+    for (const quest of this.quests.value.values()) {
+      const key = `${quest.dungeonId}.${quest.id}`;
+      if (!this.hasQuestDefinition(quest.dungeonId, quest.id)) {
+        reportDevProblem('quest', `Quest '${key}' is in the save but not in the content; the quest log hides it`, { sceneId: null, dungeonId: quest.dungeonId });
+        continue;
+      }
+      for (const goal of quest.goals) {
+        for (const logId of goal.logs) {
+          if (!this.getQuestLine(quest.dungeonId, quest.id, goal.id, logId)) {
+            reportDevProblem('quest', `Quest log '${key}.${goal.id}.${logId}' is in the save but not in the content; the quest log hides it`, { sceneId: null, dungeonId: quest.dungeonId });
+          }
+        }
+      }
+    }
+  }
+
   public getQuestTitle(dungeonId: string, questId: string): string {
     const line = this.getQuestLine(dungeonId, questId, 'main', '');
     if (!line) {
@@ -3873,8 +4077,22 @@ export class DungeonSystem {
     return goalLine?.val || goalId;
   }
 
+  /** Take one log entry out of the save's quest progress; an emptied goal and an emptied quest go with it. */
+  public removeQuestLog(dungeonId: string, questId: string, goalId: string, logId: string): void {
+    const questKey = `${dungeonId}.${questId}`;
+    const quest = this.quests.value.get(questKey);
+    const goal = quest?.goals.find(g => g.id === goalId);
+    if (!quest || !goal) return;
+    goal.logs = goal.logs.filter(l => l !== logId);
+    if (!goal.logs.length) quest.goals = quest.goals.filter(g => g !== goal);
+    if (!quest.goals.length) this.quests.value.delete(questKey);
+  }
+
   public addQuestLog(dungeonId: string, questId: string, goalId: string, logId: string) {
     const questKey = `${dungeonId}.${questId}`;
+    if (!this.getQuestLine(dungeonId, questId, goalId, logId)) {
+      reportDevProblem('quest', `Quest log '${questKey}.${goalId}.${logId}' is not in the content`);
+    }
 
     let quest = this.quests.value.get(questKey);
     const isNewQuest = !quest;

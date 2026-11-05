@@ -51,6 +51,8 @@ export class DungeonRoom {
 
     public defaultAssets: string[] = [];
     public defaultSounds: string[] = [];
+    // Screen dungeons: the room's own picture (empty = the dungeon image).
+    public image: string = "";
 
     // Lock: entering needs this item (auto-used from the party bag; keyConsume spends it).
     public key: string = "";

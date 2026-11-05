@@ -129,6 +129,7 @@ export class DungeonFabric {
             // set default assets
             room.defaultAssets = roomObject.default_assets || [];
             room.defaultSounds = roomObject.default_sounds || [];
+            room.image = roomObject.image || '';
 
             // set actions
             room.actions = roomObject.actions || {};
@@ -323,6 +324,10 @@ export class DungeonFabric {
                             if (params.rooms) {
                                 let extraRooms = params.rooms.split(",").map((x: string) => x.trim()).filter(Boolean);
                                 encounter.additionalRoomIds.push(...extraRooms);
+                            }
+
+                            if (typeof params.title === 'string') {
+                                encounter.title = params.title;
                             }
                         }
                     }

@@ -596,10 +596,10 @@ export class CharacterSystem {
    * Supports operations: = (set), += (increase), -= (reduce)
    *
    * Resources accept the keyword `max` in place of a number — it resolves to that character's
-   * cap for the resource, so `resource: "ane.health = max"` is a full heal.
+   * cap for the resource, so `resource: "alice.health = max"` is a full heal.
    *
-   * @param data String format: "alice.trait.name = New Name, eleanor.resource.health -= 25.5, alice.skinStyle.hat += class1, alice.skinStyle.hat = [class1, class2]"
-   *             Object format: { "alice.trait.name": "New Name", "eleanor.resource.health": -25.5 }
+   * @param data String format: "alice.trait.name = New Name, bob.resource.health -= 25.5, alice.skinStyle.hat += class1, alice.skinStyle.hat = [class1, class2]"
+   *             Object format: { "alice.trait.name": "New Name", "bob.resource.health": -25.5 }
    * @param forcedType When set (e.g. by the `attr`/`stat`/`trait`/`resource`/`skin_style` shortcut
    *                   actions), paths are "charId.key" and this value is used as the type.
    */
@@ -713,15 +713,11 @@ export class CharacterSystem {
 
           case 'stat':
             if (op.operator === '=') {
-              character.update({ stats: { [op.key]: op.value } });
+              character.setStat(op.key, op.value);
             } else if (op.operator === '+=') {
-              const coreStatus = character.getCoreStatus();
-              const currentValue = coreStatus.stats[op.key] || 0;
-              character.update({ stats: { [op.key]: currentValue + op.value } });
+              character.addStat(op.key, op.value);
             } else if (op.operator === '-=') {
-              const coreStatus = character.getCoreStatus();
-              const currentValue = coreStatus.stats[op.key] || 0;
-              character.update({ stats: { [op.key]: currentValue - op.value } });
+              character.addStat(op.key, -op.value);
             }
             break;
 
@@ -771,7 +767,7 @@ export class CharacterSystem {
 
   /**
    * Process addSkinLayer action
-   * Format: "alice.fancy_hat, eleanor.fancy_gloves"
+   * Format: "alice.fancy_hat, bob.fancy_gloves"
    */
   // ignore types
   public processAddSkinLayerAction(data: string): void {
@@ -804,7 +800,7 @@ export class CharacterSystem {
 
   /**
    * Process removeSkinLayer action
-   * Format: "alice.fancy_hat, eleanor.fancy_gloves"
+   * Format: "alice.fancy_hat, bob.fancy_gloves"
    */
   // ignore types
   public processRemoveSkinLayerAction(data: string): void {
@@ -837,7 +833,7 @@ export class CharacterSystem {
 
   /**
    * Process addItemSlot action
-   * Format: "alice.hat[20, 40], eleanor.gloves" — coordinates are optional and
+   * Format: "alice.hat[20, 40], bob.gloves" — coordinates are optional and
    * default to `0, 0` when omitted (useful for text-based games with no doll).
    * When present, coordinates are percentage of the character width and height.
    */
@@ -910,7 +906,7 @@ export class CharacterSystem {
 
   /**
    * Process removeItemSlot action
-   * Format: "alice.hat, eleanor.gloves"
+   * Format: "alice.hat, bob.gloves"
    */
   // ignore types
   public processRemoveItemSlotAction(data: string): void {

@@ -122,7 +122,8 @@ assets/                            # ← Open this folder in VS Code
 │           └── dungeons/
 │               └── my_dungeon/
 │                   ├── config.json
-│                   └── content_raw.txt   # Dungeon markup (editable in VS Code)
+│                   ├── content_raw.txt   # Dungeon markup (editable in VS Code)
+│                   └── content_parsed.json  # Made from content_raw.txt (don't edit)
 └── engine_files/
     ├── plugins/                   # Engine plugins (each with its own docs/)
     │   ├── global_essentials/
@@ -131,6 +132,30 @@ assets/                            # ← Open this folder in VS Code
     │       └── docs/              # Combat plugin documentation
     └── types.d.ts                 # Type definitions (don't modify)
 ```
+
+### Editing Content Outside the Editor
+
+`content_raw.txt` is where a dungeon's content lives, so you can write it in VS Code, with an AI, or through your own pipeline. The game reads `content_parsed.json`, which the engine makes from the text whenever the text changed:
+
+- when a dev playtest starts,
+- when the editor opens the game,
+- when you **Export** the game.
+
+There is nothing to run, and you never edit `content_parsed.json` yourself.
+
+### Checking Content from the Terminal
+
+The editor's content checks also run without the engine, with Node 18 or newer. From the `assets` folder:
+
+```bash
+node engine_files/tools/dryad.mjs check my_game
+```
+
+It lists every problem as `file:line: severity: message` – unknown actions and conditions, ids that don't exist, flags that are read but never set, broken syntax – with the editor's suggestion where it has one, and exits with `1` when there are errors. Name dungeons to check only those (`check my_game chapter_1`), or add `--mod my_mod` to check a mod.
+
+`node engine_files/tools/dryad.mjs parse my_game` regenerates the `content_parsed.json` of every dungeon whose text changed, without starting the engine.
+
+If an AI agent writes for you, point it at `engine_files/ai/AGENT_HINTS.md`: it tells the agent where content lives, to never touch `content_parsed.json`, and to run `check` after every edit.
 
 ---
 

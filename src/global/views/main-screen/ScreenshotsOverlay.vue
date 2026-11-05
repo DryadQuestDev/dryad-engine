@@ -32,7 +32,11 @@ function prev() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close');
+  if (e.key === 'Escape') {
+    // Marked handled, or App.vue's window listener would open the game menu as well.
+    e.preventDefault();
+    emit('close');
+  }
   else if (e.key === 'ArrowRight') next();
   else if (e.key === 'ArrowLeft') prev();
 }

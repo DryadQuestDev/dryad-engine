@@ -55,15 +55,9 @@
       "entity_description": "<p><span style=\"color: rgb(102, 163, 224);\">It&#39;s Riko!</span></p>"
     },
     "stats": {
-      "health": 150,
       "stamina": 15,
       "fashion": 50,
-      "endurance": 5,
-      "power": 10,
-      "sorcery": 25,
-      "speed": 55,
-      "armor": 3,
-      "leadership_cost": 2
+      "endurance": 5
     },
     "computed_stats": [],
     "skill_trees": [],

@@ -1,49 +1,35 @@
 <script setup lang="ts">
 import Button from 'primevue/button';
-import { ref, onMounted, Ref, watch } from 'vue';
+import { ref, onMounted } from 'vue';
 import { Analyser } from '../analyser';
 import { Editor } from '../editor';
-// Props definition (example)
-// const props = defineProps<{
-//   exampleProp: string;
-// }>();
 
-// Reactive state
-const componentName = ref('AnalyserComponent');
+// The results of the content editor's Sync. It checks on mount, so each time its popover opens.
+const analyser = new Analyser();
+const editor = Editor.getInstance();
+const checking = ref(true);
 
-let analyser = new Analyser();
-let editor = Editor.getInstance();
-
-function analyse() {
-  analyser.analyse();
-}
-
-// Lifecycle hooks
-onMounted(() => {
-  console.log(`${componentName.value} component mounted.`);
-});
-
-watch(
-  [() => editor.selectedGame, () => editor.selectedMod, () => editor.selectedDungeon],
-  () => {
-    analyser.analized.value = false;
+onMounted(async () => {
+  try {
+    await analyser.analyse();
+  } finally {
+    checking.value = false;
   }
-);
-
+});
 </script>
 
 <template>
   <div class="analyser-component">
 
-    <Button v-tooltip.left="'Synchronize Rooms and Encounters from the Dungeon Content Document with the game files.'"
-      label="Synchronize Content Document" severity="help" icon="pi pi-check-circle" raised @click="analyse" />
+    <div v-if="checking" class="analyser-status">Checking…</div>
+    <div v-else-if="!analyser.analized.value" class="analyser-status">No saved content to check yet.</div>
 
-    <div class="analyser-content" v-if="analyser.analized.value">
+    <div class="analyser-content" v-else>
       <div class="warning" v-if="editor.hasUnsavedChanges.value">
         You have unsaved changes. Save your changes before synchronizing the document to ensure the data is in sync.
       </div>
 
-      <div v-else class="block">
+      <div v-else class="analyser-results">
 
         <!-- Missing Rooms -->
         <div class="block" v-if="analyser.missingRooms.value.size > 0">
@@ -123,8 +109,20 @@ watch(
 
 <style scoped>
 .analyser-component {
-  margin-left: 15px;
-  margin-bottom: 15px;
+  width: 28rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.analyser-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.analyser-status {
+  font-size: 0.85rem;
+  color: var(--editor-text-muted);
 }
 
 .analyser-content {

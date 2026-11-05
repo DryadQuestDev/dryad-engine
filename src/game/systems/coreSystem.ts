@@ -3,6 +3,7 @@ import { parseAudioSpec, rampVolume, type AudioOverrides } from '../../services/
 import { ManifestObject } from '../../schemas/manifestSchema';
 import { Global } from '../../global/global';
 import { IndexedDbSaveService, DEV_REPLAY_SCENE_KEY } from '../../services/indexeddb-save.service';
+import { resetCheckpoints, syncCheckpointsOnLoad } from '../../services/devCheckpoints';
 import { Ref, ref, markRaw, type Component, computed, watch, ComputedRef } from 'vue';
 import { useIdle, type UseIdleReturn } from '@vueuse/core';
 import { DebugSettingsType } from '../data/debugSettings';
@@ -106,8 +107,9 @@ export type MigrationScope = boolean | { only?: string[]; skip?: string[] };
 /** Options for one save-migration declaration. Every mutating section has its own key. */
 export interface SaveMigrationOptions {
   /**
-   * What sections nobody mentions do — `opt-out` (default) syncs them, `opt-in` skips them.
-   * Only honored on the `_core` declaration: a mod can't flip the game's global default.
+   * What the sections nobody names do. Omitted, every section syncs except `itemTraits`; `opt-out`
+   * syncs `itemTraits` too; `opt-in` syncs only what a declaration turns on with `true` or `only`.
+   * Only honored on the `_core` declaration.
    */
   mode?: 'opt-in' | 'opt-out';
   /** Stat ids. */
@@ -174,24 +176,41 @@ function syncViewMap<T>(current: Map<string, T>, fromTemplate: Map<string, T>, s
   }
 }
 
+/**
+ * Whether a section nobody names syncs. Item traits are off unless asked for: unlike a character,
+ * an item records no writes, so its charges and wear would go back to the template.
+ */
+function syncsByDefault(mode: SaveMigrationOptions['mode'], key: MigrationSection): boolean {
+  if (mode === 'opt-out') return true;
+  if (mode === 'opt-in') return false;
+  return key !== 'itemTraits';
+}
+
+/** Drop the recorded writes of ids whose definition is gone. */
+function purgeWrites(record: Record<string, unknown>, scope: ScopeFilter, defs: Map<string, unknown>): void {
+  for (const key of Object.keys(record)) {
+    if (scope.allows(key) && !defs.has(key)) delete record[key];
+  }
+}
+
 /** See the `MigrationScope` table in `Game.registerSaveMigration()`. Omitted follows the mode. */
-function resolveScope(value: MigrationScope | undefined, optIn: boolean): ScopeFilter {
+function resolveScope(value: MigrationScope | undefined, onByDefault: boolean): ScopeFilter {
   if (value === true) return ALLOW_ALL;
   if (value === false) return DENY_ALL;
   if (value) {
     const only = value.only ? new Set(value.only) : null;
     const skip = new Set(value.skip ?? []);
     if (only && only.size === 0) return DENY_ALL;
+    if (!only && value.skip && !onByDefault) return DENY_ALL;
     return { enabled: true, allows: k => (!only || only.has(k)) && !skip.has(k) };
   }
-  return optIn ? DENY_ALL : ALLOW_ALL;
+  return onByDefault ? ALLOW_ALL : DENY_ALL;
 }
 
 /** Resolve one declaration on its own — the manual `runDefaultSaveMigration(options)` path. */
 function resolveScopes(options: SaveMigrationOptions): MigrationScopes {
-  const optIn = options.mode === 'opt-in';
   const scopes = {} as MigrationScopes;
-  for (const key of MIGRATION_SECTIONS) scopes[key] = resolveScope(options[key], optIn);
+  for (const key of MIGRATION_SECTIONS) scopes[key] = resolveScope(options[key], syncsByDefault(options.mode, key));
   return scopes;
 }
 
@@ -202,10 +221,13 @@ function resolveScopes(options: SaveMigrationOptions): MigrationScopes {
  * - `false` from any source disables the section outright.
  * - `skip` entries from every source union, and always subtract last.
  * - `only` lists union (a mod extends coverage); `true` from any source widens it to every key.
- * - `mode` comes from the `_core` declaration alone; elsewhere it's ignored with a warning.
+ * - `mode` comes from the `_core` declaration alone; elsewhere it's ignored with a warning. It decides
+ *   the sections nobody names — see `syncsByDefault`.
+ * - `skip` never turns a section on. A plugin that only keeps its own item trait out would otherwise
+ *   reset every other item trait in the save.
  */
 function mergeScopes(registrations: SaveMigrationRegistration[]): MigrationScopes {
-  const optIn = registrations.find(r => r.source === '_core')?.options.mode === 'opt-in';
+  const mode = registrations.find(r => r.source === '_core')?.options.mode;
   for (const reg of registrations) {
     if (reg.source !== '_core' && reg.options.mode) {
       gameLogger.warn(`[save-migration] "${reg.source}" set mode: '${reg.options.mode}' — ignored, only _core owns the default`);
@@ -214,21 +236,28 @@ function mergeScopes(registrations: SaveMigrationRegistration[]): MigrationScope
 
   const scopes = {} as MigrationScopes;
   for (const key of MIGRATION_SECTIONS) {
-    let mentioned = false, denied = false, widened = false, narrowed = false;
+    let requested = false, denied = false, widened = false, narrowed = false, coreNarrowed = false;
     const only = new Set<string>();
     const skip = new Set<string>();
-    for (const { options } of registrations) {
+    for (const { source, options } of registrations) {
       const value = options[key];
       if (value === undefined) continue;
-      mentioned = true;
       if (value === false) { denied = true; continue; }
-      if (value === true) { widened = true; continue; }
-      if (value.only) { narrowed = true; for (const k of value.only) only.add(k); }
+      if (value === true) { widened = true; requested = true; continue; }
+      if (value.only) {
+        narrowed = true; requested = true;
+        if (source === '_core') coreNarrowed = true;
+        for (const k of value.only) only.add(k);
+      }
       if (value.skip) for (const k of value.skip) skip.add(k);
+      if (!value.only && !value.skip) requested = true;
     }
 
-    if (denied || (!mentioned && optIn)) { scopes[key] = DENY_ALL; continue; }
-    const all = widened || !narrowed;                 // nobody narrowed it → every key
+    const byDefault = syncsByDefault(mode, key);
+    if (denied || (!requested && !byDefault)) { scopes[key] = DENY_ALL; continue; }
+    // A section the mode already syncs is narrowed by the game's own `only` alone: a mod's `only`
+    // asks for its ids to be covered, which they already are.
+    const all = widened || (byDefault ? !coreNarrowed : !narrowed);
     if (!all && only.size === 0) { scopes[key] = DENY_ALL; continue; }
     scopes[key] = { enabled: true, allows: k => (all || only.has(k)) && !skip.has(k) };
   }
@@ -347,6 +376,11 @@ export class CoreSystem {
   @Skip()
   private migratingSave = false;
 
+  /** True while the save migration pass or its hooks run. Character writes made then are not recorded. */
+  public isMigratingSave(): boolean {
+    return this.migratingSave;
+  }
+
   /**
    * Full-screen "Loading" overlay (same visual as the initial game load) that
    * covers the game WITHOUT unmounting it — used by scripts/plugins to hide
@@ -410,22 +444,21 @@ export class CoreSystem {
   }
 
   /**
-   * Merge every registered declaration and run the pass. Called by the engine on save load.
-   * `save_migrated` fires under the same gate as the pass (an old save, or any load in dev mode)
-   * even when nothing was declared or every section is disabled.
+   * Merge every registered declaration and run the pass. Called by the engine on save load. With
+   * nothing declared the pass runs with the default mode. `save_migrated` fires under the same
+   * gate as the pass (an old save, or any load in dev mode) even when every section is disabled.
    */
   public runRegisteredSaveMigrations(): void {
     const game = Game.getInstance();
     if (game.isNewGame) return;
     if (!this.isOldSave() && !game.isDevMode()) return;
-    let fired = false;
-    if (this.saveMigrations.length > 0) {
-      const sources = this.saveMigrations.map(r => r.source).join(' + ');
-      this.migratingSave = true;
-      try { fired = this.applySaveMigration(mergeScopes(this.saveMigrations), sources); }
-      finally { this.migratingSave = false; }
+    const sources = this.saveMigrations.map(r => r.source).join(' + ') || 'default';
+    this.migratingSave = true;
+    try {
+      if (!this.applySaveMigration(mergeScopes(this.saveMigrations), sources)) this.trigger('save_migrated');
+    } finally {
+      this.migratingSave = false;
     }
-    if (!fired) this.trigger('save_migrated');
   }
 
   /**
@@ -439,7 +472,8 @@ export class CoreSystem {
   }
 
   /**
-   * Rebuild every character's state from current definitions (template + statuses + traits).
+   * Rebuild every character's state from current definitions (template + statuses + traits), with
+   * the writes its `coreWrites` recorded replayed on top.
    * Resource pools are never touched — snapshot at the start, restored verbatim at the end.
    * No-op for new games or when the loaded versions match the current ones —
    * except in dev mode, where it runs on every load regardless of versions.
@@ -488,66 +522,80 @@ export class CoreSystem {
       if (!template) continue;                                       // template gone (e.g. removed mod); leave char alone
 
       const coreStatus = char.getCoreStatus();
+      // What the game wrote on top of the template, replayed onto the rebuilt values below. A save
+      // made before the record existed has an empty one and syncs to the template outright.
+      const writes = char.coreWrites;
 
-      // 1. Stats — reset to the template values. Safe against resource pools only because the
-      // whole migration is wrapped in the snapshot/restore above: setStat delta-adjusts
-      // replenishable resources (e.g. a pool that doubles as a lifespan) and that gets undone at the end.
+      // 1. Stats — the template value, replaced by the last `=` the game wrote and moved by every
+      // `+=` / `-=` since. A stat the template doesn't define keeps the save's value, which already
+      // holds every write. Safe against resource pools only because the whole migration is wrapped
+      // in the snapshot/restore above: setStat delta-adjusts replenishable resources (e.g. a pool
+      // that doubles as a lifespan) and that gets undone at the end.
       if (scopes.stats.enabled) {
         const tplStats = (template as any).stats || {};
+        const value = (key: string) => (writes.statPins[key] ?? tplStats[key]) + (writes.stats[key] ?? 0);
+        purgeWrites(writes.statPins, scopes.stats, statsMap);
+        purgeWrites(writes.stats, scopes.stats, statsMap);
         for (const key of Object.keys(coreStatus.stats || {})) {
           if (!scopes.stats.allows(key)) continue;
           if (!statsMap.has(key)) { delete coreStatus.stats[key]; continue; }
-          if (typeof tplStats[key] === 'number') char.setStat(key, tplStats[key]);
+          if (typeof tplStats[key] === 'number') char.setStat(key, value(key));
         }
         for (const key of Object.keys(tplStats)) {
           if (!scopes.stats.allows(key)) continue;
           if (!statsMap.has(key)) continue;
-          if (coreStatus.stats[key] === undefined) char.setStat(key, tplStats[key]);
+          if (coreStatus.stats[key] === undefined) char.setStat(key, value(key));
         }
       }
 
-      // 2. Traits
+      // 2. Traits — the template value unless the game wrote one.
       if (scopes.traits.enabled) {
         const tplTraits = (template as any).traits || {};
+        const value = (key: string) => key in writes.traits ? writes.traits[key] : tplTraits[key];
+        purgeWrites(writes.traits, scopes.traits, traitsMap);
         for (const key of Object.keys(coreStatus.traits || {})) {
           if (!scopes.traits.allows(key)) continue;
           if (!traitsMap.has(key)) { delete coreStatus.traits[key]; continue; }
-          if (tplTraits[key] !== undefined) char.setTrait(key, tplTraits[key]);
+          if (tplTraits[key] !== undefined) char.setTrait(key, value(key));
         }
         for (const key of Object.keys(tplTraits)) {
           if (!scopes.traits.allows(key)) continue;
           if (!traitsMap.has(key)) continue;
-          if (coreStatus.traits[key] === undefined) char.setTrait(key, tplTraits[key]);
+          if (coreStatus.traits[key] === undefined) char.setTrait(key, value(key));
         }
       }
 
-      // 3. Attributes
+      // 3. Attributes — same as traits.
       if (scopes.attributes.enabled) {
         const tplAttrs = (template as any).attributes || {};
+        const value = (key: string) => key in writes.attributes ? writes.attributes[key] : tplAttrs[key];
+        purgeWrites(writes.attributes, scopes.attributes, attributesMap);
         for (const key of Object.keys(coreStatus.attributes || {})) {
           if (!scopes.attributes.allows(key)) continue;
           if (!attributesMap.has(key)) { delete coreStatus.attributes[key]; continue; }
-          if (typeof tplAttrs[key] === 'string') char.setAttribute(key, tplAttrs[key]);
+          if (typeof tplAttrs[key] === 'string') char.setAttribute(key, value(key));
         }
         for (const key of Object.keys(tplAttrs)) {
           if (!scopes.attributes.allows(key)) continue;
           if (!attributesMap.has(key)) continue;
-          if (coreStatus.attributes[key] === undefined) char.setAttribute(key, tplAttrs[key]);
+          if (coreStatus.attributes[key] === undefined) char.setAttribute(key, value(key));
         }
       }
 
-      // 3.5. Abilities — the core-status list is the template-innate set baked at creation;
-      // status-/item-granted abilities live on their own statuses and recompute on reevaluate.
+      // 3.5. Abilities — the template's innate set, plus what the game granted, minus what it removed.
+      // Status-/item-granted abilities live on their own statuses and recompute on reevaluate.
       if (scopes.abilities.enabled) {
         const tplAbilities: string[] = (template as any).abilities || [];
+        const wanted = (id: string) => id in writes.abilities ? writes.abilities[id] : tplAbilities.includes(id);
+        purgeWrites(writes.abilities, scopes.abilities, abilityTemplatesMap);
         for (const abilityId of [...coreStatus.abilities]) {
           if (!scopes.abilities.allows(abilityId)) continue;
-          if (!abilityTemplatesMap.has(abilityId) || !tplAbilities.includes(abilityId)) char.removeAbility(abilityId);
+          if (!abilityTemplatesMap.has(abilityId) || !wanted(abilityId)) char.removeAbility(abilityId);
         }
-        for (const abilityId of tplAbilities) {
+        for (const abilityId of new Set([...tplAbilities, ...Object.keys(writes.abilities)])) {
           if (!scopes.abilities.allows(abilityId)) continue;
           if (!abilityTemplatesMap.has(abilityId)) continue;
-          if (!coreStatus.abilities.has(abilityId)) char.addAbility(abilityId);
+          if (wanted(abilityId) && !coreStatus.abilities.has(abilityId)) char.addAbility(abilityId);
         }
       }
 
@@ -572,16 +620,16 @@ export class CoreSystem {
         }
       }
 
-      // 3.7. Skin layers — the core-status set is the template-innate set (like abilities);
-      // status-/item-granted layers live on their own statuses and recompute on reevaluate.
-      // Layers granted at runtime by the skin action land on the core status too, so
-      // list those to keep them.
+      // 3.7. Skin layers — like abilities: the template's set, plus what the game turned on, minus
+      // what it turned off. Status-/item-granted layers live on their own statuses.
       if (scopes.skinLayers.enabled) {
         const tplSkinLayers: string[] = (template as any).skin_layers || [];
+        const wanted = (l: string) => l in writes.skinLayers ? writes.skinLayers[l] : tplSkinLayers.includes(l);
+        purgeWrites(writes.skinLayers, scopes.skinLayers, skinLayersMap);
         const layersToRemove = [...coreStatus.skinLayers].filter(l =>
-          scopes.skinLayers.allows(l) && (!skinLayersMap.has(l) || !tplSkinLayers.includes(l)));
-        const layersToAdd = tplSkinLayers.filter(l =>
-          scopes.skinLayers.allows(l) && skinLayersMap.has(l) && !coreStatus.skinLayers.has(l));
+          scopes.skinLayers.allows(l) && (!skinLayersMap.has(l) || !wanted(l)));
+        const layersToAdd = [...new Set([...tplSkinLayers, ...Object.keys(writes.skinLayers)])].filter(l =>
+          scopes.skinLayers.allows(l) && skinLayersMap.has(l) && wanted(l) && !coreStatus.skinLayers.has(l));
         if (layersToRemove.length) char.removeSkinLayers(layersToRemove);
         if (layersToAdd.length) char.addSkinLayers(layersToAdd);
       }
@@ -724,7 +772,7 @@ export class CoreSystem {
       for (const slot of char.itemSlots) {
         if (!slot.itemUid) continue;
         const item = game.itemSystem.getItemByUid(slot.itemUid);
-        if (item) Inventory.applyEquipStatus(item, char);
+        if (item) Inventory.applyEquipStatus(item, char, slot);
       }
     }
 
@@ -1491,8 +1539,10 @@ export class CoreSystem {
 
   @Skip()
   // item_discard_render is a pure render predicate, not a game event — suppressing it would answer
-  // "yes, droppable" for protected items and show a Drop button that then refuses. item_compare is
-  // the same kind: muted, a game's key rewrite would be skipped and the item card would misread.
+  // "yes, droppable" for protected items and show a Drop button that then refuses. item_stats is
+  // the same kind: muted, a game's key rewrite would be skipped and the item card would misread —
+  // and it also runs inside a load, where the migration pass re-equips every worn item, which
+  // would otherwise take its unresolved stats.
   // status_preview likewise: muted, a preview card would fall back to the template's numbers.
   // Emitters that keep firing while events are suppressed. Two families:
   //  - render/mount events: UI hooks that must still run to paint the restored screen.
@@ -1503,7 +1553,7 @@ export class CoreSystem {
   //    the pass itself runs under migratingSave — these hooks exist precisely so listeners can
   //    act inside the load.
   ignoreSupressEvents: Set<string> = new Set([
-    'character_render', 'item_discard_render', 'item_compare', 'status_preview', 'asset_render', 'asset_exit',
+    'character_render', 'item_discard_render', 'item_stats', 'status_preview', 'asset_render', 'asset_exit',
     'gallery_asset_preview',
     'dungeon_create', 'collectable_resolve',
     'character_create', 'item_create',
@@ -1683,29 +1733,30 @@ export class CoreSystem {
    */
   // ignore types
   public initNewGameState(game: any) {
+    resetCheckpoints(this.gameId);
     const initSystem = new InitSystem(game);
     initSystem.initNewGameState();
   }
 
   /**
-   * Save the current game state to IndexedDB.
+   * Save the current game state to IndexedDB. Resolves to whether the save was written.
    */
-  public async saveGame(game: any, saveName: string, options?: SaveOptions) {
+  public async saveGame(game: any, saveName: string, options?: SaveOptions): Promise<boolean> {
     const gameId = this.gameManifest?.id;
     if (!gameId) {
       gameLogger.error('Game ID is not set - cannot save game');
-      return;
+      return false;
     }
 
     if (!options?.forceSave && this.isSaveDisabled()) {
       gameLogger.warn('Save is disabled - cannot save game');
-      return;
+      return false;
     }
 
 
     let proceed = this.trigger('game_save', saveName);
     if (!proceed) {
-      return;
+      return false;
     }
 
     // Snapshot which loops are live so loadGame can restart them. Derived here from the one
@@ -1725,10 +1776,12 @@ export class CoreSystem {
       if (!options?.hidden && !options?.noNotification) {
         globalService.addNotificationId('save_success_named', { name: saveName });
       }
+      return true;
     } catch (error) {
       const globalService = Global.getInstance();
       gameLogger.error(`Failed to save game ${gameId} as ${saveName}`, error);
       globalService.addNotificationId("error_save_generic");
+      return false;
     }
   }
 
@@ -1773,14 +1826,16 @@ export class CoreSystem {
 
     game.dungeonSystem._loadAndSetDungeonActual(game.dungeonSystem.currentDungeonId.value!);
 
-    // Hard Scene Reset (dev): a presence flag means "re-enter the loaded save's own scene
+    // Replay paragraph (dev): a presence flag means "re-enter the loaded save's own scene
     // fresh" instead of restoring its cached text — rebuilds content from the (possibly
     // edited) disk lines and fires its enter actions exactly once. The scene id comes from
     // the loaded save (set just before the checkpoint was written), so callers don't pass it.
     const wantReplay = localStorage.getItem(DEV_REPLAY_SCENE_KEY);
     if (wantReplay) localStorage.removeItem(DEV_REPLAY_SCENE_KEY);
+    syncCheckpointsOnLoad(this.gameId, saveName, !!wantReplay);
 
     const ds = game.dungeonSystem;
+    ds.resolveMissingAssets();
     if (wantReplay && ds.currentSceneId.value) {
       ds.playScene(ds.currentSceneId.value, ds.activeDungeonId.value ?? ds.currentDungeonId.value);
     } else {

@@ -266,9 +266,23 @@ Inside a collectable's `@` line, `|title|` and `|description|` substitute the gr
 
 You can also write your own choice with a custom label instead of the synthesized Collect – give any `!` choice a `{collect: "item_id#qty"}` param.
 
-Running **Synchronize Content Document** never flags a collectable as redundant – unlike regular encounters, they legitimately live outside the content document.
+Running **Sync** (the Content tab's toolbar) never flags a collectable as redundant – unlike regular encounters, they legitimately live outside the content document.
 
 Listen for pickups with the ->builtins.game_emitters `encounter_collected` emitter. Scripts can also call `game.uncollectEncounter(id)` / `game.isEncounterCollected(id)`.
+
+---
+
+### Spots: Labeled Points on the Map
+
+A **spot** is an encounter drawn as a glowing ring with a label at a point of the map, for things that need a name rather than an outline: a well, a notice board, a door. In the **Encounters tab**, set the encounter's type to `spot` and place it with `x` / `y`. The label is written in the content document, on the encounter's `@` line:
+
+```text
+@well{title: "Old well"}
+!inspect
+A stone well, its rope rotted through.
+```
+
+Clicking it selects it like any encounter, and its `!` choices show. `title` resolves placeholders.
 
 ---
 
@@ -552,16 +566,16 @@ The engine automatically:
 2. Sets the current speaker, so the UI can display their name, portrait, and dialogue box styling.
 3. Returns just the dialogue text (everything after the colon) for display.
 
-**Important:** The character ID must match a **live character instance** – meaning the character must be defined in the editor and exist in the game's character system. If the ID doesn't match any registered character, the engine won't know which portrait or name to display.
+**Important:** The character ID must match a **live character instance** – meaning the character must be defined in the editor and exist in the game's character system. If it doesn't, the line shows as narration with the prefix kept, and the console logs a warning. In a playtest, an ID-like prefix (lowercase) shows a placeholder name tag instead – see ->advanced.debugging.
 
 #### Party lines
 
 Add `!` after the ID when the line belongs to a companion who may not be with the player. The paragraph plays only while that character is in the party. Otherwise it is skipped whole, actions included:
 
 ```text
-ane!: “Are those... fresh? After all this time?”
+alice!: “Are those... fresh? After all this time?”
 
-peth!: Peth ducks behind my back. “A g-ghost...”
+bob!: Bob ducks behind my back. “A g-ghost...”
 ```
 
 A skipped line keeps its choices: its `>` choices, or the next row's `~` branches when it ends its block, are offered under the text already on screen.
@@ -569,7 +583,7 @@ A skipped line keeps its choices: its `>` choices, or the next row's `~` branche
 A `{…}` line directly under the text belongs to the same paragraph and is skipped with it. Put menus, flags, jumps and items on a paragraph that always plays – the Content Editor warns about a party line that carries anything beyond staging:
 
 ```text
-ane!: Ane frowns at the map.
+alice!: Alice frowns at the map.
 
 The path forks ahead.
 {choices: "&fork"}
@@ -578,7 +592,7 @@ The path forks ahead.
 To make a party line depend on who else is present, wrap it in an inline `if{}`:
 
 ```text
-if{_in_party(klead) = false}ane!: Ane glances back the way we came.fi{}
+if{_in_party(carol) = false}alice!: Alice glances back the way we came.fi{}
 ```
 
 To create and configure characters, see ->characters.characters_overview.

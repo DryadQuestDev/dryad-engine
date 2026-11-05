@@ -55,5 +55,16 @@ export const MenuOptions: SettingsObject[] = [
         label: 'settings.interactive_tooltips',
         default_value: 'false',
         tooltip: 'settings.interactive_tooltips.tooltip',
+    },
+    {
+        // 'reduced' turns off blurs and glows that redraw every frame, for slow machines. It
+        // defaults to 'reduced' when the OS asks for reduced motion (Global.initUserSettings).
+        id: 'visual_effects',
+        type: 'chooseOne',
+        label: 'settings.visual_effects',
+        default_value: 'full',
+        values: ['full', 'reduced'],
+        localizeValues: true,
+        tooltip: 'settings.visual_effects.tooltip',
     }
 ]

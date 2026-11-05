@@ -2,11 +2,16 @@
 import { Global } from '../../global/global';
 import { Game } from '../game';
 import CustomComponentContainer from './CustomComponentContainer.vue';
-import { computed, ref, watch, onMounted } from 'vue';
+import { computed, watch, onMounted, onUnmounted, ref, nextTick } from 'vue';
 import { useStorage } from '@vueuse/core';
 import Button from 'primevue/button';
 import { editorTheme, scopePrimeVueTokens } from '../../editor/editorTheme';
-import { DEV_AUTO_SAVE_SLOT, DEV_PREV_SCENE_SLOT, DEV_REPLAY_SCENE_KEY, DEV_LEFT_SCENE_KEY } from '../../services/indexeddb-save.service';
+import {
+  hardSceneReset, stepBack, canStepBack, backToEditor, playPosition, debugPanelCollapsed, takeSnapshot, loadSnapshot,
+  namingSnapshotId, HARD_RESET_KEY, STEP_BACK_KEY, TOGGLE_PANEL_KEY, SNAPSHOT_KEY,
+} from '../utils/devPlaytest';
+import { devProblems } from '../utils/devProblems';
+import { listSnapshots, renameSnapshot, deleteSnapshot, snapshotAge, snapshotPlace, type DevSnapshot } from '../../services/devSnapshots';
 
 const COMPONENT_ID = 'debug-panel';
 
@@ -16,20 +21,30 @@ const game = Game.getInstance();
 const expanded = useStorage('debug-panel-expanded', false);
 
 // Panel width in px, applied by GameScreen.vue on `.game-body-panel` (ignored while expanded).
+// Set by dragging the panel's left edge.
 const DEFAULT_PANEL_WIDTH = 350;
-const MIN_PANEL_WIDTH = 100;
+const MIN_PANEL_WIDTH = 200;
 const panelWidth = useStorage('debug-panel-width', DEFAULT_PANEL_WIDTH);
 
-// Buffer the field locally so a half-typed value ("1" on the way to "150") doesn't collapse
-// the panel mid-keystroke — the store is only written on change/blur, clamped.
-const widthInput = ref(panelWidth.value);
-watch(panelWidth, (w) => { widthInput.value = w; });
-
-function commitWidth() {
-  const parsed = Math.round(Number(widthInput.value));
-  panelWidth.value = Number.isFinite(parsed) && parsed > 0 ? Math.max(MIN_PANEL_WIDTH, parsed) : DEFAULT_PANEL_WIDTH;
-  widthInput.value = panelWidth.value;
+function startResize(event: PointerEvent) {
+  const handle = event.currentTarget as HTMLElement;
+  handle.setPointerCapture(event.pointerId);
+  const onMove = (e: PointerEvent) => {
+    const width = window.innerWidth - e.clientX;
+    panelWidth.value = Math.round(Math.max(MIN_PANEL_WIDTH, Math.min(window.innerWidth - 240, width)));
+  };
+  const onUp = () => {
+    handle.removeEventListener('pointermove', onMove);
+    handle.removeEventListener('pointerup', onUp);
+    handle.removeEventListener('pointercancel', onUp);
+  };
+  handle.addEventListener('pointermove', onMove);
+  handle.addEventListener('pointerup', onUp);
+  handle.addEventListener('pointercancel', onUp);
 }
+
+// Where Back to Editor lands: the dungeon and room, and the paragraph on screen.
+const placeLine = computed(() => [playPosition.value.dungeonId, playPosition.value.roomId].filter(Boolean).join(' › '));
 
 // Get debug menu options from unified registry
 const debugMenuOptions = computed(() => {
@@ -48,8 +63,9 @@ onMounted(() => {
   // token aliases do not survive on their own.
   scopePrimeVueTokens();
 
-  // If no tab is selected, select the first one
-  if (!activeTabId.value && debugMenuOptions.value.length > 0) {
+  // No tab yet, or a stored one that no longer exists (a renamed or removed tab): open the first.
+  const known = debugMenuOptions.value.some(option => option.id === activeTabId.value);
+  if (!known && debugMenuOptions.value.length > 0) {
     activeTabId.value = debugMenuOptions.value[0].id;
   }
 });
@@ -67,75 +83,100 @@ watch(game.coreSystem.debugSettings, () => {
   localStorage.setItem('debug-settings', JSON.stringify(debugStorage));
 }, { deep: true });
 
-function test() {
-  console.warn("testing...");
-  let item = game.itemSystem.getInventory('_party_inventory')?.getFirstItemById('ancient_tome') || null;
-  if (item && typeof item.traits.durability === 'number') item.traits.durability -= 20;
-  console.warn(item);
-
-  game.getProperty('lewds')?.addCurrentValue(1);
-}
-
 const isWebMode = import.meta.env.VITE_WEB_MODE === 'true';
 
 const inScene = computed(() => !!game.dungeonSystem.currentSceneId.value);
 
-const hardResetLabel = computed(() => inScene.value ? '🔄 Hard Scene Reset' : '🔄 Reload Game');
+const hardResetLabel = computed(() => `${inScene.value ? '🔄 Replay paragraph' : '🔄 Reload Game'} (${HARD_RESET_KEY})`);
 
 const hardResetTooltip = computed(() => inScene.value
-  ? 'Dev tool: reload and re-enter the current scene from scratch — rebuilds its text from your latest content edits and re-runs its enter actions once (on clean pre-scene state).'
-  : 'Dev tool: reload the app and resume right where you are — picks up your latest content, script and CSS edits.');
+  ? 'Replay the paragraph on screen with your latest saved changes. Its actions run once, on the state it had before.'
+  : 'Reload the game and carry on where you are, with your latest content, script and CSS changes.');
 
-// In a scene: reload into the pre-scene checkpoint and force-replay the current scene, so an
-// edited scene shows its new content and re-fires its enter actions once on clean state. The
-// checkpoint carries its own currentSceneId, so the replay flag needs no scene id.
-// Outside a scene (map, menus): checkpoint where we stand and reload into it.
-async function hardSceneReset() {
-  // Re-assert dev flags: a second app instance (the editor) shares localStorage and can
-  // clear devMode, which would otherwise reload the game with the debug panel gone.
-  localStorage.setItem('devMode', 'true');
-  localStorage.setItem('showDebugPanel', 'true');
+const stepBackLabel = `⏪ Back one paragraph (${STEP_BACK_KEY})`;
+const stepBackTooltip = 'Go back one paragraph and replay it on the state it had then, for example to pick the other answer of a menu.';
 
-  if (inScene.value) {
-    localStorage.setItem(DEV_REPLAY_SCENE_KEY, '1');
-    game.loadGame(DEV_PREV_SCENE_SLOT);
+// Snapshots: named moments kept per game, across reloads.
+const snapshots = computed(() => listSnapshots(game.coreSystem.gameId));
+
+// Ages ("3 min ago") tick on their own while the panel is open.
+const now = ref(Date.now());
+let ageTimer: number | undefined;
+
+const editingId = ref<string | null>(null);
+const draftName = ref('');
+// A snapshot just taken is named in place; Escape then drops it, where it only cancels a rename.
+const editingIsNew = ref(false);
+const nameInput = ref<HTMLInputElement[] | HTMLInputElement | null>(null);
+const menuId = ref<string | null>(null);
+const confirmDeleteId = ref<string | null>(null);
+
+function startEditing(snapshot: DevSnapshot, isNew: boolean) {
+  menuId.value = null;
+  editingId.value = snapshot.id;
+  editingIsNew.value = isNew;
+  draftName.value = snapshot.name;
+  nextTick(() => {
+    const input = Array.isArray(nameInput.value) ? nameInput.value[0] : nameInput.value;
+    input?.focus();
+    input?.select();
+  });
+}
+
+watch(namingSnapshotId, (id) => {
+  if (!id) return;
+  namingSnapshotId.value = null;
+  const snapshot = snapshots.value.find(s => s.id === id);
+  if (snapshot) startEditing(snapshot, true);
+});
+
+function commitName() {
+  const id = editingId.value;
+  if (!id) return;
+  editingId.value = null;
+  renameSnapshot(game.coreSystem.gameId, id, draftName.value);
+}
+
+function cancelName() {
+  const id = editingId.value;
+  if (!id) return;
+  editingId.value = null;
+  if (editingIsNew.value) deleteSnapshot(game.coreSystem.gameId, id);
+}
+
+function toggleMenu(id: string) {
+  confirmDeleteId.value = null;
+  menuId.value = menuId.value === id ? null : id;
+}
+
+function removeSnapshot(id: string) {
+  if (confirmDeleteId.value !== id) {
+    confirmDeleteId.value = id;
     return;
   }
-
-  // Keep the editor's "Continue" marker honest: outside a scene it resumes the auto-save.
-  localStorage.removeItem(DEV_LEFT_SCENE_KEY);
-  // forceSave: the current state may have saves disabled (replay mode etc.), but a dev
-  // reload still needs a checkpoint to come back to.
-  await game.saveGame(DEV_AUTO_SAVE_SLOT, { noNotification: true, forceSave: true });
-  game.loadGame(DEV_AUTO_SAVE_SLOT);
+  menuId.value = null;
+  confirmDeleteId.value = null;
+  deleteSnapshot(game.coreSystem.gameId, id);
 }
 
-async function backToEditor() {
-
-  // Record whether we left mid-scene so the editor "Continue" button knows which dev save
-  // to resume from (pre-scene checkpoint for a clean re-enter, else the auto-save).
-  const leftScene = game.dungeonSystem.currentSceneId.value;
-  if (leftScene) localStorage.setItem(DEV_LEFT_SCENE_KEY, leftScene);
-  else localStorage.removeItem(DEV_LEFT_SCENE_KEY);
-
-  try {
-    // Auto-save to dev slot
-    await game.saveGame(DEV_AUTO_SAVE_SLOT);
-
-    // Set flag to return to editor after reload
-    localStorage.setItem('returning_to_editor', 'true');
-
-    // Reload page to clean up game's custom JS/CSS
-    window.location.reload();
-  } catch (error) {
-    console.error('Failed to auto-save:', error);
-    global.addNotificationId('auto_save_failed');
-
-    // Still go back to editor even if save fails
-    localStorage.setItem('returning_to_editor', 'true');
-    window.location.reload();
-  }
+function closeMenuOutside(event: PointerEvent) {
+  if (!menuId.value) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('.snapshot-menu, .snapshot-more')) return;
+  menuId.value = null;
+  confirmDeleteId.value = null;
 }
+
+onMounted(() => {
+  ageTimer = window.setInterval(() => { now.value = Date.now(); }, 15000);
+  window.addEventListener('pointerdown', closeMenuOutside);
+});
+
+onUnmounted(() => {
+  window.clearInterval(ageTimer);
+  window.removeEventListener('pointerdown', closeMenuOutside);
+});
+
 </script>
 
 <template>
@@ -145,46 +186,106 @@ async function backToEditor() {
   <div :id="COMPONENT_ID" class="debug-panel" :class="{ 'editor-dark': editorTheme === 'dark' }">
     <!--<Button label="Test" @click="test" class="mb-2" />-->
 
-    <!-- Expand/Collapse Button -->
-    <button class="expand-button" @click="expanded = !expanded"
-      :title="expanded ? 'Collapse panel' : 'Expand panel full width'">
-      <i :class="expanded ? 'pi pi-chevron-right' : 'pi pi-chevron-left'"></i>
-    </button>
+    <!-- Outside the scrolling box, so the handle stays along the whole edge at any scroll. -->
+    <div v-if="!expanded" class="resize-handle" title="Drag to resize" @pointerdown.prevent="startResize"></div>
 
-    <div class="back-to-editor-container">
-      <input type="number" class="panel-width-input" v-model.number="widthInput" :min="MIN_PANEL_WIDTH" step="10"
-        @change="commitWidth" @blur="commitWidth"
-        v-tooltip.left="`Debug panel width in pixels (min ${MIN_PANEL_WIDTH})`" />
-      <Button label="Back to Editor" icon="pi pi-arrow-left" @click="backToEditor" class="back-to-editor-button"
-        severity="warning" />
-    </div>
-
-    <!-- Documentation Button -->
-    <div class="docs-button-container">
-      <Button label="📚 Documentation" @click="global.setViewer('docs')" class="docs-button" />
-    </div>
-
-    <!-- Hard reset: re-enters the current scene, or plain reloads when outside one -->
-    <div class="hard-reset-container">
-      <Button :label="hardResetLabel" @click="hardSceneReset" class="hard-reset-button" severity="secondary"
-        v-tooltip.left="hardResetTooltip" />
-    </div>
-
-    <!-- Custom tabs -->
-    <div class="custom-tabs">
-      <div class="tab-buttons">
-        <button v-for="option in debugMenuOptions" :key="option.id"
-          :class="['tab-button', { active: activeTabId === option.id }]" @click="activeTabId = option.id">
-          {{ option.name }}
+    <div class="debug-panel-scroll">
+      <div class="panel-top-row">
+        <button class="panel-icon-button" @click="debugPanelCollapsed = true" :title="`Hide the panel (${TOGGLE_PANEL_KEY})`">
+          <i class="pi pi-angle-double-right"></i>
+        </button>
+        <button class="panel-icon-button" @click="expanded = !expanded"
+          :title="expanded ? 'Back to the side' : 'Expand to full width'">
+          <i :class="expanded ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"></i>
         </button>
       </div>
-      <div v-if="activeComponent" class="tab-content">
-        <component :is="activeComponent.component" v-bind="activeComponent.props" />
-      </div>
-    </div>
 
-    <!-- Custom components registered to this container -->
-    <CustomComponentContainer :slot="COMPONENT_ID" :context="{ activeTabId }" />
+      <div class="back-to-editor-container">
+        <Button label="Back to Editor" icon="pi pi-arrow-left" @click="backToEditor()" class="back-to-editor-button"
+          severity="warning" v-tooltip.left="'Opens the editor on the paragraph on screen'" />
+        <div v-if="placeLine" class="play-position">
+          <span class="play-position-place">{{ placeLine }}</span>
+          <code v-if="playPosition.sceneId" class="play-position-scene">{{ playPosition.sceneId }}</code>
+        </div>
+      </div>
+
+      <!-- Documentation Button -->
+      <div class="docs-button-container">
+        <Button label="📚 Documentation" @click="global.setViewer('docs')" class="docs-button" />
+      </div>
+
+      <!-- Hard reset: re-enters the current scene, or plain reloads when outside one -->
+      <div class="hard-reset-container">
+        <Button :label="hardResetLabel" @click="hardSceneReset" class="hard-reset-button" severity="secondary"
+          v-tooltip.left="hardResetTooltip" />
+        <Button :label="stepBackLabel" @click="stepBack" :disabled="!canStepBack" class="hard-reset-button step-back-button"
+          severity="secondary" v-tooltip.left="stepBackTooltip" />
+
+        <div class="snapshots">
+          <div class="snapshots-head">
+            <span class="snapshots-title">Snapshots</span>
+            <button type="button" class="snapshot-save" @click="takeSnapshot()"
+              v-tooltip.left="'Save this moment under a name. Load it any time, even after a reload.'">
+              <i class="pi pi-camera" />
+              <span>Save snapshot</span>
+              <kbd>{{ SNAPSHOT_KEY }}</kbd>
+            </button>
+          </div>
+          <div v-for="snap in snapshots" :key="snap.id" class="snapshot"
+            :class="{ 'snapshot--naming': editingId === snap.id }">
+            <template v-if="editingId === snap.id">
+              <div class="snapshot-body">
+                <input ref="nameInput" v-model="draftName" class="snapshot-name-input" spellcheck="false"
+                  @keydown.enter.prevent="commitName" @keydown.esc.prevent.stop="cancelName" @blur="commitName" />
+                <div class="snapshot-meta"><code>{{ snapshotPlace(snap) }}</code> · {{ snapshotAge(snap.savedAt, now) }}</div>
+              </div>
+              <button type="button" class="snapshot-confirm" title="Keep this name (Enter)" @mousedown.prevent
+                @click="commitName">
+                <i class="pi pi-check" />
+              </button>
+            </template>
+            <template v-else>
+              <div class="snapshot-body" :title="snap.dungeonId ?? ''">
+                <div class="snapshot-name">{{ snap.name }}</div>
+                <div class="snapshot-meta">
+                  <code>{{ snapshotPlace(snap) }}</code> · {{ snapshotAge(snap.savedAt, now) }}<template
+                    v-if="snap.summary"> · <span class="snapshot-summary">{{ snap.summary }}</span></template>
+                </div>
+              </div>
+              <button type="button" class="snapshot-load" @click="loadSnapshot(snap.id)">Load</button>
+              <button type="button" class="snapshot-more" :class="{ 'snapshot-more--open': menuId === snap.id }"
+                title="Rename or delete" @click="toggleMenu(snap.id)">
+                <i class="pi pi-ellipsis-v" />
+              </button>
+              <div v-if="menuId === snap.id" class="snapshot-menu">
+                <button type="button" @click="startEditing(snap, false)"><i class="pi pi-pencil" /> Rename</button>
+                <button type="button" class="snapshot-menu-delete" @click="removeSnapshot(snap.id)">
+                  <i class="pi pi-trash" /> {{ confirmDeleteId === snap.id ? 'Click again to delete' : 'Delete' }}
+                </button>
+              </div>
+            </template>
+          </div>
+          <div class="snapshots-hint">Kept per game, across reloads. Playtest ▾ in the editor can start from one.</div>
+        </div>
+      </div>
+
+      <!-- Custom tabs -->
+      <div class="custom-tabs">
+        <div class="tab-buttons">
+          <button v-for="option in debugMenuOptions" :key="option.id"
+            :class="['tab-button', { active: activeTabId === option.id }]" @click="activeTabId = option.id">
+            {{ option.name }}
+            <span v-if="option.id === 'debug-problems' && devProblems.length" class="tab-badge">{{ devProblems.length }}</span>
+          </button>
+        </div>
+        <div v-if="activeComponent" class="tab-content">
+          <component :is="activeComponent.component" v-bind="activeComponent.props" />
+        </div>
+      </div>
+
+      <!-- Custom components registered to this container -->
+      <CustomComponentContainer :slot="COMPONENT_ID" :context="{ activeTabId }" />
+    </div>
   </div>
 </template>
 
@@ -207,9 +308,14 @@ async function backToEditor() {
   position: relative;
   width: 100%;
   height: 100%;
-  padding: 1rem;
   background: var(--dp-bg);
   color: var(--dp-text);
+  box-sizing: border-box;
+}
+
+.debug-panel-scroll {
+  height: 100%;
+  padding: 1rem;
   box-sizing: border-box;
   overflow: auto;
 }
@@ -233,31 +339,6 @@ async function backToEditor() {
 .debug-panel h1 {
   margin-top: 0;
   color: #42b983;
-}
-
-.expand-button {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--dp-block);
-  border: 1px solid var(--dp-border);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--dp-text);
-  z-index: 1;
-  transition: all 0.15s ease;
-}
-
-.expand-button:hover {
-  background: var(--dp-control-hover);
-  border-color: var(--dp-border-hover);
-  color: var(--dp-text-strong);
 }
 
 .mb-2 {
@@ -312,8 +393,82 @@ async function backToEditor() {
   padding: 0.5rem;
 }
 
+.resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.resize-handle:hover {
+  background: var(--dp-border-hover);
+}
+
+.panel-top-row {
+  display: flex;
+  gap: 0.35rem;
+  margin: -0.5rem 0 0.5rem;
+}
+
+.panel-icon-button {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dp-block);
+  border: 1px solid var(--dp-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--dp-text);
+}
+
+.panel-icon-button:hover {
+  background: var(--dp-control-hover);
+  border-color: var(--dp-border-hover);
+  color: var(--dp-text-strong);
+}
+
+.play-position {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+
+.play-position-place {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.play-position-scene {
+  font-size: 0.75rem;
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
+.tab-badge {
+  display: inline-block;
+  min-width: 1.2rem;
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #d9534f;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2rem;
+  text-align: center;
+}
+
 .back-to-editor-container {
   display: flex;
+  flex-direction: column;
   align-items: stretch;
   gap: 0.5rem;
   background: var(--dp-block);
@@ -322,31 +477,6 @@ async function backToEditor() {
   padding: 0.75rem;
   margin-bottom: 1rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.panel-width-input {
-  width: 4.5rem;
-  flex-shrink: 0;
-  padding: 0.5rem;
-  background: var(--dp-control);
-  border: 2px solid var(--dp-border);
-  border-radius: 4px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--dp-text);
-  text-align: center;
-  transition: all 0.2s ease;
-}
-
-.panel-width-input:hover {
-  background: var(--dp-control-hover);
-  border-color: var(--dp-border-hover);
-}
-
-.panel-width-input:focus {
-  outline: none;
-  background: var(--dp-control-hover);
-  border-color: var(--dp-border-hover);
 }
 
 .back-to-editor-button {
@@ -386,6 +516,224 @@ async function backToEditor() {
   font-size: 1rem;
   font-weight: 600;
   padding: 0.75rem;
+}
+
+.step-back-button {
+  margin-top: 0.5rem;
+}
+
+.snapshots {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--dp-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.snapshots-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.snapshots-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--dp-text-strong);
+}
+
+.snapshot-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  background: var(--dp-content-bg);
+  border: 1px solid var(--dp-border);
+  border-radius: 6px;
+  color: var(--dp-text-strong);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.snapshot-save:hover {
+  border-color: var(--dp-border-hover);
+  background: var(--dp-control-hover);
+}
+
+.snapshot-save kbd {
+  padding: 0 0.25rem;
+  border: 1px solid var(--dp-border-hover);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.snapshot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.45rem 0.4rem 0.6rem;
+  background: var(--dp-content-bg);
+  border: 1px solid var(--dp-content-border);
+  border-radius: 6px;
+}
+
+.snapshot--naming {
+  border: 2px solid var(--editor-fg-success);
+  padding: calc(0.4rem - 1px) calc(0.45rem - 1px) calc(0.4rem - 1px) calc(0.6rem - 1px);
+}
+
+.snapshot-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.snapshot-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--dp-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.snapshot-name-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--dp-border);
+  border-radius: 4px;
+  background: var(--dp-content-bg);
+  color: var(--dp-text-strong);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.snapshot-name-input:focus {
+  outline: none;
+  border-color: var(--dp-border-hover);
+}
+
+.snapshot-meta {
+  font-size: 0.72rem;
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
+.snapshot-meta code {
+  font-size: 0.7rem;
+}
+
+.snapshot-summary {
+  display: inline-block;
+}
+
+.snapshot-load {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.6rem;
+  background: var(--dp-control);
+  border: 1px solid var(--dp-border-hover);
+  border-radius: 5px;
+  color: var(--dp-text-strong);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.snapshot-load:hover {
+  background: var(--dp-control-hover);
+}
+
+.snapshot-confirm {
+  flex: 0 0 auto;
+  width: 2.2rem;
+  height: 1.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: #16a34a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.snapshot-confirm:hover {
+  background: #15803d;
+}
+
+.snapshot-more {
+  flex: 0 0 auto;
+  width: 1.4rem;
+  height: 1.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dp-text);
+  cursor: pointer;
+}
+
+.snapshot-more:hover,
+.snapshot-more--open {
+  background: var(--dp-control);
+}
+
+.snapshot-menu {
+  position: absolute;
+  right: 0.3rem;
+  top: calc(100% - 0.2rem);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  padding: 0.25rem;
+  background: var(--dp-content-bg);
+  border: 1px solid var(--dp-border-hover);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.snapshot-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dp-text);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.snapshot-menu button:hover {
+  background: var(--dp-control);
+}
+
+.snapshot-menu .snapshot-menu-delete {
+  color: var(--editor-fg-danger);
+}
+
+.snapshots-hint {
+  font-size: 0.72rem;
+  opacity: 0.75;
+  line-height: 1.35;
 }
 
 .docs-button-container {

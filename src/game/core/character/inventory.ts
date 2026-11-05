@@ -24,13 +24,16 @@ export class Inventory {
      * then creates a fresh Status from the item's current `statusObject` so a stale instance is
      * replaced cleanly. Safe to call any number of times (idempotent refresh).
      */
-    public static applyEquipStatus(item: Item, character: Character): void {
+    public static applyEquipStatus(item: Item, character: Character, slot?: ItemSlot | null): void {
         if (!item.statusObject) return;
         const id = "item_" + item.uid;
         if (character.hasStatus(id)) character.removeStatus(id);   // refresh-safe; silent on first equip
         const status = new Status();
         status.id = id;
-        status.setValues(item.statusObject);
+        // Its own copy of the stats, resolved for the slot — sharing the item's object would let an
+        // edit to the worn status rewrite the item itself.
+        const stats = Game.getInstance().itemSystem.getItemStats(item, slot ?? character.getItemSlotByItemUid(item.uid), character);
+        status.setValues({ ...item.statusObject, stats });
         status.isHidden = true;
         // The equip status is hidden, so its own icon is never drawn — the source id exists purely
         // as the fallback for the abilities this item grants (Character.computeFinalAbilities).
@@ -416,7 +419,7 @@ export class Inventory {
                 createdItems.push(newItem);
             }
 
-            return createdItems;
+            return this.stampAdded(createdItems);
         }
 
         // Non-stackable items (max_stack = 0, 1, or undefined)
@@ -428,7 +431,7 @@ export class Inventory {
                 createdItems.push(newItem);
             }
 
-            return createdItems;
+            return this.stampAdded(createdItems);
         }
 
         // Stackable items with limit (e.g., max_stack = 99)
@@ -461,7 +464,14 @@ export class Inventory {
             createdItems.push(newItem);
         }
 
-        return createdItems;
+        return this.stampAdded(createdItems);
+    }
+
+    // Every stack addItem creates or grows counts as just added (the inventory's "recent" sort).
+    private stampAdded(items: Item[]): Item[] {
+        const now = Date.now();
+        for (const item of items) item.addedAt = now;
+        return items;
     }
 
     /**
@@ -592,7 +602,7 @@ export class Inventory {
         slot.itemUid = item.uid;
 
         // create and add Item Status (always-refreshing from item.statusObject)
-        Inventory.applyEquipStatus(item, character);
+        Inventory.applyEquipStatus(item, character, slot);
 
         if (item.actions?.item_equip_after) {
             game.logicSystem.resolveActions(item.actions.item_equip_after);
@@ -652,7 +662,11 @@ export class Inventory {
         this.removeItem(itemToUnequip);
         let survivor = itemToUnequip;
         if (qty > 0) {
+            // Taking a piece off is not acquiring it: a stack it merges into keeps its own stamp, and
+            // a piece back on its own keeps the one it was picked up with.
+            const stamps = new Map(this.items.map(i => [i, i.addedAt]));
             const created = this.addItem(itemToUnequip, qty, true);
+            for (const c of created) c.addedAt = stamps.get(c) ?? itemToUnequip.addedAt;
             if (created.length) survivor = created[0];
         }
 

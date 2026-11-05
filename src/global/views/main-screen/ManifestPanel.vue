@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { ManifestObject } from '../../../schemas/manifestSchema';
 import { manifestPanelCollapsed as collapsed } from './manifestPanelState';
 import { Global } from '../../global';
+import { sortedChangelog, hasUnseenChangelog, recordFirstVisit, markChangelogSeen, renderManifestDescription } from './changelog';
 
 const props = withDefaults(defineProps<{
   manifest: ManifestObject | null;
@@ -13,12 +14,24 @@ const props = withDefaults(defineProps<{
   closable: false,
 });
 
-defineEmits<{ (e: 'screenshots'): void; (e: 'toggle'): void; (e: 'close'): void }>();
+const emit = defineEmits<{ (e: 'screenshots'): void; (e: 'changelog'): void; (e: 'toggle'): void; (e: 'close'): void }>();
 
 const global = Global.getInstance();
 
 const hasScreenshots = computed(() => (props.manifest?.cover_assets || []).length > 0);
-const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.author));
+const hasChangelog = computed(() => sortedChangelog(props.manifest).length > 0);
+const descriptionHtml = computed(() => renderManifestDescription(props.manifest, (version) => global.getString('changelog.new_in', { version })));
+const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.author || hasChangelog.value));
+const changelogUnseen = computed(() => hasUnseenChangelog(props.manifest));
+const whatsNewLabel = computed(() => global.getString('changelog.whats_new'));
+const whatsNewTitle = computed(() => changelogUnseen.value ? global.getString('changelog.updated') : undefined);
+
+watch(() => props.manifest, (manifest) => recordFirstVisit(manifest), { immediate: true });
+
+function openChangelog() {
+  markChangelogSeen(props.manifest);
+  emit('changelog');
+}
 
 const collapseAriaLabel = computed(() => global.getString(collapsed.value ? 'manifest_panel.expand_description' : 'manifest_panel.collapse_description'));
 const closeAriaLabel = computed(() => global.getString('close'));
@@ -55,11 +68,16 @@ const badgeTitle = computed(() => global.getString(props.active ? 'mods.tooltip.
         <span v-if="manifest.version">{{ global.getString('manifest.version', { version: manifest.version }) }}</span>
         <span v-if="manifest.version && manifest.author" class="manifest-panel-meta-sep">·</span>
         <span v-if="manifest.author">{{ global.getString('manifest.by_author', { author: manifest.author }) }}</span>
+        <span v-if="hasChangelog && (manifest.version || manifest.author)" class="manifest-panel-meta-sep">·</span>
+        <button v-if="hasChangelog" type="button" class="manifest-panel-whatsnew" :title="whatsNewTitle"
+          @click="openChangelog">
+          {{ whatsNewLabel }}<span v-if="changelogUnseen" class="manifest-panel-whatsnew-dot"></span>
+        </button>
       </div>
     </div>
     <slot />
     <div v-if="manifest.description && !collapsed" class="manifest-panel-description dark-scrollbar">
-      <div v-html="manifest.description"></div>
+      <div v-html="descriptionHtml"></div>
     </div>
   </div>
 </template>
@@ -162,6 +180,38 @@ const badgeTitle = computed(() => global.getString(props.active ? 'mods.tooltip.
 
 .manifest-panel-meta-sep {
   opacity: 0.5;
+}
+
+.manifest-panel-whatsnew {
+  position: relative;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--glass-tint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s ease, filter 0.15s ease;
+}
+
+.manifest-panel-whatsnew:hover {
+  filter: brightness(1.15);
+  text-decoration-color: currentColor;
+}
+
+/* Updated since the player's last visit. */
+.manifest-panel-whatsnew-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 5px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: var(--glass-tint);
+  box-shadow: 0 0 8px var(--glass-tint);
 }
 
 .manifest-panel-description {

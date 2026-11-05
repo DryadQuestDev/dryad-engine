@@ -37,6 +37,10 @@ export class NarrativeSystem {
     /** Character template id → ids of the encyclopedia records about that character, in tree order. Built with the encyclopedia index. */
     @Skip()
     private characterRecordIndex = new Map<string, string[]>();
+    /** character id → records about that character with `reveal` set (talk or appear). */
+    private talkRevealIndex = new Map<string, string[]>();
+    /** character id → records about that character with `reveal: appear`. */
+    private appearRevealIndex = new Map<string, string[]>();
 
     public discoveredRecords: Set<string> = new Set();
 
@@ -325,6 +329,16 @@ export class NarrativeSystem {
         this.discoveredRecords.add(id);
     }
 
+    /** A character has just spoken a line: discover their records set to reveal on talk or on appear. */
+    public revealOnTalk(characterId: string): void {
+        for (const id of this.talkRevealIndex.get(characterId) || []) this.discoverRecord(id);
+    }
+
+    /** A character has just been staged: discover their records set to reveal on appear. */
+    public revealOnAppear(characterId: string): void {
+        for (const id of this.appearRevealIndex.get(characterId) || []) this.discoverRecord(id);
+    }
+
     /** The reveal_all debug toggle answers true for every record without touching `discoveredRecords`, so nothing reaches the save. */
     public isRecordDiscovered(id: string): boolean {
         const record = this.recordsMap.get(id);
@@ -363,6 +377,18 @@ export class NarrativeSystem {
     public buildEncyclopediaIndex(): void {
         this.encyclopediaRecordIndex.clear();
         this.characterRecordIndex.clear();
+        this.talkRevealIndex.clear();
+        this.appearRevealIndex.clear();
+        const index = (map: Map<string, string[]>, characterId: string, recordId: string) => {
+            const ids = map.get(characterId);
+            if (ids) ids.push(recordId);
+            else map.set(characterId, [recordId]);
+        };
+        for (const record of this.recordsMap.values()) {
+            if (!record.reveal || !record.character) continue;
+            index(this.talkRevealIndex, record.character, record.id);
+            if (record.reveal === 'appear') index(this.appearRevealIndex, record.character, record.id);
+        }
         for (const tree of this.encyclopediaTreesMap.values()) {
             for (const group of tree.groups || []) {
                 for (const entry of group.records || []) {

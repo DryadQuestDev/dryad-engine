@@ -2,6 +2,7 @@
 import { Game } from '../../game';
 import { ref, computed } from 'vue';
 import Select from 'primevue/select';
+import { panelOverlayClass } from '../../../editor/editorTheme';
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
 import FloatLabel from 'primevue/floatlabel';
@@ -62,7 +63,7 @@ const addNewFlag = () => {
 
 
     <Select v-model="game.coreSystem.debugSettings.value.selected_dungeon" filter optionLabel="name" optionValue="id"
-      :options="dungeons" placeholder="Select an option" class="w-full md:w-56" />
+      :options="dungeons" placeholder="Select an option" class="w-full md:w-56" :overlayClass="panelOverlayClass" />
     <div class="block">
       <div class="mt-2">
         <FloatLabel variant="on">

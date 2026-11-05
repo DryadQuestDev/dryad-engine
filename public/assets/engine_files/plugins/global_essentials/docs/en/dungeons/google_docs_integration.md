@@ -104,7 +104,7 @@ Make sure you have the correct token selected in **Google Document Integration â
 
 @en/images/gdoc/24.png
 
-2. Click **Fetch Google Document**. The content will be imported into the `dungeon_content` field.
+2. Click **Fetch Google Document**. The content is imported into the dungeon's **Content** subtab.
 
 @en/images/gdoc/25.png
 

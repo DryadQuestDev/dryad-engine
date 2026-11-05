@@ -1,22 +1,40 @@
 $dungeon_name
-My Dungeon Name
+Chapter 1
+
 ^main
 @description
-Screen Description
+Riko's room.
 
-#greetings{if: true}
+#start{if: true}
+// {if: true} on the line above makes this scene play by itself when the player enters the room.
 1
 %
-riko: Hi, I’m Riko!
-{actor: “riko->left”}
+// This is your first scene. Each paragraph is one click.
+// "riko:" at the start of a paragraph makes Riko say it. Her name and portrait come from Characters › Character Templates.
+riko: Hi, I'm Riko! This is your first scene.
+{actor: "riko->left"}
 
-riko: Nice to meet you!
+// A {…} line runs actions. This one changes Riko's expression.
+// Continue replays the paragraph you left the game on, so edit that one to see your change.
+riko: Go back to the editor, change what I just said, Save, and press Continue.
+{attr: "riko.mood = blush"}
+2
+// A row of ~ lines is a menu. Each ~ is one choice, and the text under it plays when the player picks it.
+~Ask about the room{flag: "trust += 1"}
+// {flag: …} on a choice changes a variable when the player picks it. A flag needs no setup: one nobody set reads 0.
+riko: It's small, but it's mine.
+{attr: "riko.mood = normal"}
+~Say goodbye
+riko: See you soon!
 
 @encounter1
-!choice1
-Test Encounter
+// An @ block is something the player can click on the screen, and its ! lines are the buttons it offers. The text in <…> is the button label.
+!choice1<Read the notes>
+A desk covered in notes and half-finished sketches.
 
 #encounter1~choice1
 1
 %
-Test interaction
+// {sound: …} plays a sound from General › Sounds. if{…}…fi{} shows its text only while the condition holds.
+The top note says: *Water the plants. Fix the lamp. Call Mom.*if{trust >= 1} Riko has added your name at the bottom.fi{}
+{sound: "page_turn"}

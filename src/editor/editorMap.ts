@@ -45,6 +45,8 @@ export type StateIconMap = {
 }
 
 export const ROOM_SIZE = 40;
+// The room graph of a screen dungeon is drawn on a blank canvas: it only feeds the in-game room map.
+const SCREEN_GRAPH_SIZE = 1000;
 
 export class EditorMap {
 
@@ -103,6 +105,13 @@ export class EditorMap {
     screen_width: number = 0;
     screen_height: number = 0;
 
+    // Screen dungeons: the Rooms subtab edits the room graph ('graph'), the Encounters subtab one
+    // room's picture at a time ('picture'), the room picked in screenRoomId. Null for other types.
+    screenView: Ref<'graph' | 'picture' | null> = ref(null);
+    screenRoomId: Ref<string> = ref('');
+    // The picture under the map: the dungeon image, or the picked room's own for a screen dungeon.
+    backgroundImage: Ref<string> = ref('');
+
 
 
     editorObject: EditorMapObject = reactive({ config: null, rooms: [], encounters: [], doors: [] });
@@ -121,6 +130,40 @@ export class EditorMap {
     // scroll coordinates of the map
     scrollX: number = 0;
     scrollY: number = 0;
+
+    /** Every room id of the dungeon across the loaded mods; a screen dungeon without rooms has its implicit `main`. */
+    screenRoomIds(): string[] {
+        const ids = new Set<string>();
+        for (const modRooms of this.editorObject.rooms) {
+            for (const room of modRooms.val) if (room?.id) ids.add(room.id);
+        }
+        return ids.size ? [...ids] : ['main'];
+    }
+
+    /** Keeps screenRoomId on an existing room and returns that room's picture (else the dungeon image). */
+    private pickScreenRoomImage(config: DungeonConfigObject): string {
+        const ids = this.screenRoomIds();
+        if (!ids.includes(this.screenRoomId.value)) this.screenRoomId.value = ids[0];
+        let image = '';
+        for (const modRooms of this.editorObject.rooms) {
+            const room = modRooms.val.find((r) => r?.id === this.screenRoomId.value);
+            if (room?.image) image = room.image;
+        }
+        return image || config.image || '';
+    }
+
+    /** Show another room's picture in a screen dungeon's Encounters subtab. */
+    async selectScreenRoom(roomId: string) {
+        this.screenRoomId.value = roomId;
+        await this.init();
+    }
+
+    /** Whether the map draws this encounter: a screen dungeon's picture shows only its own room's. */
+    isEncounterOnView(encounter: DungeonEncounterObject): boolean {
+        if (this.screenView.value === 'graph') return false;
+        if (this.screenView.value === 'picture') return encounter.id?.startsWith(this.screenRoomId.value + '.') ?? false;
+        return true;
+    }
 
     async init() {
 
@@ -241,20 +284,31 @@ export class EditorMap {
             return;
         }
 
+        this.backgroundImage.value = '';
+        this.screenView.value = config.dungeon_type !== 'screen' ? null
+            : this.editor.secondaryTab === 'rooms' ? 'graph' : 'picture';
+
         if (config.dungeon_type === 'text') {
             // Text-based dungeons use map_width and map_height from config
             this.widthBackground = config.map_width ?? 800;
             this.heightBackground = config.map_height ?? 600;
             this.padding = config.padding ?? 0;
             this.indent = 0;
+        } else if (this.screenView.value === 'graph') {
+            this.widthBackground = SCREEN_GRAPH_SIZE;
+            this.heightBackground = SCREEN_GRAPH_SIZE;
+            this.padding = 0;
+            this.indent = 0;
         } else {
+            const image = this.screenView.value === 'picture' ? this.pickScreenRoomImage(config) : config.image;
             // Map and screen types require an image
-            if (!config.image) {
+            if (!image) {
                 this.loadFailed.value = true;
                 return;
             }
+            this.backgroundImage.value = image;
 
-            const { width, height } = await getImageDimensions(config.image);
+            const { width, height } = await getImageDimensions(image);
             const scale = config.image_scaling ?? 1; // Get scale factor, default to 1
 
             this.widthBackground = (width * scale);

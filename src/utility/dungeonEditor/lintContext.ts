@@ -13,6 +13,12 @@ export type LintIO = {
   dungeonIds(): Promise<string[]>;
   /** The dungeon's `content_raw.txt`, from the most specific layer that has one. */
   dungeonText(id: string): Promise<string | null>;
+  /**
+   * Every layer's `content_raw.txt` for the dungeon, `_core` first. A mod's file only overlays
+   * `_core`'s (the game merges them line by line), so its names are the union. Defaults to
+   * `dungeonText` alone.
+   */
+  dungeonLayerTexts?(id: string): Promise<string[]>;
   /** The dungeon's merged `rooms.json` entries. */
   dungeonRooms(id: string): Promise<any[]>;
   /** The dungeon's `config.json`, if any. */
@@ -52,23 +58,34 @@ export async function buildLintContext(io: LintIO, dungeonId: string): Promise<B
   const data = await loadVocabData(vocab, io.loadData);
   for (const id of scripts.characters) addCharacter(data, id, 'a script');
 
-  const dungeons = new Map<string, DungeonIndex>();
-  const texts = new Map<string, string>();
-  const dIds = await io.dungeonIds().catch(() => [] as string[]);
-  await Promise.all(dIds.map(async (id) => {
-    const [text, rooms, config] = await Promise.all([
-      io.dungeonText(id).catch(() => null), io.dungeonRooms(id).catch(() => [] as any[]), io.dungeonConfig(id).catch(() => null),
+  const built: BuiltLintContext = {
+    ctx: { dungeonId, ...data, dungeons: new Map(), scriptFlags: scripts.flags, vocab }, texts: new Map(), scripts,
+  };
+  await refreshDungeons(io, built, await io.dungeonIds().catch(() => [] as string[]));
+  return built;
+}
+
+/**
+ * Read these dungeons again into a built context: their text, rooms and config, as they are on
+ * disk now. Cheaper than a rebuild when only they can have changed (the one just saved).
+ */
+export async function refreshDungeons(io: LintIO, built: BuiltLintContext, ids: string[]): Promise<void> {
+  const { ctx, texts } = built;
+  await Promise.all(ids.map(async (id) => {
+    const [text, layerTexts, rooms, config] = await Promise.all([
+      io.dungeonText(id).catch(() => null),
+      io.dungeonLayerTexts ? io.dungeonLayerTexts(id).catch(() => null) : Promise.resolve(null),
+      io.dungeonRooms(id).catch(() => [] as any[]), io.dungeonConfig(id).catch(() => null),
     ]);
     const roomIds = rooms.map((r) => r?.id).filter((r) => r !== undefined && r !== null).map(String);
-    // A screen dungeon plays in one implicit room.
-    if (config?.dungeon_type === 'screen') roomIds.push('main');
-    const index = indexDungeon(parseToAst(text ?? ''), roomIds);
-    for (const c of index.createdCharacters) addCharacter(data, c, `dungeon ${id}`);
-    dungeons.set(id, index);
+    // A screen dungeon without rooms plays in one implicit room.
+    if (config?.dungeon_type === 'screen' && !roomIds.length) roomIds.push('main');
+    const index = indexDungeon(parseToAst(layerTexts?.length ? layerTexts.join('\n') : text ?? ''), roomIds);
+    for (const c of index.createdCharacters) addCharacter(ctx, c, `dungeon ${id}`);
+    ctx.dungeons.set(id, index);
     if (text !== null) texts.set(id, text);
+    else texts.delete(id);
   }));
-
-  return { ctx: { dungeonId, ...data, dungeons, scriptFlags: scripts.flags, vocab }, texts, scripts };
 }
 
 export type VocabData = Pick<LintContext, 'ids' | 'info' | 'attributes'>;

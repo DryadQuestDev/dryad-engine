@@ -17,6 +17,8 @@ export class DungeonEncounter {
     public rotation: number = 0;
     public image: string = "";
     public polygon: string = "";
+    /** A spot's title, from the content's @id{title: "…"} header. */
+    public title: string = "";
 
     // Added properties for Vue conversion
     public fadeTime: number = 300; // Default fade time in ms

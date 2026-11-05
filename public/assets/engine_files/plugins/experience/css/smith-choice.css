@@ -1,0 +1,17 @@
+/* ============================================
+   SMITH CHOICE  ({smith} choices, smith.mjs)
+   ============================================ */
+
+/* The anvil before a smith option's label: a mask painted in the text colour, so it follows the
+   choice's own state (normal, hover, visited, locked). The row carries `.smith-choice`; style
+   `.choice-list .choice.smith-choice` to tint the whole option, or hide `.smith-badge` to drop the
+   icon. The outer `.smith-badge` is unmasked, so its ::before/::after can wrap the icon. */
+.smith-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.15em;
+  background-color: currentColor;
+  -webkit-mask: url('assets/engine_assets/plugins/experience/anvil.webp') center / contain no-repeat;
+  mask: url('assets/engine_assets/plugins/experience/anvil.webp') center / contain no-repeat;
+}

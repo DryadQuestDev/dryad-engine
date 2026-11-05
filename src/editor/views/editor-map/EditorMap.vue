@@ -8,6 +8,7 @@ import EncounterEditPopup from '../encounter-edit-popup/EncounterEditPopup.vue';
 import CollectablePopup from '../collectable-popup/CollectablePopup.vue';
 import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
+import Select from 'primevue/select';
 import { computePosition, flip, shift, offset } from '@floating-ui/vue';
 
 const editor = Editor.getInstance();
@@ -507,8 +508,11 @@ const stateHandlers: StateHandler[] = [
           label: 'Encounter ID:',
           context: { coords: clickCoords },
           position: { top: event.clientY + 5, left: event.clientX + 5 },
-          onConfirm: (id, context) => {
-            if (!id) return { isValid: false, error: "Encounter ID cannot be empty." };
+          onConfirm: (typedId, context) => {
+            if (!typedId) return { isValid: false, error: "Encounter ID cannot be empty." };
+            // On a screen dungeon's picture a bare id joins the room shown.
+            const id = editor.map?.screenView.value === 'picture' && !typedId.includes('.')
+              ? `${editor.map.screenRoomId.value}.${typedId}` : typedId;
             const validation = editor.validateItemId(id);
             if (!validation.isValid) return { isValid: false, error: validation.message || "Invalid ID." };
 
@@ -552,6 +556,10 @@ const stateHandlers: StateHandler[] = [
 
       // Plain click on the map background → place, if a room is selected.
       if (event.shiftKey || payload?.room) return;
+      // A screen dungeon's picture has no room rects: its home is the room shown.
+      if (editor.map.screenView.value === 'picture') {
+        selectedRoomForCollectable.value = { id: editor.map.screenRoomId.value } as DungeonRoomObject;
+      }
       if (!selectedRoomForCollectable.value) return;
 
       const modEncData = editor.map?.editorObject?.encounters.find(
@@ -1316,6 +1324,14 @@ const hideTooltip = () => {
       <span>X: {{ mouseX }}</span> <span> Y: {{ mouseY }}</span>
     </div>
 
+    <!-- screen dungeon with several rooms: which room's picture the encounters are placed on -->
+    <div v-if="editor.map.screenView.value === 'picture' && editor.map.screenRoomIds().length > 1"
+      class="screen-room-picker" @mousedown.stop>
+      <span>Room</span>
+      <Select :modelValue="editor.map.screenRoomId.value" :options="editor.map.screenRoomIds()" size="small"
+        @update:modelValue="(id: string) => editor.map.selectScreenRoom(id)" />
+    </div>
+
     <!-- Generic Input Popup -->
     <div v-if="isPopupVisible && popupConfig" id="generic-popup" class="generic-popup" :style="popupStyle"
       @mousedown.stop @mouseup.stop @mousemove.stop>
@@ -1353,8 +1369,8 @@ const hideTooltip = () => {
         <div ref="mapContent" class="map">
 
           <!-- map image -->
-          <img v-if="editor.map.editorObject.config?.dungeon_type !== 'text'" class="map-image" draggable="false"
-            :src="editor.map.editorObject.config?.image"
+          <img v-if="editor.map.backgroundImage.value" class="map-image" draggable="false"
+            :src="editor.map.backgroundImage.value"
             :style="{ transform: 'scale(' + (editor.map.editorObject.config?.image_scaling ?? 1) + ')' }" />
 
           <!-- encounters -->
@@ -1362,7 +1378,7 @@ const hideTooltip = () => {
             <template v-for="encounter in modEncounters.val" :key="encounter.id">
               <!-- Outer wrapper for positioning and scaling -->
               <!-- @vue-ignore -->
-              <div v-if="!encounter.polygon" class="encounter-wrapper"
+              <div v-if="!encounter.polygon && editor.map.isEncounterOnView(encounter)" class="encounter-wrapper"
                 :class="{ 'active': modEncounters.mod === editor.selectedMod, 'selected': selectedEncounterForPolygon?.id === encounter.id && editor.map.activeState.value === 'encounters.set_polygon' }"
                 :style="{
                   left: encounter.x + 'px',
@@ -1376,7 +1392,7 @@ const hideTooltip = () => {
                   :style="{ transform: 'rotate(' + (encounter.rotation ?? 0) + 'deg)' }"
                   :src="getEncounterImage(encounter)" />
               </div>
-              <svg v-if="encounter.polygon" :width="editor.map.width" :height="editor.map.height" class="svg_contour"
+              <svg v-if="encounter.polygon && editor.map.isEncounterOnView(encounter)" :width="editor.map.width" :height="editor.map.height" class="svg_contour"
                 :style="{ zIndex: encounter.z }">
                 <g :transform="`translate(${editor.map.padding}, ${editor.map.padding})`">
                   <!-- @vue-ignore -->
@@ -1436,7 +1452,8 @@ const hideTooltip = () => {
               </defs>
             </template>
 
-            <g :transform="`translate(${editor.map.padding}, ${editor.map.padding})`">
+            <!-- a screen dungeon's picture shows encounters only: its rooms live on the room graph -->
+            <g v-if="editor.map.screenView.value !== 'picture'" :transform="`translate(${editor.map.padding}, ${editor.map.padding})`">
               <template v-for="modRooms in editor.map.editorObject.rooms" :key="modRooms.mod">
                 <g v-for="room in modRooms.val" :key="room.id">
                   <rect :x="room.x ?? 0" :y="room.y ?? 0" :width="editor.map.room_size" :height="editor.map.room_size"
@@ -1484,7 +1501,7 @@ const hideTooltip = () => {
           </svg>
 
           <!-- screen area-->
-          <div v-if="editor.map.editorObject.config?.dungeon_type === 'screen'" class="screen-area" :style="{
+          <div v-if="editor.map.screenView.value === 'picture'" class="screen-area" :style="{
             width: editor.map.screen_width + 'px',
             left: editor.map.indent / 2 + 'px',
             top: editor.map.indentYvalue + 'px',

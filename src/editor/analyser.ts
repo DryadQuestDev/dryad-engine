@@ -96,7 +96,9 @@ export class Analyser {
             }
 
 
-            if (this.config.dungeon_type === 'map' || this.config.dungeon_type === 'text') {
+            // A screen dungeon's rooms are checked once it has any; until then it plays in an implicit `main`.
+            const type = this.config.dungeon_type;
+            if (type === 'map' || type === 'text' || (type === 'screen' && this.dungeonRoomsAll.length)) {
                 let isRoomInFile = this.dungeonRoomsAll.find(r => r.id === roomId);
                 if (!isRoomInFile) {
                     this.missingRooms.value.add(roomId);

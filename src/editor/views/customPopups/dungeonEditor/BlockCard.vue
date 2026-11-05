@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import InputText from 'primevue/inputtext';
-import Button from 'primevue/button';
+import IconButton from './IconButton.vue';
 import { inject } from 'vue';
 import Sortable from 'sortablejs';
 import RowEditor from './RowEditor.vue';
@@ -14,6 +13,7 @@ import { tagWithUid } from './uid';
 import { focusFieldAt, type RevealRequest } from './reveal';
 
 const sceneExistsForBlock = inject<(blockIndex: number, sceneId: string) => boolean>('sceneExistsForBlock');
+const playFrom = inject<(event: Event, blockIndex: number, rowIdx?: number, colIdx?: number, paragraph?: number) => void>('playFrom');
 
 function sceneExistsForRow(rowIndex: number): boolean {
   if (!sceneExistsForBlock) return false;
@@ -138,7 +138,7 @@ function rowReveal(rowIndex: number): RevealRequest | null {
   return r.at.rowIndex === rowIndex ? r : null;
 }
 
-const paramsInputRef = ref<InstanceType<typeof InputText> | null>(null);
+const paramsInputRef = ref<InstanceType<typeof ParamsInput> | null>(null);
 const rawTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 watch(() => props.reveal, (r) => {
@@ -373,6 +373,10 @@ function updateRawText(v: string) {
 function onSceneUpdate(newScene: SceneBlock) {
   emit('update:block', props.index, newScene);
 }
+
+function onScenePlay(event: Event, rowIdx: number, colIdx: number, paragraph: number) {
+  playFrom?.(event, props.index, rowIdx, colIdx, paragraph);
+}
 </script>
 
 <template>
@@ -392,8 +396,8 @@ function onSceneUpdate(newScene: SceneBlock) {
         </span>
       </span>
       <template v-if="block.kind !== 'raw'">
-        <InputText :model-value="(block as any).id" @update:model-value="(v: any) => updateHeader('id', v ?? '')"
-          placeholder="id" class="id-input" :disabled="locked"
+        <input type="text" :value="(block as any).id" @input="updateHeader('id', ($event.target as HTMLInputElement).value)"
+          placeholder="id" class="p-inputtext p-component id-input" :disabled="locked"
           :class="{ 'input-search-hit': !!(block as any).id && inputMatchesSearch(kindSigil[block.kind] + (block as any).id) }" />
         <ParamsInput v-if="block.kind !== 'room'" ref="paramsInputRef" :model-value="authorParams" assist="header"
           @update:model-value="(v: string) => updateParams(v)"
@@ -406,13 +410,17 @@ function onSceneUpdate(newScene: SceneBlock) {
         <MetaStatusGrid :params-raw="(block as any).paramsRaw"
           @update:params-raw="(v: string | undefined) => updateHeader('paramsRaw', v ?? '')" />
       </template>
+      <button v-if="block.kind === 'scene' && playFrom && block.id" type="button" class="play-here-btn"
+        v-tooltip.top="'Play this scene from its start in a playtest'" @click="(e: MouseEvent) => playFrom!(e, props.index)">
+        <span class="play-here-pill"><i class="pi pi-play" /><span class="play-here-label">Play from here</span></span>
+      </button>
       <div class="block-actions">
-        <Button v-if="!locked" icon="pi pi-arrow-up" severity="secondary" text rounded size="small"
-          :disabled="!canMoveUp" @click="emit('move-up', props.index)" aria-label="Move block up" />
-        <Button v-if="!locked" icon="pi pi-arrow-down" severity="secondary" text rounded size="small"
-          :disabled="!canMoveDown" @click="emit('move-down', props.index)" aria-label="Move block down" />
-        <Button v-if="!locked" icon="pi pi-trash" severity="danger" text rounded size="small" @click="emit('remove', props.index)"
-          aria-label="Remove block" />
+        <IconButton v-if="!locked" icon="pi pi-arrow-up" severity="secondary" size="small"
+          :disabled="!canMoveUp" @click="emit('move-up', props.index)" label="Move block up" />
+        <IconButton v-if="!locked" icon="pi pi-arrow-down" severity="secondary" size="small"
+          :disabled="!canMoveDown" @click="emit('move-down', props.index)" label="Move block down" />
+        <IconButton v-if="!locked" icon="pi pi-trash" severity="danger" size="small" @click="emit('remove', props.index)"
+          label="Remove block" />
         <span v-if="locked" class="locked-indicator" title="This block is required and cannot be moved or removed">
           <i class="pi pi-lock"></i>
         </span>
@@ -427,7 +435,7 @@ function onSceneUpdate(newScene: SceneBlock) {
 
     <!-- Scene body — dedicated grid editor -->
     <SceneEditor v-else-if="block.kind === 'scene'" :block="block" :issues="issues" :reveal="sceneReveal"
-      @update:block="onSceneUpdate" />
+      :can-play="!!playFrom && !!block.id" @update:block="onSceneUpdate" @play="onScenePlay" />
 
     <!-- Encounter / Template body — flat row groups -->
     <div v-else-if="block.kind === 'encounter' || block.kind === 'template'" ref="bodyRef" class="block-body">
@@ -721,6 +729,60 @@ function onSceneUpdate(newScene: SceneBlock) {
   display: flex;
   gap: 0.1rem;
   flex: 0 0 auto;
+}
+
+/* Play from here: a quiet ▷ that names itself while it is hovered. The named pill floats over the
+   header instead of widening it, so the buttons beside it never move. */
+.play-here-btn {
+  position: relative;
+  flex: 0 0 auto;
+  width: 1.6rem;
+  height: 1.7rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.play-here-pill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  height: 1.7rem;
+  padding: 0 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--editor-fg-success);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.play-here-pill .pi {
+  font-size: 0.7rem;
+}
+
+.play-here-label {
+  display: none;
+}
+
+.play-here-btn:hover .play-here-pill,
+.play-here-btn:focus-visible .play-here-pill {
+  border-color: var(--editor-fg-success);
+  background-color: var(--editor-surface-raised);
+  background-image: linear-gradient(var(--editor-tint-success), var(--editor-tint-success));
+}
+
+.play-here-btn:hover .play-here-label,
+.play-here-btn:focus-visible .play-here-label {
+  display: inline;
 }
 
 .block-body {

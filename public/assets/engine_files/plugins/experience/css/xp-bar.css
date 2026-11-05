@@ -10,23 +10,23 @@
 .xp-level-badge {
     font-weight: 700;
     color: #f0c040;
-    font-size: 16px;
+    font-size: 0.8em;
     white-space: nowrap;
 }
 
 .xp-bar-track {
     position: relative;
     flex: 1;
-    height: 18px;
+    height: 0.9em;
     background: rgba(255, 255, 255, 0.1);
-    border-radius: 9px;
+    border-radius: 0.45em;
     overflow: hidden;
 }
 
 .xp-bar-fill {
     height: 100%;
     background: linear-gradient(90deg, #d4a020, #f0c040);
-    border-radius: 9px;
+    border-radius: 0.45em;
     transition: width 0.4s ease;
 }
 
@@ -36,7 +36,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
+    font-size: 0.55em;
     font-weight: 600;
     color: #fff;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);

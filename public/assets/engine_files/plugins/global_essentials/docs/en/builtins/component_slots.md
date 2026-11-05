@@ -42,6 +42,8 @@ Each slot passes **context props** to registered components, giving them access 
 | `character-statuses-bottom` | Inside status list, after items/statuses (inline) | `character` |
 | `debug-panel` | Debug panel | `activeTabId` |
 | `events-container` | Events/dialogue area | `sceneSlots` |
+| `exchange-currency` | Trade window only: each side's currency box, at the end facing the other panel. Both boxes render it, so check `isParty`. Never changes a panel's height | `inventory`, `targetInventory`, `mode`, `isParty` |
+| `exchange-inventory-header` | Right end of each loot/trade panel's title row, before Loot All. Both panels render it, so check `isParty`. A wide button wraps to its own line on a narrow panel | `inventory`, `targetInventory`, `mode`, `isParty` |
 | `exploration-state` | Inside exploration view | `dungeon`, `currentRoom` |
 | `inventory` | Inside inventory component | `inventory` |
 | `inventory-header` | Header above inventory grid | `inventory` |
@@ -61,6 +63,7 @@ Each slot passes **context props** to registered components, giving them access 
 | `quests-tab` | Quests panel | `selectedQuest` |
 | `replay-custom-block` | Custom content in replay mode | `replayMode`, `data` |
 | `ui-container` | Main UI layer | |
+| `ui-top-center` | Top middle of the game area: a centered column, stacked by `order`. Hidden while the character sheet is open | |
 
 ---
 
@@ -137,6 +140,14 @@ The dungeon name stretches to fill the bar, so everything below order 20 sits in
 | ID | Description |
 |----|-------------|
 | `character-list` | Party character list panel |
+
+### ui-top-center
+
+| ID | Order | Description |
+|----|-------|-------------|
+| `scene-look-around` | 100 | Look around button of a scene point layout with `look_button` |
+
+Each child takes clicks; a widget that should let them through (a meter) sets `pointer-events: none` on its own class.
 
 ---
 

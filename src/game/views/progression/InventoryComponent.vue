@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import vTooltip from 'primevue/tooltip';
+import Select from 'primevue/select';
+import { useStorage } from '@vueuse/core';
 import { Character } from '../../core/character/character';
+import { Item } from '../../core/character/item';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
 import ItemGrid from './ItemGrid.vue';
@@ -29,6 +32,23 @@ const selectedCategory = ref('all');
 const searchQuery = ref('');
 const equippableOnly = ref(false);
 
+type InventorySort = 'recent' | 'name' | 'rarity' | 'level' | 'weight';
+const SORTS: InventorySort[] = ['recent', 'name', 'rarity', 'level'];
+// A viewing preference, not game state: kept per browser, across games and sessions.
+const sortMode = useStorage<InventorySort>('inventory_sort', 'recent');
+
+// Weight sort only exists in a game that weighs its items. Templates, not the bag, decide it, so
+// the option does not come and go as the player picks things up.
+const hasWeights = computed(() =>
+  [...game.itemSystem.itemTemplatesMap.values()].some(template => ((template.traits as { weight?: number } | undefined)?.weight ?? 0) > 0)
+);
+const availableSorts = computed<InventorySort[]>(() => hasWeights.value ? [...SORTS, 'weight'] : SORTS);
+// The stored choice is shared across games, so one this game does not offer reads as Recent.
+const activeSort = computed<InventorySort>({
+  get: () => availableSorts.value.includes(sortMode.value) ? sortMode.value : 'recent',
+  set: value => { sortMode.value = value; },
+});
+
 const inventory = computed(() => {
   return game.itemSystem.inventories.value.get(props.inventory_id);
 });
@@ -45,6 +65,35 @@ const equippableLabel = computed(() => Global.getInstance().getString('inventory
 const equippableGlyph = computed(() => Global.getInstance().getString('inventory.filter.equippable_short'));
 const questLabel = computed(() => Global.getInstance().getString('inventory.filter.quest'));
 const searchPlaceholder = computed(() => Global.getInstance().getString('inventory.search'));
+const sortLabel = computed(() => Global.getInstance().getString('inventory.sort'));
+const sortOptions = computed(() =>
+  availableSorts.value.map(id => ({ id, label: Global.getInstance().getString(`inventory.sort.${id}`) }))
+);
+
+// Rank by the rarity trait's value order; quest rarity is a story marker, not a tier, so it ranks
+// with the unrated items below every real tier.
+const rarityOrder = computed(() =>
+  ((game.itemSystem.itemTraitsMap.get('rarity') as { values?: string[] } | undefined)?.values ?? [])
+    .filter(rarity => rarity !== QUEST_RARITY)
+);
+
+function sortItems(items: Item[]): Item[] {
+  const order = rarityOrder.value;
+  const rank = (item: Item) => order.indexOf(item.getRarity());
+  const level = (item: Item) => item.traits?.item_level || 0;
+  const byName = (a: Item, b: Item) => a.getName().localeCompare(b.getName());
+  const entries = items.map((item, index) => ({ item, index }));
+  // Newest first, highest first, rarest first, heaviest first; the next key breaks ties, and in
+  // Recent the bag order breaks a tie (one Loot All stamps every stack with the same moment).
+  const compare: Record<InventorySort, (a: { item: Item; index: number }, b: { item: Item; index: number }) => number> = {
+    recent: (a, b) => b.item.addedAt - a.item.addedAt || b.index - a.index,
+    name: (a, b) => byName(a.item, b.item) || level(b.item) - level(a.item),
+    rarity: (a, b) => rank(b.item) - rank(a.item) || level(b.item) - level(a.item) || byName(a.item, b.item),
+    level: (a, b) => level(b.item) - level(a.item) || rank(b.item) - rank(a.item) || byName(a.item, b.item),
+    weight: (a, b) => b.item.getWeight() - a.item.getWeight() || rank(b.item) - rank(a.item) || byName(a.item, b.item),
+  };
+  return entries.sort(compare[activeSort.value]).map(entry => entry.item);
+}
 
 const isFiltering = computed(() => selectedCategory.value !== 'all' || searchQuery.value.trim() !== '' || equippableOnly.value);
 
@@ -65,7 +114,7 @@ const filteredItems = computed(() => {
     const char = props.character || game.characterSystem.selectedCharacter.value;
     items = char ? items.filter(item => char.getAvailableSlotsForItem(item).length > 0) : [];
   }
-  return items;
+  return sortItems(items);
 });
 
 const gridSlots = computed(() => {
@@ -100,6 +149,8 @@ const gridSlots = computed(() => {
           v-tooltip.top="equippableLabel" @click="equippableOnly = !equippableOnly">
           {{ equippableGlyph }}
         </div>
+        <Select v-model="activeSort" :options="sortOptions" option-label="label" option-value="id"
+          class="inventory-sort" v-tooltip.top="sortLabel" :pt="{ overlay: { class: 'dark-mode-dropdown' } }" />
         <div class="inventory-search-wrap">
           <input v-model="searchQuery" type="text" class="inventory-search" :placeholder="searchPlaceholder" />
           <i v-if="searchQuery" class="pi pi-times inventory-search-clear" @click="searchQuery = ''"></i>
@@ -199,6 +250,28 @@ const gridSlots = computed(() => {
   border-color: #5fd6a6;
   color: #fff;
   box-shadow: 0 0 8px rgba(66, 185, 131, 0.6);
+}
+
+.inventory-sort {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.4);
+  box-shadow: none;
+}
+
+.inventory-sort:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.inventory-sort :deep(.p-select-label) {
+  padding: 6px 4px 6px 10px;
+  color: white;
+  font-size: 13px;
+}
+
+.inventory-sort :deep(.p-select-dropdown) {
+  width: 26px;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .inventory-search-wrap {

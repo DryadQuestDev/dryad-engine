@@ -18,6 +18,7 @@ Engine-level settings are **shared across all games** and persisted to the brows
 | `sound_volume` | chooseOne (0-100) | 80 | Sound effects volume percentage |
 | `font_size` | chooseOne (10-40) | 20 | UI font size in pixels |
 | `typing_speed` | chooseOne | fast | Text typing animation speed (none, slow, medium, fast, very_fast) |
+| `visual_effects` | chooseOne | full | `full` or `reduced`. Reduced turns off blurs, glows and particles that redraw every frame, for slow machines. Defaults to `reduced` when the player's OS asks for reduced motion |
 
 ### API
 
@@ -32,6 +33,19 @@ game.setEngineSetting('typing_speed', 'none');
 ```
 
 The player can also change these directly via **Engine Settings** in the game menu.
+
+### Reduced visual effects
+
+While `visual_effects` is `reduced`, the engine puts the class `reduced-effects` on `<body>`. Give your own heavy effects a still version under it: anything that animates a `filter`, a `backdrop-filter` or a canvas every frame.
+
+```css
+.my-aura { animation: my-aura-pulse 3s ease-in-out infinite; }
+body.reduced-effects .my-aura { animation: none; }
+```
+
+```js
+const reduced = computed(() => game.getEngineSetting('visual_effects') === 'reduced');
+```
 
 ---
 

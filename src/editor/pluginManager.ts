@@ -71,8 +71,11 @@ export class PluginManager {
 
         let allPluginIds;
         if (Editor.getInstance().mainTab !== "new") {
-            // 2. fetch a list of mod plugins
-            const modPlugins = await Global.getInstance().listFolders(`${basePath}/plugins`);
+            // 2. fetch a list of mod plugins (a mod without a plugins folder has none; listing it would 404)
+            const modPluginsPath = `${basePath}/plugins`;
+            const modPlugins = await Global.getInstance().pathExists(modPluginsPath)
+                ? await Global.getInstance().listFolders(modPluginsPath)
+                : [];
 
             // 3. merge the two lists
             allPluginIds = [...plugins, ...modPlugins];
@@ -170,6 +173,7 @@ export class PluginManager {
         // 2. Look inside mod plugins
         for (const modItterator of Editor.getInstance().getModList(modId)) {
             const basePath = `games_files/${gameId}/${modItterator}`;
+            if (!await Global.getInstance().pathExists(`${basePath}/plugins`)) continue;
             const modPlugins = await Global.getInstance().listFolders(`${basePath}/plugins`);
             for (const plugin of modPlugins) {
                 if (!this.pluginList.value.includes(plugin)) {

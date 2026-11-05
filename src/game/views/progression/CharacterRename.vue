@@ -107,7 +107,7 @@ function handleKeydown(event: KeyboardEvent) {
   <div class="character-rename">
     <!-- Display mode -->
     <div v-if="!isEditing" class="rename-display">
-      <span class="character-name">{{ characterName }}</span>
+      <span class="character-name notranslate">{{ characterName }}</span>
       <button
         class="rename-edit-btn"
         @click="startEdit"

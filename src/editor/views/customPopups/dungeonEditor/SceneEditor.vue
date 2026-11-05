@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import InputText from 'primevue/inputtext';
 import Button from 'primevue/button';
+import IconButton from './IconButton.vue';
 import Dialog from 'primevue/dialog';
 import InputNumber from 'primevue/inputnumber';
 import RichContentEditor from './PlainEditor.vue';
@@ -14,14 +14,21 @@ import { tagWithUid } from './uid';
 import { inputMatchesSearch, paramsMatchSearch } from './searchState';
 import { flashElement, focusFieldAt, type RevealRequest } from './reveal';
 import { worse, type IssueRange, type Severity } from './issueSeverity';
+import { paragraphAt } from '../../../playFrom';
 
 const props = defineProps<{
   block: SceneBlock;
   issues?: LintIssue[];
   /** Focus request aimed at one of this scene's cells; `null` otherwise. */
   reveal?: RevealRequest | null;
+  /** Show Play from here on the column headers. */
+  canPlay?: boolean;
 }>();
-const emit = defineEmits<{ 'update:block': [block: SceneBlock] }>();
+const emit = defineEmits<{
+  'update:block': [block: SceneBlock];
+  /** Play from here, from `paragraph` of that column (1 = its start). */
+  'play': [event: Event, rowIdx: number, colIdx: number, paragraph: number];
+}>();
 
 const rootRef = ref<HTMLElement | null>(null);
 
@@ -188,6 +195,24 @@ function toggleRowLayout(rowIdx: number) {
   emitRows(rows);
 }
 
+// The column's paragraph under the caret, read on pointerdown, before the button takes the focus.
+let caretParagraph: { rowIdx: number; colIdx: number; paragraph: number } | null = null;
+
+function readCaret(event: PointerEvent, rowIdx: number, colIdx: number) {
+  caretParagraph = null;
+  const column = (event.currentTarget as HTMLElement).closest('.scene-column');
+  const active = document.activeElement;
+  if (!column || !(active instanceof HTMLTextAreaElement) || !column.contains(active)) return;
+  caretParagraph = { rowIdx, colIdx, paragraph: paragraphAt(active.value, active.selectionStart) };
+}
+
+function play(event: Event, rowIdx: number, colIdx: number) {
+  const at = caretParagraph;
+  caretParagraph = null;
+  const paragraph = at && at.rowIdx === rowIdx && at.colIdx === colIdx ? at.paragraph : 1;
+  emit('play', event, rowIdx, colIdx, paragraph);
+}
+
 function updateColumn<K extends keyof SceneColumn>(
   rowIdx: number,
   colIdx: number,
@@ -220,16 +245,16 @@ function updateColumn<K extends keyof SceneColumn>(
       <div class="row-header">
         <span class="row-label">Row {{ rowIdx + 1 }}</span>
         <div class="flex-spacer" />
-        <Button :icon="isStackedRow(row) ? 'pi pi-bars' : 'pi pi-pause'" severity="secondary" text rounded
+        <IconButton :icon="isStackedRow(row) ? 'pi pi-bars' : 'pi pi-pause'" severity="secondary"
           size="small" :class="{ 'layout-btn--on': isStackedRow(row) }"
           v-tooltip.top="isStackedRow(row) ? 'Columns stacked — click to put them side by side' : 'Columns side by side — click to stack them'"
-          @click="toggleRowLayout(rowIdx)" aria-label="Toggle column layout" />
-        <Button icon="pi pi-arrow-up" severity="secondary" text rounded size="small" :disabled="rowIdx === 0"
-          @click="moveRow(rowIdx, -1)" aria-label="Move row up" />
-        <Button icon="pi pi-arrow-down" severity="secondary" text rounded size="small"
-          :disabled="rowIdx === block.rows.length - 1" @click="moveRow(rowIdx, 1)" aria-label="Move row down" />
-        <Button icon="pi pi-trash" severity="danger" text rounded size="small" @click="removeRow(rowIdx)"
-          aria-label="Remove row" />
+          @click="toggleRowLayout(rowIdx)" label="Toggle column layout" />
+        <IconButton icon="pi pi-arrow-up" severity="secondary" size="small" :disabled="rowIdx === 0"
+          @click="moveRow(rowIdx, -1)" label="Move row up" />
+        <IconButton icon="pi pi-arrow-down" severity="secondary" size="small"
+          :disabled="rowIdx === block.rows.length - 1" @click="moveRow(rowIdx, 1)" label="Move row down" />
+        <IconButton icon="pi pi-trash" severity="danger" size="small" @click="removeRow(rowIdx)"
+          label="Remove row" />
       </div>
 
       <div v-if="row.preColumns !== undefined" class="parked-comment parked-comment--row">
@@ -243,12 +268,17 @@ function updateColumn<K extends keyof SceneColumn>(
           :class="`col--${column.kind === '~' ? 'tilde' : 'percent'}`" v-bind="{ 'data-scene-col': colIdx }">
           <div class="col-header">
             <span class="col-index">{{ colIdx + 1 }}</span>
+            <button v-if="canPlay" type="button" class="play-here-btn"
+              v-tooltip.top="column.kind === '~' ? 'Play this choice as if the player picked it. With the caret further down its text, play from that paragraph.' : 'Play from this column\'s first paragraph, or from the one the caret is in'"
+              @pointerdown="(e: PointerEvent) => readCaret(e, rowIdx, colIdx)" @click="(e: MouseEvent) => play(e, rowIdx, colIdx)">
+              <span class="play-here-pill"><i class="pi pi-play" /><span class="play-here-label">Play from here</span></span>
+            </button>
             <span class="col-sigil"
               v-tooltip.top="column.kind === '~' ? 'Branch choice' : 'Column'">{{ column.kind }}</span>
             <template v-if="column.kind === '~'">
-              <InputText :model-value="column.name ?? ''"
-                @update:model-value="(v: any) => updateColumn(rowIdx, colIdx, 'name', v ?? '')"
-                placeholder="name" class="name-input"
+              <input type="text" :value="column.name ?? ''"
+                @input="updateColumn(rowIdx, colIdx, 'name', ($event.target as HTMLInputElement).value)"
+                placeholder="name" class="p-inputtext p-component name-input"
                 :class="{ 'input-search-hit': inputMatchesSearch(column.name) }" />
               <ParamsInput :model-value="column.paramsRaw ?? ''" :assist="column.kind === '~' ? 'choice' : undefined"
                 @update:model-value="(v: string) => updateColumn(rowIdx, colIdx, 'paramsRaw', v ? v : undefined)"
@@ -257,14 +287,14 @@ function updateColumn<K extends keyof SceneColumn>(
                   'params-input--warning': paramsIssueCells.get(cellKey(rowIdx, colIdx)) === 'warning', 'input-search-hit': paramsMatchSearch(column.paramsRaw) }" />
             </template>
             <div v-else class="col-spacer" />
-            <Button :icon="isStackedRow(row) ? 'pi pi-chevron-up' : 'pi pi-chevron-left'" severity="secondary" text
-              rounded size="small" :disabled="colIdx === 0" @click="moveColumn(rowIdx, colIdx, -1)"
-              aria-label="Move column earlier" />
-            <Button :icon="isStackedRow(row) ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" severity="secondary" text
-              rounded size="small" :disabled="colIdx === row.columns.length - 1"
-              @click="moveColumn(rowIdx, colIdx, 1)" aria-label="Move column later" />
-            <Button icon="pi pi-times" severity="danger" text rounded size="small"
-              @click="removeColumn(rowIdx, colIdx)" aria-label="Remove column" />
+            <IconButton :icon="isStackedRow(row) ? 'pi pi-chevron-up' : 'pi pi-chevron-left'" severity="secondary"
+              size="small" :disabled="colIdx === 0" @click="moveColumn(rowIdx, colIdx, -1)"
+              label="Move column earlier" />
+            <IconButton :icon="isStackedRow(row) ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" severity="secondary"
+              size="small" :disabled="colIdx === row.columns.length - 1"
+              @click="moveColumn(rowIdx, colIdx, 1)" label="Move column later" />
+            <IconButton icon="pi pi-times" severity="danger" size="small"
+              @click="removeColumn(rowIdx, colIdx)" label="Remove column" />
           </div>
           <RichContentEditor :model-value="column.content"
             @update:model-value="(v: string) => updateColumn(rowIdx, colIdx, 'content', v)"
@@ -333,10 +363,11 @@ function updateColumn<K extends keyof SceneColumn>(
   align-items: flex-start;
   gap: 0.4rem;
   margin: 0 0 0.4rem;
-  padding: 0.25rem 0.45rem;
-  border-left: 2px solid var(--p-surface-500);
-  background: color-mix(in srgb, var(--p-surface-800) 45%, transparent);
-  border-radius: 3px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--editor-border);
+  border-left: 3px solid var(--editor-border-strong);
+  background: var(--editor-surface-sunken);
+  border-radius: 4px;
 }
 
 .parked-comment--row {
@@ -347,7 +378,7 @@ function updateColumn<K extends keyof SceneColumn>(
   flex: 0 0 auto;
   margin-top: 0.15rem;
   font-size: 0.7rem;
-  opacity: 0.55;
+  color: var(--editor-text-faint);
 }
 
 .parked-input {
@@ -356,9 +387,9 @@ function updateColumn<K extends keyof SceneColumn>(
   border: none;
   outline: none;
   background: transparent;
-  color: var(--p-text-muted-color);
+  color: var(--editor-text-muted);
   font-family: inherit;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   line-height: 1.35;
   padding: 0;
 }
@@ -482,6 +513,60 @@ function updateColumn<K extends keyof SceneColumn>(
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+/* Play from here: a quiet ▷ that names itself while it is hovered. The named pill
+   floats over the header instead of widening it, so a narrow lane's buttons never wrap. */
+.play-here-btn {
+  position: relative;
+  flex: 0 0 auto;
+  width: 1.4rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.play-here-pill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  box-sizing: border-box;
+  height: 1.5rem;
+  padding: 0 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--editor-fg-success);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.play-here-pill .pi {
+  font-size: 0.65rem;
+}
+
+.play-here-label {
+  display: none;
+}
+
+.play-here-btn:hover .play-here-pill,
+.play-here-btn:focus-visible .play-here-pill {
+  border-color: var(--editor-fg-success);
+  background-color: var(--editor-surface-raised);
+  background-image: linear-gradient(var(--editor-tint-success), var(--editor-tint-success));
+}
+
+.play-here-btn:hover .play-here-label,
+.play-here-btn:focus-visible .play-here-label {
+  display: inline;
 }
 
 .col-index {

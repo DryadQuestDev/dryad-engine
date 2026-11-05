@@ -21,7 +21,7 @@ Under the battle, each sheet shows its frames with the cuts drawn in, and warns 
 | `caster_animation` | The caster |
 |---|---|
 | `melee` | Lunges at the target in the `attack` battle state. An impact plays at the moment of contact; a travel sprite launches at the lunge's peak, which suits a thrown bomb or an arrow shot. |
-| `cast` | Stays in place in the `cast` battle state, with a nudge toward another ally or a wobble when there are no images. |
+| `cast` | Stays in place in the `cast` battle state, with a nudge toward another ally or a wobble when there are no images. A caster with no cast pose (no art keyed on `battle_state`, as when a character is drawn as a single frame) plays a default cast gesture instead: it rises a little, brightens, then pushes toward the target as the effect goes off. |
 | empty | A self or ally ability casts. A hostile ability lunges when the definition has no images (or there is no definition), and casts with a travel sprite or an impact. |
 
 **Area abilities** (`all_enemies`, `all_allies`) play the effect on every living target, each started a moment after the last, and a lunge goes at the first. **Bounces** fly from the previous landing point, so a chain keeps going after the prior target falls. **Flurry** strikes replay the effect for each strike.
@@ -93,3 +93,15 @@ Both are audio files, picked like an image.
 | `hit_sound` | with every impact: a landing, an impact-only effect on each target, a melee contact |
 
 They play at the player's sound volume, like every other sound. A definition with sounds and no images gives a plain lunge its swing and its contact.
+
+## Outside battles
+
+A game can fly the same effects in its own scenes, for a spell cast on stage. Give the service two points on the screen, in viewport pixels:
+
+```js
+const bolt = game.getService("rpg_projectile");
+await bolt.play("fire_bolt", { from: { x: 300, y: 420 }, to: { x: 900, y: 380 } });
+game.resolveString('{animate: "bram hurt", screen_shake: 0.3}');
+```
+
+The travel sprite flies, the impact plays where it lands with its burst and sparks, and the promise resolves on arrival. The bodies are the game's: animate its actors with `{animate}` (`lunge` for the caster, `hurt` for the target). An effect with no travel sprite plays its impact at `to`. Pass `toRect`, the target's box, for a `feet` or `head` hit anchor. Sizes are shares of the scene's height, like a battle's, where a front-row enemy is about 35% of the screen. A stage that draws its bodies bigger passes `scale`, their ratio, so the effect keeps its size against them. The pace is the effect's own: the battle speed setting doesn't apply.

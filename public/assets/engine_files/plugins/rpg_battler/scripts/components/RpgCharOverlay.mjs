@@ -4,7 +4,8 @@ const { game, vue, components } = window.engine;
 const { computed, defineComponent } = vue;
 const { ProgressBar, CustomComponentContainer } = components;
 
-import { getBattleDisplayName } from '../rpg-battle-state.mjs';
+import { getBattleDisplayName, currentRpgBattle } from '../rpg-battle-state.mjs';
+import { getSide } from '../rpg-battle-effects.mjs';
 
 // @ts-ignore
 export const RpgCharOverlay = defineComponent({
@@ -12,6 +13,9 @@ export const RpgCharOverlay = defineComponent({
   props: ['character', 'slotScale'],
   setup(/** @type {{ character: Character, slotScale: number }} */ props) {
     const name = computed(() => props.character ? getBattleDisplayName(props.character.id) : '');
+    // A page translator turns proper names into words. The player's side carries proper names; foes are often
+    // a kind (a boar, a bee soldier) whose name reads better translated, so only allies are kept as written.
+    const keepName = computed(() => !!props.character && !!currentRpgBattle.value && getSide(props.character.id) === 'player');
     const health = computed(() => props.character?.getResource('health') || 0);
     const maxHealth = computed(() => props.character?.getStat('health') || 1);
 
@@ -62,12 +66,12 @@ export const RpgCharOverlay = defineComponent({
     const staggerBonusFilled = computed(() => Math.min(staggerStacks.value, staggerBonus.value));
     const staggerBaseFilled = computed(() => Math.max(0, staggerStacks.value - staggerBonus.value));
 
-    return { game, name, health, maxHealth, healthColor, battleStatuses, staggerStacks, staggerBase, staggerBonus, staggerBonusFilled, staggerBaseFilled };
+    return { game, name, keepName, health, maxHealth, healthColor, battleStatuses, staggerStacks, staggerBase, staggerBonus, staggerBonusFilled, staggerBaseFilled };
   },
   template: /*html*/ `
     <div v-if="character" class="rpg-char-overlay">
       <CustomComponentContainer :slot="'rpg-char-overlay-top'" :context="{ character }" />
-      <div class="rpg-char-overlay-name">{{ name }}</div>
+      <div class="rpg-char-overlay-name" :class="{ notranslate: keepName }">{{ name }}</div>
       <ProgressBar :current="health" :max="maxHealth" :barColor="healthColor"
         bgColor="rgba(0,0,0,0.5)" width="13cqh" height="2cqh" :hideMax="true" />
       <div v-if="staggerStacks > 0 || staggerBase > 0" class="rpg-stagger-pips">

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { ManifestObject } from '../../../schemas/manifestSchema';
+import { Global } from '../../global';
+import { replaceChangesToken } from './changelog';
 
 const props = defineProps<{
   manifests: ManifestObject[];
@@ -18,10 +20,14 @@ interface MergedWidget {
   key: string;
   domId: string | undefined;
   html: string;
+  /** Manifest whose entry supplied the html: `[changes]` reads its changelog. */
+  source: ManifestObject;
   x: number;
   y: number;
   disabled: boolean;
 }
+
+const global = Global.getInstance();
 
 const widgets = computed<PlacedWidget[]>(() => {
   // Widgets with the same widget_id merge across active manifests in order
@@ -41,6 +47,7 @@ const widgets = computed<PlacedWidget[]>(() => {
             key: `${m.id || ''}_${i}`,
             domId: undefined,
             html: w.html,
+            source: m,
             x: w.x ?? 0,
             y: w.y ?? 0,
             disabled: !!w.disabled,
@@ -53,6 +60,7 @@ const widgets = computed<PlacedWidget[]>(() => {
         key: w.widget_id,
         domId: w.widget_id,
         html: w.html || prev?.html || '',
+        source: w.html ? m : (prev?.source ?? m),
         x: w.x ?? prev?.x ?? 0,
         y: w.y ?? prev?.y ?? 0,
         disabled: typeof w.disabled === 'boolean' ? w.disabled : (prev?.disabled ?? false),
@@ -61,7 +69,10 @@ const widgets = computed<PlacedWidget[]>(() => {
   }
   return [...merged.values(), ...standalone]
     .filter(w => w.html && !w.disabled)
-    .map(({ disabled, ...w }) => w);
+    .map(({ disabled, source, ...w }) => ({
+      ...w,
+      html: replaceChangesToken(w.html, source, (version) => global.getString('changelog.new_in', { version })),
+    }));
 });
 </script>
 

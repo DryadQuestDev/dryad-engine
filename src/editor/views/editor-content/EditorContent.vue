@@ -4,9 +4,9 @@ import Dbookmarks from '../dbookmarks/Dbookmarks.vue';
 import Dform from '../dform/Dform.vue';
 import EditorMap from '../editor-map/EditorMap.vue';
 import EditorDocument from '../EditorDocument.vue';
-import AnalyserComponent from '../AnalyserComponent.vue';
 import DevPanel from '../DevPanel.vue';
-import NewGameWizard from './NewGameWizard.vue';
+import SubtabView from './SubtabView.vue';
+import StartPage from './StartPage.vue';
 import Button from 'primevue/button';
 import { Editor } from '../../editor';
 
@@ -149,9 +149,6 @@ function toggleLeftColumn() {
 
 const componentName = ref('EditorContent');
 
-// --- New Game Wizard ---
-const showWizard = ref(false);
-
 // Lifecycle hooks
 onMounted(() => {
   console.log(`${componentName.value} component mounted.`);
@@ -159,29 +156,31 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="editor-content" :class="{ 'left-column-hidden': !isLeftColumnVisible }">
+  <div v-if="editor.mainTab === 'start'" class="editor-content editor-content--start">
+    <StartPage />
+  </div>
+  <div v-else class="editor-content" :class="{ 'left-column-hidden': !isLeftColumnVisible }">
     <!-- Toggle Button -->
-    <Button :icon="isLeftColumnVisible ? 'pi pi-chevron-left' : 'pi pi-chevron-right'"
+    <Button v-if="!editor.view.value" :icon="isLeftColumnVisible ? 'pi pi-chevron-left' : 'pi pi-chevron-right'"
       class="p-button-rounded p-button-text left-column-toggle" @click="toggleLeftColumn"
       aria-label="Toggle Bookmarks Panel" />
 
-    <!-- Left Column (Bookmarks) -->
-    <div class="column editor-left" v-if="isLeftColumnVisible">
+    <!-- Left Column (Bookmarks). A subtab view brings its own Save. -->
+    <div class="column editor-left" v-if="isLeftColumnVisible && !editor.view.value">
       <Dbookmarks :items="filteredItems" :isFilterActive="isFilterFormDirty" :paginationData="paginationData"
         @clear-requested="requestClearFilters" @bookmark-click="handleBookmarkClick"
         @id-search-input="handleIdSearchInput" />
     </div>
 
     <!-- Right Column (Form/Map) -->
-    <div class="column editor-right">
+    <div class="column editor-right" :class="{ 'editor-right--view': editor.view.value }">
       <div v-if="editor.showMap.value" class="map_anchor" v-bind="{ 'data-bookmark-id': 'map' }"></div>
       <EditorMap v-if="editor.showMap.value" />
       <EditorDocument v-if="editor.mainTab === 'dungeons' && editor.secondaryTab === 'config'" />
-      <AnalyserComponent v-if="editor.mainTab === 'dungeons' && editor.secondaryTab === 'config'" />
       <DevPanel v-if="editor.secondaryTab === 'dev_settings'" />
       <!-- Create from Template button (shown in new_game tab) -->
       <div v-if="editor.secondaryTab === 'new_game'" class="template-wizard-trigger">
-        <div class="template-wizard-banner" @click="showWizard = true">
+        <div class="template-wizard-banner" @click="editor.setMainTab('start')">
           <i class="pi pi-bolt"></i>
           <div class="template-wizard-text">
             <strong>Quick Start</strong>
@@ -190,8 +189,8 @@ onMounted(() => {
           <i class="pi pi-chevron-right"></i>
         </div>
       </div>
-      <NewGameWizard v-model:visible="showWizard" @game-created="showWizard = false" />
-      <Dform :items="filteredItems" :triggerClear="clearTriggerCount" :scrollToBookmarkId="scrollToBookmarkId"
+      <SubtabView v-if="editor.view.value" />
+      <Dform v-else :items="filteredItems" :triggerClear="clearTriggerCount" :scrollToBookmarkId="scrollToBookmarkId"
         @filtered-update="handleFilteredUpdate" @update:isDirty="handleIsDirtyUpdate"
         @pagination-update="handlePaginationUpdate" />
     </div>

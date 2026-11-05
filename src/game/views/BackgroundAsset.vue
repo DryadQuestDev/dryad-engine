@@ -30,6 +30,10 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 // bindings and by the spine renderer.
 const assetElementRef = ref<HTMLElement | null>(null);
 
+// A dev playtest stages a `missing` stand-in for an id with no asset template; anywhere else it
+// draws nothing.
+const showMissingPlaceholder = game.isDevMode();
+
 // Determine asset type
 const assetType = computed(() => props.asset.type ?? 'image');
 const isImageAsset = computed(() => assetType.value === 'image');
@@ -176,6 +180,10 @@ const cssTransform = computed(() => {
 
   return transforms.join(' ');
 });
+
+// A transition's blur term, left out under Visual effects: Reduced: blurring the full-screen plate on
+// every frame of the tween is the costliest thing a slow machine draws here.
+const transitionBlur = (px: number) => (global.reducedEffects ? {} : { filter: `blur(${px}px)` });
 
 // CSS filter: the asset's own filters (same set and order as CharacterSlot), plus the scene colour
 // grade when one is up. Each term is rebuilt from a tweened number rather than transitioned in CSS —
@@ -385,13 +393,13 @@ const applyEnterTransition = (element: HTMLElement, override?: string) => {
       opacity: 0,
       scale: 1.5,
       rotation: 15,
-      filter: 'blur(10px)'
+      ...transitionBlur(10),
     });
     gsap.to(element, {
       opacity: 1,
       scale: 1,
       rotation: 0,
-      filter: 'blur(0px)',
+      ...transitionBlur(0),
       duration,
       delay,
       ease: 'back.out(2)',
@@ -499,10 +507,10 @@ const applyEnterTransition = (element: HTMLElement, override?: string) => {
     // cannot interpolate a filter function list into a keyword — it snapped on the first tick, which
     // left blurIn rendering as a bare fade. blur(0px) gives both ends a matching structure; the
     // inline filter is dropped afterwards so the wrapper keeps no needless compositing layer.
-    gsap.set(element, { opacity: 0, filter: 'blur(20px)' });
+    gsap.set(element, { opacity: 0, ...transitionBlur(20) });
     gsap.to(element, {
       opacity: 1,
-      filter: 'blur(0px)',
+      ...transitionBlur(0),
       duration,
       delay,
       ease,
@@ -739,7 +747,7 @@ const applyExitTransition = (element: HTMLElement) => {
     gsap.to(element, {
       scale: 1.5,
       rotation: 15,
-      filter: 'blur(10px)',
+      ...transitionBlur(10),
       opacity: 0,
       duration,
       ease: 'back.in(2)',
@@ -832,10 +840,10 @@ const applyExitTransition = (element: HTMLElement) => {
     // Mirror of blurIn: GSAP needs a filter list on BOTH ends to interpolate, and the element's
     // resting filter computes to the keyword `none`, so the blur used to appear in full on the
     // first tick. Seed an explicit blur(0px) to tween out of.
-    gsap.set(element, { filter: 'blur(0px)' });
+    gsap.set(element, { ...transitionBlur(0) });
     gsap.to(element, {
       opacity: 0,
-      filter: 'blur(20px)',
+      ...transitionBlur(20),
       duration,
       ease,
     });
@@ -1335,7 +1343,15 @@ watch([idleAnimation, idleDuration, idleIntensity],
 </script>
 
 <template>
-  <div v-if="isImageAsset || isVideoAsset" class="background-asset-wrapper">
+  <div v-if="asset.missing" class="background-asset-wrapper" v-bind="{ 'data-asset-id': asset.id }">
+    <div ref="assetElementRef" class="background-asset-animation-wrapper">
+      <div v-if="showMissingPlaceholder" class="missing-asset notranslate" :class="{ 'missing-asset--backdrop': asset.bg }">
+        <span class="missing-asset-id">{{ asset.id }}</span>
+        <span class="missing-asset-label">missing · dev only</span>
+      </div>
+    </div>
+  </div>
+  <div v-else-if="isImageAsset || isVideoAsset" class="background-asset-wrapper" v-bind="{ 'data-asset-id': asset.id }">
     <!-- Animation wrapper for GSAP - separate from CSS transforms -->
     <div ref="assetElementRef" class="background-asset-animation-wrapper">
       <!-- Stacked plates. The transform/opacity/filter live on the .background-asset-stack
@@ -1359,7 +1375,7 @@ watch([idleAnimation, idleDuration, idleIntensity],
         playsinline />
     </div>
   </div>
-  <div v-else-if="isSpineAsset" class="spine-aspect-outer">
+  <div v-else-if="isSpineAsset" class="spine-aspect-outer" v-bind="{ 'data-asset-id': asset.id }">
     <!-- Same role as .background-asset-animation-wrapper: GSAP owns this element's transform,
          opacity and filter, and the spine canvas rides along inside it. It must stay OUTSIDE
          .spine-aspect-wrapper, whose overflow:hidden would clip a slide or a zoom-out, and INSIDE
@@ -1518,6 +1534,64 @@ watch([idleAnimation, idleDuration, idleIntensity],
   width: 100%;
   height: 100%;
   aspect-ratio: auto;
+}
+
+/* Dev-only stand-in for an asset id with no template. A centred card, or the whole backdrop area
+   when it was staged as a background. */
+.missing-asset {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(36%, 420px);
+  aspect-ratio: 4 / 3;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  background: repeating-linear-gradient(135deg, #6e6e6e 0 12px, #4f4f4f 12px 24px);
+  border: 2px dashed #c8c8c8;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-family: ui-monospace, monospace;
+  text-align: center;
+}
+
+.missing-asset--backdrop {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  transform: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.missing-asset-id,
+.missing-asset-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+}
+
+.missing-asset-id {
+  font-size: 1.3em;
+  font-weight: 700;
+  padding: 3px 10px;
+}
+
+.missing-asset-label {
+  font-size: 0.8em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e0e0e0;
+  padding: 2px 8px;
 }
 
 /* CSS animation for jitter - more stable than GSAP for rapid movements */

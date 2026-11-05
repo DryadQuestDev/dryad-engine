@@ -94,6 +94,7 @@ const rows = battleConfig?.rows_size || 3;
 | `custom_choices` | Custom choice definitions |
 | `locale` | Locale string definitions |
 | `character_views` | View definitions used by skin layers and status spines |
+| `scene_points` | Scene point layouts (->dungeons.scene_points) |
 
 ### Meta & Trait Key Definitions
 

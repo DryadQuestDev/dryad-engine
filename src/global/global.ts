@@ -11,7 +11,7 @@ import { loadSave } from '../utility/save-system';
 import { IndexedDbSaveService } from '../services/indexeddb-save.service';
 
 import { Property } from '../game/property';
-import { Ref, ref, shallowRef, watch } from 'vue';
+import { Ref, ref, shallowRef, watch, nextTick } from 'vue';
 import { createValidatingDefineComponent } from './templateValidation';
 import { useLocalStorage, useStorage } from '@vueuse/core';
 import { SettingsObject } from '../schemas/settingsSchema';
@@ -26,6 +26,8 @@ import { Character } from '../game/core/character/character';
 import { PluginObject } from '../schemas/pluginShema';
 import { updateGamePlayOrder } from '../utility/game-order-tracker';
 import { gameLogger } from '../game/utils/logger';
+import { devLogPause, devLogResume } from '../game/utils/devLog';
+import { freshLayerLines } from '../services/contentFreshness';
 import { showConfirm, showAlert } from '../services/dialogService';
 import { closeAll as closeAllPopups, closePopupsByKey } from '../game/views/popups/popupStore';
 import { MusicPlayer } from '../services/musicPlayer';
@@ -154,6 +156,11 @@ export class Global {
 
   public userSettings!: Ref<Record<string, any>>;
 
+  /** The player chose Visual effects: Reduced; skip effects that redraw every frame (blurs, glows, particles). */
+  public get reducedEffects(): boolean {
+    return this.userSettings?.value?.visual_effects === 'reduced';
+  }
+
   public openViewer: Ref<string> = ref('');
 
   public engineVersion: string = "0.0.0"; // Initialized in constructor now
@@ -217,6 +224,23 @@ export class Global {
 
   public setViewer(type: string) {
     this.openViewer.value = this.openViewer.value === type ? '' : type;
+  }
+
+  /**
+   * Open the docs viewer on one page, e.g. openDocs('global_essentials', 'introduction/coming_from_renpy').
+   * The viewer reads its plugin and page from storage when it mounts, so an open viewer is
+   * remounted to pick them up.
+   */
+  public async openDocs(pluginId: string, page: string) {
+    try {
+      localStorage.setItem('docs-selected-plugin', pluginId);
+      localStorage.setItem(`docs-active-tab-${pluginId}`, page);
+    } catch { /* storage unavailable: the viewer opens on its last page */ }
+    if (this.openViewer.value) {
+      this.openViewer.value = '';
+      await nextTick();
+    }
+    this.openViewer.value = 'docs';
   }
 
   public closeViewer() {
@@ -287,6 +311,8 @@ export class Global {
   private initUserSettings() {
     let defaultObject = this.optionsToObject(this.menuOptions.value);
     // Debug: console.log("MenuOptions object", defaultObject);
+    // A player whose OS asks for reduced motion starts with reduced effects; a stored choice still wins below.
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) defaultObject.visual_effects = 'reduced';
 
     // Get existing settings from localStorage
     const existingSettings = JSON.parse(localStorage.getItem('user-settings') || '{}');
@@ -298,6 +324,12 @@ export class Global {
     localStorage.setItem('user-settings', JSON.stringify(mergedSettings));
 
     this.userSettings = useStorage('user-settings', mergedSettings);
+
+    // Visual effects: Reduced puts a class on <body>, so engine, plugin and game CSS can turn their
+    // heavy effects off with one selector (body.reduced-effects …).
+    watch(() => this.userSettings.value.visual_effects, (value) => {
+      document.body.classList.toggle('reduced-effects', value === 'reduced');
+    }, { immediate: true });
 
     // Live music volume: registered here (not per-game) so it also covers main-menu music
     watch(() => this.userSettings.value.music_volume, (newVolume) => {
@@ -635,14 +667,20 @@ export class Global {
     await this.initGameAfter(mergedManifest);
     this.game.coreSystem.loadGame(this.game, saveName);
 
-    // Track that this game was played
-    updateGamePlayOrder(gameId);
-    this.initGameAfterScriptsLoaded();
-    gameLogger.success(`Loaded game "${gameId}" from save "${saveName}"`);
-    this.game.coreSystem.stateLoading.value = false;
-    // Restore saved entities from the current definitions before any listener can read them.
-    this.game.coreSystem.runRegisteredSaveMigrations();
-    this.game.coreSystem.trigger("game_initiated");
+    devLogPause();
+    try {
+      // Track that this game was played
+      updateGamePlayOrder(gameId);
+      this.initGameAfterScriptsLoaded();
+      gameLogger.success(`Loaded game "${gameId}" from save "${saveName}"`);
+      this.game.coreSystem.stateLoading.value = false;
+      // Restore saved entities from the current definitions before any listener can read them.
+      this.game.coreSystem.runRegisteredSaveMigrations();
+      this.game.dungeonSystem.reportOrphanQuests();
+      this.game.coreSystem.trigger("game_initiated");
+    } finally {
+      devLogResume();
+    }
     return this.game;
     // end fetch played time
 
@@ -732,7 +770,7 @@ export class Global {
       "item_templates", "item_traits", "locale", "music",
       "narrative_segments", "narrative_slots", "narrative_states", "narrative_tags",
       "pool_definitions", "pool_entries", "properties", "recipe_groups",
-      "records", "skill_slots", "skill_trees", "sounds", "stat_groups",
+      "records", "scene_points", "skill_slots", "skill_trees", "sounds", "stat_groups",
       "stat_meta", "status_meta",
     ];
 
@@ -867,6 +905,8 @@ export class Global {
     await this.fetchMapValues(gameId, `character_views`, modsIds);
     await this.fetchMapValues(gameId, `dungeon_traits`, modsIds);
     await this.fetchMapValues(gameId, `inventory_traits`, modsIds);
+    // point layouts ({inspect}, point-bound choices, {zoom}); read through getData('scene_points')
+    await this.fetchMapValues(gameId, `scene_points`, modsIds);
 
     // load global variables
     let globalStats: PropertyObject[] = await this.loadAndMergeArrayFile<PropertyObject>(gameId, `properties`, modsIds);
@@ -1028,11 +1068,13 @@ export class Global {
     if (pluginList && Array.isArray(pluginList)) {
       // One listing per mod, in parallel. A folder's contents answer every plugin name at
       // once — the old loop re-listed the same directory once per plugin name.
+      // A mod without a plugins folder has none; listing it would log a 404 before the catch could swallow it.
       const modPluginFolders = await Promise.all(
-        modList.map(mod =>
-          this.storageService.listFolders(`games_files/${gameId}/${mod.id}/plugins`)
-            .catch(() => [] as string[]) // plugins folder doesn't exist in this mod
-        )
+        modList.map(async (mod) => {
+          const dir = `games_files/${gameId}/${mod.id}/plugins`;
+          if (!await this.storageService.pathExists(dir)) return [] as string[];
+          return this.storageService.listFolders(dir).catch(() => [] as string[]);
+        })
       );
 
       // Iterate through mods in reverse order so latest mod overwrites earlier ones
@@ -1241,7 +1283,11 @@ export class Global {
     const pluginCssLists = new Map<string, string[]>();
     await Promise.all(
       [...this.game.coreSystem.pluginPaths].map(async ([pluginId, pluginPath]) => {
-        pluginCssLists.set(pluginId, await this.listFiles(`${pluginPath}/css`).catch(() => [] as string[]));
+        // css is optional; listing a missing folder logs a 404 before the catch can swallow it
+        const cssPath = `${pluginPath}/css`;
+        pluginCssLists.set(pluginId, await this.pathExists(cssPath)
+          ? await this.listFiles(cssPath).catch(() => [] as string[])
+          : []);
       })
     );
 
@@ -1535,10 +1581,22 @@ export class Global {
       dataList.push(pluginData);
     }
 
+    // A dev playtest regenerates a layer's parsed content whose text changed outside the editor.
+    const parsedDungeon = /^dungeons\/([^/]+)\/content_parsed$/.exec(path)?.[1];
+    const checkFresh = !!parsedDungeon && localStorage.getItem('devMode') === 'true';
+
     // 2. Then load mod files in order (higher precedence)
     for (let mod of modList) {
       //console.error("mod", mod);
       try {
+        if (checkFresh) {
+          const fresh = await freshLayerLines(gameId, mod, parsedDungeon!);
+          if (fresh) {
+            if (fresh.regenerated) gameLogger.info(`Regenerated ${mod}/dungeons/${parsedDungeon}/content_parsed.json: its text changed`);
+            dataList.push(fresh.lines as T[]);
+            continue;
+          }
+        }
         let fullPath = `games_files/${gameId}/${mod}/${path}.json`;
         let isExists = await this.pathExists(fullPath);
         if (!isExists) {
@@ -1710,6 +1768,11 @@ export class Global {
 
   async copyDir(src: string, dest: string): Promise<{ success: boolean; error?: string }> {
     return this.storageService.copyDir(src, dest);
+  }
+
+  /** A file's modification time and size; null when it doesn't exist or the host can't tell (web). */
+  async statFile(path: string): Promise<{ mtimeMs: number; size: number } | null> {
+    return this.storageService.statFile(path);
   }
 
   async getFileSize(path: string): Promise<number> {

@@ -592,3 +592,14 @@ screen and (max-height: 650px) {
     max-width: 100%;
   }
 }
+
+/* A screen dungeon's room pictures cross-fade on a room change. */
+.screen-picture-enter-active,
+.screen-picture-leave-active {
+  transition: opacity 0.5s ease;
+}
+
+.screen-picture-enter-from,
+.screen-picture-leave-to {
+  opacity: 0;
+}

@@ -249,6 +249,10 @@ export class WebStorageService implements StorageService {
         return 0;
     }
 
+    async statFile(_path: string): Promise<{ mtimeMs: number; size: number } | null> {
+        return null;
+    }
+
     async convertToWebP(_options: { pngPath: string; quality: number; lossless: boolean }): Promise<{ webpPath: string; originalSize: number; newSize: number }> {
         throw new Error('WebP conversion not available in web mode');
     }

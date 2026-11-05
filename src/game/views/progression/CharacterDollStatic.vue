@@ -34,11 +34,33 @@ const isKeepLayer = (layerId: string) => {
   return def?.mask_mode === 'keep';
 };
 
+const isInstantLayer = (layerId: string) =>
+  !!(Game.getInstance().characterSystem.skinLayersMap.get(layerId) as any)?.instant;
+
+// True for one layer fade after the `view` prop changes. Sync so it is already set when the
+// imageLayers watcher and the render below run for that same update.
+const viewSwapping = ref(false);
+let viewSwapTimer: ReturnType<typeof setTimeout> | undefined;
+watch(() => props.view, () => {
+  viewSwapping.value = true;
+  clearTimeout(viewSwapTimer);
+  viewSwapTimer = setTimeout(() => { viewSwapping.value = false; }, LAYER_FADE_MS + 100);
+}, { flush: 'sync' });
+
 // Layers that never fade: keep-mask carriers (above) and layers flagged `instant` — art that
 // cannot blend with another image of itself (breasts free ↔ lifted would show four nipples).
-const isNoFadeLayer = (layerId: string) => {
-  const def = Game.getInstance().characterSystem.skinLayersMap.get(layerId) as any;
-  return isKeepLayer(layerId) || !!def?.instant;
+// A view swap crossfades the whole doll, so there an `instant` layer fades with it: snapping
+// would float the breasts over a half-faded body, or drop them out of one.
+const isNoFadeLayer = (layerId: string) =>
+  isKeepLayer(layerId) || (isInstantLayer(layerId) && !viewSwapping.value);
+
+// A leaving node keeps the classes of its last render, which predates the view change, so it
+// still carries `.no-fade`. Strip it before Vue reads the leave transition's duration.
+const onLayerBeforeLeave = (el: Element) => {
+  const layerId = (el as HTMLElement).dataset.layer || '';
+  if (viewSwapping.value && isInstantLayer(layerId) && !isKeepLayer(layerId)) {
+    el.classList.remove('no-fade');
+  }
 };
 
 // Build image layers - either directly from skinLayers or via event system
@@ -177,6 +199,7 @@ onBeforeUnmount(() => {
   for (const timer of pendingTimers.values()) {
     clearTimeout(timer);
   }
+  clearTimeout(viewSwapTimer);
 });
 
 // Convert polygon CSS string to mask-image CSS properties
@@ -280,9 +303,9 @@ const getLayerStyle = (index: number) => {
 <template>
   <div class="character-doll" :class="{ 'natural-size': naturalSize }">
     <TransitionGroup :name="instantLayers ? '' : 'layer-fade'" :appear="!instantLayers && (enableAppear || false)"
-      @enter="onLayerEnter">
+      @enter="onLayerEnter" @before-leave="onLayerBeforeLeave">
       <img class="character-doll-image" v-for="(layer, index) of imageLayers" :key="layer.image" :src="layer.image"
-        :style="getLayerStyle(index)"
+        v-bind="{ 'data-layer': layer.layerId }" :style="getLayerStyle(index)"
         :class="[getLayerClasses(layer.layerId), { 'no-fade': isNoFadeLayer(layer.layerId), 'swap-in': swapIns.has(layer.image) }]"
         draggable="false" v-persist @load="onImageLoad" />
     </TransitionGroup>

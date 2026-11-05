@@ -88,9 +88,9 @@ game.on('battle_action_applied', (caster, event) => {
 // normal stat channel (computer, buff status, item) drives the boost without a special emitter.
 // `power_amplifier` is a percentage (100 = +100% = doubles power).
 // Abilities can opt out per-call by setting `meta.unamplified: true`.
-game.registerStatComputer('reservoir_potency', (character) => {
-    if (character.id !== 'ane') return {};
-    return { power_amplifier: character.getStat('potency') };
+game.registerStatComputer('focus_boost', (character) => {
+    if (character.id !== 'alice') return {};
+    return { power_amplifier: character.getStat('focus') };
 });
 
 // Double damage to targets below 25% HP

@@ -7,6 +7,7 @@ import { EntityTraitSchema, DataEntityTraitSchema } from "../schemas/entityTrait
 import { StatusMetaSchema } from "../schemas/statusMetaSchema";
 import { StatMetaSchema } from "../schemas/statMetaSchema";
 import { AssetMetaSchema } from "../schemas/assetMetaSchema";
+import { ScenePointSchema } from '../schemas/scenePointSchema';
 import { CharacterTemplateSchema } from "../schemas/characterTemplateSchema";
 import { DungeonConfigObject, DungeonConfigSchema } from "../schemas/dungeonConfigSchema";
 import { DungeonEncounterSchema } from "../schemas/dungeonEncounterSchema";
@@ -39,7 +40,8 @@ import ItemSlotPickerPopup from "./views/customPopups/ItemSlotPickerPopup.vue";
 import CharacterSceneSlotPopup from "./views/customPopups/CharacterSceneSlotPopup.vue";
 import AssetPopup from "./views/customPopups/AssetPopup.vue";
 import MaskEditorPopup from "./views/customPopups/MaskEditorPopup.vue";
-import DungeonContentEditorPopup from "./views/customPopups/DungeonContentEditorPopup.vue";
+import ScenePointEditorPopup from './views/customPopups/ScenePointEditorPopup.vue';
+import DungeonContentEditor from "./views/customPopups/DungeonContentEditor.vue";
 import AbilityPickerPopup from "./views/customPopups/AbilityPickerPopup.vue";
 import StatsPopup from "./views/customPopups/StatsPopup.vue";
 import AbilityEditorPopup from "./views/customPopups/abilityEditor/AbilityEditorPopup.vue";
@@ -85,11 +87,24 @@ export type EditorTab = {
     specificDungeonTypes?: ('map' | 'screen' | 'text')[],
     ignoreDefaultValues?: boolean,
     customPopups?: string[],
+    // A registered custom component shown in place of the form, bound to the tab's object (popup
+    // props: `item`, `coreItem`, `schema`, `subtabId`). Single-object tabs only. It shows the tab's
+    // Save and popup buttons by placing SubtabActions in its own toolbar.
+    view?: string,
+    // Fields the form leaves out, keeping their values: a field another subtab of the same file edits.
+    hideFields?: string[],
   }[],
   disabled?: boolean, // if disabled when building ui by default
 }
 
 export const EDITOR_TABS: EditorTab[] = [
+  {
+    // The Start page (StartPage.vue): template cards, games and docs. Reached from the header's
+    // Start entry, and the first thing a fresh editor shows.
+    id: 'start',
+    subtabs: [{ id: 'start' }],
+    disabled: true,
+  },
   {
     id: 'new',
     subtabs: [
@@ -166,6 +181,15 @@ export const EDITOR_TABS: EditorTab[] = [
         customPopups: ['asset-editor'],
       },
       {
+        id: 'scene_points',
+        schema: ScenePointSchema,
+        file: 'scene_points',
+        title: 'scene_point',
+        isArray: true,
+        requiresMod: true,
+        customPopups: ['scene-point-editor'],
+      },
+      {
         id: 'asset_meta',
         schema: AssetMetaSchema,
         file: 'asset_meta',
@@ -229,7 +253,19 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
         requiresDungeon: true,
         disableId: true,
-        customPopups: ['dungeon-content-editor'],
+        hideFields: ['dungeon_content'],
+      },
+      {
+        // Same file as config: the content is its `dungeon_content` field, and a save of
+        // either tab writes content_parsed.json from both.
+        id: 'content',
+        schema: DungeonConfigSchema,
+        file: '[dungeon]/config',
+        title: 'config',
+        requiresMod: true,
+        requiresDungeon: true,
+        disableId: true,
+        view: 'dungeon-content-editor',
       },
       {
         id: 'rooms',
@@ -240,7 +276,7 @@ export const EDITOR_TABS: EditorTab[] = [
         requiresMod: true,
         requiresDungeon: true,
         showMap: true,
-        specificDungeonTypes: ['map', 'text'],
+        specificDungeonTypes: ['map', 'screen', 'text'],
       },
       {
         id: 'encounters',
@@ -690,12 +726,17 @@ export function registerEditorCustomComponents(editor: Editor) {
     name: 'Mask Editor',
     component: MaskEditorPopup
   });
+  editor.registerCustomComponent({
+    id: 'scene-point-editor',
+    name: 'Visual Editor',
+    component: ScenePointEditorPopup
+  });
 
-  // Register visual dungeon content editor
+  // Register visual dungeon content editor (the view of Dungeons → Content)
   editor.registerCustomComponent({
     id: 'dungeon-content-editor',
     name: 'Content Editor',
-    component: DungeonContentEditorPopup
+    component: DungeonContentEditor
   });
 
   // Register stats popup: editable stat grid + effective totals for every BaseStatusSchema holder

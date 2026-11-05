@@ -6,6 +6,7 @@ import { initBattleTracking, summonCombatant, summonFromTemplate, sideAtUnitCap,
 import { checkStaggerThreshold, getEffectivePower, applyDefenses, applyDamageInstance, applyHeal, applyStatusEffect, logEffect, getSide, isCharAlive, isSupport, getStatusDefinitions } from './rpg-battle-effects.mjs';
 import { registerAspectRenderers } from './aspect-renderers.mjs';
 import { RpgBattleScreen } from './components/RpgBattleScreen.mjs';
+import { playProjectileAt } from './rpg-battle-anims.mjs';
 import { RpgCombatStats } from './components/RpgCombatStats.mjs';
 import './DebugBattles.mjs';
 import { RpgChannelCard } from './components/RpgChannelCard.mjs';
@@ -277,6 +278,13 @@ game.registerService('rpg_floating_text', {
 
 game.registerService('rpg_battle_log', {
   push: pushLog,
+});
+
+// ── Projectiles outside a battle ──
+// A Projectiles-tab effect between two viewport points, for a game's own scenes (a spell cast on
+// stage). The caller animates the bodies.
+game.registerService('rpg_projectile', {
+  play: playProjectileAt,
 });
 
 // Register battle screen as game_state component

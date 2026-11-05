@@ -24,9 +24,64 @@ const normalizedChoices = computed(() => {
   return [rawChoices as Choice];
 });
 
+// A choice bound to a scene point ({point}) is drawn on the picture by ScenePoints instead.
 const visibleChoices = computed(() => {
-  return normalizedChoices.value.filter(choice => choice?.isVisible && (choice.name || choice.nameKey));
+  return normalizedChoices.value.filter(choice => choice?.isVisible && (choice.name || choice.nameKey)
+    && !game.scenePointSystem.isPointChoice(choice));
 });
+
+// A choice whose condition flips while its menu is up grows open or folds shut instead of popping, and
+// the choices under it slide along. Each menu arrives as a new choices array, so keying the group by it
+// leaves a fresh menu's choices still: only the list's own fade plays for them.
+const menuIds = new WeakMap<object, number>();
+let lastMenuId = 0;
+const menuKey = computed(() => {
+  const raw = game.dungeonSystem.relevantChoices.value;
+  if (!raw) return 0;
+  let id = menuIds.get(raw);
+  if (!id) {
+    id = ++lastMenuId;
+    menuIds.set(raw, id);
+  }
+  return id;
+});
+
+const TOGGLE_MS = 380;
+
+function togglesInstantly(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// Height first, then the text fades in; leaving, the text fades out, then the row closes.
+function onChoiceEnter(el: Element, done: () => void) {
+  const row = el as HTMLElement;
+  if (togglesInstantly()) return done();
+  const height = `${row.offsetHeight}px`;
+  row.style.overflow = 'hidden';
+  const anim = row.animate([
+    { height: '0px', opacity: 0 },
+    { height, opacity: 0, offset: 0.45 },
+    { height, opacity: 1 },
+  ], { duration: TOGGLE_MS, easing: 'ease-out' });
+  anim.onfinish = anim.oncancel = () => {
+    row.style.overflow = '';
+    done();
+  };
+}
+
+function onChoiceLeave(el: Element, done: () => void) {
+  const row = el as HTMLElement;
+  if (togglesInstantly()) return done();
+  const height = `${row.offsetHeight}px`;
+  row.style.overflow = 'hidden';
+  row.style.pointerEvents = 'none';
+  const anim = row.animate([
+    { height, opacity: 1 },
+    { height, opacity: 0, offset: 0.45 },
+    { height: '0px', opacity: 0 },
+  ], { duration: TOGGLE_MS, easing: 'ease-in' });
+  anim.onfinish = anim.oncancel = () => done();
+}
 
 function isChoiceVisited(choice: Choice): boolean {
   if (game.dungeonSystem.choiceType.value === 'encounter' || !choice.id) {
@@ -81,15 +136,16 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 <template>
   <div v-if="visibleChoices.length > 0" class="choice-list"
     :class="[game.dungeonSystem.choiceType.value, { instant: revealsInstantly }]">
-    <template v-for="(choice, index) in visibleChoices" :key="choice.id">
-      <div @click.stop="handleChoice(choice)" class="choice"
+    <TransitionGroup :key="menuKey" :css="false" @enter="onChoiceEnter" @leave="onChoiceLeave">
+      <div v-for="(choice, index) in visibleChoices" :key="choice.id || `choice_${index}`"
+        @click.stop="handleChoice(choice)" class="choice"
         :class="[unref(choice.className), { visited: isChoiceVisited(choice), unavailable: !choice.isAvailable, clue: choice.isClue() }]">
         <span v-if="game.dungeonSystem.choiceType.value != 'encounter'" class="choice-number">
           {{ index + 1 }}.
         </span>
         <span v-script="{ html: (choice.nameComputed as unknown as string) || choice.name, resolver: false }"></span>
       </div>
-    </template>
+    </TransitionGroup>
   </div>
 </template>
 

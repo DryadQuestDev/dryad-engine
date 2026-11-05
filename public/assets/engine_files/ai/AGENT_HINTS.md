@@ -37,6 +37,18 @@ npx tsc --project jsconfig.json --noEmit 2>&1 | grep "games_assets"
 
 The `grep` filters out node_modules noise and shows only game script errors.
 
+## Dungeon Content Files
+
+Write a dungeon's content in `games_files/[game]/[layer]/dungeons/[dungeon]/content_raw.txt` (DryadScript). Never edit `content_parsed.json`: the engine makes it from the text, by itself, whenever the text changed – when a dev playtest starts, when the editor opens the game, and on Export. After editing the text, start a dev playtest to see it; there is no parse step to run.
+
+Check your edits from the assets folder (Node 18+), the same checks the editor runs:
+
+```bash
+node engine_files/tools/dryad.mjs check <game> [dungeon...]   # add --mod <id> for a mod
+```
+
+It prints `file:line: severity: message` (unknown actions, conditions and ids, flags read but never set, broken syntax), with a "did you mean" where the editor has a fix, and exits with 1 on errors. Fix everything it reports before you finish.
+
 ## Component Patterns
 
 ### Vue Component Structure
@@ -90,6 +102,9 @@ Use this pattern for game UI:
   }
 }
 ```
+
+### Heavy effects need a still version
+A `filter`, `backdrop-filter` or canvas that changes every frame redraws everything it covers every frame, which costs a slow machine its frame rate. Give each one a still version under `body.reduced-effects` (the engine's Visual effects: Reduced setting), or read `game.getEngineSetting('visual_effects') === 'reduced'` in script.
 
 ### Custom Buttons (avoid PrimeVue for game UI)
 ```css

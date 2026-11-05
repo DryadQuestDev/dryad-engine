@@ -63,6 +63,11 @@ const faceShiftX = computed(() => -(props.character?.getTrait('face_shift_x') ||
 const faceShiftY = computed(() => -(props.character?.getTrait('face_shift_y') || 0) * scale.value * sizeRatio.value);
 const faceShiftScale = computed(() => scale.value * sizeRatio.value);
 
+// Remount the doll when the face shows someone else. The crop above snaps to the new character
+// at once while the doll's layer fade keeps the old one on screen, framed by the wrong crop.
+// The template id counts too: a reused id (the encyclopedia's one face) can stand for anyone.
+const dollKey = computed(() => `${props.character?.id}|${props.character?.templateId ?? ''}`);
+
 // Scale name label relative to face size (baseline: 100px)
 const sizeNum = computed(() => props.size ?? 100);
 const nameFontSize = computed(() => Math.max(9, sizeNum.value * 0.13) + 'px');
@@ -78,13 +83,13 @@ const centerFontSize = computed(() => Math.max(10, sizeNum.value * 0.14) + 'px')
   <div class="character-face-wrapper" v-if="character && !noWrapper">
     <div class="character-face">
       <!-- No art: render name centered inside the circle -->
-      <div v-if="!hasAnyArt" class="character-face-name-center">{{ characterName }}</div>
+      <div v-if="!hasAnyArt" class="character-face-name-center notranslate">{{ characterName }}</div>
 
       <!-- Static face image if available -->
       <img v-else-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
 
       <!-- Fallback to CharacterDoll if no static face -->
-      <div v-else class="character-face-doll-container">
+      <div v-else class="character-face-doll-container" :key="dollKey">
         <CharacterDoll :character="character" />
       </div>
 
@@ -99,14 +104,14 @@ const centerFontSize = computed(() => Math.max(10, sizeNum.value * 0.14) + 'px')
 
     <!-- Badge name (below face, default) -->
     <div v-if="hasAnyArt && showName && (nameStyle ?? 'badge') === 'badge'" v-fit class="character-face-name"><span
-        class="character-face-name-text">{{ characterName }}</span></div>
+        class="character-face-name-text notranslate">{{ characterName }}</span></div>
   </div>
 
   <!-- No-wrapper mode: just the face, no column layout -->
   <div class="character-face" v-else-if="character && noWrapper">
-    <div v-if="!hasAnyArt" v-fit class="character-face-name-center">{{ characterName }}</div>
+    <div v-if="!hasAnyArt" v-fit class="character-face-name-center notranslate">{{ characterName }}</div>
     <img v-else-if="useStaticFace" :src="faceStaticPath" class="character-face-image" />
-    <div v-else class="character-face-doll-container">
+    <div v-else class="character-face-doll-container" :key="dollKey">
       <CharacterDoll :character="character" />
     </div>
     <CustomComponentContainer :slot="COMPONENT_ID" :context="{ character }" />

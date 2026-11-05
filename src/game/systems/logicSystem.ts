@@ -6,6 +6,8 @@ import { Game } from "../game";
 import type { DungeonLine } from "./dungeonSystem";
 import { computed, ComputedRef } from "vue";
 import { gameLogger } from "../utils/logger";
+import { reportDevProblem } from "../utils/devProblems";
+import { devLogOn, devLogActionStart, devLogActionEnd } from "../utils/devLog";
 import { Global } from "../../global/global";
 import { normalizeAbilityEffects, sortEffectIds } from "../../utility/abilityEffects";
 
@@ -18,6 +20,44 @@ import { PoolDefinitionObject } from "../../schemas/poolDefinitionSchema";
 import { PoolEntryObject } from "../../schemas/poolEntrySchema";
 
 export type GateContext = { sceneId: string; dungeonId: string };
+
+/** One clause of a condition, as the evaluator read it. */
+export type ConditionClause = {
+    /** As authored: `_property(trust) >= 2`. */
+    text: string;
+    /** The flag, `dungeon.flag` or `_condition(args)` it reads; null when the clause does not parse. */
+    key: string | null;
+    /** What the key read; undefined when reading it threw. */
+    value: any;
+    /** Null for a bare key, which holds while its value is set. */
+    operator: string | null;
+    /** The value compared against, typed as the comparison sees it. */
+    expected: any;
+    pass: boolean;
+    /** Why the clause cannot be evaluated: it does not parse, names an unknown condition, or threw. */
+    error?: string;
+    /** Reading the key threw, so the real evaluation throws when it reaches this clause. */
+    throws?: boolean;
+    /** The real evaluation settles before this clause and never reads it. */
+    skipped?: boolean;
+};
+
+/** One clause list of a condition: `all` must hold (`if`, `active`), or `any` (`ifOr`, `activeOr`). */
+export type ConditionGroup = {
+    key: string;
+    mode: 'all' | 'any';
+    source: string | boolean;
+    pass: boolean;
+    throws: boolean;
+    clauses: ConditionClause[];
+};
+
+/** What explainCondition returns. `pass` is the real result; `throws` means the real evaluation throws instead. */
+export type ConditionExplanation = {
+    pass: boolean;
+    throws: boolean;
+    groups: ConditionGroup[];
+};
 
 export type ActionObject = {
     action?: Function;
@@ -222,11 +262,13 @@ export class LogicSystem {
 
 
     /**
-     * Private helper to evaluate a single condition string like "a==1" or "a=1"
-     * Returns the result of the evaluation
-     * Supports custom conditions with parameters: "_char(alice.attribute.sex) = female"
+     * Read one clause — `a==1`, `a=1`, a bare key, `_char(alice.attribute.sex) = female` — the way
+     * the evaluator does, and say what it read. Never throws, logs or reports: the boolean path
+     * does that from what this returns, so an explanation and the real result cannot disagree.
      */
-    private _evaluateSingleCondition(condition: string): boolean {
+    private _readCondition(condition: string): { clause: ConditionClause; log?: string; thrown?: { error: unknown } } {
+        const clause: ConditionClause = { text: condition, key: null, value: undefined, operator: null, expected: undefined, pass: false };
+
         // Parse condition format: "key operator value"
         // Supported operators: ==, =, !=, >, <, >=, <=
         // Note: We check for == and >= before = to avoid matching = in ==, >=, etc.
@@ -235,21 +277,33 @@ export class LogicSystem {
 
         // A bare key — `met_bob`, `town.gate_open`, `_has_key(rusty_key)` — is true when its value is set:
         // anything but 0, false, an empty string, null or undefined (a flag nobody set reads 0).
-        if (!match && /^[a-zA-Z0-9_.]+(?:\([^)]*\))?$/.test(condition)) {
-            const value = this.getConditionValue(condition);
-            return Boolean(value) && value !== 'false' && value !== '0';
+        const bare = !match && /^[a-zA-Z0-9_.]+(?:\([^)]*\))?$/.test(condition);
+
+        if (!match && !bare) {
+            clause.error = 'Invalid format';
+            return { clause, log: `Invalid condition format: "${condition}". Use format like key==value or key=value without quotes` };
+        }
+
+        const key = match ? match[1].trim() : condition;
+        clause.key = key;
+
+        // Get the actual value from the flag/condition
+        try {
+            clause.value = this.getConditionValue(key);
+        } catch (error) {
+            clause.error = this._conditionReadError(key, error);
+            clause.throws = true;
+            return { clause, thrown: { error } };
         }
 
         if (!match) {
-            gameLogger.error(`Invalid condition format: "${condition}". Use format like key==value or key=value without quotes`);
-            return false;
+            const value = clause.value;
+            clause.pass = Boolean(value) && value !== 'false' && value !== '0';
+            return { clause };
         }
 
-        const [, key, operator, rawValue] = match;
-
-        // Get the actual value from the flag/condition
-        const actualValue = this.getConditionValue(key.trim());
-
+        const [, , operator, rawValue] = match;
+        const actualValue = clause.value;
         const trimmedValue = rawValue.trim();
 
         // Parse the comparison value - try boolean, then number, then string
@@ -266,41 +320,66 @@ export class LogicSystem {
             comparisonValue = trimmedValue;
             valueType = 'string';
         }
+        clause.operator = operator;
+        clause.expected = comparisonValue;
+
+        if (valueType === 'string' && (operator === '>' || operator === '<' || operator === '>=' || operator === '<=')) {
+            clause.error = `'${operator}' needs a number`;
+            return { clause, log: `Operator "${operator}" not supported for string comparison in condition "${condition}"` };
+        }
 
         // Perform comparison based on operator and type
         switch (operator) {
             case '=':
             case '==':
-                return actualValue == comparisonValue; // Use == for type coercion
+                clause.pass = actualValue == comparisonValue; // Use == for type coercion
+                break;
             case '!=':
-                return actualValue != comparisonValue;
+                clause.pass = actualValue != comparisonValue;
+                break;
             case '>':
-                if (valueType === 'string') {
-                    gameLogger.error(`Operator "${operator}" not supported for string comparison in condition "${condition}"`);
-                    return false;
-                }
-                return Number(actualValue) > Number(comparisonValue);
+                clause.pass = Number(actualValue) > Number(comparisonValue);
+                break;
             case '<':
-                if (valueType === 'string') {
-                    gameLogger.error(`Operator "${operator}" not supported for string comparison in condition "${condition}"`);
-                    return false;
-                }
-                return Number(actualValue) < Number(comparisonValue);
+                clause.pass = Number(actualValue) < Number(comparisonValue);
+                break;
             case '>=':
-                if (valueType === 'string') {
-                    gameLogger.error(`Operator "${operator}" not supported for string comparison in condition "${condition}"`);
-                    return false;
-                }
-                return Number(actualValue) >= Number(comparisonValue);
+                clause.pass = Number(actualValue) >= Number(comparisonValue);
+                break;
             case '<=':
-                if (valueType === 'string') {
-                    gameLogger.error(`Operator "${operator}" not supported for string comparison in condition "${condition}"`);
-                    return false;
-                }
-                return Number(actualValue) <= Number(comparisonValue);
-            default:
-                return false;
+                clause.pass = Number(actualValue) <= Number(comparisonValue);
+                break;
         }
+        return { clause };
+    }
+
+    private _conditionReadError(key: string, error: unknown): string {
+        const name = key.match(/^_[a-zA-Z0-9_]+/)?.[0];
+        if (name && !this.conditionRegistry.has(name)) {
+            return `Unknown condition '${name}'`;
+        }
+        return `Condition '${key}' failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+
+    /** Look-aheads (isLineSkipped) evaluate paragraphs that are not playing; their problems are reported when those play. */
+    private devReportsMuted = 0;
+
+    /**
+     * Evaluate a single condition string like "a==1" or "a=1".
+     * Supports custom conditions with parameters: "_char(alice.attribute.sex) = female"
+     */
+    private _evaluateSingleCondition(condition: string): boolean {
+        const { clause, log, thrown } = this._readCondition(condition);
+        if (log) {
+            gameLogger.error(log);
+        }
+        if (thrown) {
+            if (!this.devReportsMuted) {
+                reportDevProblem('condition', clause.error!);
+            }
+            throw thrown.error;
+        }
+        return clause.pass;
     }
 
     /**
@@ -328,35 +407,37 @@ export class LogicSystem {
     }
 
     /**
-     * Private helper to evaluate string-based conditions with AND logic: "a==1, b>4, _char(alice.health) > 50"
-     * All conditions must be true
+     * Walk a clause list in order: `all` (the `if` / `active` keys) stops at the first clause that
+     * fails, `any` (the …Or keys) at the first that holds. An empty `any` list fails.
      */
-    private _evaluateConditionString(conditionString: string): boolean {
-        const conditions = this._splitConditions(conditionString);
-
+    private _walkConditions(conditions: string[], mode: 'all' | 'any', holds: (condition: string) => boolean): boolean {
+        const settlesOn = mode === 'any';
         for (const condition of conditions) {
-            if (!this._evaluateSingleCondition(condition)) {
-                return false; // AND logic: if any condition fails, return false
+            if (holds(condition) === settlesOn) {
+                return settlesOn;
             }
         }
-
-        return true; // All conditions passed
+        return !settlesOn;
     }
 
     /**
-     * Private helper to evaluate string-based conditions with OR logic: "a==1, b>4, d!=6"
-     * At least one condition must be true
+     * The clause groups a params object carries for visibility (`if`, `ifOr`) or availability
+     * (`active`, `activeOr`). A primary that is neither a string nor a boolean, or an …Or that is
+     * not a string, counts as absent.
      */
-    private _evaluateConditionStringOr(conditionString: string): boolean {
-        const conditions = this._splitConditions(conditionString);
-
-        for (const condition of conditions) {
-            if (this._evaluateSingleCondition(condition)) {
-                return true; // OR logic: if any condition passes, return true
-            }
+    private _conditionGroups(params: Record<string, any>, isActiveClause: boolean): Array<{ key: string; mode: 'all' | 'any'; source: string | boolean }> {
+        const clauseKey = isActiveClause ? 'active' : 'if';
+        const clauseOrKey = isActiveClause ? 'activeOr' : 'ifOr';
+        const groups: Array<{ key: string; mode: 'all' | 'any'; source: string | boolean }> = [];
+        const primaryClause = params[clauseKey];
+        if (typeof primaryClause === 'string' || typeof primaryClause === 'boolean') {
+            groups.push({ key: clauseKey, mode: 'all', source: primaryClause });
         }
-
-        return false; // No conditions passed
+        const orClause = params[clauseOrKey];
+        if (typeof orClause === 'string') {
+            groups.push({ key: clauseOrKey, mode: 'any', source: orClause });
+        }
+        return groups;
     }
 
     // ignore types
@@ -365,71 +446,65 @@ export class LogicSystem {
             return true;
         }
 
-        const clauseKey = isActiveClause ? 'active' : 'if';
-        const clauseOrKey = isActiveClause ? 'activeOr' : 'ifOr';
+        // Every group is evaluated, so one that throws still throws after another has failed.
+        let passes = true;
+        for (const group of this._conditionGroups(params, isActiveClause)) {
+            const groupPasses = typeof group.source === 'boolean'
+                ? group.source
+                : this._walkConditions(this._splitConditions(group.source), group.mode, condition => this._evaluateSingleCondition(condition));
+            passes = groupPasses && passes;
+        }
+        return passes;
+    }
 
-        const primaryClause = params[clauseKey];
-        const orClause = params[clauseOrKey];
+    /**
+     * Dev tooling: why a condition holds, clause by clause, read by the same code as the real
+     * evaluation. Takes an `if`-style expression (`"a == 1, _x(y) > 2"`, every clause must hold),
+     * or params whose `if` and `ifOr` groups — `active` and `activeOr` with isActiveClause — combine
+     * as they do in play. Every clause is read, including those the real evaluation stops before
+     * (marked `skipped`). Never logs, reports or throws: a clause that would throw sets `throws`.
+     */
+    public explainCondition(expression?: string | boolean | Record<string, any>, isActiveClause = false): ConditionExplanation {
+        const params = typeof expression === 'string' || typeof expression === 'boolean'
+            ? { [isActiveClause ? 'active' : 'if']: expression }
+            : expression;
+        const explanation: ConditionExplanation = { pass: true, throws: false, groups: [] };
+        if (!params) {
+            return explanation;
+        }
 
-        // Determine if primary clause exists and what type it is
-        let hasPrimary = false;
-        let primaryIsString = false;
-        let primaryIsBoolean = false;
-
-        if (primaryClause !== undefined) {
-            if (typeof primaryClause === 'string') {
-                hasPrimary = true;
-                primaryIsString = true;
-            } else if (typeof primaryClause === 'boolean') {
-                hasPrimary = true;
-                primaryIsBoolean = true;
+        for (const { key, mode, source } of this._conditionGroups(params, isActiveClause)) {
+            const group: ConditionGroup = { key, mode, source, pass: source === true, throws: false, clauses: [] };
+            if (typeof source === 'boolean') {
+                group.clauses.push({ text: String(source), key: null, value: source, operator: null, expected: undefined, pass: source });
+            } else {
+                const conditions = this._splitConditions(source);
+                group.clauses = conditions.map(condition => this._readCondition(condition).clause);
+                let reached = 0;
+                try {
+                    group.pass = this._walkConditions(conditions, mode, () => {
+                        const clause = group.clauses[reached++];
+                        if (clause.throws) {
+                            throw clause;
+                        }
+                        return clause.pass;
+                    });
+                } catch {
+                    group.pass = false;
+                    group.throws = true;
+                }
+                group.clauses.forEach((clause, i) => {
+                    if (i >= reached) clause.skipped = true;
+                });
             }
+            explanation.pass = group.pass && explanation.pass;
+            explanation.throws = group.throws || explanation.throws;
+            explanation.groups.push(group);
         }
-
-        // Determine if or clause exists and what type it is
-        let hasOr = false;
-        let orIsString = false;
-
-        if (orClause !== undefined) {
-            if (typeof orClause === 'string') {
-                hasOr = true;
-                orIsString = true;
-            }
+        if (explanation.throws) {
+            explanation.pass = false;
         }
-
-        // If neither primary nor 'Or' clauses are present or valid, return always true.
-        if (!hasPrimary && !hasOr) {
-            return true;
-        }
-
-        // Evaluate primary clause
-        let primaryBlockPasses = true;
-        if (hasPrimary) {
-            if (primaryIsBoolean) {
-                primaryBlockPasses = primaryClause as boolean;
-            } else if (primaryIsString) {
-                primaryBlockPasses = this._evaluateConditionString(primaryClause);
-            }
-        }
-
-        // Evaluate or clause
-        let orBlockPasses = true; // Default to true if no 'or' clause
-        if (hasOr) {
-            orBlockPasses = false; // If 'or' clause exists, it must have at least one true condition
-            if (orIsString) {
-                orBlockPasses = this._evaluateConditionStringOr(orClause);
-            }
-        }
-
-        if (hasPrimary && hasOr) {
-            return primaryBlockPasses && orBlockPasses;
-        } else if (hasPrimary) {
-            return primaryBlockPasses;
-        } else if (hasOr) {
-            return orBlockPasses;
-        }
-        // This case should be covered by the initial (!hasPrimary && !hasOr) check
-        return true;
+        return explanation;
     }
 
     // ignore types
@@ -513,6 +588,7 @@ export class LogicSystem {
             let actionObject = this.actionRegistry.get(param);
             if (!actionObject) {
                 gameLogger.error(`Action ${param} is not registered.`);
+                reportDevProblem('action', `Unknown action '${param}'`);
                 continue;
             }
 
@@ -520,7 +596,7 @@ export class LogicSystem {
                 if (!skipDelayed) delayed.push([param, actionObject]);
                 continue;
             }
-            this.dispatchAction(actionObject, params[param]);
+            this.dispatchAction(actionObject, params[param], param);
         }
         if (!delayed.length) {
             return true;
@@ -533,12 +609,13 @@ export class LogicSystem {
             return false;
         }
         for (const [param, actionObject] of delayed) {
-            this.dispatchAction(actionObject, params[param]);
+            this.dispatchAction(actionObject, params[param], param);
         }
         return true;
     }
 
-    private dispatchAction(actionObject: any, value: any) {
+    private dispatchAction(actionObject: any, value: any, key: string) {
+        const devMark = devLogOn ? devLogActionStart(key, value) : null;
         if (Array.isArray(value)) {
             for (let item of value) {
                 actionObject.action?.(item);
@@ -546,6 +623,7 @@ export class LogicSystem {
         } else {
             actionObject.action?.(value);
         }
+        if (devMark) devLogActionEnd(devMark);
     }
 
     /**
@@ -853,8 +931,13 @@ export class LogicSystem {
      * discovery), so the dungeon can look ahead at the paragraphs after the one on screen.
      */
     public isLineSkipped(text: string): boolean {
-        const output = this.ifLogic(this.resolveCode(text)).trim();
-        return !output || this.resolveTalkingCharacter(output).absent;
+        this.devReportsMuted++;
+        try {
+            const output = this.ifLogic(this.resolveCode(text)).trim();
+            return !output || this.resolveTalkingCharacter(output).absent;
+        } finally {
+            this.devReportsMuted--;
+        }
     }
 
     public resolveTextStyles(text: string): string {
@@ -1444,7 +1527,7 @@ export class LogicSystem {
                         stackMap.set(filtered[0], (stackMap.get(filtered[0]) || 0) + count);
                     } else {
                         for (let i = 0; i < count && filtered.length > 0; i++) {
-                            const idx = Math.floor(Math.random() * filtered.length);
+                            const idx = this.pickTemplateIndex(filtered, winner, workingSourceMap);
                             const templateId = filtered[idx];
                             stackMap.set(templateId, (stackMap.get(templateId) || 0) + 1);
 
@@ -1474,7 +1557,7 @@ export class LogicSystem {
                         stackMap.set(filtered[0], (stackMap.get(filtered[0]) || 0) + count);
                     } else {
                         for (let i = 0; i < count && filtered.length > 0; i++) {
-                            const idx = Math.floor(Math.random() * filtered.length);
+                            const idx = this.pickTemplateIndex(filtered, winner, workingSourceMap);
                             const templateId = filtered[idx];
                             stackMap.set(templateId, (stackMap.get(templateId) || 0) + 1);
 
@@ -1537,6 +1620,28 @@ export class LogicSystem {
         const delta = entity.delta || 0;
         if (delta <= 0) return base;
         return base + Math.floor(Math.random() * (2 * delta + 1)) - delta;
+    }
+
+    /**
+     * Index into `filtered` of the template an entity yields. An entity whose filter names several
+     * categories picks one of the categories that matched first, then a template in it: a per-template
+     * pick would give each category a share equal to its template count, so twenty rings drown out
+     * two weapons. Any other entity picks uniformly.
+     */
+    private pickTemplateIndex(filtered: string[], entity: PoolEntityGroup, sourceMap: Map<string, any>): number {
+        const categories = entity.filters_include?.category;
+        if (!Array.isArray(categories) || categories.length < 2) {
+            return Math.floor(Math.random() * filtered.length);
+        }
+        const byCategory = new Map<string, number[]>();
+        filtered.forEach((templateId, index) => {
+            const category = sourceMap.get(templateId)?.category;
+            if (!byCategory.has(category)) byCategory.set(category, []);
+            byCategory.get(category)!.push(index);
+        });
+        const groups = [...byCategory.values()];
+        const group = groups[Math.floor(Math.random() * groups.length)];
+        return group[Math.floor(Math.random() * group.length)];
     }
 
     /**

@@ -171,14 +171,8 @@
       {
         "id": "item_level",
         "type": "number",
-        "description": "Visual level indicator shown on the item card.",
+        "description": "Item level, shown as a Lv tag on the item card and on every item brick (inventory, slots, trade and loot windows). Also the Level sort in the inventory.",
         "uid": "GEitItemLevel1"
-      },
-      {
-        "id": "book",
-        "type": "string",
-        "description": "Readable book: full scene reference dungeon_id.room_id.scene_id (e.g. global.books.eilfiel) whose paragraphs are the pages. Adds a Read choice opening the paged reader (Next/Previous/Read again/Close); finishing the last page discovers the item.",
-        "uid": "GEitBook1"
       },
       {
         "id": "painting",
@@ -292,6 +286,15 @@
         "description": "The ability exists for the character only while they have ANY of these statuses - otherwise it is hidden everywhere (ability panel, character sheet, battle, AI). Merged from modifiers, so items and statuses can inject it.",
         "uid": "GeDfAbReqStatus",
         "order": -92
+      },
+      {
+        "id": "conceal_effects",
+        "role": "meta",
+        "type": "boolean",
+        "description": "Keep what the ability does a mystery. Its card shows the name, cooldown, costs, description and this field's line, and leaves out every effect line and every other meta line, such as Target. The ability still works as authored.",
+        "ingame_description": "Effects unknown",
+        "uid": "GeDfAbConceal",
+        "order": -91
       }
     ],
     "dev/editor_layouts": [
@@ -332,7 +335,6 @@
             "color": "81c784",
             "members": [
               "use_scene",
-              "book",
               "painting"
             ]
           },

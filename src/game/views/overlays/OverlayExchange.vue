@@ -6,6 +6,7 @@ import { PARTY_INVENTORY_ID, TradeContext } from '../../systems/itemSystem';
 import { Item } from '../../core/character/item';
 import { Inventory } from '../../core/character/inventory';
 import ExchangeInventory from '../exchange/ExchangeInventory.vue';
+import CustomComponentContainer from '../CustomComponentContainer.vue';
 import ItemPopupCard from '../popups/cards/ItemPopupCard.vue';
 import { popover as vPopover, type PopoverBinding } from '../../directives/popoverDirective';
 import { gameLogger } from '../../utils/logger';
@@ -180,62 +181,8 @@ function handleItemClick(item: Item, source: Inventory, target: Inventory, event
   }
 }
 
-// Move item with trade validation
 function moveItem(item: Item, source: Inventory, target: Inventory, quantity: number): boolean {
-  // In trade mode, handle currency exchange
-  if (mode.value === 'trade') {
-    // Determine which context based on who owns the item
-    // If source is party inventory, use player context (what trader pays player)
-    // If source is trader inventory, use trader context (what trader charges player)
-    const isSourceParty = source.id === PARTY_INVENTORY_ID;
-    const context: TradeContext = isSourceParty ? 'player' : 'trader';
-
-    // Check if item is tradable in this context
-    if (item.isTradableInContext(context)) {
-      const pricePerItem = item.getTradePriceInContext(context);
-
-      // Calculate total price for quantity
-      const totalPrice: Record<string, number> = {};
-      for (const [currencyId, amount] of Object.entries(pricePerItem)) {
-        totalPrice[currencyId] = amount * quantity;
-      }
-
-      // Check if buyer can afford BEFORE attempting transfer
-      if (!target.canAffordPrice(totalPrice)) {
-        global.addNotificationId('not_enough_currency', { currency: getCurrencyName(totalPrice) });
-        return false;
-      }
-
-      // Try to transfer the item first - if this fails, no currency changes hands
-      const transferSuccess = source.transferTo(target, item, quantity);
-      if (!transferSuccess) {
-        return false; // Transfer failed (inventory full, etc.), no currency exchanged
-      }
-
-      // Transfer succeeded - now exchange currency
-      // Deduct currency from buyer (target = the inventory receiving the item)
-      if (!target.deductCurrency(totalPrice)) {
-        // This shouldn't happen since we checked canAfford, but handle it anyway
-        // Need to reverse the item transfer
-        target.transferTo(source, item, quantity);
-        global.addNotificationId('not_enough_currency', { currency: getCurrencyName(totalPrice) });
-        return false;
-      }
-
-      // Add currency to seller (source = the inventory giving away the item)
-      // Skip validation to allow currency payment even if inventory is over weight/size limit
-      for (const [currencyId, amount] of Object.entries(totalPrice)) {
-        const currencyItem = game.itemSystem.createItem(currencyId);
-        source.addItem(currencyItem, amount, true); // true = skipValidation
-        game.trigger('currency_change', source, currencyId, amount);
-      }
-
-      return true;
-    }
-  }
-
-  // Non-trade mode or non-tradable item: just transfer
-  return source.transferTo(target, item, quantity);
+  return game.itemSystem.exchangeItem(item, source, target, quantity);
 }
 
 // Open quantity popup
@@ -473,6 +420,10 @@ function close() {
             <img v-if="currency.image" :src="currency.image" :alt="currency.name" class="currency-image" />
             <span class="currency-amount">{{ currency.amount }}</span>
           </div>
+          <div class="currency-actions">
+            <CustomComponentContainer slot="exchange-currency"
+              :context="{ inventory: partyInventory, targetInventory: exchangeInventory, mode, isParty: true }" />
+          </div>
         </div>
 
         <ExchangeInventory :inventory="partyInventory" :target-inventory="exchangeInventory"
@@ -487,6 +438,10 @@ function close() {
             v-popover="currencyPopover(currency.id, false)">
             <img v-if="currency.image" :src="currency.image" :alt="currency.name" class="currency-image" />
             <span class="currency-amount">{{ currency.amount }}</span>
+          </div>
+          <div class="currency-actions">
+            <CustomComponentContainer slot="exchange-currency"
+              :context="{ inventory: exchangeInventory, targetInventory: partyInventory, mode, isParty: false }" />
           </div>
         </div>
 
@@ -661,6 +616,26 @@ function close() {
 /* Exchange inventory currencies align right */
 .inventory-with-currency:last-child .currency-display {
   justify-content: flex-end;
+}
+
+/* The `exchange-currency` slot takes the box's inner end, toward the other panel. Both boxes are
+   always the same height, so a button here never pushes one panel's grid below the other's,
+   which a button in the title row does once it wraps. */
+.currency-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.inventory-with-currency:last-child .currency-actions {
+  order: -1;
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.currency-actions:empty {
+  display: none;
 }
 
 .currency-item {

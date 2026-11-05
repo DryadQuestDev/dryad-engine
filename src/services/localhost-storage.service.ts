@@ -435,6 +435,17 @@ export class LocalhostStorageService implements StorageService {
     }
     // --- End Google API Methods ---
 
+    async statFile(path: string): Promise<{ mtimeMs: number; size: number } | null> {
+        try {
+            const response = await fetch(`${this.baseUrl}/engine/stat?path=${encodeURIComponent(path)}`);
+            if (!response.ok) return null;
+            const result = await response.json();
+            return result?.exists ? { mtimeMs: result.mtimeMs, size: result.size } : null;
+        } catch {
+            return null;
+        }
+    }
+
     // --- WebP Conversion Methods ---
     async getFileSize(path: string): Promise<number> {
         const url = `${this.baseUrl}/engine/get-file-size?path=${encodeURIComponent(path)}`;

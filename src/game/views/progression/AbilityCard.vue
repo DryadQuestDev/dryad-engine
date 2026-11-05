@@ -109,6 +109,9 @@ const description = computed(() => {
 });
 
 const metaDescription = computed(() => {
+  if (abilityMeta.value?.conceal_effects) {
+    return game.buildAbilityMetaDescription({ meta: { conceal_effects: true } }, props.characterId);
+  }
   const delta = deltaData.value;
   if (delta && Object.keys(delta.metaDiff).length > 0) {
     const displayMeta = { ...delta.baseData.meta };
@@ -366,6 +369,11 @@ const effectGroups = computed(() => {
   return merged;
 });
 
+// meta.conceal_effects keeps what the ability does a mystery: the card drops every effect group and
+// every other meta line (a "Target: All enemies" would already give the game away), and lists the
+// flag's own line instead.
+const shownEffectGroups = computed(() => abilityMeta.value?.conceal_effects ? [] : effectGroups.value);
+
 // Helper to get stat display name
 function getStatName(statId: string): string {
   return game.characterSystem.statsMap.get(statId)?.name || statId;
@@ -424,10 +432,10 @@ function getStatIcon(statId: string): string | undefined {
         class="ability-description"></div>
 
       <div class="ability-details"
-        v-if="metaDescription.length > 0 || effectGroups.length > 0">
+        v-if="metaDescription.length > 0 || shownEffectGroups.length > 0">
         <div v-for="(line, i) in metaDescription" :key="'m' + i" class="meta-desc-line"
           v-script="{ html: line, resolver: false, context: lineContext }"></div>
-        <div v-for="effect in effectGroups" :key="effect.id + (effect.inactive ? ':off' : '')" class="effect-item"
+        <div v-for="effect in shownEffectGroups" :key="effect.id + (effect.inactive ? ':off' : '')" class="effect-item"
           :class="{ 'inactive-effect': effect.inactive, 'new-effect': effect.isNew }">
           <div v-if="effect.name" class="effect-name">{{ effect.name }}</div>
           <div v-if="effect.attach" class="effect-line effect-attach"

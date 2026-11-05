@@ -55,18 +55,16 @@ const durability = computed(() => {
   return typeof value === 'number' ? Math.round(value) : null;
 });
 
+// Generic `item_level` trait (stamped by whatever scales the item), same tag as the item card
+const itemLevel = computed(() => {
+  const value = props.item.traits?.item_level;
+  return typeof value === 'number' && value > 0 ? value : 0;
+});
+const levelTag = computed(() => Global.getInstance().getString('item.level_short', { level: itemLevel.value }));
+
 const quantity = computed(() => {
   const maxStack = props.item.maxStack();
   if (maxStack && (maxStack > 1 || maxStack === -1)) return props.item.quantity;
-  return null;
-});
-
-const weight = computed(() => {
-  if (props.item.isEquipped) return null;
-  const itemWeight = props.item.getTrait('weight');
-  if (itemWeight && itemWeight > 0) {
-    return (itemWeight * props.item.quantity).toFixed(1);
-  }
   return null;
 });
 
@@ -121,7 +119,7 @@ function handleDragStart(event: DragEvent) {
       <span v-else class="item-name-fallback">{{ name }}</span>
 
       <span v-if="durability !== null" class="item-durability">{{ durability }}</span>
-      <span v-if="weight !== null" class="item-weight">{{ weight }}</span>
+      <span v-if="itemLevel" class="item-level">{{ levelTag }}</span>
       <span v-if="quantity !== null" class="item-quantity">{{ quantity }}</span>
     </div>
   </div>
@@ -180,17 +178,5 @@ function handleDragStart(event: DragEvent) {
   font-size: 10px;
   border-radius: 2px;
   font-weight: bold;
-}
-
-.item-weight {
-  position: absolute;
-  bottom: 2px;
-  left: 2px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #999;
-  padding: 2px 4px;
-  font-size: 9px;
-  border-radius: 2px;
-  font-weight: normal;
 }
 </style>

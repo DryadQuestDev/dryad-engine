@@ -1,5 +1,6 @@
 import { ref, computed, onBeforeUnmount, type Ref } from 'vue';
 import gsap from 'gsap';
+import { Global } from '../global/global';
 import { PowerGlitch } from 'powerglitch';
 import type { CharacterSceneSlotObject } from '../schemas/characterSceneSlotSchema';
 
@@ -37,7 +38,7 @@ export interface CharacterAnimationControls {
   stopIdle: () => void;
   /** Ease out of the current idle back to rest, then start the slot's (new) idle. */
   switchIdle: () => void;
-  /** Play a one-shot animation once. `side` is -1 when the actor stands left of center, 1 right of it. */
+  /** Play a one-shot animation once. `side` is -1 when the actor stands left of what it faces (the stage center by default), 1 right of it. */
   playOneShot: (anim: string, opts: { duration?: number; intensity?: number; side: number }) => void;
 
   // State tracking
@@ -156,7 +157,8 @@ export function useCharacterAnimation(
       bounce: { y: '-100%', opacity: 0 },
       pop: { scale: 0, opacity: 0 },
       sweep: { x: '-100%', opacity: 0 },
-      blurIn: { opacity: 0, filter: 'blur(20px)' },
+      // Visual effects: Reduced drops the blur (a filter redrawn every frame) and keeps the fade
+      blurIn: Global.getInstance().reducedEffects ? { opacity: 0 } : { opacity: 0, filter: 'blur(20px)' },
       moveInLeft: { x: '-100%' },
       moveInRight: { x: '100%' },
       moveInTop: { y: '-100%' },
@@ -211,7 +213,7 @@ export function useCharacterAnimation(
       };
 
       // Only reset filter if the transition used it (blurIn)
-      if (type === 'blurIn') {
+      if (type === 'blurIn' && !Global.getInstance().reducedEffects) {
         elementAnimProps.filter = 'blur(0px)';
       }
 
@@ -281,7 +283,7 @@ export function useCharacterAnimation(
       flipVertical: { rotationX: 90, opacity: 0 },
       elastic: { scale: 0, opacity: 0 },
       bounce: { y: '100%', opacity: 0 },
-      blurOut: { opacity: 0, filter: 'blur(20px)' },
+      blurOut: Global.getInstance().reducedEffects ? { opacity: 0 } : { opacity: 0, filter: 'blur(20px)' },
     };
 
     if (transitions[type]) {
@@ -830,7 +832,8 @@ export function useCharacterAnimation(
 
   /**
    * One-shot animations: play once on the action wrapper and return to rest. `side` makes the
-   * directional ones point the right way — a lunge goes toward the stage center, a recoil away.
+   * directional ones point the right way — a lunge goes toward what the actor faces (the stage
+   * center by default), a recoil away.
    */
   const playOneShot = (anim: string, opts: { duration?: number; intensity?: number; side: number }) => {
     const el = actionWrapperRef.value;
@@ -838,8 +841,8 @@ export function useCharacterAnimation(
     oneShot?.kill();
     gsap.set(el, { clearProps: 'all' });
     const k = opts.intensity ?? 1;
-    const d = opts.duration ?? ({ lunge: 0.55, recoil: 0.6, hop: 0.45, shake: 0.45, shiver: 0.6, nod: 0.5, bounce: 0.5, flash: 0.45 } as Record<string, number>)[anim] ?? 0.5;
-    const inward = -opts.side;    // toward the center
+    const d = opts.duration ?? ({ lunge: 0.55, recoil: 0.6, hurt: 0.6, hop: 0.45, shake: 0.45, shiver: 0.6, nod: 0.5, bounce: 0.5, flash: 0.45 } as Record<string, number>)[anim] ?? 0.5;
+    const inward = -opts.side;    // toward what it faces
     const tl = gsap.timeline({ onComplete: () => { gsap.set(el, { clearProps: 'all' }); oneShot = null; } });
     switch (anim) {
       case 'lunge':
@@ -849,6 +852,14 @@ export function useCharacterAnimation(
       case 'recoil':
         tl.to(el, { xPercent: -10 * k * inward, rotation: -4 * k * inward, transformOrigin: '50% 100%', duration: d * 0.2, ease: 'power4.out' })
           .to(el, { xPercent: 0, rotation: 0, duration: d * 0.8, ease: 'power2.inOut' });
+        break;
+      case 'hurt':
+        // Taking a hit: the recoil and the red wash together (one-shots replace each other, so they can't stack).
+        tl.to(el, { xPercent: -10 * k * inward, rotation: -4 * k * inward, transformOrigin: '50% 100%', duration: d * 0.2, ease: 'power4.out' }, 0)
+          .to(el, { xPercent: 0, rotation: 0, duration: d * 0.8, ease: 'power2.inOut' }, d * 0.2)
+          .fromTo(el, { filter: 'sepia(0) saturate(1) hue-rotate(0deg) brightness(1)' },
+            { filter: `sepia(${0.9 * k}) saturate(${1 + 5 * k}) hue-rotate(-40deg) brightness(${1 + 0.15 * k})`, duration: d * 0.2, ease: 'power2.out' }, 0)
+          .to(el, { filter: 'sepia(0) saturate(1) hue-rotate(0deg) brightness(1)', duration: d * 0.8, ease: 'power2.in' }, d * 0.2);
         break;
       case 'hop':
         tl.to(el, { yPercent: -7 * k, duration: d * 0.45, ease: 'power2.out' })

@@ -149,6 +149,14 @@
   background: rgba(66, 185, 131, 0.2);
 }
 
+.rpg-btn-lose {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.rpg-btn-lose:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
 .rpg-btn-zoom {
   border-color: rgba(147, 130, 220, 0.4);
 }
@@ -647,6 +655,17 @@
 .rpg-targetable-friendly:has(.character-slot-hit-mask polygon:hover) .character-doll-wrapper {
   animation: none;
   filter: drop-shadow(0 0 20px rgba(234, 179, 8, 1)) drop-shadow(0 0 10px rgba(234, 179, 8, 0.8)) drop-shadow(0 0 4px rgba(234, 179, 8, 0.6));
+}
+
+/* Visual effects: Reduced (engine setting): the target glow holds still instead of pulsing. The hover
+   rules above outrank these, so the hovered target still lights up gold. */
+body.reduced-effects .rpg-targetable-hostile .character-doll-wrapper {
+  animation: none;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.7)) drop-shadow(0 0 3px rgba(239, 68, 68, 0.5));
+}
+body.reduced-effects .rpg-targetable-friendly .character-doll-wrapper {
+  animation: none;
+  filter: drop-shadow(0 0 8px rgba(66, 185, 131, 0.7)) drop-shadow(0 0 3px rgba(66, 185, 131, 0.5));
 }
 
 @keyframes rpg-target-pulse-hostile {

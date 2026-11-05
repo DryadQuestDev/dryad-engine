@@ -20,6 +20,7 @@ import TriStateSwitch from './TriStateSwitch.vue';
 import FileInput from './FileInput.vue';
 import HtmlAreaInput from './HtmlAreaInput.vue';
 import RangeInput from './RangeInput.vue';
+import DateInput from './DateInput.vue';
 import StringArrayInput from './StringArrayInput.vue';
 import { preserveScroll } from './preserveScrollDirective';
 import { useGeneratedFields } from './useGeneratedFields';
@@ -635,6 +636,17 @@ watchDebounced(internalValue, (newValue, oldValue) => {
           @click="internalValue = null" v-tooltip.bottom="'Reset Color'" :disabled="internalValue === null"
           class="p-button-sm ml-1" />
       </div>
+      <div class="core-data-display" v-if="parentCoreDataItem !== null">
+        <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
+      </div>
+    </div>
+
+    <!-- Date Picker (stored as "YYYY-MM-DD") -->
+    <div v-else-if="fieldType === 'date'" class="field-container">
+      <FloatLabel variant="on" class="p-float-label-variant-on input-wrapper" v-tooltip.left="tooltip">
+        <DateInput v-model="internalValue" :inputId="fieldId" />
+        <label :for="fieldId">{{ label }}</label>
+      </FloatLabel>
       <div class="core-data-display" v-if="parentCoreDataItem !== null">
         <pre>{{ displayCoreValue(fieldCoreValue) }}</pre>
       </div>

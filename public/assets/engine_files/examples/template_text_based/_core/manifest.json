@@ -5,9 +5,12 @@
   ],
   "starting_state": "exploration",
   "id": "template_text_based",
-  "name": "Text Based Template",
+  "name": "Text adventure",
   "version": "0.0.1",
-  "description": "<p>Template game.</p>",
+  "description": "<p>The story is told in text, and the player explores rooms by picking choices.</p>",
+  "cover_assets": [
+    "assets/engine_files/template_assets/covers/text_adventure.webp"
+  ],
   "starting_dungeon_room_id": "1",
   "starting_dungeon_id": "template",
   "scripts": [

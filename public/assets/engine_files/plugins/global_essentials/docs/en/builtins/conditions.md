@@ -26,7 +26,7 @@ All built-in conditions for choice visibility checks and conditional logic.
 | `_choice_visited` | Whether a choice was ever picked, by its line id; put its dungeon in front to ask about another one. A `{no_visited}` choice never counts. For choices already made in existing saves: in new content, set a flag on the branch's first paragraph and test the flag | `_choice_visited(~1.intro.3.1) = true`, `_choice_visited(dungeon2.~1.intro.3.1) = false` |
 | `_scene` | Whether a scene is currently active | `_scene = true` |
 | `_selected_character` | ID of currently selected character | `_selected_character = alice` |
-| `_in_party` | Whether a character is currently in the party. For a companion's own line use the `ane!:` speaker tag instead | `_in_party(ane) = true`, `if{_in_party(klead) = false}ane!: “…”fi{}` |
+| `_in_party` | Whether a character is currently in the party. For a companion's own line use the `alice!:` speaker tag instead | `_in_party(alice) = true`, `if{_in_party(carol) = false}alice!: “…”fi{}` |
 | `_item_on` | Whether character has item equipped (no item id = the active item) | `_item_on(alice, sword) = true`, `_item_on(mc) = true` |
 | `_active_item` | Whether the active item (the one whose custom choice opened the scene) is this template id | `_active_item(rusty_key) = true` |
 | `_active_item_slot` | Slot type the active item is equipped in on that character (`''` while it isn't) | `_active_item_slot(alice) = ring` |

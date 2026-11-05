@@ -2,7 +2,7 @@
 
 const { game } = window.engine;
 
-import { getMc, getDungeonLevel, dungeonScale, setGenerationLevel, inSpawnWindow, isKnownRecipe } from './reward.mjs';
+import { getMc, getDungeonLevel, setGenerationLevel, drawPool } from './reward.mjs';
 
 // ═══════════════════════ Pooled inventories (DQ9 generics port) ═══════════════════════
 // Two authoring forms:
@@ -38,25 +38,11 @@ function mcLevel() {
  *  `poolRef` accepts an array (the chooseMany `pool` trait) or a comma-separated string (inline
  *  `^a,b` refs); every entry draws independently, so tiers and places compose additively. */
 function drawPoolInto(/** @type {Inventory} */ inventory, /** @type {string|string[]} */ poolRef, /** @type {number} */ level) {
-    // Spawn windows: the pool draws from a level-filtered copy of the templates, so tiered items
-    // (spawn_min/spawn_max) only appear inside their band. Entity filters still apply on top.
-    const source = [...(game.getData('item_templates', true)?.values() || [])]
-        .filter(t => inSpawnWindow(t, level) && !isKnownRecipe(t));
     setGenerationLevel(level);
-    // Two authoring shapes reach here: the `pool` inventory trait is chooseMany (an array), while
-    // inline {loot: "^a,b"} refs arrive as the raw comma string the engine sliced off the caret.
-    const entryIds = (Array.isArray(poolRef) ? poolRef : String(poolRef || '').split(','))
-        .map(s => String(s).trim()).filter(Boolean);
     try {
-        for (const entryId of entryIds) {
-            for (const draw of game.drawFromPool(entryId, { type: 'chance', customData: source })) {
-                const item = game.createItem(draw.id);
-                if (!item) continue;
-                const quantity = item.is_currency
-                    ? Math.max(1, Math.round(draw.quantity * dungeonScale(level)))
-                    : draw.quantity;
-                inventory.addItem(item, quantity);
-            }
+        for (const { template, quantity } of drawPool(poolRef, level)) {
+            const item = game.createItem(template.id);
+            if (item) inventory.addItem(item, quantity);
         }
     } finally {
         setGenerationLevel(null);

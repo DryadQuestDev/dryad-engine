@@ -1,20 +1,29 @@
 $dungeon_name
-My Dungeon Name
+Chapter 1
+
 ^1
 @description
-Room1 Description
+// The ^1 line starts a room, and everything below it up to the next ^ belongs to it. Doors between rooms are set in the Rooms tab.
+// @description is the text the player sees in that room.
+Riko's room. Morning light comes through the blinds, and the door to the hall stands open.
 
 @encounter1
-!choice1
-Test Encounter
+// An @ block is something in the room the player can interact with. Each ! line below is a choice it offers. The text in <…> is the button label.
+!choice1<Read the notes>
+A desk covered in notes and half-finished sketches.
 
 #encounter1~choice1
+// # starts a scene. This one is named encounter1~choice1, so it plays when the player picks choice1 of encounter1.
 1
+// The 1 above starts the scene's first row, and the % below starts that row's text.
 %
-Test interaction
+The top note says: *Water the plants. Fix the lamp. Call Mom.*
+// A {…} line runs actions: this one plays a sound from General › Sounds and sets the flag notes_read. A flag needs no setup: one nobody set reads 0.
+{sound: "page_turn", flag: "notes_read = 1"}
 ^2
 @description
-Room2 Description
+// if{…}…fi{} shows its text only while the condition holds: here, once the notes are read.
+The hallway. A rug runs to the stairs, and a lamp hums at the far end.if{notes_read = 1} It must be the lamp from the note.fi{}
 ^3
 @description
-Room3 Description
+The kitchen. Something on the stove smells faintly of cinnamon.

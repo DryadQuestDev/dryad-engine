@@ -1,14 +1,24 @@
 # Visual Editor
 
-The **Visual Editor** is the recommended way to author dungeons in Dryad Engine. It's an in-editor popup that turns DryadScript's line-based markup into editable block cards.
+The **Visual Editor** is the recommended way to author dungeons in Dryad Engine. It's a dungeon's **Content** subtab, and it turns DryadScript's line-based markup into editable block cards.
 
 ## Opening the editor
 
 1. Navigate to the **Dungeons** tab and pick a dungeon (or create one).
-2. Go to the **Config** subtab.
-3. Click the **Content Editor** button in the subtab header.
+2. Go to the **Content** subtab, next to **Config**.
 
-> **Auto-open:** Toggle **Auto-open** inside the popup to have it open automatically whenever you land on a dungeon's Config subtab. The preference is remembered across sessions.
+@en/images/first_steps/content_tab.webp
+
+**Save** sits at the start of the toolbar, next to **Autosave**. The dungeon select above switches dungeons, and the editor remembers the subtab you were on.
+
+### Focus
+
+For more room to write, press the **Focus** button at the left end of the top row, or **Ctrl+Shift+F**. The editor's two header rows shrink to one slim strip:
+
+- **Where you are** – game › tab › dungeon › subtab. Click any part to switch.
+- **Playtest** and **Continue**.
+
+The toolbar and the search row share one line, and the add buttons show each block's sigil (`^` `@` `#` `$`). Focus is remembered per subtab: the Content tab can stay focused while the Config form keeps the full header. **F11** in the desktop app also hides the window's title bar.
 
 ## Structure at a glance
 

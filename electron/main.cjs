@@ -1053,6 +1053,19 @@ ipcMain.handle("list-files-recursively", async (_, startDirPath, assetFolders, i
   }
 });
 
+// 🕒 A file's modification time and size, or null when it doesn't exist (Electron IPC)
+ipcMain.handle("stat-file", async (_, relativePath) => {
+  const normalizedPath = relativePath.startsWith('assets/') ? relativePath.substring('assets/'.length) : relativePath;
+  const safePath = getSafeAbsolutePath(normalizedPath);
+  if (!safePath) return null;
+  try {
+    const stats = await fs.promises.stat(safePath);
+    return stats.isFile() ? { mtimeMs: stats.mtimeMs, size: stats.size } : null;
+  } catch {
+    return null;
+  }
+});
+
 // 📏 Get File Size (Electron IPC)
 ipcMain.handle("get-file-size", async (_, relativePath) => {
   try {

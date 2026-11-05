@@ -39,7 +39,7 @@ type PendingReward = {
   /** Dev mode only: generator numbers for tuning, shown at the top of the panel. */
   debug: {
     battleId: string; level: number; scale: number; base: number; threat: number;
-    threatXp: number; equipBudget: number; incomeBudget: number; currencyPayout: number;
+    threatXp: number; pool: string | null;
   } | null;
 };
 
@@ -95,11 +95,51 @@ type RewardService = {
   simulateBattleLoot(opts: { level: number, threat: number, rolls?: number, battleId?: string }): { level: number, threat: number, rolls: { id: string, quantity: number, price: number, itemLevel?: number, source: string }[][], budgets: any };
 };
 
+/** One worn piece of an "upgrade equipped" batch: how many levels it gains and their stone cost. */
+type SmithUpgradePlan = { item: Item; levels: number; cost: number };
+
+/** A stat a reforge moves, for the detail view's change list: signed display values, name off character_stats, good by the stat's polarity. */
+type SmithStatChange = { id: string; name: string; from: string; to: string; good: boolean };
+
+/** What the station's confirm box shows. `tone` picks the accept button: the forge look or the break look. */
+type SmithConfirmOptions = { tone: 'upgrade' | 'break'; header: string; message: string; acceptLabel: string; rejectLabel: string };
+
+type SmithService = {
+  /** Open the smith station overlay (same as the `smith` action). */
+  open(): void;
+  close(): void;
+  /** Reforge `levels` levels higher; a worn item is re-equipped into its slot. Null if not possible. */
+  upgradeItem(item: Item, levels: number): Item | null;
+  /** Reforge a batch with one sound. Returns the live upgraded instances. */
+  upgradeItems(entries: SmithUpgradePlan[]): Item[];
+  /** Spread `budget` stones (default: all held) over worn pieces, lowest level first. */
+  planEquippedUpgrades(budget?: number): SmithUpgradePlan[];
+  /** True when a bag piece gains a visible stat and loses none against what a party member wears. */
+  beatsWornGear(item: Item): boolean;
+  /** Break one unequipped item. Returns the stones granted, or null. */
+  breakItem(item: Item): number | null;
+  /** Break a batch of unequipped items with one sound. Returns the stones granted. */
+  breakItems(items: Item[]): number;
+  breakYield(item: Item): number;
+  upgradeCost(item: Item, levels: number): number;
+  rarityCost(item: Item): number;
+  /** Level-stamped equipment in the party bag, worn or not. */
+  smithableItems(): Item[];
+  /** The party member wearing an item, or null. */
+  wearerOf(item: Item): Character | null;
+  /** Highest level an item can be reforged to: the MC's level, and for worn gear the wearer's too. */
+  levelCap(item: Item): number;
+  makeItemAtLevel(templateId: string, level: number): Item;
+  stoneCount(): number;
+  mcLevel(): number;
+};
+
 // ── Service overloads (declaration merging) ──
 
 interface Game {
   getService(id: 'xp'): XpService;
   getService(id: 'reward'): RewardService;
+  getService(id: 'smith'): SmithService;
 }
 
 // ── Emitter overloads ──
@@ -118,4 +158,12 @@ interface GameEvents {
 interface GameEvents {
   /** Fired when a character levels up. */
   character_level_up: (character: Character, newLevel: number) => void;
+  /** Fired before a smith reforge. Return false to prevent it (stones are kept). */
+  smith_upgrade: (item: Item, levels: number) => boolean | void;
+  /** Fired before a smith break, once per item of a batch. Return false to skip that item. */
+  smith_break: (item: Item, stonesRefunded: number) => boolean | void;
+  /** Fired after a reforge; item is the live upgraded instance. */
+  smith_upgraded: (item: Item, levels: number) => void;
+  /** Fired after an item was broken down and its stones granted. */
+  smith_broken: (item: Item, stonesRefunded: number) => void;
 }

@@ -12,6 +12,7 @@
 }
 
 .smith-panel {
+    position: relative;
     width: min(1000px, 95vw);
     /* Constant height — the panel must not jump between list/detail modes or as filters change. */
     height: min(720px, 88vh);
@@ -34,7 +35,7 @@
 }
 
 .smith-title {
-    font-size: 18px;
+    font-size: 0.9em;
     font-weight: 700;
     color: #e8c87a;
     flex: 1;
@@ -44,7 +45,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 16px;
+    font-size: 0.8em;
     font-weight: 700;
     color: #e4dbc8;
 }
@@ -65,7 +66,7 @@
     background: none;
     border: none;
     color: #b0a695;
-    font-size: 18px;
+    font-size: 0.9em;
     cursor: pointer;
     padding: 4px 8px;
 }
@@ -97,7 +98,7 @@
     border-radius: 8px 8px 0 0;
     color: #b0a695;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 0.65em;
 }
 
 .smith-tabs button.active {
@@ -112,12 +113,12 @@
 .smith-search {
     margin-bottom: 6px;
     padding: 6px 12px;
-    width: 220px;
+    width: 17em;
     background: rgba(0, 0, 0, 0.35);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
     color: #e4dbc8;
-    font-size: 13px;
+    font-size: 0.65em;
     outline: none;
 }
 
@@ -125,11 +126,154 @@
     color: #7d7264;
 }
 
+/* List area under the tabs: fixed how-to/filter row, scrolling bricks, break bar pinned below. */
+.smith-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.smith-subbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 10px 16px 0;
+}
+
+.smith-hint {
+    flex: 1 1 260px;
+    font-size: 0.625em;
+    line-height: 1.4;
+    color: #9a8f7f;
+}
+
+.smith-filter {
+    display: flex;
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.smith-filter button {
+    padding: 5px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: none;
+    color: #b0a695;
+    cursor: pointer;
+    font-size: 0.625em;
+}
+
+.smith-filter button + button {
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.smith-filter button.active {
+    background: rgba(232, 200, 122, 0.16);
+    color: #e8c87a;
+}
+
 .smith-body {
     overflow-y: auto;
     padding: 12px 16px 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
     flex: 1;
+    min-height: 0;
+}
+
+.smith-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.smith-select-button {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: #b0a695;
+    cursor: pointer;
+    font-size: 0.625em;
+}
+
+.smith-select-button:hover:not(:disabled) {
+    color: #e4dbc8;
+}
+
+.smith-select-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.smith-bar-note {
+    flex: 1;
+    text-align: right;
+    font-size: 0.65em;
+    color: #b0a695;
+}
+
+.smith-body.flashing {
+    animation: smith-flash 0.3s ease-out;
+}
+
+/* Break-tab quick select: rarity chips + "select up to Lv N" stepper. */
+.smith-quick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.smith-rarity-chip {
+    padding: 4px 11px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--rarity-color, #b0a695) 45%, transparent);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--rarity-color, #b0a695);
+    cursor: pointer;
+    font-size: 0.6em;
+}
+
+.smith-rarity-chip.active {
+    background: color-mix(in srgb, var(--rarity-color, #b0a695) 22%, transparent);
+    border-color: var(--rarity-color, #b0a695);
+}
+
+.smith-upto {
+    display: flex;
+    margin-left: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.smith-upto button {
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: none;
+    color: #b0a695;
+    cursor: pointer;
+    font-size: 0.625em;
+}
+
+.smith-upto button + button {
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.smith-upto button:hover:not(:disabled) {
+    color: #e4dbc8;
+}
+
+.smith-upto button:disabled {
+    opacity: 0.35;
+    cursor: default;
 }
 
 .smith-empty {
@@ -143,7 +287,7 @@
 }
 
 .smith-group-title {
-    font-size: 12px;
+    font-size: 0.6em;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #b0a695;
@@ -169,9 +313,18 @@
     height: 64px;
 }
 
+/* The bottom-left corner holds the break mark here, so the brick's level tag moves up to the
+   top-right and the smith's badges sit on the other three. */
+.smith-brick .item-level {
+    top: 2px;
+    bottom: auto;
+    left: auto;
+    right: 2px;
+}
+
 .smith-brick-badge {
     position: absolute;
-    top: -6px;
+    bottom: -6px;
     right: -4px;
     padding: 1px 6px;
     border-radius: 9px;
@@ -182,6 +335,75 @@
     color: #cfe4f5;
     pointer-events: none;
     z-index: 2;
+}
+
+/* Ring drawn around the brick: gold for worn gear, red for a piece marked to break. */
+.smith-brick.equipped::after,
+.smith-brick.marked::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border: 2px solid rgba(232, 200, 122, 0.75);
+    border-radius: 9px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.smith-brick.marked::after {
+    border-color: rgba(240, 128, 128, 0.9);
+    background: rgba(240, 96, 96, 0.12);
+}
+
+.smith-brick-equipped,
+.smith-brick-better,
+.smith-brick-check {
+    position: absolute;
+    top: -6px;
+    left: -4px;
+    min-width: 17px;
+    padding: 0 4px;
+    border-radius: 9px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-align: center;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.smith-brick-equipped {
+    background: rgba(54, 44, 22, 0.95);
+    border: 1px solid rgba(232, 200, 122, 0.6);
+    color: #e8c87a;
+}
+
+.smith-brick-check {
+    top: auto;
+    bottom: -6px;
+    background: rgba(120, 36, 36, 0.95);
+    border: 1px solid rgba(240, 128, 128, 0.7);
+    color: #ffd9d9;
+}
+
+/* Shares the equipped tag's corner: a worn piece never beats what is worn. */
+.smith-brick-better {
+    font-size: 9.5px;
+    line-height: 15px;
+    background: rgba(20, 48, 30, 0.95);
+    border: 1px solid rgba(66, 185, 131, 0.6);
+    color: #5fd39b;
+}
+
+/* At the level cap: still listed (and still opens its card), but faded behind a MAX badge. */
+.smith-brick.maxed .item-slot-wrapper {
+    opacity: 0.5;
+    filter: saturate(0.5);
+}
+
+.smith-brick-badge.max {
+    background: rgba(54, 44, 22, 0.95);
+    border-color: rgba(232, 200, 122, 0.6);
+    color: #e8c87a;
+    letter-spacing: 0.04em;
 }
 
 .smith-brick-badge.break {
@@ -204,7 +426,7 @@
 }
 
 .smith-detail-controls {
-    flex: 0 0 210px;
+    flex: 0 0 10.5em;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -254,7 +476,7 @@
     align-self: flex-start;
     margin-top: 40px;
     flex: 0 0 auto;
-    font-size: 24px;
+    font-size: 1.2em;
     color: #e8c87a;
 }
 
@@ -266,13 +488,13 @@
 }
 
 .smith-step {
-    width: 34px;
-    height: 34px;
+    width: 1.9em;
+    height: 1.9em;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.15);
     background: rgba(255, 255, 255, 0.06);
     color: #e4dbc8;
-    font-size: 18px;
+    font-size: 0.9em;
     cursor: pointer;
 }
 
@@ -282,9 +504,9 @@
 }
 
 .smith-levels {
-    min-width: 46px;
+    min-width: 2.9em;
     text-align: center;
-    font-size: 16px;
+    font-size: 0.8em;
     font-weight: 700;
     color: #9fc7e8;
 }
@@ -296,7 +518,7 @@
     background: rgba(255, 255, 255, 0.06);
     color: #b0a695;
     cursor: pointer;
-    font-size: 12.5px;
+    font-size: 0.625em;
 }
 
 .smith-forge {
@@ -305,7 +527,7 @@
     border: 1px solid rgba(232, 200, 122, 0.5);
     background: rgba(232, 200, 122, 0.16);
     color: #e8c87a;
-    font-size: 14px;
+    font-size: 0.7em;
     font-weight: 700;
     cursor: pointer;
     transition: background 0.15s;
@@ -326,24 +548,76 @@
     border: 1px solid rgba(240, 96, 96, 0.5);
     background: rgba(240, 96, 96, 0.14);
     color: #f08080;
-    font-size: 14px;
+    font-size: 0.7em;
     font-weight: 700;
     cursor: pointer;
     transition: background 0.15s;
 }
 
-.smith-break-button:hover {
+.smith-break-button:hover:not(:disabled) {
     background: rgba(240, 96, 96, 0.3);
+}
+
+.smith-break-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.smith-changes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.625em;
+}
+
+.smith-change {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.smith-change-name {
+    color: #b0a695;
+    min-width: 0;
+}
+
+.smith-change-values {
+    flex: 0 0 auto;
+    color: #e4dbc8;
+    font-weight: 600;
+}
+
+.smith-change-arrow {
+    color: #e8c87a;
+    font-size: 0.85em;
+}
+
+.smith-change-values .good {
+    color: #42b983;
+}
+
+.smith-change-values .bad {
+    color: #ff453a;
+}
+
+.smith-worn-note {
+    font-size: 0.625em;
+    color: #e8c87a;
+    text-align: center;
 }
 
 .smith-maxed-note {
     color: #e8c87a;
-    font-size: 12px;
+    font-size: 0.6em;
     letter-spacing: 0.08em;
 }
 
 .smith-short {
-    font-size: 12.5px;
+    font-size: 0.625em;
     color: #f08080;
 }
 
@@ -354,7 +628,7 @@
     background: rgba(255, 255, 255, 0.05);
     color: #b0a695;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 0.65em;
 }
 
 .smith-cancel:hover {
@@ -362,28 +636,13 @@
 }
 
 .smith-cap {
-    font-size: 13px;
+    font-size: 0.65em;
     font-weight: 700;
     color: #9fc7e8;
     background: rgba(159, 199, 232, 0.1);
     border: 1px solid rgba(159, 199, 232, 0.3);
     padding: 3px 10px;
     border-radius: 10px;
-}
-
-.smith-brick-level {
-    position: absolute;
-    bottom: -5px;
-    left: -2px;
-    padding: 0 5px;
-    border-radius: 8px;
-    font-size: 10px;
-    font-weight: 700;
-    background: rgba(24, 30, 24, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #cfe0cf;
-    pointer-events: none;
-    z-index: 2;
 }
 
 .smith-search-wrap {
@@ -404,11 +663,60 @@
     background: none;
     border: none;
     color: #7d7264;
-    font-size: 12px;
+    font-size: 0.6em;
     cursor: pointer;
     padding: 2px 4px;
 }
 
 .smith-search-clear:hover {
     color: #e4dbc8;
+}
+
+/* ── confirm box (Upgrade equipped, Break): drawn over the panel; its buttons are the station's own ── */
+
+.smith-confirm-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.smith-confirm {
+    position: relative;
+    width: min(26em, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 22px;
+    background: rgba(30, 27, 24, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+}
+
+.smith-confirm-header {
+    font-size: 0.8em;
+    font-weight: 700;
+    color: #e8c87a;
+}
+
+.smith-confirm.break .smith-confirm-header {
+    color: #f08080;
+}
+
+.smith-confirm-message {
+    font-size: 0.7em;
+    line-height: 1.45;
+    color: #e4dbc8;
+}
+
+.smith-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
 }

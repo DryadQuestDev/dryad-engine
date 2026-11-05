@@ -103,10 +103,10 @@ The story scene that triggered the battle is snapshotted before the first queued
 ```js
 const battle = game.getService('rpg_battle');
 
-// Chyseleia comments on the first turn
+// The mentor comments on the first turn
 game.on('battle_turn_start', (turn) => {
-    if (turn === 1 && battle.inBattle('prologue_golems')) {
-        game.playScene('1.fight_golems_1.1.1.1');
+    if (turn === 1 && battle.inBattle('training_fight')) {
+        game.playScene('room1.mentor_tip');
     }
 });
 ```

@@ -14,7 +14,20 @@ export const ManifestSchema = {
   starting_state: { type: 'chooseOne', options: ['exploration', 'custom'], tooltip: 'Initial game state when starting.', defaultValue: 'exploration' },
   starting_custom_state: { type: 'string', tooltip: 'Custom state name if starting_state is set to "custom".', show: { starting_state: ['custom'] } },
   description: { type: 'htmlarea', tooltip: 'Rich text description of the game/mod shown to players.' },
+  changelog: {
+    type: 'schema[]',
+    tooltip: 'Release notes players open from "What\'s new" next to the version on the landing page. Listed newest version first, whatever the order here. A mod keeps its own list in its own manifest.',
+    objects: {
+      uid: { type: 'uid' },
+      version: { type: 'string', tooltip: 'Version this entry describes, in the a.b.c format of the version field.' },
+      date: { type: 'date', tooltip: 'Release date.' },
+      title: { type: 'string', tooltip: 'Optional headline for the release.' },
+      image: { type: 'file', fileType: 'image', tooltip: 'Optional picture shown above the notes.' },
+      notes: { type: 'htmlarea', tooltip: 'What changed. Headings and lists work.' },
+    }
+  },
   cover_assets: { type: 'file[]', fileType: 'asset', tooltip: 'Cover images or videos displayed on the game/mod selection screen.' },
+  sample: { type: 'boolean', tooltip: "Lists the game on the editor's Start page as a sample to play and open." },
   landing_bg_asset: { type: 'chooseOne', fromFile: 'assets', tooltip: 'Asset rendered behind the landing page. Stacks with other active manifests — base game at the bottom, mods on top in load order. Use a transparent overlay to augment, an opaque image to replace.' },
   landing_soundtrack: { type: 'chooseOne', fromFile: 'music', tooltip: 'Music id for the landing page. Last active manifest with a value wins. Crossfades into the first in-game track on Play.' },
   theme: {

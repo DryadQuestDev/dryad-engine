@@ -24,6 +24,21 @@ Use actions to open exchanges:
 
 Both actions are **event delayed** - they wait for the current scene to finish before opening.
 
+On a choice, the action also marks the option: a chest (`loot`) or scales (`trade`) before its label, and a class on the row.
+
+```text
+!loot{loot: "chest_inventory"}
+~Browse her wares{trade: "merchant_inventory"}
+```
+
+| Selector | Element |
+|---|---|
+| `.choice-list .choice.loot-choice` / `.trade-choice` | The whole option row |
+| `.loot-badge` / `.trade-badge` | Badge wrapper (unmasked; its `::before` / `::after` can bracket the icon) |
+| `.loot-icon` / `.trade-icon` | The glyph, painted in the text colour |
+
+Hide the badge in your game's CSS to drop the icon.
+
 The exchange UI shows two inventories side by side:
 - **Left:** Party inventory (`_party_inventory`)
 - **Right:** Exchange inventory (the one you specified)
@@ -114,7 +129,7 @@ game.on("trade_init", (traderInventory, item) => {
 
 | Event | When it fires | Parameters |
 |-------|---------------|------------|
-| `inventory_open` | Exchange UI opens | `(inventory)` |
+| `inventory_open` | Exchange UI opens | `(inventory, mode)` – mode is `"loot"` or `"trade"` |
 | `inventory_close` | Exchange UI closes | `(inventory)` |
 | `inventory_transfer` | Item moves between inventories | `(source, target, item, quantity, isTrade)` |
 | `trade_init` | Trade opens, for each item | `(traderInventory, item)` |

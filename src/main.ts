@@ -1,4 +1,4 @@
-import { createApp, h, Suspense } from 'vue'
+import { createApp, h, Suspense, type DirectiveBinding } from 'vue'
 import './style.css'
 // Import Inter, Lora, and JetBrains Mono fonts for consistent cross-platform typography
 import '@fontsource/inter/400.css';
@@ -13,6 +13,7 @@ import App from './App.vue'
 import PrimeVue from 'primevue/config';
 import Aura from '@primeuix/themes/aura';
 import Tooltip from 'primevue/tooltip';
+import Ripple from 'primevue/ripple';
 import { ZIndex } from '@primeuix/utils/zindex';
 import ConfirmationService from 'primevue/confirmationservice';
 import { initDialogService } from './services/dialogService';
@@ -72,13 +73,36 @@ const SafeTooltip = (Tooltip as any).extend('tooltip', {
   },
 });
 
-app.directive('tooltip', SafeTooltip);
+// PrimeVue directives reload their styles on every update of the element's component – rewriting
+// the shared base <style>, which makes the browser re-evaluate every stylesheet – and the tooltip
+// also rebinds its events, even when nothing about them changed. In a big dungeon's Content tab
+// that ran dozens of times per keystroke. An update with the same value has nothing to do.
+const sameValue = (binding: DirectiveBinding) => {
+  const { value, oldValue } = binding;
+  if (value === oldValue) return true;
+  return !!value && !!oldValue && typeof value === 'object' && typeof oldValue === 'object'
+    && JSON.stringify(value) === JSON.stringify(oldValue);
+};
+function skipUnchangedUpdates(directive: any) {
+  for (const hook of ['beforeUpdate', 'updated']) {
+    const run = directive[hook];
+    if (run) directive[hook] = (el: any, binding: DirectiveBinding, vnode: any, prevVnode: any) => {
+      if (!sameValue(binding)) run(el, binding, vnode, prevVnode);
+    };
+  }
+  return directive;
+}
+const FastTooltip = skipUnchangedUpdates({ ...SafeTooltip });
+// In place: PrimeVue's own components (every Button) use this very object.
+skipUnchangedUpdates(Ripple);
+
+app.directive('tooltip', FastTooltip);
 app.directive('persist', persistImage);
 app.directive('fit', fitText);
 app.directive('script', script);
 app.directive('popover', popover);
 app.directive('dragscroll', dragscroll);
-app.config.globalProperties.vTooltip = SafeTooltip;
+app.config.globalProperties.vTooltip = FastTooltip;
 
 // Configure Vue error handler
 app.config.errorHandler = (err, _instance, info) => {

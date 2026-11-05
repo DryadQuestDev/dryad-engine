@@ -45,6 +45,9 @@ export interface StorageService {
     // --- File System Browser ---
     showFileInFolder?(filePath: string): Promise<{ success: boolean, error?: string }>;
 
+    /** A file's modification time and size; null when it doesn't exist or the host can't tell (web). */
+    statFile(path: string): Promise<{ mtimeMs: number; size: number } | null>;
+
     // --- WebP Conversion Methods ---
     getFileSize(path: string): Promise<number>;
     convertToWebP(options: {

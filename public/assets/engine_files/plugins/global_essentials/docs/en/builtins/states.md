@@ -17,6 +17,7 @@ const on = game.hasState('mod_flag') && game.getState('mod_flag');
 | `game_state` | `"exploration" but can be set to a custom state in General->Manifest` | Main game view state (used by `game_state` component slot) |
 | `overlay_state` | `"overlay-navigation"` | Overlay layer state |
 | `popup_state` | `[]` | Open popup stack (array of popup ids; last = topmost) |
+| `inspect` | `null` | Scene point layout in force: `{ layout, zoomed, restore, looking }`, set by the `inspect` and `zoom` actions and the Look around button, cleared when the scene ends |
 | `progression_state` | `null` | Side panel tab (quests, character, gallery) |
 | `progression_sub_state` | `null` | Character sheet sub-tab |
 | `suppress_character_progression` | `false` | When true, clicking a character in the character list only updates `selected_character` and skips opening the progression overlay. Use when the game renders the character sheet elsewhere (e.g., a side panel) and doesn't want the full-page overlay on every click. |
@@ -83,8 +84,9 @@ const on = game.hasState('mod_flag') && game.getState('mod_flag');
 | `replay_mode_unlock_choices` | `false` | Unlock all choices in replay mode |
 | `replay_mode_unlock_scenes` | `false` | Open every gallery scene for replay, including ones the player never reached |
 | `max_log` | `40` | Maximum number of log entries |
-| `reading_book` | `null` | Active book-reader session `{ itemId, base, page }`; cleared when the scene closes |
-| `book_bookmarks` | `{}` | Per-item saved page `{ itemId: page }`; cleared when a book is finished |
+| `reading_item` | `null` | The Book or Scroll open in the reader `{ id, uid }`; cleared when it closes |
+| `reading_book` | `null` | Active Scene-readable session `{ itemId, base, page }`; cleared when the scene closes |
+| `book_bookmarks` | `{}` | Per-item saved page of Scene readables `{ itemId: page }`; cleared on the last page |
 | `choose_item_pending` | `null` | Filter/options of the open choose_item picker |
 | `chosen_item_id` | `''` | Template id of the last choose_item pick (`''` after a cancel) |
 

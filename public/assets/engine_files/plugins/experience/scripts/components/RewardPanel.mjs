@@ -186,8 +186,7 @@ export const RewardPanel = defineComponent({
         <span>{{ pending.debug.battleId }}</span>
         <span>threat {{ pending.debug.base }} → {{ pending.debug.threat }} (lv {{ pending.debug.level }} ×{{ pending.debug.scale }})</span>
         <span>xp {{ pending.debug.threatXp }}</span>
-        <span>equip {{ pending.debug.equipBudget }}</span>
-        <span>income {{ pending.debug.incomeBudget }} (payout {{ pending.debug.currencyPayout }})</span>
+        <span>pool {{ pending.debug.pool || 'none' }}</span>
       </div>
       <div class="reward-title">{{ line('reward_title') }}</div>
 

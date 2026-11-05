@@ -10,8 +10,9 @@ import { Item } from "./item";
 import { Choice } from "../content/choice";
 import { Global } from "../../../global/global";
 import { gameLogger } from "../../utils/logger";
+import { devLogOn, devLogVar, devLogStacks } from "../../utils/devLog";
 import { Inventory } from "./inventory";
-import { PARTY_INVENTORY_ID } from "../../systems/itemSystem";
+import { PARTY_INVENTORY_ID, getGameLineOrEngine } from "../../systems/itemSystem";
 import { mergeTrait } from "../../../functions/mergeTrait";
 import ShortUniqueId from "short-unique-id";
 
@@ -37,6 +38,23 @@ export type ItemComparison = {
   equipped: Item | null;
   /** Stat deltas (item minus equipped), zero deltas dropped. Keys the item gains come first. */
   stats: Record<string, number>;
+};
+
+/**
+ * Every write the game made to a character's core status, in the form it was written. The save
+ * migration rebuilds the core status from the template, then replays this on top, so what the story
+ * set survives a template edit. A stat keeps both forms: `statPins` holds its last `=` and `stats`
+ * the `+=` / `-=` total since then. Writes made by the migration and its hooks are not recorded.
+ */
+export type CoreWrites = {
+  statPins: Record<string, number>;
+  stats: Record<string, number>;
+  traits: Record<string, any>;
+  attributes: Record<string, string>;
+  /** true = turned on, false = turned off. */
+  skinLayers: Record<string, boolean>;
+  /** true = granted, false = removed. */
+  abilities: Record<string, boolean>;
 };
 
 /** Character trait (global essentials plugin) naming the view a staged scene actor renders with. */
@@ -312,6 +330,13 @@ export class Character {
     return this.statuses.values().next().value!;
   }
 
+  public coreWrites: CoreWrites = { statPins: {}, stats: {}, traits: {}, attributes: {}, skinLayers: {}, abilities: {} };
+
+  /** The record to write into, or null while the save migration runs: its rebuild and its hooks re-run on every pass. */
+  private recordedWrites(): CoreWrites | null {
+    return Game.getInstance().coreSystem.isMigratingSave() ? null : this.coreWrites;
+  }
+
   // Build the attribute-suffixed lookup key for a layer (matches the editor's
   // build_images key construction). No attributes → key = layer.id alone.
   private buildLayerLookupKey(layer: CharacterSkinLayerObject): string {
@@ -399,13 +424,10 @@ export class Character {
   /** Modifiers whose `requires_status` is currently unmet — rendered greyed out, never applied. */
   public inactiveAbilityModifiers: Record<string, any> = {};
 
-  @Skip()
-  public finalAbilities: ComputedRef<FinalAbilities> = computed(() => {
+  // Fresh on every call, like getAbility(). A field-initializer computed closes over the RAW
+  // instance, tracks none of abilities/statuses/modifiers, and froze the battle panel's list.
+  public getAbilities(): FinalAbilities {
     return this.computeFinalAbilities();
-  });
-
-  public getAbilities(): ComputedRef<FinalAbilities> {
-    return this.finalAbilities;
   }
 
   public getAbility(abilityId: string): FinalAbility | undefined {
@@ -499,7 +521,10 @@ export class Character {
     let coreStatus = this.getCoreStatus();
     const oldValue = coreStatus.traits[key];
     coreStatus.traits[key] = value;
+    const writes = this.recordedWrites();
+    if (writes) writes.traits[key] = value;
     this.reevaluate();
+    if (devLogOn) devLogVar('trait', `${this.id}.${key}`, oldValue, value);
     if (oldValue !== value) Game.getInstance().trigger('character_trait_change', this, key, oldValue, value);
   }
 
@@ -534,8 +559,12 @@ export class Character {
       throw new Error(`Character Attribute ${key} does not exist`);
     }
     let coreStatus = this.getCoreStatus();
+    const oldValue = coreStatus.attributes[key];
     coreStatus.attributes[key] = value;
+    const writes = this.recordedWrites();
+    if (writes) writes.attributes[key] = value;
     this.reevaluate();
+    if (devLogOn) devLogVar('attr', `${this.id}.${key}`, oldValue, value);
   }
 
   /** Normalize a view id: _default and undefined/empty all become ''. */
@@ -1060,25 +1089,16 @@ export class Character {
 
   public update(data: any): void {
     let coreStatus = this.getCoreStatus();
-
-    // Capture all replenishable stat values before any changes (for computed stats)
-    const oldReplenishableValues = this.captureResourceStatValues();
+    const writes = this.recordedWrites();
 
     if (data.stats) {
-      for (let [key, value] of Object.entries(data.stats)) {
-        const stat = Game.getInstance().characterSystem.statsMap.get(key);
-        if (!stat) {
-          throw new Error(`Stat ${key} does not exist`);
+      this.writeCoreStats(data.stats);
+      if (writes) {
+        for (const key in data.stats) {
+          writes.statPins[key] = data.stats[key];
+          delete writes.stats[key];
         }
-        if (typeof value !== 'number') {
-          throw new Error(`Stat ${key} is not a number`);
-        }
-
-        coreStatus.stats[key] = value;
       }
-
-      // After all stat changes, adjust all replenishable resources (handles computed stats)
-      this.adjustAllResources(oldReplenishableValues, false);
     }
 
     if (data.traits) {
@@ -1087,7 +1107,9 @@ export class Character {
         if (!trait) {
           throw new Error(`Trait ${key} does not exist`);
         }
+        if (devLogOn) devLogVar('trait', `${this.id}.${key}`, coreStatus.traits[key], value);
         coreStatus.traits[key] = value;
+        if (writes) writes.traits[key] = value;
       }
     }
 
@@ -1100,7 +1122,9 @@ export class Character {
         if (typeof value !== 'string') {
           throw new Error(`Attribute ${key} is not a string`);
         }
+        if (devLogOn) devLogVar('attr', `${this.id}.${key}`, coreStatus.attributes[key], value);
         coreStatus.attributes[key] = value;
+        if (writes) writes.attributes[key] = value;
       }
     }
 
@@ -1111,11 +1135,46 @@ export class Character {
           throw new Error(`Skin Layer ${key} does not exist`);
         }
         coreStatus.skinLayers.add(key);
+        if (writes) writes.skinLayers[key] = true;
       }
 
       //this.reevaluate();
     }
     this.reevaluate();
+  }
+
+  /**
+   * Add to a stat's base value on the character's core status (a negative amount subtracts).
+   * Unlike `setStat`, the save migration puts the amount back on top of the template's current
+   * value, so a retuned template still reaches the save.
+   * @param name - The stat name
+   * @param amount - How much to add
+   * @throws Error if stat doesn't exist in schema
+   */
+  public addStat(name: string, amount: number): void {
+    this.writeCoreStats({ [name]: (this.getCoreStatus().stats[name] || 0) + amount });
+    const writes = this.recordedWrites();
+    if (writes) writes.stats[name] = (writes.stats[name] || 0) + amount;
+    this.reevaluate();
+  }
+
+  /** Write base stat values onto the core status and keep replenishable resources in step. Every key is checked before any is written. */
+  private writeCoreStats(stats: Record<string, unknown>): void {
+    const coreStatus = this.getCoreStatus();
+    const statsMap = Game.getInstance().characterSystem.statsMap;
+    for (const [key, value] of Object.entries(stats)) {
+      if (!statsMap.has(key)) throw new Error(`Stat ${key} does not exist`);
+      if (typeof value !== 'number') throw new Error(`Stat ${key} is not a number`);
+    }
+
+    // Capture all replenishable stat values before any changes (for computed stats)
+    const oldReplenishableValues = this.captureResourceStatValues();
+    for (const [key, value] of Object.entries(stats) as [string, number][]) {
+      if (devLogOn) devLogVar('stat', `${this.id}.${key}`, coreStatus.stats[key] ?? 0, value);
+      coreStatus.stats[key] = value;
+    }
+    // After all stat changes, adjust all replenishable resources (handles computed stats)
+    this.adjustAllResources(oldReplenishableValues, false);
   }
 
   /**
@@ -1128,25 +1187,35 @@ export class Character {
     const coreStatus = this.getCoreStatus();
     coreStatus.attributes = JSON.parse(JSON.stringify((template as any).attributes || {}));
     coreStatus.skinLayers = new Set((template as any).skin_layers || []);
+    const writes = this.recordedWrites();
+    if (writes) {
+      writes.attributes = {};
+      writes.skinLayers = {};
+    }
     this.reevaluate();
   }
 
   public addSkinLayers(layers: string[]): void {
     let coreStatus = this.getCoreStatus();
+    const writes = this.recordedWrites();
     for (const layer of layers) {
       const skinLayer = Game.getInstance().characterSystem.skinLayersMap.get(layer);
       if (!skinLayer) {
         throw new Error(`Skin Layer ${layer} does not exist`);
       }
+      if (devLogOn && !coreStatus.skinLayers.has(layer)) devLogVar('skin', `${this.id}.${layer}`, 'off', 'on');
       coreStatus.skinLayers.add(layer);
+      if (writes) writes.skinLayers[layer] = true;
     }
     this.reevaluate();
   }
 
   public removeSkinLayers(layers: string[]): void {
     let coreStatus = this.getCoreStatus();
+    const writes = this.recordedWrites();
     for (const layer of layers) {
-      coreStatus.skinLayers.delete(layer);
+      if (coreStatus.skinLayers.delete(layer) && devLogOn) devLogVar('skin', `${this.id}.${layer}`, 'on', 'off');
+      if (writes) writes.skinLayers[layer] = false;
     }
     this.reevaluate();
   }
@@ -1157,11 +1226,15 @@ export class Character {
       throw new Error(`Ability Template ${abilityId} does not exist`);
     }
     this.getCoreStatus().abilities.add(abilityId);
+    const writes = this.recordedWrites();
+    if (writes) writes.abilities[abilityId] = true;
     this.reevaluate();
   }
 
   public removeAbility(abilityId: string): void {
     this.getCoreStatus().abilities.delete(abilityId);
+    const writes = this.recordedWrites();
+    if (writes) writes.abilities[abilityId] = false;
     this.reevaluate();
   }
 
@@ -1269,7 +1342,9 @@ export class Character {
       // than freezing on the first application (eating a second dish reskins the shared buff).
       if (status.image && status.image !== existingStatus.image) existingStatus.image = status.image;
       if (status.iconSource && status.iconSource !== existingStatus.iconSource) existingStatus.iconSource = status.iconSource;
+      const oldStacks = devLogOn ? existingStatus.currentStacks : 0;
       existingStatus.applyInstance({ stacks, duration, source });
+      if (devLogOn && !existingStatus.isHidden) devLogVar('status', `${this.id}.${status.id}`, devLogStacks(oldStacks), devLogStacks(existingStatus.currentStacks));
       this.reevaluate();
       this.adjustAllResources(oldReplenishableValues, true);
       return;
@@ -1288,6 +1363,7 @@ export class Character {
 
     // Add as a new status
     this.statuses.set(status.id, status);
+    if (devLogOn && !status.isHidden) devLogVar('status', `${this.id}.${status.id}`, 'off', devLogStacks(status.currentStacks));
     this.reevaluate();
     this._updateAndSetResources(status);
 
@@ -1308,6 +1384,7 @@ export class Character {
     const oldReplenishableValues = this.captureResourceStatValues();
 
     this.statuses.delete(id);
+    if (devLogOn && !statusToRemove.isHidden) devLogVar('status', `${this.id}.${id}`, devLogStacks(statusToRemove.currentStacks), 'off');
 
     if (statusToRemove) {
       this._updateAndSetResources(statusToRemove);
@@ -1348,7 +1425,9 @@ export class Character {
     if (status.currentStacks === newStacks) return;
 
     const oldValues = this.captureResourceStatValues();
+    const oldStacks = devLogOn ? status.currentStacks : 0;
     status.currentStacks = newStacks;
+    if (devLogOn && !status.isHidden) devLogVar('status', `${this.id}.${statusId}`, devLogStacks(oldStacks), devLogStacks(status.currentStacks));
     this.reevaluate();
     this.adjustAllResources(oldValues, true);
   }
@@ -1363,7 +1442,9 @@ export class Character {
     }
 
     const oldValues = this.captureResourceStatValues();
+    const oldStacks = devLogOn ? status.currentStacks : 0;
     const success = status.addStacks(amount);
+    if (devLogOn && !status.isHidden) devLogVar('status', `${this.id}.${statusId}`, devLogStacks(oldStacks), devLogStacks(status.currentStacks));
     this.reevaluate();
     this.adjustAllResources(oldValues, true);
     return success;
@@ -1378,7 +1459,9 @@ export class Character {
     if (!status) return 0;
 
     const oldValues = this.captureResourceStatValues();
+    const oldStacks = devLogOn ? status.currentStacks : 0;
     const removed = status.removeStacks(amount);
+    if (devLogOn && !status.isHidden && status.getInstances().length) devLogVar('status', `${this.id}.${statusId}`, devLogStacks(oldStacks), devLogStacks(status.currentStacks));
     if (status.getInstances().length === 0) {
       this.removeStatus(statusId);
     } else {
@@ -1571,6 +1654,7 @@ export class Character {
     const precisionValue = this.applyPrecision(clampedValue, stat);
 
     this.resources[name] = precisionValue;
+    if (devLogOn) devLogVar('resource', `${this.id}.${name}`, currentVal, precisionValue);
     Game.getInstance().trigger('character_resource_change', this, name, currentVal, precisionValue);
   }
 
@@ -1697,6 +1781,8 @@ export class Character {
   /**
    * Set the base value of a stat on the character's core status.
    * Convenience wrapper around update({ stats: { [name]: value } }).
+   * The save migration keeps this exact value even after the template's changes — use `addStat`
+   * for a change relative to the template.
    * @param name - The stat name
    * @param value - The value to set
    * @throws Error if stat doesn't exist in schema
@@ -1940,9 +2026,9 @@ export class Character {
 
   /**
    * What equipping an item would change, one entry per slot instance that accepts it (in the
-   * character's slot order), each against whatever that slot holds now. Compares the two items'
-   * own stats — the numbers their item cards show — times the stacks each would hold. Empty for an
-   * equipped item or one no slot accepts. The `item_compare` emitter can rewrite both sides first.
+   * character's slot order), each against whatever that slot holds now. Compares the stats each
+   * item grants in that slot (`getItemStats`, so `item_stats` applies) times the stacks each would
+   * hold. Empty for an equipped item or one no slot accepts.
    */
   public compareItem(item: Item): ItemComparison[] {
     if (item.isEquipped) return [];
@@ -1955,10 +2041,9 @@ export class Character {
       // id blank, and several blank ids would all resolve to the first of them.
       const equipped = slot.itemUid ? this.getPartyInventory()?.getItemByUid(slot.itemUid) || null : null;
       const sides = {
-        item: { ...(item.statusObject?.stats || {}) } as Record<string, number>,
-        equipped: { ...(equipped?.statusObject?.stats || {}) } as Record<string, number>,
+        item: game.itemSystem.getItemStats(item, slot, this),
+        equipped: equipped ? game.itemSystem.getItemStats(equipped, slot, this) : {},
       };
-      game.trigger('item_compare', item, equipped, slot, this, sides);
 
       // Same stack count equipSlot gives the equip status: the quantity, cut to the slot's cap.
       const cap = slot.getSlotObject()?.max_stack;
@@ -2042,12 +2127,12 @@ export class Character {
       choices.push(choice);
     }
 
-    // read choice (book trait — opens the paged reader)
-    if ((item.traits as any)?.book && !item.isEquipped) {
+    // read choice (readable field — opens the reader; the game's locale may rename "Read")
+    if (item.getReadable() && !item.isEquipped) {
       choices.push(Game.getInstance().logicSystem.createCustomChoice({
-        id: "read_book",
-        name: Global.getInstance().getString("read_book"),
-        params: { read_book: { itemUid: item.uid } },
+        id: "read_item",
+        name: getGameLineOrEngine("read_item"),
+        params: { read_item: { itemUid: item.uid } },
       }));
     }
 

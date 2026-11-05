@@ -9,9 +9,9 @@ import { getMc, inSpawnWindow } from './reward.mjs';
 // creation, through the core collectable_resolve emitter. Eligible items are ingredient-category
 // templates tagged herb or fungus, inside their spawn window at the dungeon level, and legal for
 // the dungeon's `environment` trait (item trait `environments`; an ingredient with none grows
-// everywhere). The roll picks a TIER first — spawn_min floors 1/4/7/10 map to tiers 1–4, the
-// dungeon level's own tier weighs 100% and every tier below it keeps gather_lower_tier_weight %
-// per step down — then a uniform item of that tier. A resolved spot is locked into the
+// everywhere). The roll picks a TIER first — level 1 and each distinct spawn_min among the foragable
+// items open one; the dungeon level's own tier weighs 100% and every tier below it keeps
+// gather_lower_tier_weight % per step down — then a uniform item of that tier. A resolved spot is locked into the
 // gather_spots state, so dungeon rebuilds (re-entry, save load) keep the same item.
 
 // { "<dungeonId>.<encounterId>": itemId }
@@ -28,18 +28,20 @@ function getConfig() {
     return game.getData('plugins_data/experience/config_experience');
 }
 
-const TIER_FLOORS = [1, 4, 7, 10];
-
-function tierOfLevel(/** @type {number} */ level) {
-    let tier = 1;
-    for (let i = 0; i < TIER_FLOORS.length; i++) {
-        if (level >= TIER_FLOORS[i]) tier = i + 1;
-    }
-    return tier;
+/** Level 1 plus every distinct spawn_min among the foragable items, ascending. Read from ALL of them,
+ *  not the spot's candidates: an environment missing a tier must not renumber the tiers above it. */
+function tierFloors(/** @type {any[]} */ foragable) {
+    const floors = new Set([1]);
+    for (const t of foragable) if (t.traits?.spawn_min) floors.add(t.traits.spawn_min);
+    return [...floors].sort((a, b) => a - b);
 }
 
-function tierOfItem(/** @type {any} */ template) {
-    return tierOfLevel(template.traits?.spawn_min || 1);
+function tierOfLevel(/** @type {number[]} */ floors, /** @type {number} */ level) {
+    let tier = 1;
+    for (let i = 0; i < floors.length; i++) {
+        if (level >= floors[i]) tier = i + 1;
+    }
+    return tier;
 }
 
 // The level snapshot only exists after the first dungeon_enter_after, but collectable_resolve fires
@@ -69,22 +71,22 @@ game.on('collectable_resolve', (/** @type {{dungeonId: string, encounterId: stri
 
     const level = levelForDungeon(request.dungeonId);
     const environment = game.getDungeonConfig(request.dungeonId)?.traits?.environment || '';
-    const candidates = [...game.getData('item_templates', true).values()].filter(t =>
+    const foragable = [...game.getData('item_templates', true).values()].filter(t =>
         gatherCategories().includes(t.category) &&
         !t.traits?.no_drop &&
-        (t.tags?.includes('herb') || t.tags?.includes('fungus')) &&
-        inSpawnWindow(t, level) &&
-        growsHere(t, environment));
+        (t.tags?.includes('herb') || t.tags?.includes('fungus')));
+    const candidates = foragable.filter(t => inSpawnWindow(t, level) && growsHere(t, environment));
     if (!candidates.length) return;
 
+    const floors = tierFloors(foragable);
     const byTier = new Map();
     for (const t of candidates) {
-        const tier = tierOfItem(t);
+        const tier = tierOfLevel(floors, t.traits?.spawn_min || 1);
         if (!byTier.has(tier)) byTier.set(tier, []);
         byTier.get(tier).push(t);
     }
     const decay = (getConfig()?.gather_lower_tier_weight ?? 40) / 100;
-    const topTier = tierOfLevel(level);
+    const topTier = tierOfLevel(floors, level);
     const tiers = [...byTier.entries()].map(([tier, items]) => ({ items, weight: Math.pow(decay, topTier - tier) }));
 
     let roll = Math.random() * tiers.reduce((sum, t) => sum + t.weight, 0);

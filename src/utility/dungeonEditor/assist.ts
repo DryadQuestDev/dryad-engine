@@ -17,7 +17,8 @@ import {
  */
 
 /** `actions`: a bare action object, run as it is (the game's debug panel): no choice keys. */
-export type AssistMode = 'header' | 'choice' | 'prose' | 'content' | 'actions';
+/** `condition`: the whole text is one condition, as inside `if{…}` (the debug console). */
+export type AssistMode = 'header' | 'choice' | 'prose' | 'content' | 'actions' | 'condition';
 
 /** Where a text sits: its mode, its block's scope, and what the checks know. */
 export type AssistPlace = {
@@ -222,6 +223,7 @@ function findFields(spec: ValueSpec | undefined): Record<string, ValueSpec> | nu
 
 /** What is at `caret` in `text`: the slot to complete or describe, or null. */
 function slotAt(text: string, caret: number, place: AssistPlace, explicit: boolean): Slot | null {
+  if (place.mode === 'condition') return conditionSlot({ text, start: 0 }, caret, place);
   const { frame, str } = framesAt(text, caret);
   if (frame) {
     if (frame.type === 'cond') {

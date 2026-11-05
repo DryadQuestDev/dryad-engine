@@ -334,7 +334,7 @@
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.7em;
     font-weight: bold;
     transition: background 0.2s;
 }

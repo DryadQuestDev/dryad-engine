@@ -11,6 +11,12 @@ export const ItemTemplateSchema = {
     price: { type: 'schema', fromFile: 'item_templates', fromFileType: 'number', fromFileTypeAnd: { is_currency: true }, tooltip: 'Price of the item in various currencies. Only items marked as currency appear as options.' },
     is_currency: { type: 'boolean', tooltip: 'If true, the item can be used as currency for the \'price\' field. You might need to reload the tab to update the price options.' },
     learn_recipe: { type: 'chooseOne', fromFile: 'item_recipes', tooltip: 'If set, the item shows a "Learn" choice in the inventory that teaches this recipe (grayed out once learned). Learning consumes the item.' },
+    readable: {
+        type: 'schema', tooltip: 'Makes the item readable: a "Read" choice in the inventory opens its text. Opening a Book or Scroll marks the item read.', objects: {
+            type: { type: 'chooseOne', options: ['book', 'scroll', 'scene'], tooltip: 'Empty reads as book. book: an open book whose pages fit the screen. scroll: a parchment the text scrolls on. scene: the text plays in the dialogue box, one paragraph per page, and may run actions; the item is marked read on its last page.' },
+            source: { type: 'string', tooltip: 'book / scroll: dungeon id + $template id (e.g. global.old_diary). scene: a scene reference (dungeon_id.room_id.scene_id).' },
+        }
+    },
     traits: { type: 'schema', fromFile: 'item_traits', fromFileType: 'custom', tooltip: 'Custom item traits defined in item_traits file.' },
     apply_statuses_on_consume: {
         type: 'schema[]', tooltip: 'Statuses applied when the item is CONSUMED (referencing status templates, which carry their own duration/max_stacks/polarity/group_id). Any entry makes the item show a "Consume" choice. An item can also carry an equip `status` — the two are independent (e.g. +2 luck on equip, +10 health on consume).', objects: {

@@ -621,31 +621,17 @@ function closePopup() {
   activePopup.value = null;
 }
 
-// Auto-open preference for the dungeon content editor
-const dungeonEditorSettings = useStorage<{
-  autoOpen: boolean;
-  selectedBlock: Record<string, { kind: string; id: string }>;
-}>('dungeonEditor_settings', { autoOpen: false, selectedBlock: {} });
-
-watch(
-  [
-    () => editor.customPopups.value,
-    () => editor.activeObject.value,
-    () => editor.isArray.value,
-    () => dungeonEditorSettings.value.autoOpen,
-  ],
-  () => {
-    if (!dungeonEditorSettings.value.autoOpen) return;
-    if (activePopup.value) return;
-    if (editor.isArray.value) return;
-    const ao = editor.activeObject.value;
-    if (!ao || Array.isArray(ao)) return;
-    const popups = editor.customPopups.value;
-    if (!popups || !popups.includes('dungeon-content-editor')) return;
-    openPopup('dungeon-content-editor', ao);
-  },
-  { immediate: true },
-);
+// The single-object form's fields: the subtab's `hideFields` stay out, values kept.
+const singleFormSchema = computed(() => {
+  const schema = editor.schema.value;
+  const hidden = editor.hideFields.value;
+  if (!schema || !hidden.length) return schema;
+  const shown: Schema = {};
+  for (const key in schema) {
+    if (!hidden.includes(key)) shown[key] = schema[key];
+  }
+  return shown;
+});
 
 // --- Trigger initial detection when items render ---
 // --- Restore active bookmark when items arrive after tab switch ---
@@ -717,7 +703,7 @@ onUnmounted(() => {
             class="custom-popup-button" />
         </div>
       </div>
-      <div v-for="(fieldSchema, fieldKey) in editor.schema.value" :key="fieldKey.toString()" class="form-field-wrapper">
+      <div v-for="(fieldSchema, fieldKey) in singleFormSchema" :key="fieldKey.toString()" class="form-field-wrapper">
         <FormFieldRenderer :base-field-schema="fieldSchema" :field-key="fieldKey.toString()"
           :item-data="editor.activeObject.value" :root-schema="editor.schema.value" :field-id="fieldKey.toString()"
           v-model="editor.activeObject.value[fieldKey]" :parent-core-data-item="editor.coreObject.value"

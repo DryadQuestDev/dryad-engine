@@ -16,9 +16,20 @@ import SceneGradeFilter from './SceneGradeFilter.vue';
 import SceneShake from './SceneShake.vue';
 import SceneLight from './SceneLight.vue';
 import SceneAmbient from './SceneAmbient.vue';
+import ScenePoints from './ScenePoints.vue';
+import CustomComponentContainer from './CustomComponentContainer.vue';
+import { installDevPlaytestKeys, debugPanelCollapsed, TOGGLE_PANEL_KEY } from '../utils/devPlaytest';
+import { devProblems } from '../utils/devProblems';
 
 const global = Global.getInstance();
 const game = Game.getInstance();
+
+// Mounted for the whole game session, unlike the debug panel, which can be hidden.
+let removeDevPlaytestKeys: (() => void) | null = null;
+onMounted(() => {
+  if (game.isDevMode()) removeDevPlaytestKeys = installDevPlaytestKeys();
+});
+onUnmounted(() => removeDevPlaytestKeys?.());
 
 
 onUpdated(() => {
@@ -90,7 +101,7 @@ const noGameStateLabel = computed(() => global.getString('game_screen.no_game_st
 
         <!-- Stays mounted while actors are still playing their exit animations
              (sceneSlots keeps mid-exit slots after the scene itself tore down). -->
-        <div class="events-body"
+        <div class="events-body" :class="{ 'scene-points-hide-actors': game.scenePointSystem.hideActors.value }"
           v-if="(game.dungeonSystem.currentSceneId.value || game.dungeonSystem.sceneSlots.value.length > 0) && !game.coreSystem.getState('hide_events')">
           <!--  && !game.coreSystem.getState('progression_state')-->
           <div :class="{ 'events-zone': game.coreSystem.getDebugSetting('events_zone') }" class="events-wrapper"
@@ -98,6 +109,10 @@ const noGameStateLabel = computed(() => global.getString('game_screen.no_game_st
             <EventsContainer />
           </div>
         </div>
+
+        <!-- Scene point markers ({inspect} + choices with {point}): over the actors, under the dialogue. -->
+        <ScenePoints v-if="game.dungeonSystem.currentSceneId.value && !game.coreSystem.getState('hide_events')"
+          v-show="!game.coreSystem.getState('progression_state')" />
 
         <!-- Colour-matrix def for the scene grade. Draws nothing: the art elements themselves
              (BackgroundAsset, CharacterSlot's art wrapper, the map) reference it as a CSS filter,
@@ -115,6 +130,11 @@ const noGameStateLabel = computed(() => global.getString('game_screen.no_game_st
 
         <div class="ui-wrapper">
           <UiContainer />
+          <!-- Top middle of the game area: scene-wide buttons and meters, stacked in order. Scene UI, so the
+               character sheet hides it like the dialogue box. -->
+          <div class="ui-top-center" v-show="!game.coreSystem.getState('progression_state')">
+            <CustomComponentContainer :slot="'ui-top-center'" />
+          </div>
         </div>
 
         <div class="popup-wrapper">
@@ -124,10 +144,15 @@ const noGameStateLabel = computed(() => global.getString('game_screen.no_game_st
         <LogsPopup />
 
       </div>
-      <div v-if="shouldShowDebugPanel" :class="['game-body-panel', { expanded: debugPanelExpanded }]"
+      <div v-if="shouldShowDebugPanel && !debugPanelCollapsed" :class="['game-body-panel', { expanded: debugPanelExpanded }]"
         :style="debugPanelStyle">
         <Debug />
       </div>
+      <button v-else-if="shouldShowDebugPanel" type="button" class="debug-strip" :title="`Show the debug panel (${TOGGLE_PANEL_KEY})`"
+        @click="debugPanelCollapsed = false">
+        <i class="pi pi-angle-double-left"></i>
+        <span v-if="devProblems.length" class="debug-strip-badge">{{ devProblems.length }}</span>
+      </button>
 
 
 
@@ -172,6 +197,39 @@ const noGameStateLabel = computed(() => global.getString('game_screen.no_game_st
 
 .game-body-panel.expanded {
   width: 100%;
+}
+
+.debug-strip {
+  flex-shrink: 0;
+  width: 18px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  border: none;
+  border-left: 1px solid #555;
+  background: #2a2a2a;
+  color: #ccc;
+  cursor: pointer;
+  z-index: 999;
+}
+
+.debug-strip:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+
+.debug-strip-badge {
+  min-width: 14px;
+  padding: 1px 2px;
+  border-radius: 7px;
+  background: #d9534f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
 }
 
 .game-screen {
@@ -272,6 +330,23 @@ const noGameStateLabel = computed(() => global.getString('game_screen.no_game_st
 }
 
 .ui-container * {
+  pointer-events: auto;
+}
+
+.ui-top-center {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* Zero specificity: a component that should let clicks through (a meter) says so with a single class. */
+:where(.ui-top-center) > * {
   pointer-events: auto;
 }
 

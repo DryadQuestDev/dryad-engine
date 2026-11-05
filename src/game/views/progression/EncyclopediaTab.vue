@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { Game } from '../../game';
 import { Global } from '../../../global/global';
+import CharacterFace from '../CharacterFace.vue';
 
 const game = Game.getInstance();
 const global = Global.getInstance();
@@ -138,11 +139,22 @@ const contentSource = computed(() => {
     return r.content || r.summary || '';
 });
 
-// The character the selected record is about, once the player has met them in the gallery
-const galleryCharacterId = computed(() => {
+// The character the selected record is about
+const recordCharacterId = computed(() => {
     const characterId = selectedRecord.value?.character;
     if (!characterId || !isSelectedDiscovered.value) return null;
-    return game.isCharacterInGallery(characterId) ? characterId : null;
+    return game.characterSystem.templatesMap.has(characterId) ? characterId : null;
+});
+
+const recordFaceCharacter = computed(() => {
+    if (!recordCharacterId.value) return null;
+    return game.characterSystem.createCharacter('_encyclopedia_face', recordCharacterId.value, true);
+});
+
+// Same character, once the player has met them in the gallery
+const galleryCharacterId = computed(() => {
+    const characterId = recordCharacterId.value;
+    return characterId && game.isCharacterInGallery(characterId) ? characterId : null;
 });
 
 function openCharacterInGallery() {
@@ -330,10 +342,17 @@ function onLinkNavigate(recordId: string) {
                 <div v-if="selectedRecord && isSelectedDiscovered">
                     <img v-if="selectedRecord.image" :src="selectedRecord.image" class="record-image" />
                     <div class="record-title-row">
-                        <button v-if="galleryCharacterId" class="record-action" @click="openCharacterInGallery"
-                            v-tooltip.bottom="openInGalleryLabel" :aria-label="openInGalleryLabel">
-                            <i class="pi pi-user"></i>
+                        <button v-if="recordFaceCharacter && galleryCharacterId" class="record-face in-gallery"
+                            @click="openCharacterInGallery" v-tooltip.bottom="openInGalleryLabel"
+                            :aria-label="openInGalleryLabel">
+                            <CharacterFace :character="recordFaceCharacter" :size="64" noWrapper staticFaceForce
+                                borderColor="#3a3a3a" />
+                            <span class="record-face-badge"><i class="pi pi-images"></i></span>
                         </button>
+                        <div v-else-if="recordFaceCharacter" class="record-face">
+                            <CharacterFace :character="recordFaceCharacter" :size="64" noWrapper staticFaceForce
+                                borderColor="#3a3a3a" />
+                        </div>
                         <h2 class="record-title">{{ selectedRecord.title }}</h2>
                     </div>
                     <div v-script="{ html: contentSource, navMode: true, onNavigate: onLinkNavigate }"
@@ -623,22 +642,47 @@ function onLinkNavigate(recordId: string) {
     margin: 0;
 }
 
-.record-action {
+.record-face {
+    position: relative;
+    flex-shrink: 0;
+    border-radius: 50%;
+}
+
+.record-face.in-gallery {
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.record-face :deep(.character-face) {
+    background-color: #2a2a2a;
+    transition: outline-color 0.15s;
+}
+
+.record-face.in-gallery:hover :deep(.character-face) {
+    outline-color: var(--theme-primary, #5dadec);
+}
+
+/* A sibling of the face rather than inside it: the face clips its overflow to the circle. */
+.record-face-badge {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0;
-    width: 34px;
-    height: 34px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
     background-color: #2a2a2a;
     color: #d1d5db;
     border: 1px solid #3a3a3a;
-    cursor: pointer;
+    font-size: 0.7em;
     transition: all 0.15s;
 }
 
-.record-action:hover {
+.record-face.in-gallery:hover .record-face-badge {
     background-color: #333;
     border-color: var(--theme-primary, #5dadec);
     color: var(--theme-primary, #5dadec);

@@ -79,6 +79,7 @@ export function useGeneratedFields(
       'textarea': { type: 'textarea' },
       'htmlarea': { type: 'htmlarea' },
       'color': { type: 'color' },
+      'date': { type: 'date' },
       'image': { type: 'file', fileType: 'image' },
       'video': { type: 'file', fileType: 'video' },
       'chooseOne': { type: 'chooseMany', options: item.values || [] },  // chooseOne → chooseMany for filters

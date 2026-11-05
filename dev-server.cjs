@@ -35,7 +35,8 @@ const assetsPath = ASSETS_PATH.endsWith(path.sep) ? ASSETS_PATH : ASSETS_PATH + 
 console.log(`[Dev Server] Assets path: ${assetsPath}`);
 
 // Middleware
-app.use(express.json());
+// A large dungeon's content_parsed.json is several hundred KB, past express's 100 KB default.
+app.use(express.json({ limit: '50mb' }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -616,6 +617,29 @@ function normalizeForSearch(text) {
 // ============================================================================
 // Image Tools API
 // ============================================================================
+
+// GET /engine/stat?path=... – { exists, mtimeMs, size }. A missing file answers exists: false
+// rather than 404, since callers ask about files that are often absent (a mod without a dungeon).
+app.get('/engine/stat', async (req, res) => {
+  let relativePath = req.query.path;
+  if (!relativePath) {
+    return res.status(400).json({ error: 'Missing "path" query parameter.' });
+  }
+  if (relativePath.startsWith('assets/')) {
+    relativePath = relativePath.substring('assets/'.length);
+  }
+  const safePath = getSafePath(relativePath);
+  if (!safePath) {
+    return res.status(400).json({ error: 'Invalid or forbidden path.' });
+  }
+  try {
+    const stats = await fs.promises.stat(safePath);
+    if (!stats.isFile()) return res.json({ exists: false });
+    res.json({ exists: true, mtimeMs: stats.mtimeMs, size: stats.size });
+  } catch {
+    res.json({ exists: false });
+  }
+});
 
 // GET /engine/get-file-size?path=...
 app.get('/engine/get-file-size', async (req, res) => {

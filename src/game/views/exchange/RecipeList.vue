@@ -48,9 +48,9 @@ const availableRecipes = computed<ItemRecipeObject[]>(() => {
     if (!learnedIds.has(recipeId)) continue;
 
     const recipe = game.itemSystem.itemRecipesMap.get(recipeId);
-    if (recipe) {
-      recipes.push(recipe);
-    }
+    if (!recipe) continue;
+    if (recipe.if && !game.logicSystem.performConditionalEvaluation({ if: recipe.if })) continue;
+    recipes.push(recipe);
   }
 
   return recipes;

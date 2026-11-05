@@ -892,6 +892,38 @@ span.lore-link:focus-visible,
   background-image: url('/assets/engine_assets/icons/quest.svg');
 }
 
+/* The chest / scales / backpack before a {loot} / {trade} / {choose_item} choice's label: a mask
+   painted in the text colour, so it follows the choice's own state. The row carries
+   `.loot-choice` / `.trade-choice` / `.choose-item-choice`; hide `.loot-badge` / `.trade-badge` /
+   `.choose-item-badge` to drop the icon. The outer badge is unmasked, so its ::before/::after can
+   wrap the icon. */
+.loot-icon,
+.trade-icon,
+.choose-item-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.15em;
+  background-color: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+
+.loot-icon {
+  -webkit-mask-image: url('/assets/engine_assets/icons/loot.webp');
+  mask-image: url('/assets/engine_assets/icons/loot.webp');
+}
+
+.trade-icon {
+  -webkit-mask-image: url('/assets/engine_assets/icons/trade.webp');
+  mask-image: url('/assets/engine_assets/icons/trade.webp');
+}
+
+.choose-item-icon {
+  -webkit-mask-image: url('/assets/engine_assets/icons/choose_item.webp');
+  mask-image: url('/assets/engine_assets/icons/choose_item.webp');
+}
+
 /* Space reserved on the left for the fixed .ui-container tray (cog / book /
    users icons). Panels rendered next to it (ProgressionContainer,
    OverlayNavigation's .overlay.text) read this var so they don't overlap.
@@ -1021,6 +1053,26 @@ span.lore-link:focus-visible,
   border-radius: 3px;
   text-shadow: 1px 1px 2px black;
   pointer-events: none;
+}
+
+/* Item level (generic `item_level` trait), the item card's level tag in brick size. Bottom-left,
+   opposite the stack count: the trade price and durability sit top-left, and a long price runs
+   far enough right that a top-right tag would sit under it. */
+.item-level {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(138, 180, 248, 0.45);
+  color: #8ab4f8;
+  font-size: 9.5px;
+  font-weight: bold;
+  line-height: 1.25;
+  padding: 0 3px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
 }
 
 /* Item Popup Styles */
@@ -1332,4 +1384,29 @@ span.lore-link:focus-visible,
   background: rgba(255, 255, 255, 0.14) !important;
   border-color: var(--glass-tint) !important;
   color: #fff !important;
+}
+/* ── Visual effects: Reduced (engine setting `visual_effects`, class set by Global) ──
+   A blur or glow that changes every frame redraws whatever it covers every frame, which costs a slow
+   machine its frame rate. Panels drop their backdrop blur and take a more opaque background so text stays
+   readable; the text effects that animate a filter hold still. */
+body.reduced-effects *,
+body.reduced-effects *::before,
+body.reduced-effects *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body.reduced-effects {
+  --glass-bg: rgba(20, 24, 29, 0.88);
+  --glass-bg-strong: rgba(20, 24, 29, 0.95);
+}
+/* the two panels that were nearly clear glass */
+body.reduced-effects .progression-container {
+  background: rgba(16, 19, 26, 0.94);
+}
+body.reduced-effects .overlay-exchange {
+  background: rgba(16, 20, 28, 0.94);
+}
+body.reduced-effects .fx-glow,
+body.reduced-effects .fx-spooky {
+  animation: none;
 }

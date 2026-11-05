@@ -5,9 +5,12 @@
   ],
   "starting_state": "exploration",
   "id": "template_rpg_based",
-  "name": "RPG Based Template",
+  "name": "RPG",
   "version": "0.0.1",
-  "description": "<p>Template game.</p>",
+  "description": "<p>The player explores a map with a party of characters who have stats and gear.</p>",
+  "cover_assets": [
+    "assets/engine_files/template_assets/covers/rpg.webp"
+  ],
   "starting_dungeon_room_id": "1",
   "starting_dungeon_id": "template",
   "scripts": [

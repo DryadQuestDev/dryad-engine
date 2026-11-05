@@ -53,10 +53,10 @@ Every game starts with these item traits (from the `global_essentials` plugin):
 | Trait | Type | Meaning |
 |-------|------|---------|
 | name, description, image | string, rich-text, image | What the item card shows |
-| max_stack, weight, item_level | number | Stack size, encumbrance, card level badge |
+| max_stack, weight, item_level | number | Stack size, encumbrance, level tag (card and brick) |
 | rarity | chooseOne | Color and loot tier; `quest` also makes the item undiscardable |
 | no_discard | boolean | The player can never throw the item away — the card's Drop choice and the reward panel's trash button stay hidden (`item.isDiscardable()`). Unrelated to loot drops. |
-| book, painting, use_scene, durability | various | Readables, gallery art, use-scene hooks, wear |
+| painting, use_scene, durability | various | Gallery art, use-scene hooks, wear |
 
 ---
 
@@ -79,10 +79,10 @@ Items define which slots they can go into (the item's `slots`). Characters defin
 | Slot ID | `accepts` | Admits items whose `slots` include… |
 |---------|-----------|--------------------------------------|
 | `trinket_general` | – | (tag-only slot — nothing equips it directly) |
-| `trinket_ane` | `trinket_general` | `trinket_ane` **or** `trinket_general` |
-| `trinket_ordelia` | `trinket_general` | `trinket_ordelia` **or** `trinket_general` |
+| `trinket_alice` | `trinket_general` | `trinket_alice` **or** `trinket_general` |
+| `trinket_bob` | `trinket_general` | `trinket_bob` **or** `trinket_general` |
 
-A **general** trinket sets `slots: ["trinket_general"]` and fits every character's trinket slot; a **character-specific** trinket sets `slots: ["trinket_ane"]` and fits only Ane's. Adding a new character never touches existing items — its slot simply lists `trinket_general` in `accepts`. Leave `accepts` empty for an ordinary slot (it matches its own id only).
+A **general** trinket sets `slots: ["trinket_general"]` and fits every character's trinket slot; a **character-specific** trinket sets `slots: ["trinket_alice"]` and fits only Alice's. Adding a new character never touches existing items — its slot simply lists `trinket_general` in `accepts`. Leave `accepts` empty for an ordinary slot (it matches its own id only).
 
 ---
 
@@ -120,7 +120,7 @@ tab plus one tab per category, with a name search box; items with no category ap
 | learn_recipe | Recipe id this item teaches — adds a "Learn" choice that learns it and consumes the item (see ->items.apply) |
 | status | What stats/abilities/skin layers to apply when equipped |
 
-A `traits.item_level` number renders as a level badge on the item card – a purely visual indicator. Systems that scale item instances (e.g. the experience plugin's dungeon-level scaling) stamp it on creation.
+A `traits.item_level` number renders as a level tag on the item card and on every item brick (inventory, equipment slots, loot and trade windows), and orders the inventory's **Level** sort – it changes nothing else. Systems that scale item instances (e.g. the experience plugin's dungeon-level scaling) stamp it on creation.
 
 **Example - Iron Sword:**
 
@@ -159,7 +159,17 @@ A `traits.item_level` number renders as a level badge on the item card – a pur
 | Inventory | ID Format | Description |
 |-----------|-----------|-------------|
 | Party | `_party_inventory` | Shared inventory for all party members |
-| Character private | `_character_[characterId]` | Personal storage per character (e.g., `_character_mc`) |
+| Character private | `_character_[characterId]` | Personal storage per character (e.g., `_character_alice`) |
+
+**Sorting:** the inventory window has a sort picker, remembered per browser:
+
+| Sort | Order |
+|------|-------|
+| Recent | Newest first, by when each stack last gained items (`item.addedAt`, stamped by `addItem`; unequipping keeps the old stamp) |
+| Name | A–Z |
+| Rarity | Rarest first, in the `rarity` trait's value order; `quest` ranks after every real tier |
+| Level | Highest `item_level` first, then rarest |
+| Weight | Heaviest stack first (`item.getWeight()`, weight × quantity). Offered only when an item template has a `weight` |
 
 **Inventory Editor:** Every inventory template has an **Inventory Editor** button beside its title. On the left, the Item Templates tab's filter form, saved presets included, narrows an item pool that shows items as inventory slots, with category chips like the in-game tabs. Click an item to add one, or Shift+click to add a full stack. A badge shows how many are already in. Hovering any item shows the game's own item card, built from the template without running its `item_create` script; in the contents and the slot preview a click pins the card. On the right sit the inventory's own fields and traits, its slots and weight against `max_size` and `max_weight`, its total value per currency, the contents with quantity steppers, and a preview of the slots the game fills, counted the way it stacks items. Warnings flag a row whose item is missing (the game throws on it), a quantity of 0 (read as 1), items that take a slot per copy, duplicate rows, and an inventory that starts over its limits.
 
@@ -238,10 +248,81 @@ what makes one trait enough for every kind of usable item — a key, a letter, a
 {remove_item: true}
 ```
 
-> `book` and `painting` are the two specialized cousins of this trait — they render their own
-> reader / viewer instead of playing an authored scene. Reach for `use_scene` for everything else.
+> The `readable` field (below) and the `painting` trait are the two specialized cousins of this trait — they
+> render their own reader / viewer instead of playing an authored scene. Reach for `use_scene` for everything else.
 
 ---
+
+---
+
+## Readable Items
+
+An item with a **readable** gets a **Read** choice in the inventory. It comes in three types:
+
+| Type | Opens | Marked read |
+|------|-------|-------------|
+| Book | An open book over the screen. Pages are laid out to fit the window: two side by side when it is wide, one on a phone. ‹ › or the arrow keys turn them, and a swipe on touch | When it opens |
+| Scroll | A parchment the text scrolls on | When it opens |
+| Scene | A scene in the dialogue box, one paragraph per page, with Next / Previous / Read again / Close. The scene's actions run, so a page can change the art or set a flag | On the last page |
+
+A Book or Scroll reads a `$template`: its source is the dungeon id and the template id. A blank line starts a
+paragraph, and placeholders, `**bold**` and `if{}` work. Actions do not run, so a text that needs them is a Scene.
+
+```
+^books
+$old_diary
+*Day 1*<br>
+The rain has not stopped since we left the coast.
+
+*Day 3*<br>
+Mira found the old road today.
+```
+
+`{read_item: "old_diary"}` opens a readable from content even when the player does not carry it, so a letter
+can be read where it lies; scripts call `game.readItem(item)`.
+
+The engine draws a plain paper book and scroll. To use your own art, set a `background` on the reader's parts in
+your game's CSS, with the same document-relative paths as any game CSS (no leading slash):
+
+| Selector | Part |
+|----------|------|
+| `.readable--spread .readable-paper` | The open book, two pages side by side |
+| `.readable--book .readable-paper` | The single page shown on a narrow window |
+| `.readable--scroll .readable-paper` | The scroll's parchment |
+| `.readable--scroll .readable-paper::before`, `::after` | The top and bottom rollers |
+
+```css
+.readable--spread .readable-paper {
+  background: url('assets/games_assets/my_game/_core/ui/book_spread.webp') center / 100% 100% no-repeat;
+}
+.readable[data-item="old_diary"] .readable-paper {
+  background: url('assets/games_assets/my_game/_core/ui/diary.webp') center / 100% 100% no-repeat;
+}
+```
+
+Put the art on these selectors, never in a CSS variable: in an exported game a `url()` inside a variable resolves
+against the engine's own stylesheet and does not find the file.
+
+Everything else is a variable. Set them on `.readable`, or on `.readable[data-item="old_diary"]` for one item:
+
+```css
+.readable {
+  --readable-page-inset: 8% 7%;
+  --readable-ink: #2e1d0e;
+  --readable-font: 'Cormorant Garamond', serif;
+}
+```
+
+| Variable | What it sets |
+|----------|--------------|
+| `--readable-page-inset`, `--readable-scroll-inset` | Where the text sits on the art |
+| `--readable-spine-gap` | The gap between two pages, in percent of the text width (default `14`) |
+| `--readable-roller-height`, `--readable-roller-overhang`, `--readable-roller-radius` | The rollers' height, how far they reach past the parchment, and their corner rounding (defaults `24px`, `16px`, `12px`) |
+| `--readable-ink`, `--readable-font`, `--readable-font-size`, `--readable-font-style`, `--readable-line-height`, `--readable-text-align` | The text. The size defaults to `1em`, the player's text size setting; a relative value such as `0.9em` keeps following it |
+| `--readable-frame`, `--readable-title-color`, `--readable-accent` | A panel behind the reader (none by default), the title, the arrows and page count |
+
+The labels (`read_item`, `readable.page`, `readable.pages`, `readable.close`) come from the engine locale and can be
+renamed in the game's `locale.json`.
 
 ---
 
@@ -250,6 +331,7 @@ what makes one trait enough for every kind of usable item — a key, a letter, a
 | Method | Description |
 |--------|-------------|
 | `game.createItem(id)` | Create an item instance |
+| `game.readItem(itemOrId)` | Open an item's readable text, as its Read choice does |
 | `game.getInventory(id)` | Get an inventory by ID |
 | `inventory.addItem(item, quantity)` | Add items to inventory |
 | `inventory.getItemsById(id)` | Find items by template ID |

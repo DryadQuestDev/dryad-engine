@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { Editor } from '../../editor';
-import { EDITOR_TABS } from '../../editorTabs';
+import { EDITOR_TABS, type EditorTab } from '../../editorTabs';
 import { Global } from '../../../global/global';
 import EditorContent from '../editor-content/EditorContent.vue';
 import LoadGamePopup from '../LoadGamePopup.vue';
 import PlaytestModsPopup from '../PlaytestModsPopup.vue';
 import Select from 'primevue/select';
 import Button from 'primevue/button';
+import ToggleSwitch from 'primevue/toggleswitch';
 import DungeonSelect from '../shared/DungeonSelect.vue';
+import PlaytestMenu from './PlaytestMenu.vue';
+import FocusStrip from './FocusStrip.vue';
 import {
   startPlaytest,
   continuePlaytest,
@@ -17,10 +20,15 @@ import {
   showPlaytestModsPopup,
 } from './usePlaytest';
 import { editorTheme, applyEditorTheme, clearEditorTheme, toggleEditorTheme } from '../../editorTheme';
+import { hideEmptyOn, setHideEmpty, subtabShown, mainTabShown, trackTabData } from '../../hideEmptyTabs';
+import { currentFirstSteps, markFirstStep } from '../../firstSteps';
+import { openPlaceFromGame } from '../../openAt';
+import { FOCUS_KEY, canFocus, focusMode, toggleFocusMode } from '../../focusMode';
 
 const componentName = ref('EditorScreen');
 const editor = Editor.getInstance();
-editor.init();
+// After boot, a playtest's hand-over (Back to Editor, Open in editor) opens the Content tab on its paragraph.
+editor.init().then(openPlaceFromGame);
 const global = Global.getInstance();
 
 // TODO: add tabs from plugins
@@ -28,6 +36,30 @@ const global = Global.getInstance();
 
 // vue computed property for basic tabs + plugin tabs
 const visibleMainTabs = computed(() => [...EDITOR_TABS, ...editor.pluginManager.pluginTabs.value]); //.filter(tab => !tab.disabled)
+
+// With Hide empty tabs on, the header lists only tabs with data (and the open one); the rest stay
+// reachable greyed in their tab's menu, and whole empty main tabs under ⋯.
+trackTabData();
+const shownMainTabs = computed(() => visibleMainTabs.value.filter(tab => mainTabShown(tab.id, allSubtabsForMainTab(tab.id).map(s => s.id))));
+const hiddenMainTabs = computed(() => hideEmptyOn.value
+  ? visibleMainTabs.value.filter(tab => !tab.disabled && !shownMainTabs.value.includes(tab))
+  : []);
+
+const hideEmpty = computed({
+  get: () => hideEmptyOn.value,
+  set: (on: boolean) => { if (editor.selectedGame) setHideEmpty(editor.selectedGame, on); },
+});
+
+// The editor opens again after a playtest only by coming back from one, so that ticks First steps'
+// Back to Editor. Checked once, when the game is known: the Playtest tick itself happens later,
+// in this same editor, right before the reload into the game.
+let backChecked = false;
+watch(() => editor.selectedGame, (game) => {
+  if (backChecked || !game) return;
+  backChecked = true;
+  const steps = currentFirstSteps.value;
+  if (steps?.done.includes('playtest')) markFirstStep('back', game);
+}, { immediate: true });
 
 
 // Assume these properties/methods exist on the editor instance
@@ -41,6 +73,10 @@ function handleKeyDown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key === 'p') {
     event.preventDefault();
     startPlaytest();
+  }
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f' && canFocus.value) {
+    event.preventDefault();
+    toggleFocusMode();
   }
 }
 
@@ -82,7 +118,8 @@ const handleModChange = async (event: any) => {
   if (editor.selectedMod !== target) modSelectKey.value++;
 };
 
-function subtabsForMainTab(mainTabId: string) {
+/** A main tab's subtabs for the open dungeon's type, empty ones included. */
+function allSubtabsForMainTab(mainTabId: string) {
   // Explicitly read reactive values for proper dependency tracking
   const dungeonConfig = editor.dungeonConfig.value;
 
@@ -100,6 +137,10 @@ function subtabsForMainTab(mainTabId: string) {
   return filteredSubtabs;
 }
 
+function subtabsForMainTab(mainTabId: string) {
+  return allSubtabsForMainTab(mainTabId).filter(subtab => subtabShown(mainTabId, subtab.id));
+}
+
 const getSecondaryTabsForCurrentMain = computed(() => subtabsForMainTab(editor.mainTab));
 
 // --- Main tab hover menu ---
@@ -110,10 +151,22 @@ const hoverMenuTab = ref<string | null>(null);
 const hoverMenuPos = ref({ left: 0, top: 0 });
 let hoverMenuCloseTimer: number | undefined;
 
-const hoverMenuSubtabs = computed(() => {
-  if (!hoverMenuTab.value) return [];
-  if (!editor.selectedGame || !editor.selectedMod) return [];
-  return subtabsForMainTab(hoverMenuTab.value);
+type HoverMenuItem = { main: string; sub?: EditorTab['subtabs'][number]; header?: string; dim?: boolean; toggle?: boolean };
+
+// A tab's menu lists its subtabs, then its empty ones greyed. The ⋯ menu ('__more') holds the
+// Hide empty tabs switch, then the subtabs of the main tabs that are hidden whole.
+const hoverMenuItems = computed<HoverMenuItem[]>(() => {
+  const tabId = hoverMenuTab.value;
+  if (!tabId || !editor.selectedGame || !editor.selectedMod) return [];
+  if (tabId === '__more') {
+    return [{ main: '', toggle: true }, ...hiddenMainTabs.value.flatMap(tab => [
+      { main: tab.id, header: tab.name ?? global.getString('tab.' + tab.id) },
+      ...allSubtabsForMainTab(tab.id).map(sub => ({ main: tab.id, sub, dim: true })),
+    ])];
+  }
+  const shown = subtabsForMainTab(tabId);
+  const empty = allSubtabsForMainTab(tabId).filter(sub => !shown.includes(sub));
+  return [...shown.map(sub => ({ main: tabId, sub })), ...empty.map(sub => ({ main: tabId, sub, dim: true }))];
 });
 
 function openHoverMenu(tabId: string, event: MouseEvent) {
@@ -147,10 +200,8 @@ function closeHoverMenu() {
   hoverMenuTab.value = null;
 }
 
-async function selectSubtabFromMenu(subtabId: string) {
-  const tabId = hoverMenuTab.value;
+async function selectSubtabFromMenu(tabId: string, subtabId: string) {
   closeHoverMenu();
-  if (!tabId) return;
   if (editor.mainTab === tabId) {
     await editor.setSecondaryTab(subtabId);
   } else {
@@ -194,8 +245,15 @@ function searchDungeon(event: Event): void {
     <!--<pre>{{ JSON.stringify(editor.activeObject.value, null, 2) }}</pre>-->
     <!--<pre>{{ JSON.stringify(editor.coreObject.value, null, 2) }} </pre>-->
     <!-- <pre>{{ JSON.stringify(editor.schema.value, null, 2) }}</pre>-->
-    <div class="editor_header">
+    <div class="editor_header" :class="{ 'editor_header--focus': focusMode }">
+      <FocusStrip v-if="focusMode" :mainTabs="shownMainTabs" :subtabs="getSecondaryTabsForCurrentMain" />
+      <template v-else>
       <div class="main_row tab_row">
+        <!-- Focus: where the slim strip has its way back, so the button stays put between modes -->
+        <Button icon="pi pi-window-maximize" text size="small" class="focus-toggle" :disabled="!canFocus"
+          aria-label="Focus" v-tooltip.bottom="`Focus: one slim header for more room (${FOCUS_KEY}). F11 also hides the window's title bar.`"
+          @click="toggleFocusMode" />
+
         <!-- Light / Dark Theme Toggle -->
         <Button :icon="editorTheme === 'dark' ? 'pi pi-sun' : 'pi pi-moon'" @click="toggleEditorTheme"
           v-tooltip.bottom="editorTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
@@ -203,6 +261,9 @@ function searchDungeon(event: Event): void {
 
         <div class="tab main_tab" @click="global.toMainMenu">
           Exit
+        </div>
+        <div class="tab main_tab" :class="{ 'selected': editor.mainTab === 'start' }" @click="editor.setMainTab('start')">
+          Start
         </div>
         <div class="create_new tab main_tab" :class="{ 'selected': editor.mainTab === 'new' }"
           @click="editor.setMainTab('new')">
@@ -213,15 +274,13 @@ function searchDungeon(event: Event): void {
         <Button icon="pi pi-list" @click="showPlaytestModsPopup = true" :disabled="!editor.selectedGame"
           v-tooltip.bottom="'Configure which mods to load during playtest'" class="playtest-mods-button" text />
 
-        <!-- Playtest Button -->
-        <Button class="playtest-button" icon="pi pi-play" label="Playtest" @click="startPlaytest"
-          :disabled="!editor.selectedGame || editor.hasUnsavedChanges.value"
-          v-tooltip.bottom="editor.hasUnsavedChanges.value ? 'You have unsaved changes' : 'Start playtesting with dev mode (Ctrl/Cmd+P)'" />
+        <!-- Playtest, with a menu: from the scene being edited, or from a snapshot -->
+        <PlaytestMenu />
 
-        <!-- Continue Button — resume last playtest, hard-reset the scene you were on -->
+        <!-- Continue Button — resume last playtest, replaying the paragraph you were on -->
         <Button icon="pi pi-replay" label="Continue" severity="success" @click="continuePlaytest"
           :disabled="!editor.selectedGame || editor.hasUnsavedChanges.value"
-          v-tooltip.bottom="editor.hasUnsavedChanges.value ? 'You have unsaved changes' : 'Resume your last playtest and hard-reset the scene you were on — reloads with your latest content edits and re-plays the scene fresh (plain resume if you left outside a scene).'" />
+          v-tooltip.bottom="editor.hasUnsavedChanges.value ? 'You have unsaved changes' : 'Resume your last playtest: replays the paragraph you left on, with your latest saved changes. Outside a scene it carries on where you were.'" />
 
         <!-- Load Game Button -->
         <Button icon="pi pi-file-arrow-up" @click="openLoadGamePopup"
@@ -246,14 +305,17 @@ function searchDungeon(event: Event): void {
           emptyFilterMessage="No mods found" emptyMessage="select a game first" scrollHeight="250px" />
 
         <!-- Main Tabs - Iterate over visibleMainTabs from component -->
-        <div v-for="tab in visibleMainTabs" :key="tab.id" class="tab main_tab"
+        <div v-for="tab in shownMainTabs" :key="tab.id" class="tab main_tab"
           :class="{ 'selected': editor.mainTab === tab.id }" @click="editor.setMainTab(tab.id)" :hidden="tab.disabled"
           @mouseenter="openHoverMenu(tab.id, $event)" @mouseleave="scheduleCloseHoverMenu">
           {{ tab.name ?? global.getString("tab." + tab.id) }}
         </div>
 
+        <div v-if="editor.selectedGame && editor.mainTab !== 'start'" class="tab main_tab more_tabs"
+          v-tooltip.bottom="hiddenMainTabs.length ? 'Empty tabs, and the Hide empty tabs switch' : 'Hide empty tabs'"
+          @mouseenter="openHoverMenu('__more', $event)" @mouseleave="scheduleCloseHoverMenu">⋯</div>
       </div>
-      <div class="secondary_row tab_row" v-if="editor.mainTab == 'new' || (editor.selectedGame && editor.selectedMod)">
+      <div class="secondary_row tab_row" v-if="editor.mainTab !== 'start' && (editor.mainTab == 'new' || (editor.selectedGame && editor.selectedMod))">
 
         <!-- choose dungeon-->
         <DungeonSelect v-if="editor.mainTab === 'dungeons'" class="choose_dungeon" />
@@ -263,11 +325,13 @@ function searchDungeon(event: Event): void {
           :class="{ 'selected': editor.secondaryTab === subtab.id }" @click="editor.setSecondaryTab(subtab.id)">
           {{ subtab.name ?? global.getString("tab." + editor.mainTab + "." + subtab.id) }}
         </div>
+
       </div>
+      </template>
     </div>
     <div class="content">
 
-      <div v-if="editor.mainTab !== 'new' && (!editor.selectedGame || !editor.selectedMod)"
+      <div v-if="editor.mainTab !== 'new' && editor.mainTab !== 'start' && (!editor.selectedGame || !editor.selectedMod)"
         class="nothing_selected_message">
         {{ global.getString('please_select_game') }}
       </div>
@@ -285,14 +349,21 @@ function searchDungeon(event: Event): void {
 
     <!-- Main tab hover menu - jump straight to a subtab instead of the last used one -->
     <Teleport to="body">
-      <div v-if="hoverMenuSubtabs.length" class="main_tab_menu"
+      <div v-if="hoverMenuItems.length" class="main_tab_menu"
         :style="{ left: hoverMenuPos.left + 'px', top: hoverMenuPos.top + 'px' }" @mouseenter="cancelCloseHoverMenu"
         @mouseleave="closeHoverMenu">
-        <div v-for="subtab in hoverMenuSubtabs" :key="subtab.id" class="main_tab_menu_item"
-          :class="{ 'selected': editor.mainTab === hoverMenuTab && editor.secondaryTab === subtab.id }"
-          @click="selectSubtabFromMenu(subtab.id)">
-          {{ subtab.name ?? global.getString("tab." + hoverMenuTab + "." + subtab.id) }}
-        </div>
+        <template v-for="item in hoverMenuItems" :key="item.main + '/' + (item.sub?.id ?? '')">
+          <label v-if="item.toggle" class="hide-empty-toggle">
+            <ToggleSwitch v-model="hideEmpty" />
+            <span>Hide empty tabs</span>
+          </label>
+          <div v-else-if="item.header" class="main_tab_menu_header">{{ item.header }}</div>
+          <div v-else-if="item.sub" class="main_tab_menu_item"
+            :class="{ 'selected': editor.mainTab === item.main && editor.secondaryTab === item.sub.id, 'main_tab_menu_item--empty': item.dim }"
+            @click="selectSubtabFromMenu(item.main, item.sub.id)">
+            {{ item.sub.name ?? global.getString("tab." + item.main + "." + item.sub.id) }}
+          </div>
+        </template>
       </div>
     </Teleport>
 

@@ -19,18 +19,38 @@ export interface SaveMetaData {
 // Special dev mode auto-save slot
 export const DEV_AUTO_SAVE_SLOT = '__dev_auto_save__';
 
-// Dev-mode rolling pre-scene checkpoint, saved on every playScene before its actions
-// fire. Hard Scene Reset loads this to re-enter the current scene on clean state.
-export const DEV_PREV_SCENE_SLOT = '__dev_prev_scene__';
+// Per-paragraph dev checkpoints live in a ring of hidden slots — see devCheckpoints.ts.
 
 // localStorage presence flag ('1'): when set at boot, the loader re-plays the loaded
-// save's own current scene (Hard Scene Reset) instead of restoring its cached text.
+// save's own current scene (Replay paragraph, Back one paragraph) instead of restoring its cached text.
 export const DEV_REPLAY_SCENE_KEY = 'dev_replay_scene';
 
 // localStorage marker written by backToEditor: the scene id you were in when you left
 // playtest (absent if outside a scene). The editor "Continue" button reads it to pick
 // which dev save to resume from.
 export const DEV_LEFT_SCENE_KEY = 'dev_left_scene';
+
+// localStorage marker the game writes when it hands over to the editor (Back to Editor, Open in
+// editor): { gameId, dungeonId, sceneId, roomId }. The editor reads it once on boot and opens that
+// dungeon's Content tab on the paragraph.
+export const DEV_OPEN_IN_EDITOR_KEY = 'dev_open_in_editor';
+
+// localStorage marker the editor writes for Play from here (a PlayFromMarker). The game consumes it
+// once at boot, in dev mode, after the new game is set up or the snapshot is loaded.
+export const DEV_PLAY_FROM_KEY = 'dev_play_from';
+
+// Snapshots (named dev saves) live in hidden slots too — see devSnapshots.ts.
+
+export interface PlayFromMarker {
+  gameId: string;
+  dungeonId: string;
+  /** `#room.scene.row.col.para` plays that paragraph; `~room.scene.row.col` plays that branch as if picked. */
+  target: string;
+  /** 'new' for a new game, else the id of the snapshot to start from. */
+  start: string;
+  /** One action object run before the target, e.g. `{property: "trust = 2"}`; empty for none. */
+  actions: string;
+}
 
 export interface SaveDB extends DBSchema {
   saves: {

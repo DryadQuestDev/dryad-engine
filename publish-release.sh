@@ -458,11 +458,29 @@ while IFS=$'\t' read -r PRODUCT VERSION; do
             fi
         done < <(jq -c . "$FILES_JSON")
 
+        # The download page's "What's new" reads the game's manifest changelog, and each premium
+        # mod's, copied here so a release carries the notes it shipped with.
+        CHANGELOG='[]'
+        MOD_CHANGELOGS='{}'
+        if [ "$KIND" = game ]; then
+            ENTRIES='[.changelog[]? | {version, date, title, image, notes} | with_entries(select(.value != null and .value != ""))]'
+            GAME_MANIFEST="production/${NAME}-linux/assets/games_files/$PRODUCT/_core/manifest.json"
+            [ -f "$GAME_MANIFEST" ] && CHANGELOG=$(jq -c "$ENTRIES" "$GAME_MANIFEST")
+            for MOD in $(jq -r --arg g "$PRODUCT" '.[] | select(.id == $g) | .premium_mods[]?' web-game-list.json); do
+                MOD_MANIFEST="production/${NAME}-linux/assets/games_files/$PRODUCT/$MOD/manifest.json"
+                [ -f "$MOD_MANIFEST" ] || continue
+                MOD_CHANGELOGS=$(jq -c --arg mod "$MOD" --slurpfile m "$MOD_MANIFEST" \
+                    ". + {(\$mod): {name: (\$m[0].name // \$mod), changelog: (\$m[0] | $ENTRIES)}}" <<< "$MOD_CHANGELOGS")
+            done
+        fi
+
         MANIFEST="$PLAN.$PRODUCT.manifest"
         jq -s --arg product "$PRODUCT" --arg version "$VERSION" --arg title "$TITLE" --arg kind "$KIND" \
               --argjson nsfw "$IS_NSFW" --arg uploadedAt "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+              --argjson changelog "$CHANGELOG" --argjson modChangelogs "$MOD_CHANGELOGS" \
               '{format: 1, product: $product, version: $version, title: $title, kind: $kind, nsfw: $nsfw,
-                uploadedAt: $uploadedAt, files: map(del(._path))}' "$FILES_JSON" > "$MANIFEST"
+                uploadedAt: $uploadedAt, changelog: $changelog, modChangelogs: $modChangelogs,
+                files: map(del(._path))}' "$FILES_JSON" > "$MANIFEST"
         rclone copyto "$MANIFEST" "$DEST/$PREFIX/release.json"
         echo "  ✓ $PREFIX/release.json"
         UPLOADED+=("$PREFIX")

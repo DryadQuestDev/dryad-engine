@@ -179,6 +179,8 @@ When you configure multiple filter fields, they combine with **AND logic**:
 - **Filters Include**: Items must match all criteria to be eligible
 - **Filters Exclude**: Items matching any criteria are removed from the pool
 
+When an entity's Filters Include names several categories, a winning entity picks one of the matching categories first, then an item in it. Each category gets an equal share however many items it has. To favor one category, give it an entity of its own.
+
 ---
 
 ## Examples

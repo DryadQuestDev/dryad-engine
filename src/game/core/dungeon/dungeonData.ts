@@ -49,22 +49,33 @@ export class DungeonData {
 
 
 
+    /**
+     * Dev log hook (devLog.ts), set only while a dev playtest records. A static, so this class
+     * imports nothing that would pull the game into its module graph.
+     */
+    public static onFlagChange: ((data: DungeonData, id: string, oldValue: number | undefined, newValue: number | undefined) => void) | null = null;
+
     public setFlag(id: string, value: number) {
+        const old = this.flags.get(id);
         this.flags.set(id, value);
+        DungeonData.onFlagChange?.(this, id, old, value);
     }
     public getFlag(id: string): number {
         //console.log("test", this.flags)
         return this.flags.get(id) || 0;
     }
     public addFlag(id: string, value: number) {
-        this.flags.set(id, this.getFlag(id) + value);
+        this.setFlag(id, this.getFlag(id) + value);
     }
 
 
 
 
     public removeFlag(id: string): boolean {
-        return this.flags.delete(id);
+        const old = this.flags.get(id);
+        const removed = this.flags.delete(id);
+        if (removed) DungeonData.onFlagChange?.(this, id, old, undefined);
+        return removed;
     }
 
 

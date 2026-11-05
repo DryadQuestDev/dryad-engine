@@ -3,6 +3,7 @@ import { computed, ref, watch, onMounted, nextTick } from 'vue';
 import { ManifestObject } from '../../schemas/manifestSchema';
 import { isImage, isVideo } from '../../utility/functions';
 import { Global } from '../global';
+import { renderManifestDescription } from './main-screen/changelog';
 import Galleria from 'primevue/galleria';
 
 interface Props {
@@ -15,6 +16,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const global = Global.getInstance();
+const descriptionHtml = computed(() => renderManifestDescription(props.manifest, (version) => global.getString('changelog.new_in', { version })));
 
 // Galleria active index for video control
 const activeIndex = ref(0);
@@ -74,7 +76,7 @@ watch(activeIndex, async () => {
       <div class="info-version" v-if="manifest.version">{{ versionLine }}</div>
     </div>
 
-    <div class="info-description" v-html="manifest.description"></div>
+    <div class="info-description" v-html="descriptionHtml"></div>
 
     <!-- Cover Assets Carousel -->
     <Galleria v-if="currentCoverAssets.length > 0" :key="manifest?.id" v-model:activeIndex="activeIndex"

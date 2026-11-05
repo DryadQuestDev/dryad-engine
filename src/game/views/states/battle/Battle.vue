@@ -12,7 +12,7 @@ const game = Game.getInstance();
         <div class="character-list">
             <div class="character-item" v-for="character of game.characterSystem.party.value" :key="character.id">
                 <div class="character-header">
-                    <div class="character-name">{{ character.getName() }}</div>
+                    <div class="character-name notranslate">{{ character.getName() }}</div>
                     <div class="character-stats">
                         <div>HP: {{ character.getResource('health') }} / {{ character.getStat('health') }}</div>
                     </div>

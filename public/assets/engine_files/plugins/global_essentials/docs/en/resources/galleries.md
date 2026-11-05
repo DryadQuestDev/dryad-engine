@@ -60,7 +60,7 @@ The `view` value becomes the scene's display name in the gallery.
 A replay plays the scene without entering its room: it stages the dungeon's and room's default assets, music and ambience, but nothing a previous scene staged. Characters keep the look the save gave them; a game that wants its cast in another look sets it in the `scene_replay_before` event. A scene that is reached from another scene and relies on its cast, looks or backdrop sets them up with `replay`. Its actions run only in a gallery replay, before the scene's first paragraph:
 
 ```
-#tea_party{view: "Tea Time", replay: {actor: "alice->pos9, herman->pos7", attr: "herman.herman_limp = true"}}
+#tea_party{view: "Tea Time", replay: {actor: "alice->pos9, bob->pos7", attr: "bob.hat = true"}}
 ```
 
 ### How It Works

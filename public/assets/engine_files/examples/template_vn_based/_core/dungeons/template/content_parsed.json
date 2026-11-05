@@ -4,42 +4,60 @@
     "params": {
       "id": "template",
       "dungeon_type": "screen",
-      "gdoc_id": "https://docs.google.com/document/d/1wCTCV1QgscSP31zFoyQYfn1GTUQpR64s1wk2xpW6JLg",
       "music": "music_track1",
-      "image": "assets/games_assets/tutorial/_core/bgs/rikomap_floor2.webp",
+      "image": "assets/engine_files/template_assets/bgs/rikomap_floor2.webp",
       "map_width": 1920,
       "map_height": 1080
     }
   },
   {
     "id": "$dungeon_name",
-    "val": "My Dungeon Name"
+    "val": "Chapter 1"
   },
   {
     "id": "@main.description",
-    "val": "Screen Description"
+    "val": "Riko's room."
   },
   {
-    "id": "#main.greetings.1.1.1",
-    "val": "riko: Hi, I’m Riko!{actor: “riko->left”}",
+    "id": "#main.start.1.1.1",
+    "val": "riko: Hi, I'm Riko! This is your first scene.{actor: \"riko->left\"}",
     "params": {
       "if": true
     }
   },
   {
-    "id": "#main.greetings.1.1.2",
-    "val": "riko: Nice to meet you!"
+    "id": "#main.start.1.1.2",
+    "val": "riko: Go back to the editor, change what I just said, Save, and press Continue.{attr: \"riko.mood = blush\"}"
+  },
+  {
+    "id": "~main.start.2.1",
+    "val": "Ask about the room",
+    "params": {
+      "flag": "trust += 1"
+    }
+  },
+  {
+    "id": "#main.start.2.1.1",
+    "val": "riko: It's small, but it's mine.{attr: \"riko.mood = normal\"}"
+  },
+  {
+    "id": "~main.start.2.2",
+    "val": "Say goodbye"
+  },
+  {
+    "id": "#main.start.2.2.1",
+    "val": "riko: See you soon!"
   },
   {
     "id": "@main.encounter1",
-    "val": "Test Encounter"
+    "val": "A desk covered in notes and half-finished sketches."
   },
   {
     "id": "!main.encounter1.choice1",
-    "val": "__Default__:choice1"
+    "val": "Read the notes"
   },
   {
     "id": "#main.encounter1~choice1.1.1.1",
-    "val": "Test interaction"
+    "val": "The top note says: *Water the plants. Fix the lamp. Call Mom.*if{trust >= 1} Riko has added your name at the bottom.fi{}{sound: \"page_turn\"}"
   }
 ]

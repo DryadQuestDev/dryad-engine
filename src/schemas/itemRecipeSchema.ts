@@ -18,6 +18,7 @@ export const ItemRecipeSchema = {
         }
     },
     recipe_group: { type: 'chooseOne', fromFile: 'recipe_groups', tooltip: 'Group this recipe belongs to. A station that lists the group (inventory field `group_recipes`) can craft it, so a new recipe joins every such station by setting this one field.' },
+    if: { type: 'string', tooltip: 'Stations list this recipe only while the condition holds, written like a scene choice\'s `if` (every clause must hold), e.g. "my_dungeon.quest_done != 1". The recipe stays learned; it only stops showing. For a quest recipe that is no longer needed, or one held back until a story point.' },
     tags: { type: 'string[]', tooltip: 'Tags for the recipe.' },
 } as const satisfies Schema;
 

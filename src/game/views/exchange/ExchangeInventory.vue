@@ -6,6 +6,7 @@ import { Item } from '../../core/character/item';
 import { TradeContext } from '../../systems/itemSystem';
 import ExchangeItemSlot from './ExchangeItemSlot.vue';
 import RecipeList from './RecipeList.vue';
+import CustomComponentContainer from '../CustomComponentContainer.vue';
 import gsap from 'gsap';
 import { inspectMode } from './useExchangeInspect';
 import { closePopupsByKey } from '../popups/popupStore';
@@ -232,6 +233,11 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
             <span class="stat-label" v-html="weightLine"></span>
           </div>
         </div>
+
+        <div class="inventory-header-actions">
+          <CustomComponentContainer slot="exchange-inventory-header"
+            :context="{ inventory, targetInventory, mode, isParty }" />
+        </div>
       </div>
 
       <button v-if="mode === 'loot' && !isParty" class="loot-all-button" @click="emit('lootAll')">
@@ -323,13 +329,29 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
 
 /* Title and the slot/weight readout share the header row; the Loot All button keeps
    the far edge. min-width:0 lets a long inventory name ellipsize instead of pushing
-   the chips out of the panel. */
+   the chips out of the panel. Centered, not baseline: a baseline row hangs the chip below
+   the title, so a panel with chips stood taller than one without and the grids misaligned. */
 .inventory-title-row {
+  flex: 1 1 auto;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+/* The `exchange-inventory-header` slot. It sits in the title row rather than beside it so
+   that, when a narrow panel wraps the chips under the title, a button rides the chips' line
+   at the right edge instead of taking a line of its own. */
+.inventory-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.inventory-header-actions:empty {
+  display: none;
 }
 
 .inventory-grid.inspect-active {
@@ -445,16 +467,18 @@ watch(() => props.inventory?.items, (newItems, oldItems) => {
   flex-wrap: wrap;
 }
 
+/* Kept shorter than the panel title (1.2em type) at every text size, so a panel showing a chip
+   is exactly as tall as one showing only its name. */
 .stat-item {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 1px 8px;
   background: rgba(66, 185, 131, 0.1);
   border: 1px solid rgba(66, 185, 131, 0.3);
   border-radius: 4px;
   font-size: 0.8em;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 .stat-item.overflow {

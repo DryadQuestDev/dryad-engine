@@ -5,6 +5,9 @@ import { ItemSlotObject } from "../../../schemas/itemSlotSchema";
 import { Inventory } from "./inventory";
 import { TradeContext } from "../../systems/itemSystem";
 
+export type ItemReadableType = 'book' | 'scroll' | 'scene';
+export type ItemReadable = { type: ItemReadableType; source: string };
+
 export class Item {
     public id: string = "";
     public uid: string = "";
@@ -19,6 +22,21 @@ export class Item {
 
     // Recipe id this item teaches. When set, getItemChoices adds a "Learn" choice (grayed once known).
     public learn_recipe: string = "";
+
+    // What the Read choice opens. Read it through getReadable(), never directly: this copy is saved
+    // with the item and can be stale, so it only counts when no registered template has one.
+    public readable: ItemReadable | null = null;
+
+    /**
+     * The item's readable definition: the registered template's wins, so an edit reaches items
+     * already in a save; the item's own copy covers an item made from an inline template object.
+     */
+    public getReadable(): ItemReadable | null {
+        const fromTemplate = Game.getInstance().itemSystem.itemTemplatesMap.get(this.id)?.readable;
+        const readable = (fromTemplate?.source ? fromTemplate : this.readable) as ItemReadable | null;
+        if (!readable?.source) return null;
+        return { type: readable.type || 'book', source: readable.source };
+    }
 
     // Statuses applied on consume: [{ status: <template id>, stacks: number }]. Any entry (or a
     // consume_percentage/absolute resource, or a consume action script) makes the item consumable.
@@ -139,6 +157,9 @@ export class Item {
 
     public isEquipped: boolean = false;
     public quantity: number = 1;
+    // When this stack last gained units in its inventory (Date.now ms), for the inventory's
+    // "recent" sort. Stamped by Inventory.addItem; 0 = never stamped.
+    public addedAt: number = 0;
 
     // -1 - unlimited
     public maxStack(): number {

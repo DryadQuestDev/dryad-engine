@@ -8,6 +8,7 @@ import StatusObjectDisplay from './StatusObjectDisplay.vue';
 import StatusCard from '../popups/cards/StatusCard.vue';
 import ItemCompareTable from './ItemCompareTable.vue';
 import { Item } from '../../core/character/item';
+import { ItemSlot } from '../../core/character/itemSlot';
 
 // for displaying item's info on hover like name, description, stats, etc.
 
@@ -21,7 +22,16 @@ const props = defineProps<{
   item: Item;
   characterId?: string;
   compare?: boolean; // Show stat deltas against the character's equipped gear. Off where there is no character to compare (the editor, lore links).
+  inSlot?: ItemSlot | null; // Show the stats as they would be in this slot of characterId's character (null: loose). Default: where the item sits.
 }>();
+
+// The stats as the item grants them where it sits, after the game's item_stats listeners.
+const statusData = computed(() => ({
+  ...props.item.statusObject,
+  stats: props.inSlot === undefined
+    ? game.getItemStats(props.item)
+    : game.getItemStats(props.item, props.inSlot, props.characterId ? game.getCharacter(props.characterId) : null),
+}));
 
 // Get rarity CSS class
 const rarityClass = computed(() => {
@@ -64,7 +74,6 @@ const rarityLabel = computed(() => {
 
 const itemImage = computed(() => props.item.getTrait('image') || '');
 
-// Get weight for single item (not multiplied by quantity)
 const itemWeight = computed(() => {
   const weight = props.item.getTrait('weight');
   if (weight && weight > 0) {
@@ -72,7 +81,14 @@ const itemWeight = computed(() => {
   }
   return null;
 });
-const weightText = computed(() => Global.getInstance().getString('item_card.weight', { value: String(itemWeight.value ?? '') }));
+// A stack shows its arithmetic ("0.3 × 5 = 1.5"): tiles carry no weight, so the card is where a
+// player reads what dropping the stack frees. toFixed(2) strips float noise (0.1 × 3).
+const weightText = computed(() => {
+  const unit = itemWeight.value;
+  const count = props.item.quantity;
+  const value = unit !== null && count > 1 ? `${unit} × ${count} = ${Number((unit * count).toFixed(2))}` : String(unit ?? '');
+  return Global.getInstance().getString('item_card.weight', { value });
+});
 
 // Consume resource effects (restore/reduce), rendered as text.
 const consumeResourceEffects = computed(() => {
@@ -147,7 +163,7 @@ const consumeLabel = computed(() => Global.getInstance().getString('consumable_l
       <div v-script="{ html: item.getTrait('description') || '', context: { item } }" class="item-description"></div>
 
       <!-- Equip status (equip stats info) — shown first -->
-      <StatusObjectDisplay :data="item.statusObject" :character-id="characterId">
+      <StatusObjectDisplay :data="statusData" :character-id="characterId">
         <template #after-stats>
           <ItemCompareTable v-if="compare" :item="item" :character-id="characterId" />
         </template>

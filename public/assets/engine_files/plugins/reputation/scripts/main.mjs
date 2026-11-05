@@ -11,8 +11,9 @@ const TRAIT = 'reputation';
 /** @type {ValueSpec} */
 const REPUTATION_OPS = { ops: { key: { ref: 'character' }, value: 'number' } };
 
-// Reputation is save-owned. A game whose save migration resyncs traits from the template would reset
-// it on every load, and a skip from any source always wins, so the plugin opts out for every game.
+// Reputation is save-owned. Save restoration replays the setTrait below, but a save made before the
+// engine recorded writes has nothing to replay and would go back to the template, so the plugin keeps
+// the trait out for every game.
 game.registerSaveMigration('reputation', { traits: { skip: [TRAIT] } });
 
 // Emitter: reputation_change

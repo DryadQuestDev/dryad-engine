@@ -59,6 +59,7 @@ Recipes define how items transform into other items.
 | `description` | Recipe description (supports rich text) |
 | `input_items` | Required ingredients |
 | `output_items` | Items produced |
+| `if` | Condition, written like a scene choice's `if`. Stations list the recipe only while it holds; the recipe stays learned. Use it to retire a quest recipe once the quest is done (`"my_dungeon.quest_done != 1"`) |
 | `tags` | For categorizing recipes |
 
 ### Input/Output Format
@@ -124,7 +125,7 @@ When an inventory has recipes:
 
 | UI Element | Behavior |
 |------------|----------|
-| Recipe list | Shows only learned recipes |
+| Recipe list | Shows only learned recipes whose `if` holds |
 | Recipe button | Disabled if ingredients missing |
 | Click recipe | Transfers needed ingredients from party inventory |
 | Click Apply | Crafts using selected recipe |

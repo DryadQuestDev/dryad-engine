@@ -1,9 +1,8 @@
 {
   "id": "template",
   "dungeon_type": "map",
-  "gdoc_id": "https://docs.google.com/document/d/1ghVNkyM0YWOWDR1mggddE0gJJk8wUuFZwOzE7Jf1G9s/edit?tab=t.0",
   "music": "music_track1",
-  "image": "assets/games_assets/tutorial/_core/maps/riko_map.webp",
+  "image": "assets/engine_files/template_assets/maps/riko_map.webp",
   "fog_default": 200,
   "fog_shadow_coef": 1.5,
   "image_scaling": 0.5,

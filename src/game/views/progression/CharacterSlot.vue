@@ -90,7 +90,7 @@ const hue = computed(() => props.slot.hue ?? 0);
 
 // Wrapper transforms key off `isSpineRendering` (= spine is currently the rendered
 // doll), not the per-character `isSpineCharacter()` — so when a static action overlay
-// (e.g. Ane back hit/attack) replaces the spine for a spine character, the wrapper
+// (e.g. a back-view hit/attack frame) replaces the spine for a spine character, the wrapper
 // still applies slot.scale via CSS and the static frame doesn't pop to full size.
 const hasSpineForView = computed(() => {
   if (props.view) return props.character.isSpineForView(props.view);
@@ -109,7 +109,7 @@ const isSpineRendering = computed(() =>
 
 // Static placement comes from the per-view static_art entries (merged across
 // statuses) — including the back action overlays that swap in for spine views
-// (e.g. Ane back hit/attack/cast). Spine paths apply their own per-spine-entry
+// (e.g. back-view hit/attack/cast frames). Spine paths apply their own per-spine-entry
 // offset via the renderer's canvas CSS, so the wrapper returns 0/0/1 there to
 // avoid double-shift.
 const animatedArtOffset = computed(() => {
@@ -248,7 +248,17 @@ const contentTransformOrigin = computed(() => {
 
 // One-shot animations ({animate} / `anim=`): requests live on dungeonSystem, unsaved, keyed by
 // character. Directional ones read the slot's side: slots are full-width and offset by `left: x%`,
-// so the stage center is x = 0 — left of it (x < 0) lunges rightward.
+// so the stage center is x = 0 — left of it (x < 0) lunges rightward. `facing` replaces the center:
+// a character on stage (its slot's x) or left / right.
+const oneShotSide = (facing: string | undefined): number => {
+  const x = props.slot.x ?? 0;
+  if (facing === 'left') return 1;
+  if (facing === 'right') return -1;
+  const other = facing ? game.dungeonSystem.findSlotByChar(facing) : null;
+  const dx = other ? (other.x ?? 0) - x : 0;
+  if (dx) return dx > 0 ? -1 : 1;
+  return x < 0 ? -1 : 1;
+};
 const playPendingOneShot = () => {
   const charId = props.slot.char;
   if (!charId) return;
@@ -258,7 +268,7 @@ const playPendingOneShot = () => {
   animationControls.playOneShot(request.anim, {
     duration: request.duration,
     intensity: request.intensity,
-    side: (props.slot.x ?? 0) < 0 ? -1 : 1,
+    side: oneShotSide(request.facing),
   });
 };
 watch(() => props.slot.char ? game.dungeonSystem.actorAnimRequests.value[props.slot.char]?.seq : undefined, (seq) => {
@@ -377,7 +387,7 @@ const onLeave = (_el: Element, done: () => void) => {
 
 <template>
   <transition name="character-exit" @before-leave="onBeforeLeave" @leave="onLeave">
-    <div ref="characterRef" class="character-slot" :style="{ zIndex: zindex }">
+    <div ref="characterRef" class="character-slot" v-bind="{ 'data-char-id': character.id }" :style="{ zIndex: zindex }">
       <div class="character-slot-positioner">
         <!-- Art only. Idle loops (float, pulse, ghost…) animate this wrapper, so the
              overlay, item slots and hit mask below stay still while the body moves. -->

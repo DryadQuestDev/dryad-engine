@@ -16,7 +16,7 @@ The editor's **Achievements** section has three files:
 
 Every field is documented by its tooltip in the editor. The concepts worth knowing before you author are below.
 
-**Target.** Progress needed to complete. `1` makes a simple flag ("bear your first sprout"), a bigger number makes a counter ("bear thirty sprouts"). Leave it empty when the number comes from your data instead — see *Targets counted from data*.
+**Target.** Progress needed to complete. `1` makes a simple flag ("open your first chest"), a bigger number makes a counter ("open thirty chests"). Leave it empty when the number comes from your data instead — see *Targets counted from data*.
 
 **Hidden.** Masks the name and description until earned, for spoilers and surprises. The tier stays visible, so the player still knows something is there.
 

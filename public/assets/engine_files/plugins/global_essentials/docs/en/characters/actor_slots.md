@@ -159,6 +159,7 @@ Play once, then the actor returns to rest; the idle loop keeps running underneat
 |-----------|--------|
 | `lunge` | Darts toward the stage center and back — attacks, grabs |
 | `recoil` | Knocked back away from the center, then settles — hits, shoves |
+| `hurt` | `recoil` and `flash` at once — taking damage |
 | `hop` | One quick jump — surprise, glee |
 | `shake` | Short sideways tremor — anger, pain, struggling |
 | `shiver` | Small fast trembling — fear, cold |
@@ -166,12 +167,13 @@ Play once, then the actor returns to rest; the idle loop keeps running underneat
 | `bounce` | Squash and stretch — playful emphasis |
 | `flash` | Quick red wash on this actor only — taking a hit |
 
-`lunge` and `recoil` read the actor's side of the stage, so the same word points the right way on either side. `intensity` (default 1) and `duration` (seconds) tune any of them.
+`lunge`, `recoil` and `hurt` read the actor's side of the stage, so the same word points the right way on either side: a lunge goes toward the center, a recoil away from it. `facing` aims them at someone else instead, a character on stage or `left` / `right`: a lunge goes toward it, a recoil away from it. `intensity` (default 1) and `duration` (seconds) tune any of them. In `actor` props they are `anim_facing`, `anim_intensity` and `anim_duration`.
 
 ```javascript
 {actor: "chimera->right(anim=lunge)"}               // stage and lunge once she has entered
 {actor: "chimera(anim=lunge)"}                      // an actor already on stage
 {animate: "chimera lunge, mc recoil(intensity=1.3)"} // several at once
+{animate: "mc lunge(facing=bram), bram hurt(facing=mc)"} // aimed at each other
 ```
 
 ---

@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue';
-import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
-import Button from 'primevue/button';
+import IconButton from './IconButton.vue';
 import RichContentEditor from './PlainEditor.vue';
 import { inputMatchesSearch } from './searchState';
 import type { Block, Row, TemplateBlock } from '../../../../utility/dungeonEditor/ast';
@@ -371,16 +370,16 @@ function removeQuest() {
     <div class="quest-header">
       <span class="quest-sigil" v-tooltip.top="'Quest'">$</span>
       <span class="quest-label">Quest</span>
-      <InputText :model-value="group.questId" @update:model-value="(v: any) => setQuestId(v ?? '')"
-        placeholder="quest_id" class="quest-id-input"
+      <input type="text" :value="group.questId" @input="setQuestId(($event.target as HTMLInputElement).value)"
+        placeholder="quest_id" class="p-inputtext p-component quest-id-input"
         :class="{ 'input-search-hit': inputMatchesSearch(group.questId) }" />
       <div class="flex-spacer" />
-      <Button icon="pi pi-arrow-up" severity="secondary" text rounded size="small" @click="moveQuest(-1)"
-        v-tooltip.top="'Move quest up'" aria-label="Move quest up" />
-      <Button icon="pi pi-arrow-down" severity="secondary" text rounded size="small" @click="moveQuest(1)"
-        v-tooltip.top="'Move quest down'" aria-label="Move quest down" />
-      <Button icon="pi pi-trash" severity="danger" text rounded size="small" @click="removeQuest()"
-        v-tooltip.top="'Delete quest'" aria-label="Delete quest" />
+      <IconButton icon="pi pi-arrow-up" severity="secondary" size="small" @click="moveQuest(-1)"
+        v-tooltip.top="'Move quest up'" label="Move quest up" />
+      <IconButton icon="pi pi-arrow-down" severity="secondary" size="small" @click="moveQuest(1)"
+        v-tooltip.top="'Move quest down'" label="Move quest down" />
+      <IconButton icon="pi pi-trash" severity="danger" size="small" @click="removeQuest()"
+        v-tooltip.top="'Delete quest'" label="Delete quest" />
     </div>
 
     <!-- Goals — `main` (locked) and any number of custom goals, all rendered
@@ -393,17 +392,17 @@ function removeQuest() {
         v-bind="goal.blockIdx >= 0 ? { 'data-block-index': goal.blockIdx } : {}">
         <div class="goal-header">
           <span class="goal-marker" v-tooltip.top="goal.locked ? 'Main goal' : 'Goal'">◆</span>
-          <InputText :model-value="goal.goalId"
-            @update:model-value="(v: any) => goal.locked ? null : setGoalId(goal.blockIdx, v ?? '')"
-            placeholder="goal_id" class="goal-id-input" :disabled="goal.locked"
+          <input type="text" :value="goal.goalId"
+            @input="goal.locked ? null : setGoalId(goal.blockIdx, ($event.target as HTMLInputElement).value)"
+            placeholder="goal_id" class="p-inputtext p-component goal-id-input" :disabled="goal.locked"
             :class="{ 'input-search-hit': inputMatchesSearch(goal.goalId) }" />
           <div class="flex-spacer" />
-          <Button v-if="!goal.locked" icon="pi pi-arrow-up" severity="secondary" text rounded size="small"
-            :disabled="!canMoveGoalUp(goal)" @click="moveGoal(goal, -1)" aria-label="Move goal up" />
-          <Button v-if="!goal.locked" icon="pi pi-arrow-down" severity="secondary" text rounded size="small"
-            :disabled="!canMoveGoalDown(goal)" @click="moveGoal(goal, 1)" aria-label="Move goal down" />
-          <Button v-if="!goal.locked" icon="pi pi-trash" severity="danger" text rounded size="small"
-            @click="removeGoal(goal)" aria-label="Remove goal" />
+          <IconButton v-if="!goal.locked" icon="pi pi-arrow-up" severity="secondary" size="small"
+            :disabled="!canMoveGoalUp(goal)" @click="moveGoal(goal, -1)" label="Move goal up" />
+          <IconButton v-if="!goal.locked" icon="pi pi-arrow-down" severity="secondary" size="small"
+            :disabled="!canMoveGoalDown(goal)" @click="moveGoal(goal, 1)" label="Move goal down" />
+          <IconButton v-if="!goal.locked" icon="pi pi-trash" severity="danger" size="small"
+            @click="removeGoal(goal)" label="Remove goal" />
         </div>
         <RichContentEditor v-if="goal.blockIdx >= 0" :model-value="bodyText(goal.blockIdx)"
           @update:model-value="(v: string) => setBody(goal.blockIdx, v)"
@@ -413,9 +412,9 @@ function removeQuest() {
           class="quest-goal-stage" v-bind="{ 'data-block-index': stageIdx }">
           <div class="stage-header">
             <span class="stage-marker" v-tooltip.top="'Stage'">▸</span>
-            <InputText :model-value="lastSegment(stageIdx)"
-              @update:model-value="(v: any) => setLastSegment(stageIdx, v ?? '')" placeholder="stage_id"
-              class="stage-id-input" :class="{ 'input-search-hit': inputMatchesSearch(lastSegment(stageIdx)) }" />
+            <input type="text" :value="lastSegment(stageIdx)"
+              @input="setLastSegment(stageIdx, ($event.target as HTMLInputElement).value)" placeholder="stage_id"
+              class="p-inputtext p-component stage-id-input" :class="{ 'input-search-hit': inputMatchesSearch(lastSegment(stageIdx)) }" />
             <Select :model-value="progressFromParams((blocks[stageIdx] as any)?.paramsRaw)"
               @update:model-value="(v: number | null) => setStageProgress(stageIdx, v)" :options="PROGRESS_OPTIONS"
               option-label="label" option-value="value" placeholder="-" class="progress-select"
@@ -424,16 +423,16 @@ function removeQuest() {
             <MetaStatusGrid :params-raw="(blocks[stageIdx] as any)?.paramsRaw"
               @update:params-raw="(v: string | undefined) => setStageParams(stageIdx, v)" />
             <span class="stage-full-id" :title="fullId(stageIdx)">{{ fullId(stageIdx) }}</span>
-            <Button icon="pi pi-copy" severity="secondary" text rounded size="small" @click="copyFullId(stageIdx)"
-              v-tooltip.top="'Copy full id'" aria-label="Copy stage id" />
+            <IconButton icon="pi pi-copy" severity="secondary" size="small" @click="copyFullId(stageIdx)"
+              v-tooltip.top="'Copy full id'" label="Copy stage id" />
             <div class="flex-spacer" />
-            <Button icon="pi pi-chevron-up" severity="secondary" text rounded size="small"
-              :disabled="!canMoveStageUp(stageIdx, goal)" @click="moveStage(stageIdx, -1)" aria-label="Move stage up" />
-            <Button icon="pi pi-chevron-down" severity="secondary" text rounded size="small"
+            <IconButton icon="pi pi-chevron-up" severity="secondary" size="small"
+              :disabled="!canMoveStageUp(stageIdx, goal)" @click="moveStage(stageIdx, -1)" label="Move stage up" />
+            <IconButton icon="pi pi-chevron-down" severity="secondary" size="small"
               :disabled="!canMoveStageDown(stageIdx, goal)" @click="moveStage(stageIdx, 1)"
-              aria-label="Move stage down" />
-            <Button icon="pi pi-times" severity="danger" text rounded size="small" @click="removeIdx(stageIdx)"
-              aria-label="Remove goal stage" />
+              label="Move stage down" />
+            <IconButton icon="pi pi-times" severity="danger" size="small" @click="removeIdx(stageIdx)"
+              label="Remove goal stage" />
           </div>
           <RichContentEditor :model-value="bodyText(stageIdx)" @update:model-value="(v: string) => setBody(stageIdx, v)"
             placeholder="stage body…" class="content-area" assist="prose"

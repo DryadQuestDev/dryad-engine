@@ -12,13 +12,15 @@ On first entry of a dungeon, the MC's level (config `mc_id`) is snapshotted as t
 
 Dungeons that belong together share one snapshot via the `level_group` dungeon trait (set in the dungeon config). Whichever grouped dungeon is entered first writes the snapshot; entry order is irrelevant.
 
-**Convention:** name the level group after the group's main dungeon id (e.g. `level_group: "elf_mansion_dungeon"` on both the mansion and its undercroft). Then binding inventories to the main dungeon covers the whole group.
+**Convention:** name the level group after the group's main dungeon id (e.g. `level_group: "castle"` on both the castle and its cellar). Then binding inventories to the main dungeon covers the whole group.
 
 The reward multiplier for a dungeon level is:
 
 ```
 scale = 1 + power_scale_per_level × (dungeon_level − 1)
 ```
+
+Numeric `{ xp: N }` grants use the same multiplier, read at the receiving character's own level instead of the dungeon's. Author them at their level-1 value, like equipment. A quest finished long after the dungeon was entered still pays its full share.
 
 **Overriding the level.** Author `{ dungeon_level: N }` to set the current dungeon's group to level `N`, `{ dungeon_level: true }` to (re)set it to the MC's live level, or `{ dungeon_level: "dungeon_id = N" }` to target a specific dungeon by id (auto-resolved to its level group). It writes the level only: future battles rescale immediately, while already-generated chests/loot keep the level they were stamped at. See the Actions reference.
 
@@ -29,12 +31,19 @@ scale = 1 + power_scale_per_level × (dungeon_level − 1)
 When a battle definition is first marked defeated – fight victory or a scripted `{win: "battleId"}` – the plugin grants, in one pass:
 
 1. **Drop table** – the battle's `loot` inventory, read as pure template data. Hand-authored, ignores threat.
-2. **Equipment roll** – budget = base threat × `loot_equipment_coef`, spent on items from `loot_equipment_categories` at their template price. Deliberately NOT level-scaled: the created instances scale themselves (below), so a scaled budget would double-dip.
-3. **Income roll** – budget = effective threat (base × scale) × `loot_income_coef`, spent on items from `loot_income_categories` (e.g. junk). Whatever budget remains pays out 1:1 as the `loot_currency_item`. The only level-scaled budget.
-4. **Threat XP** – effective threat × `threat_xp_coef` to every levelled party member.
-5. The game's own `reward_assemble` listeners run (see Emitters).
+2. **Battle pool** – the `battle_loot_pools` band with the highest `min_threat` at or below the battle's base threat names a pool entry, drawn in chance mode at the dungeon level, exactly like a pooled chest: spawn windows apply, equipment scales to the level, and drawn currency quantities scale by the level's reward multiplier. No band, no generated loot.
+3. **Threat XP** – effective threat × `threat_xp_coef` to every levelled party member.
+4. The game's own `reward_assemble` listeners run (see Emitters).
 
-Both rolls pick the most expensive affordable item first, then fill remaining slots against a price floor (`remaining / slots left`), capped at `loot_max_items` per roll. Items with no price, a `no_drop` trait, a `test` tag, or `is_currency` never drop.
+Bands are sparse steps, like the enemy curve's pins:
+
+```json
+"battle_loot_pools": [
+  { "min_threat": 0,  "pool": "battle1" },
+  { "min_threat": 30, "pool": "battle3" },
+  { "min_threat": 50, "pool": "battle4" }
+]
+```
 
 Threat comes from the rpg_battler plugin: the sum of enemy `threat` traits plus the battle's `bonus_threat`.
 
@@ -84,9 +93,9 @@ Equipment uses ONE template that scales per instance. Consumables and junk tier 
 - `spawn_min` – minimum level; empty = no floor
 - `spawn_max` – maximum level; empty = no ceiling
 
-The level compared against is the roll's own level: the dungeon snapshot for battle loot and loot chests, the MC's live level for trade stock and restocks. Windows apply to every generated source – the threat-budget generator and all pool draws – and never to hand-authored drop tables or inventory items (the author picked the tier deliberately). With no level context (auto_scaling off, outside dungeons) the level counts as 1.
+The level compared against is the roll's own level: the dungeon snapshot for battle loot and loot chests, the MC's live level for trade stock and restocks. Windows apply to every generated source – battle pools and all other pool draws – and never to hand-authored drop tables or inventory items (the author picked the tier deliberately). With no level context (auto_scaling off, outside dungeons) the level counts as 1.
 
-Pricing still matters: the budget generator can only afford expensive tiers at high budgets anyway – windows add the hard floor (no big potion early even if affordable) and the ceiling (no small-potion padding late).
+Windows give each tier its hard floor (no big potion early) and ceiling (no small-potion padding late).
 
 ## Pooled inventories
 
@@ -127,18 +136,51 @@ Eligible items: `ingredient` category, tagged `herb` or `fungus`, no `no_drop`, 
 - Dungeon trait `environment` (single pick) says what the place is.
 - Item trait `environments` (multi pick) lists where an ingredient grows; an ingredient with none grows everywhere.
 
-The roll picks a tier first, then a uniform item of that tier. Tiers open with `spawn_min` floors 1/4/7/10; the dungeon level's own tier weighs 100 % and each tier below keeps `gather_lower_tier_weight` % per step down – low-tier staples stay available forever, just rarer in deep dungeons.
+The roll picks a tier first, then a uniform item of that tier. Level 1 and each distinct `spawn_min` among the foragable items open a tier (items with `spawn_min` 8, 15 and 22 make four tiers); the dungeon level's own tier weighs 100 % and each tier below keeps `gather_lower_tier_weight` % per step down – low-tier staples stay available forever, just rarer in deep dungeons.
 
 Resolution happens through the core `collectable_resolve` emitter, so a game can claim other table names (any `collect_pool` value except `gather`) with its own listener.
 
 ## Smith station
 
-The `smith` action (eventDelayed) opens a station overlay where **unequipped, level-stamped** equipment from the party bag is worked:
+The `smith` action (eventDelayed) opens a station overlay where **level-stamped** equipment from the party bag is worked, worn or not. The list sorts by level, then rarity, highest first (each brick carries the engine's level tag); worn pieces carry an equipped tag, and a bag piece that beats what a party member wears carries a ▲ (it gains a visible stat and loses none in some slot that takes it, by each stat's `reduction_is_good` polarity; mixed trades are not called). The station reopens on the tab and filter the player left it on.
 
-- **Upgrade** – reforge an item up to the MC's level. Cost per level = the item's rarity position (common 1, uncommon 2, rare 3, …) in **smith stones**; the item is recreated through the normal `item_create` scaling path, so the result matches a fresh drop at that level. The before/after preview is a throwaway instance built the same way.
-- **Break down** – destroy an item for `floor(item_level / smith_break_divisor) × rarity cost` stones (≈ a third of what upgrading it cost). Items below the divisor refund nothing and stay ordinary sellables.
+- **Upgrade** – reforge an item up to the MC's level (a worn piece also stops at its wearer's level, or the equip gate would refuse it). Cost per level = the item's rarity position (common 1, uncommon 2, rare 3, …) in **smith stones**; the item is recreated through the normal `item_create` scaling path, so the result matches a fresh drop at that level. A worn piece is unequipped, swapped and re-equipped into the same slot, so its equip status and the game's `item_equip_*` listeners see the new stats. The before/after preview is a throwaway instance built the same way and read as it would be in the worn piece's slot (`game.getItemStats`), so stats a game makes depend on the slot through `item_stats` preview correctly. The stats that change are listed beside it. Pieces already at their cap stay listed, last in their group and faded under a MAX badge. **Upgrade equipped** reforges every worn piece at once: the stones held are spread one level at a time, lowest level first (cheaper rarity on a tie), and the confirm lists each piece's levels.
+- **Break down** – the player selects any number of unequipped items (one by one, by rarity chip, or every piece up to a level) and breaks them in one confirm. Each is destroyed for `floor(item_level / break_divisor) × rarity cost` stones (≈ a third of what upgrading it cost). Items below the divisor refund nothing and stay ordinary sellables; worn items are left out.
 
-The `smith_stone` item template is plugin-injected with neutral traits; a game overrides it by id to set its category, icon, and price, and provides the faucet (shop stock, loot pools, quest rewards). Keeping stones sell-proof is the game's economy call too — a trade script can clear the player-side trade price for items the game flags as no-sell, so stones stay buy-only and the gold→item→break→stones→gold loop can never close. Listeners can veto either operation through the `smith_upgrade` / `smith_break` emitters. A `smith` service exposes the same operations to game scripts.
+The `smith_stone` item template is plugin-injected with neutral traits; a game overrides it by id to set its category, icon, and price, and provides the faucet (shop stock, loot pools, quest rewards). Keeping stones sell-proof is the game's economy call too — a trade script can clear the player-side trade price for items the game flags as no-sell, so stones stay buy-only and the gold→item→break→stones→gold loop can never close. Listeners can veto either operation through the `smith_upgrade` / `smith_break` emitters (`smith_break` fires per item, so one veto skips just that piece of a batch). A `smith` service exposes the same operations to game scripts.
+
+### Smithy tab
+
+The station's own settings sit in the plugin's **Smithy** tab (`plugins_data/experience/smith`):
+
+| Key | Default | Description |
+|---|---|---|
+| `break_divisor` | 3 | Break-down yield = `floor(item level / this) × rarity cost`; items below it refund nothing |
+| `sound_open` | – | Played when the station opens |
+| `sound_upgrade` | – | Played on a reforge (once for **Upgrade equipped**, however many pieces) |
+| `sound_break` | – | Played on a break-down (once per **Break**, however many pieces) |
+
+Empty sounds stay silent.
+
+### Styling the station
+
+Everything the station draws sits under `#smith-station`, so a game's CSS can restyle every part of it with no other effect on the game. That includes the confirm box that **Upgrade equipped** and **Break** open, which is drawn inside the panel:
+
+| Class | Part |
+|---|---|
+| `.smith-panel` | The station window |
+| `.smith-forge` / `.smith-break-button` | Forge and break buttons, including each confirm box's accept button |
+| `.smith-cancel` | Back button, including each confirm box's reject button |
+| `.smith-confirm-backdrop` | The dimmed layer under the confirm box; a click on it rejects |
+| `.smith-confirm` | The confirm box; `.upgrade` or `.break` is added by action |
+| `.smith-confirm-header` / `.smith-confirm-message` | Its title and text |
+
+```css
+#smith-station .smith-confirm {
+    background: #2a1d14;
+    border: 2px solid #8a6a3a;
+}
+```
 
 ## Config reference
 
@@ -147,11 +189,8 @@ The `smith_stone` item template is plugin-injected with neutral traits; a game o
 | `auto_scaling` | false | Master switch for everything on this page |
 | `power_scale_per_level` | 0.25 | Item + reward (power-curve) scaling per dungeon level; the curve of `flat` stats |
 | `relative_scale_per_level` | 0.08 | Scaling per dungeon level for `relative` stats |
-| `loot_equipment_coef` | 0 | Equipment budget per point of base threat (0 = off) |
-| `loot_income_coef` | 0 | Income budget per point of effective threat (0 = off) |
-| `loot_max_items` | 3 | Item cap per roll group |
-| `loot_equipment_categories` | – | Categories that roll as equipment and scale on creation |
-| `loot_income_categories` | – | Categories the income roll draws from; empty = pure currency payout |
-| `loot_currency_item` | – | Currency item paid from the leftover income budget |
+| `price_scale_per_level` | 2 × power | Price growth per level for scaled equipment |
+| `battle_loot_pools` | – | Threat bands → pool entry a won battle draws |
+| `loot_equipment_categories` | – | Categories treated as equipment: they scale on creation and the smith works them |
 | `gather_lower_tier_weight` | 40 | Weight in % kept by each ingredient tier below the dungeon's own at gather spots |
 | `threat_xp_coef` | 5 | XP per point of effective threat on defeat (0 = off) |

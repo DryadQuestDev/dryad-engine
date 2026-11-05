@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import Textarea from 'primevue/textarea';
 import type { AssistMode } from '../../../../utility/dungeonEditor/assist';
 import { useContentAssist } from './useContentAssist';
 
@@ -44,7 +43,12 @@ useContentAssist(computed(() => nativeEl()), () => props.assist);
  * are inside that height), so the last line sits clipped behind a scrollbar.
  * Hence the `offsetHeight - clientHeight` border correction.
  */
+// Sized by CSS where the browser can (the desktop app can). The JS fallback reads the height back
+// after setting it, a forced layout per field: on a big dungeon that froze a switch for seconds.
+const sizedByCss = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content');
+
 function grow() {
+  if (sizedByCss) return;
   const el = nativeEl();
   if (!el) return;
   el.style.height = 'auto';
@@ -70,7 +74,10 @@ function onEnter(e: KeyboardEvent) {
 </script>
 
 <template>
-  <Textarea ref="fieldRef" :model-value="props.modelValue ?? ''" @update:model-value="onUpdate"
+  <!-- A plain textarea in PrimeVue's dress: a big dungeon mounts hundreds of these, and the
+       PrimeVue component cost ten times as much to create (its CSS is loaded by the editor). -->
+  <textarea ref="fieldRef" class="p-textarea p-component" :value="props.modelValue ?? ''"
+    @input="onUpdate(($event.target as HTMLTextAreaElement).value)"
     :placeholder="props.placeholder ?? '{params}'" rows="1" spellcheck="false"
     @focus="grow" @keydown.enter.prevent="onEnter" />
 </template>
@@ -82,5 +89,6 @@ textarea {
      during the grow. */
   resize: none;
   overflow: hidden;
+  field-sizing: content;
 }
 </style>

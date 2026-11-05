@@ -1,6 +1,7 @@
 import { Editor } from './editor';
 import { Global } from '../global/global';
 import { validateVersionFormat } from '../utility/version-checker';
+import { refreshStaleContent } from '../services/contentFreshness';
 
 /**
  * DevManager - Handles game/mod export and development tools
@@ -80,6 +81,10 @@ export class DevManager {
 
       // Show progress notification
       this.global.addNotificationId('export_in_progress');
+
+      // The zip must not carry content its text no longer says: regenerate what changed outside the editor.
+      const updated = await refreshStaleContent(this.editor.selectedGame!, [modId]);
+      if (updated.length) console.log('[DevManager] Regenerated before export:', updated);
 
       // Call export via global service
       const result = await this.global.exportGameZip({

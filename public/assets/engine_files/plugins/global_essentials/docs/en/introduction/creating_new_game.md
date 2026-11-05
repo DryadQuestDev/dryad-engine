@@ -3,11 +3,13 @@
 ## Creating Your First Game
 
 ### 1. Create a New Game
-Open the **Editor** and go to **New → New Game**. You have two options:
+Open the **Editor**. It starts on the **Start** page, which **Start** in the header reopens. You have two options:
 
-**Quick Start (Recommended):** Click the **”Quick Start”** banner at the top. Pick a **Template**, enter your **Game Name**, **Author**, and **Starting Dungeon Name**, then press **”Create Game”**. You'll have a working game with a dungeon, rooms, and content ready to edit immediately.
+**From a template (Recommended):** Pick a template card, type a **Game Name** and press **Create game**. **More options** sets the author and the name of the first chapter. You get a working game with a dungeon, a commented starter scene and its own art and music, and the editor opens on that scene's **Dungeons → Content** tab. ->introduction.first_15_minutes walks through it.
 
-**From Scratch:** Fill in the manifest form below the banner (game name, ID, description, etc.) and press **”Save New Game”**.
+@en/images/first_steps/start_page.webp
+
+**From Scratch:** Under **Other ways to start**, choose **Empty game**. Fill in the manifest form (game name, ID, description, etc.) and press **”Save New Game”**.
 
 @en/images/new_game.png
 
@@ -98,7 +100,7 @@ This gives you content for **two rooms**: one with ID `1` and one with ID `2`.
 
 After writing dungeon content, you should verify that your **rooms** and **encounters** match what's defined in the game files.
 
-1. In the editor, open your dungeon Config and click **"Synchronize Content Document"**.
+1. In the editor, open your dungeon's **Content** tab and click **Sync** in its toolbar.
 2. The analyser will compare your content document against the game data and report:
    - **Unimplemented rooms** – rooms referenced in content but not created yet.
    - **Redundant rooms** – rooms in game data that no longer exist in content.

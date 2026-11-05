@@ -4,7 +4,7 @@ const { game, gsap } = window.engine;
 
 import { getSpeedMult } from './rpg-battle-state.mjs';
 import {
-  AREA_STAGGER_MS, DEFAULT_TRAVEL_SIZE, DEFAULT_HIT_SIZE, LUNGE,
+  AREA_STAGGER_MS, DEFAULT_TRAVEL_SIZE, DEFAULT_HIT_SIZE, LUNGE, CAST_GESTURE,
   sizePx, frameBox, flightSeconds, lobHeight, flightAt, facing, hitAnchor, hitSeconds, hitLandSeconds,
 } from './rpg-vfx-geometry.mjs';
 import { IMPACT_STRENGTH, JUICE_DEFAULTS, strengthOf, burst, sparks, flash, shake } from './rpg-vfx-juice.mjs';
@@ -188,6 +188,57 @@ export function animateSelfCast(casterId) {
       .to(el, { rotation: -3, duration: d, ease: 'power1.inOut' })
       .to(el, { rotation: 0, duration: d, ease: 'power1.inOut' });
   });
+}
+
+/**
+ * The cast of a caster without a cast pose (see hasCastPose), which would otherwise not move at all
+ * in the `cast` state: it gathers, rising a little taller and brighter, then pushes toward the
+ * target and settles. Resolves at the push, the beat a travel sprite launches or an impact appears.
+ * Reduced visual effects keeps the motion and drops the glow.
+ * @param {string} casterId
+ * @param {string} [targetId]
+ * @returns {Promise<void>}
+ */
+export function animateCastGesture(casterId, targetId) {
+  const m = getSpeedMult();
+  return new Promise(resolve => {
+    const el = getCharEl(casterId);
+    if (!el) { resolve(); return; }
+    const targetEl = targetId && targetId !== casterId ? getCharEl(targetId) : null;
+    const dir = targetEl ? Math.sign(getCenter(targetEl).x - getCenter(el).x) : 0;
+    const glow = !document.body.classList.contains('reduced-effects');
+    gsap.timeline()
+      .to(el, {
+        y: -el.offsetHeight * CAST_GESTURE.lift, scaleX: 0.98, scaleY: 1.04,
+        ...(glow ? { filter: 'brightness(1.3)' } : {}),
+        duration: CAST_GESTURE.charge * m, ease: 'power2.out', ...FEET,
+      })
+      .to(el, {
+        y: 0, x: dir * el.offsetWidth * CAST_GESTURE.push, scaleX: 1.02, scaleY: 0.98,
+        duration: CAST_GESTURE.release * m, ease: 'power3.in', onComplete: resolve,
+      })
+      .to(el, {
+        x: 0, scaleX: 1, scaleY: 1, ...(glow ? { filter: 'brightness(1)' } : {}),
+        duration: CAST_GESTURE.settle * m, ease: 'power2.out', clearProps: 'filter',
+      });
+  });
+}
+
+/**
+ * Whether the caster has a cast pose to hold: a skin layer keyed on `battle_state`, or a Spine
+ * skeleton (its cast is authored there). A character drawn as one frame has neither.
+ * @param {string} casterId
+ * @returns {boolean}
+ */
+function hasCastPose(casterId) {
+  const char = game.getCharacter(casterId);
+  if (!char) return true;
+  if (char.isSpineCharacter?.()) return true;
+  const layers = game.getData('character_skin_layers', true);
+  for (const id of char.getSkinLayers()) {
+    if (layers?.get(id)?.attributes?.includes('battle_state')) return true;
+  }
+  return false;
 }
 
 /**
@@ -417,7 +468,7 @@ export function animateCaster(casterId, targetId, targetType, motion = casterMot
   if ((targetType === 'ally' || targetType === 'self_and_ally') && targetId && targetId !== casterId) {
     return animateBump(casterId, targetId);
   }
-  return animateSelfCast(casterId);
+  return hasCastPose(casterId) ? animateSelfCast(casterId) : animateCastGesture(casterId, targetId);
 }
 
 const FRIENDLY_TARGETS = ['self', 'ally', 'self_and_ally', 'all_allies'];
@@ -456,11 +507,12 @@ function getConfig() {
 }
 
 /**
- * On-screen px from a percentage of the battle viewport's height (see sizePx in rpg-vfx-geometry).
+ * On-screen px from a percentage of the battle viewport's height (see sizePx in rpg-vfx-geometry); outside
+ * a battle (playProjectileAt), of the scene view's.
  * @param {number|undefined} pct @param {number} fallback
  */
 function vfxSize(pct, fallback) {
-  const vp = /** @type {HTMLElement|null} */ (document.querySelector('.rpg-viewport'));
+  const vp = /** @type {HTMLElement|null} */ (document.querySelector('.rpg-viewport') || document.querySelector('.game-body-content'));
   return sizePx(pct, fallback, vp?.getBoundingClientRect().height || window.innerHeight);
 }
 
@@ -520,9 +572,10 @@ const spriteTimers = new WeakMap();
  * per-cell background-position). `cols` = frames per row (defaults to `frames` = single row); rows
  * derive from the count, and a partial last row is trimmed (the stepper never indexes past frames-1).
  * `anchor: 'bottom'` puts the sprite's bottom edge on `pos` (ground effects), otherwise its centre.
- * Frames step at the def's fps scaled by the battle-speed setting, like every other battle tween.
+ * Frames step at the def's fps scaled by the battle-speed setting, like every other battle tween (`m`
+ * overrides it: a scene's projectile keeps the def's own pace).
  * @param {{ image: string, type?: string, frames?: number, fps?: number, cols?: number, cssClass?: string,
- *   filter?: string, pos: {x:number,y:number}, size: number, loop: boolean, anchor?: string }} o
+ *   filter?: string, pos: {x:number,y:number}, size: number, loop: boolean, anchor?: string, m?: number }} o
  * @returns {HTMLElement}
  */
 function spawnSprite(o) {
@@ -560,7 +613,7 @@ function spawnSprite(o) {
         else { clearInterval(id); spriteTimers.delete(el); return; }
       }
       setFrame();
-    }, (1000 / (o.fps || 12)) * getSpeedMult());
+    }, (1000 / (o.fps || 12)) * (o.m ?? getSpeedMult()));
     spriteTimers.set(el, id);
   } else {
     /** @type {HTMLImageElement} */ (el).src = o.image;
@@ -585,14 +638,16 @@ function killSprite(el) {
  * Where an impact plays on a target, by the def's `hit_anchor`: its centre (default), its feet (the
  * sprite's bottom edge on the sole — ground rings, eruptions) or its head. The character element
  * spans exactly the body, so its bottom edge is the sole (see FEET). A target that is gone (a bounce
- * off one that just died) falls back to `fallback`, centred.
+ * off one that just died) falls back to `fallback`, centred. `rect` stands in for the target's box
+ * outside a battle (a body on a scene's stage).
  * @param {string|undefined} anchor @param {string|null} targetId @param {{x:number,y:number}|null} fallback
+ * @param {{left:number,top:number,width:number,height:number,bottom:number}|null} [rect]
  * @returns {{ pos: {x:number,y:number}, anchor: string } | null}
  */
-function hitPlacement(anchor, targetId, fallback) {
-  const el = targetId ? getCharEl(targetId) : null;
-  if (!el) return fallback ? { pos: fallback, anchor: 'center' } : null;
-  const at = hitAnchor(anchor, el.getBoundingClientRect());
+function hitPlacement(anchor, targetId, fallback, rect = null) {
+  const box = rect || (targetId ? getCharEl(targetId)?.getBoundingClientRect() : null);
+  if (!box) return fallback ? { pos: fallback, anchor: 'center' } : null;
+  const at = hitAnchor(anchor, box);
   return { pos: at.pos, anchor: at.bottom ? 'bottom' : 'center' };
 }
 
@@ -651,19 +706,20 @@ function takeJuice(targetId, lethal) {
  * sheet's fullest frame as saved in `hit_frame_auto`), which is when an impact-only effect deals its damage — while the sprite
  * plays on to its last frame and removes itself. A no-image def just plays the sound and resolves.
  * @param {any} def @param {string|null} targetId @param {{x:number,y:number}|null} [fallback]
+ * @param {FlightOpts} [o]
  * @returns {Promise<void>}
  */
-function playHitVfx(def, targetId, fallback = null) {
+function playHitVfx(def, targetId, fallback = null, o = {}) {
   return new Promise(resolve => {
     playSounds(def.hit_sound);
-    const place = def.hit_image ? hitPlacement(def.hit_anchor, targetId, fallback) : null;
-    const size = vfxSize(def.hit_size, getConfig().projectile_hit_size || DEFAULT_HIT_SIZE);
+    const place = def.hit_image ? hitPlacement(def.hit_anchor, targetId, fallback, o.rect) : null;
+    const size = vfxSize(def.hit_size, getConfig().projectile_hit_size || DEFAULT_HIT_SIZE) * (o.scale ?? 1);
     noteImpact(targetId, def, place?.anchor === 'center' ? place.pos : null, size);
     if (!place) { resolve(); return; }
-    const m = getSpeedMult();
+    const m = o.m ?? getSpeedMult();
     const el = spawnSprite({
       image: def.hit_image, type: def.hit_type, frames: def.hit_frames, fps: def.hit_fps, cols: def.hit_cols,
-      cssClass: def.css_class, filter: def.filter, pos: place.pos, size, loop: false, anchor: place.anchor,
+      cssClass: def.css_class, filter: def.filter, pos: place.pos, size, loop: false, anchor: place.anchor, m,
     });
     setTimeout(resolve, hitLandSeconds(def) * 1000 * m);
     setTimeout(() => killSprite(el), hitSeconds(def) * 1000 * m);
@@ -678,22 +734,38 @@ function playHitVfx(def, targetId, fallback = null) {
  * @returns {Promise<{x:number,y:number}|null>}
  */
 function animateProjectile(originId, targetId, def, fromPos) {
-  const m = getSpeedMult();
+  const oEl = getCharEl(originId);
+  const tEl = getCharEl(targetId);
+  const from = fromPos || (oEl ? getCenter(oEl) : null);
+  const to = tEl ? getCenter(tEl) : null;
+  if (!from || !to) return Promise.resolve(to);
+  return flyProjectile(def, from, to, targetId);
+}
+
+/**
+ * @typedef {{ rect?: {left:number,top:number,width:number,height:number,bottom:number}|null, m?: number, scale?: number }} FlightOpts
+ * Outside a battle: `rect` is the target's box for the impact's hit_anchor, `m` the pace (1 = the def's own),
+ * `scale` multiplies the sprites' sizes.
+ */
+
+/**
+ * The flight between two viewport points, then the hit VFX where it lands. Resolves on arrival.
+ * @param {any} def @param {{x:number,y:number}} from @param {{x:number,y:number}} to
+ * @param {string|null} targetId @param {FlightOpts} [o]
+ * @returns {Promise<{x:number,y:number}>}
+ */
+function flyProjectile(def, from, to, targetId, o = {}) {
+  const m = o.m ?? getSpeedMult();
   return new Promise(resolve => {
-    const oEl = getCharEl(originId);
-    const tEl = getCharEl(targetId);
-    const from = fromPos || (oEl ? getCenter(oEl) : null);
-    const to = tEl ? getCenter(tEl) : null;
-    if (!from || !to) { resolve(to); return; }
     playSounds(def.sound);
-    const size = vfxSize(def.travel_size, getConfig().projectile_travel_size || DEFAULT_TRAVEL_SIZE);
+    const size = vfxSize(def.travel_size, getConfig().projectile_travel_size || DEFAULT_TRAVEL_SIZE) * (o.scale ?? 1);
     const el = spawnSprite({
       image: def.travel_image, type: def.travel_type, frames: def.travel_frames, fps: def.travel_fps,
-      cols: def.travel_cols, cssClass: def.css_class, filter: def.filter, pos: from, size, loop: true,
+      cols: def.travel_cols, cssClass: def.css_class, filter: def.filter, pos: from, size, loop: true, m,
     });
 
     // On land: drop the travel sprite, play the impact VFX (fire-and-forget so damage isn't blocked).
-    const land = () => { killSprite(el); playHitVfx(def, targetId, to); resolve(to); };
+    const land = () => { killSprite(el); playHitVfx(def, targetId, to, o); resolve(to); };
 
     const dx = to.x - from.x;
     const dy = to.y - from.y;
@@ -740,6 +812,35 @@ function animateProjectile(originId, targetId, def, fromPos) {
       onComplete: land,
     });
   });
+}
+
+/**
+ * A projectile outside a battle (a spell cast on a scene's stage): the def's travel sprite flies between
+ * two viewport points and its impact plays where it lands, with the impact juice's burst and sparks in
+ * the effect's colour. Bodies are the caller's: a scene animates its own actors. Sizes are shares of the
+ * scene view's height; the pace is the def's own, untouched by the battle-speed setting. A def with no
+ * travel sprite manifests its impact at `to`. `toRect`, the target's box, places a feet/head hit_anchor.
+ * `scale` multiplies every size: a stage whose bodies are drawn bigger than the battle's (a front-row
+ * enemy is about 35% of the viewport's height) passes their ratio, so the effect keeps its proportion.
+ * Resolves when the projectile arrives (an impact-only def: when its impact lands), with the landing point.
+ * @param {string} projectileId
+ * @param {{ from?: {x:number,y:number}|null, to: {x:number,y:number},
+ *   toRect?: {left:number,top:number,width:number,height:number,bottom:number}|null, scale?: number }} o
+ * @returns {Promise<{x:number,y:number}|null>}
+ */
+export async function playProjectileAt(projectileId, { from = null, to, toRect = null, scale = 1 }) {
+  const def = getProjectileDef(projectileId);
+  if (!def || !to) return null;
+  const o = { rect: toRect, m: 1, scale };
+  const at = def.travel_image && from ? await flyProjectile(def, from, to, null, o) : (await playHitVfx(def, null, to, o), to);
+  const cfg = getConfig();
+  const k = strengthOf(def.impact_strength);
+  if (cfg.hit_juice !== false && k > 0) {
+    const hit = { container: document.body, fixed: true, pos: at, size: vfxSize(def.hit_size, cfg.projectile_hit_size || DEFAULT_HIT_SIZE) * scale, color: impactColor(def), k, m: 1 };
+    burst(hit);
+    sparks({ ...hit, sparks: cfg.hit_sparks ?? JUICE_DEFAULTS.sparks });
+  }
+  return at;
 }
 
 /**
@@ -799,7 +900,10 @@ export async function animateCast(casterId, targetId, targetType, ability, opts 
   // A melee motion lunges and launches at the peak; the lunge puts the caster back to idle itself.
   if (casterPose) {
     if (motion === 'melee') await animateAttack(casterId, first);
-    else setBattleState(casterId, 'cast');
+    else {
+      setBattleState(casterId, 'cast');
+      if (!hasCastPose(casterId)) await animateCastGesture(casterId, first);
+    }
   }
   let landPos = null;
   onCast?.();                                          // ranged: flash at launch; hit-only: at manifest

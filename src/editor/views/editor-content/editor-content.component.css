@@ -3,7 +3,8 @@
   /* Use Flexbox */
   gap: 1rem;
   /* Re-apply gap for Flexbox */
-  height: calc(100vh - 120px);
+  flex: 1 1 0;
+  min-height: 0;
   overflow: hidden;
   /* Prevent the container itself from scrolling */
   position: relative;
@@ -119,4 +120,16 @@
 .template-wizard-text span {
   font-size: 0.85rem;
   color: #8ab8a0;
+}
+
+/* A subtab view fills the column itself (its own scrolling panes), so the column must not scroll. */
+.editor-content>.editor-right.editor-right--view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editor-content--start>* {
+  flex: 1 1 auto;
+  min-width: 0;
 }

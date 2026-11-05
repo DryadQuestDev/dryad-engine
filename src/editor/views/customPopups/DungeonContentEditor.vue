@@ -9,22 +9,33 @@ import {
 } from './dungeonEditor/searchState';
 import Button from 'primevue/button';
 import Textarea from 'primevue/textarea';
+import InputText from 'primevue/inputtext';
 import ToggleSwitch from 'primevue/toggleswitch';
 import Popover from 'primevue/popover';
 import { Editor } from '../../editor';
 import type { EditorCustomPopupProps } from '../../editor';
-import { startPlaytest, continuePlaytest, openLoadGamePopup } from '../editor-screen/usePlaytest';
 import { Global } from '../../../global/global';
 import { parseToAst } from '../../../utility/dungeonEditor/parseToAst';
 import { serializeAst } from '../../../utility/dungeonEditor/serializeAst';
 import { exportDocumentAsHtml, exportDocumentAsText } from '../../../utility/dungeonEditor/exportHtml';
 import { lintDungeonContent, type LintIssue } from '../../../utility/dungeonEditor/lint';
-import { buildLintContext, forDungeon } from '../../../utility/dungeonEditor/lintContext';
+import { buildLintContext, forDungeon, refreshDungeons, type BuiltLintContext } from '../../../utility/dungeonEditor/lintContext';
+import { cachedLintContext, cacheLintContext } from './dungeonEditor/lintContextCache';
 import { editTarget, withIgnore, withoutIgnore } from '../../../utility/dungeonEditor/applyFix';
 import { blockScopes, indexDungeon, refLabel, type DungeonIndex, type LintContext, type RefFix } from '../../../utility/dungeonEditor/refs';
 import type { AssistMode, AssistPlace, JumpTarget } from '../../../utility/dungeonEditor/assist';
 import { CONTENT_ASSIST, type ContentAssist } from './dungeonEditor/useContentAssist';
 import AssistLayer from './dungeonEditor/AssistLayer.vue';
+import AnalyserComponent from '../AnalyserComponent.vue';
+import SubtabActions from '../editor-content/SubtabActions.vue';
+import FirstStepsBanner from '../editor-content/FirstStepsBanner.vue';
+import { focusMode } from '../../focusMode';
+import { activateAllLazy } from './dungeonEditor/useLazyMount';
+import { markFirstStep } from '../../firstSteps';
+import { pendingPlace, type PlayPlace } from '../../openAt';
+import { conditionsOf, editingScene, parseParams, type PlayTarget } from '../../playFrom';
+import PlayFromPopover from './dungeonEditor/PlayFromPopover.vue';
+import { isCommentLine } from '../../../utility/dungeonEditor/comments';
 import { EDITOR_TABS } from '../../editorTabs';
 import { editorLintIO } from './dungeonEditor/editorLintIO';
 import { blockStartLines, lineStartOffset } from '../../../utility/dungeonEditor/locate';
@@ -46,19 +57,19 @@ import type { Block, Document, SceneBlock } from '../../../utility/dungeonEditor
 import BlockCard from './dungeonEditor/BlockCard.vue';
 import IndexPopover from './dungeonEditor/IndexPopover.vue';
 import QuestCard from './dungeonEditor/QuestCard.vue';
-import DungeonSelect from '../shared/DungeonSelect.vue';
 import { tagBlockDeep as tagBlock, tagBlocks } from './dungeonEditor/uid';
 import type { RevealRequest } from './dungeonEditor/reveal';
 import { measureOffsetTop } from './dungeonEditor/textareaMeasure';
 import { groupQuestBlocks, questIdOf, questKindOf as questKindOfUtil } from '../../../utility/dungeonEditor/quest';
 const props = defineProps<EditorCustomPopupProps>();
 const emit = defineEmits<{
-  'update:item': [item: any];
   'request-save-jump': [payload: { mainTab: string; subTab: string; entityId: string }];
 }>();
 
 const editorInstance = Editor.getInstance();
 const global = Global.getInstance();
+// The tab's own dungeon config (Dungeons → Content shows this as its view): edits land in it
+// directly, so the tab's Save, unsaved prompt and dungeon select cover them.
 const localItem = ref<any>(props.item);
 
 const doc = ref<Document>(parseToAst(localItem.value?.dungeon_content ?? ''));
@@ -121,7 +132,6 @@ function blockMatches(block: Block, needle: string): boolean {
   return false;
 }
 type DungeonEditorSettings = {
-  autoOpen: boolean;
   autosave: boolean;
   liveChecks: boolean;
   suggest: boolean;
@@ -142,7 +152,6 @@ type BlockAnchor = { kind: string; id: string; roomId: string };
 // activations, future content edits, etc.) — pixel `scrollTop` is not.
 type ScrollAnchor = BlockAnchor & { offset: number };
 const settings = useStorage<DungeonEditorSettings>('dungeonEditor_settings', {
-  autoOpen: false,
   autosave: false,
   liveChecks: true,
   suggest: true,
@@ -151,10 +160,6 @@ const settings = useStorage<DungeonEditorSettings>('dungeonEditor_settings', {
   selectedBlock: {},
   scrollPosition: {},
 }, undefined, { mergeDefaults: true });
-const autoOpen = computed({
-  get: () => settings.value.autoOpen,
-  set: (v) => { settings.value.autoOpen = v; },
-});
 const autosave = computed({
   get: () => settings.value.autosave ?? false,
   set: (v) => { settings.value.autosave = v; },
@@ -164,6 +169,7 @@ const suggest = computed({
   set: (v) => { settings.value.suggest = v; },
 });
 const typingMenuRef = ref<InstanceType<typeof Popover> | null>(null);
+const syncMenuRef = ref<InstanceType<typeof Popover> | null>(null);
 const liveChecks = computed({
   get: () => settings.value.liveChecks ?? true,
   set: (v) => { settings.value.liveChecks = v; },
@@ -210,12 +216,12 @@ function ensureRequiredBlocks() {
   );
   if (dungeonNameIdx === -1) blocks.unshift(tagBlock(newTemplate('dungeon_name')));
 
-  // Screen-type dungeons — exactly one ^main room.
+  // A screen dungeon without rooms plays in one implicit ^main room.
   if (localItem.value?.dungeon_type === 'screen') {
     const mainIdx = dedupe(
       (b) => b.kind === 'room' && (b as any).id === 'main',
     );
-    if (mainIdx === -1) {
+    if (mainIdx === -1 && !blocks.some((b) => b.kind === 'room')) {
       const insertAt = blocks.findIndex(
         (b) => b.kind === 'template' && (b as any).id === 'dungeon_name',
       ) + 1;
@@ -226,11 +232,12 @@ function ensureRequiredBlocks() {
 
 function isLockedBlock(block: Block): boolean {
   if (block.kind === 'template' && (block as any).id === 'dungeon_name') return true;
-  if (localItem.value?.dungeon_type === 'screen' && block.kind === 'room' && (block as any).id === 'main') return true;
+  if (localItem.value?.dungeon_type === 'screen' && block.kind === 'room' && (block as any).id === 'main') {
+    return doc.value.blocks.filter((b) => b.kind === 'room').length === 1;
+  }
   return false;
 }
 
-const isScreenDungeon = computed(() => localItem.value?.dungeon_type === 'screen');
 
 function replaceDocBlocks(source: string) {
   const next = parseToAst(source);
@@ -240,43 +247,13 @@ function replaceDocBlocks(source: string) {
   ensureRequiredBlocks();
 }
 
+// A dungeon switch or a reload hands over the newly loaded config.
 watch(() => props.item, (v) => {
-  // Skip when the change came from our own `commit()` emit — `localItem` is
-  // already this reference. Without this guard, the post-dungeon-switch
-  // typing path would re-enter `replaceDocBlocks`, remounting every
-  // BlockCard mid-keystroke and yanking focus.
   if (localItem.value === v) return;
   localItem.value = v;
   replaceDocBlocks(v?.dungeon_content ?? '');
   restoreSelection();
 }, { deep: false });
-
-// In-popup dungeon switch: DungeonSelect already awaited `editor.setDungeon`
-// (which loaded the new active object including its external `dungeon_content`
-// from `content_raw.txt`). The popup's `props.item` is a deep-copy snapshot
-// taken at openPopup time and won't update — so we re-bind localItem to the
-// fresh active object here, then re-parse and restore selection.
-//
-// Deep-clone (don't alias `activeObject`). If localItem and activeObject
-// shared the same reference, popup mutations (commit() writes dungeon_content
-// per keystroke) would mutate activeObject directly, fire the editor's deep
-// watcher, and flip `hasUnsavedChanges` on every typed character. The
-// wrapper does the same clone on initial open ([CustomPopupWrapper.vue]) —
-// keeping consistency here.
-function onDungeonChange() {
-  const newItem = editorInstance.activeObject.value;
-  if (!newItem || Array.isArray(newItem)) return;
-  localItem.value = JSON.parse(JSON.stringify(newItem));
-  // Push the fresh clone up to CustomPopupWrapper immediately. The wrapper's
-  // own localItem (what its Save buttons Object.assign into activeObject) is
-  // otherwise still the previous dungeon's snapshot until the first commit()
-  // here — and a Save in that window merges the OLD dungeon's fields, id
-  // included, into the new dungeon's config: the id-vs-folder save block,
-  // deterministically, on every retry.
-  emit('update:item', localItem.value);
-  replaceDocBlocks(localItem.value.dungeon_content ?? '');
-  restoreSelection();
-}
 
 let suppressSelectionPersist = false;
 
@@ -317,6 +294,10 @@ function restoreSelection() {
     if (savedScroll && typeof savedScroll === 'object') {
       const idx = findBlockIndexByAnchor(savedScroll);
       const el = blocksListRef.value;
+      if (idx >= 0 && renderThrough(idx)) {
+        nextTick(() => restoreScrollTo(idx, savedScroll.offset));
+        return;
+      }
       if (idx >= 0 && el) {
         const target = el.querySelector(`[data-block-index="${idx}"]`) as HTMLElement | null;
         if (target) {
@@ -359,6 +340,7 @@ function findTopBlockAnchor(): ScrollAnchor | null {
 
 // Persist the blocks-list scroll position (per dungeon) on scroll.
 function onBlocksListScroll() {
+  noteSceneInView();
   const key = getSelectionStorageKey();
   if (!key) return;
   const anchor = findTopBlockAnchor();
@@ -368,7 +350,7 @@ function onBlocksListScroll() {
 
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
-// Ctrl+F / Cmd+F focuses the popup's search bar instead of the browser find.
+// Ctrl+F / Cmd+F focuses the editor's search bar instead of the browser find.
 // Ctrl+C / X / V copy, cut and paste the selected block card while no text field has focus.
 function onGlobalKeydown(e: KeyboardEvent) {
   if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || showRaw.value) return;
@@ -396,7 +378,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
   copyBlocks(range, key === 'x');
 }
 
-// Last block text this popup copied: the paste source when the system clipboard can't be read,
+// Last block text this editor copied: the paste source when the system clipboard can't be read,
 // and the only text whose comment-only blocks paste (stray clipboard text must hold a real block).
 let copiedBlocksText = '';
 
@@ -489,28 +471,14 @@ onBeforeUnmount(() => {
 
 const serialized = computed(() => serializeAst(doc.value));
 
-// Popup-local dirty flag. Typing in the popup mutates `localItem` (a clone)
-// and `doc` — neither of those flip `editor.hasUnsavedChanges`. Without a
-// separate flag, the Playtest / Load Save buttons would stay enabled while
-// the popup has unsaved edits, and clicking either would reload and drop
-// them. Set true on every `commit()` call, cleared after autosave / manual
-// save (the latter flips `editor.hasUnsavedChanges` from true to false,
-// which we observe with a watcher below).
-const popupDirty = ref(false);
-
+// Set the flag here, not through the editor's deep watcher: that one starts a second after a
+// load, and an edit made sooner would read as saved.
 function commit() {
   if (!localItem.value) return;
   localItem.value.dungeon_content = serialized.value;
-  popupDirty.value = true;
-  emit('update:item', localItem.value);
+  editorInstance.hasUnsavedChanges.value = true;
+  markFirstStep('change');
 }
-
-// Clear `popupDirty` when a save lands. Manual saves go through the wrapper
-// → `editor.saveActiveObject()` → `editor.hasUnsavedChanges = false`. We
-// observe that transition here. (Autosave clears popupDirty inline below.)
-watch(() => editorInstance.hasUnsavedChanges.value, (now, was) => {
-  if (was && !now) popupDirty.value = false;
-});
 
 // Insert-after-quest helper: if `idx` is inside a quest group, return the
 // group's `endIndex` (one past its last member) so callers splice the new
@@ -602,6 +570,7 @@ function updateBlock(index: number, block: Block) {
     const after = readMeta(block.paramsRaw)?.status;
     if (before !== after) cascadeRoomStatus(index, isMetaStatus(after) ? after : undefined);
   }
+  if (block.kind === 'scene') noteEditingScene(index, true);
   commit();
 }
 
@@ -819,6 +788,7 @@ function onBlockClick(index: number, event: MouseEvent) {
 }
 
 watch(selectedIndex, (idx) => {
+  if (idx !== null && doc.value.blocks[idx]?.kind === 'scene') noteEditingScene(idx);
   if (suppressSelectionPersist) return;
   const key = getSelectionStorageKey();
   if (!key) return;
@@ -849,7 +819,8 @@ function onRawEdit(v: string) {
   replaceDocBlocks(v);
   if (localItem.value) {
     localItem.value.dungeon_content = v;
-    emit('update:item', localItem.value);
+    editorInstance.hasUnsavedChanges.value = true;
+    markFirstStep('change');
   }
 }
 
@@ -962,9 +933,105 @@ const scenesByRoom = computed<Map<string, Set<string>>>(() => {
   return map;
 });
 
+// --- Play from here ---
+
+const playFromRef = ref<InstanceType<typeof PlayFromPopover> | null>(null);
+
+/**
+ * What Play from here starts in the game: the scene from its start, a column from `paragraph`,
+ * or a `~` branch as if the player picked it (its first paragraph only; deeper in, the paragraph).
+ */
+function playTargetFor(blockIndex: number, rowIdx?: number, colIdx?: number, paragraph = 1): PlayTarget | null {
+  const block = doc.value.blocks[blockIndex];
+  const dungeonId = localItem.value?.id;
+  const room = roomByBlockIndex.value[blockIndex];
+  if (!block || block.kind !== 'scene' || !block.id || !room || !dungeonId) return null;
+  const base = `${room}.${block.id}`;
+  if (rowIdx === undefined || colIdx === undefined) {
+    return {
+      dungeonId, id: `#${base}.1.1.1`, title: `#${block.id}`, where: 'from the start of the scene',
+      conditions: conditionsOf(parseParams(visibleParams(block.paramsRaw)), ['if', 'ifOr']),
+    };
+  }
+  const column = block.rows[rowIdx]?.columns[colIdx];
+  if (!column) return null;
+  const row = rowIdx + 1;
+  const col = colIdx + 1;
+  const branchTitle = `~${column.name || `choice ${col}`}`;
+  if (column.kind === '~' && paragraph <= 1) {
+    return {
+      dungeonId, id: `~${base}.${row}.${col}`, title: branchTitle,
+      where: `Row ${row}, choice ${col} · plays the text under it`,
+      conditions: conditionsOf(parseParams(column.paramsRaw), ['if', 'ifOr', 'active', 'activeOr']),
+    };
+  }
+  return {
+    dungeonId, id: `#${base}.${row}.${col}.${paragraph}`,
+    title: column.kind === '~' ? branchTitle : `#${block.id}`,
+    where: `Row ${row}, ${column.kind === '~' ? 'choice' : 'column'} ${col}, paragraph ${paragraph}`,
+    conditions: {},
+  };
+}
+
+function openPlayFrom(event: Event, blockIndex: number, rowIdx?: number, colIdx?: number, paragraph?: number) {
+  const target = playTargetFor(blockIndex, rowIdx, colIdx, paragraph);
+  if (!target) return;
+  noteEditingScene(blockIndex);
+  playFromRef.value?.open(event, target);
+}
+provide('playFrom', openPlayFrom);
+
+/**
+ * Remember the scene block last focused or scrolled to, for Playtest ▾ › From the scene I'm
+ * editing. `onlyIfSame` refreshes the remembered one (its header condition may have changed).
+ */
+function noteEditingScene(blockIndex: number, onlyIfSame = false) {
+  const gameId = editorInstance.selectedGame;
+  const target = gameId ? playTargetFor(blockIndex) : null;
+  if (!gameId || !target) return;
+  const current = editingScene.value;
+  const same = current?.gameId === gameId && current.target.dungeonId === target.dungeonId && current.target.id === target.id;
+  if (onlyIfSame && !same) return;
+  if (same && JSON.stringify(current!.target) === JSON.stringify(target)) return;
+  editingScene.value = { gameId, target };
+}
+
+// The scene block covering the top of the list's viewport, once a scroll settles.
+let sceneInViewTimer: number | undefined;
+function noteSceneInView() {
+  window.clearTimeout(sceneInViewTimer);
+  sceneInViewTimer = window.setTimeout(() => {
+    const el = blocksListRef.value;
+    if (!el) return;
+    const top = el.scrollTop + 40;
+    for (const child of Array.from(el.querySelectorAll<HTMLElement>('[data-block-index]'))) {
+      if (child.offsetTop + child.offsetHeight <= top) continue;
+      const idx = Number(child.dataset.blockIndex);
+      if (doc.value.blocks[idx]?.kind === 'scene') noteEditingScene(idx);
+      return;
+    }
+  }, 200);
+}
+
+// The encounter cards ask this on every render, and both lookups are new objects after every
+// keystroke: kept as the same object while their content is the same, so typing doesn't re-render
+// every encounter of the dungeon.
+let sceneLookupKey = '';
+let sceneLookup: { rooms: string[]; scenes: Map<string, Set<string>> } = { rooms: [], scenes: new Map() };
+const stableSceneLookup = computed(() => {
+  const rooms = roomByBlockIndex.value;
+  const scenes = scenesByRoom.value;
+  const key = `${rooms.join('\u0001')}\u0002${[...scenes].map(([room, ids]) => `${room}:${[...ids].join(',')}`).join('\u0001')}`;
+  if (key !== sceneLookupKey) {
+    sceneLookupKey = key;
+    sceneLookup = { rooms, scenes };
+  }
+  return sceneLookup;
+});
+
 function sceneExistsForBlock(blockIndex: number, sceneId: string): boolean {
-  const room = roomByBlockIndex.value[blockIndex] ?? '';
-  return scenesByRoom.value.get(room)?.has(sceneId) ?? false;
+  const { rooms, scenes } = stableSceneLookup.value;
+  return scenes.get(rooms[blockIndex] ?? '')?.has(sceneId) ?? false;
 }
 provide('sceneExistsForBlock', sceneExistsForBlock);
 
@@ -973,18 +1040,87 @@ provide('sceneExistsForBlock', sceneExistsForBlock);
 // on dense docs per profiler). Index dropdowns (Actions/Flags/Anchors) are
 // fine with a 300ms staleness — no need to recompute live during typing.
 const docIndex = ref(buildDocumentIndex(doc.value));
+// The serialized text rather than a deep watch: walking the whole document on every keystroke cost
+// more than the index it waits for.
 watchDebounced(
-  () => doc.value.blocks,
+  serialized,
   () => {
     docIndex.value = buildDocumentIndex(doc.value);
   },
-  { debounce: 300, deep: true },
+  { debounce: 300 },
 );
 
 // Walk doc.blocks and group contiguous quest-shaped `$template` runs into
 // QuestGroup entries; non-quest blocks pass through. Underlying AST
 // unchanged — this is purely a render-time grouping.
-const groupedItems = computed(() => groupQuestBlocks(doc.value));
+// Quest groups are rebuilt on every edit. A group equal to the last one is handed over as the same
+// object, so a quest card doesn't re-render for typing elsewhere (its blocks it reads reactively).
+let lastQuestGroups = new Map<string, import('../../../utility/dungeonEditor/quest').QuestGroup>();
+const groupedItems = computed(() => {
+  const next = new Map<string, import('../../../utility/dungeonEditor/quest').QuestGroup>();
+  const items = groupQuestBlocks(doc.value).map((item) => {
+    if (item.kind !== 'quest') return item;
+    const key = JSON.stringify(item.group);
+    const same = lastQuestGroups.get(key);
+    next.set(key, same ?? item.group);
+    return same ? { ...item, group: same } : item;
+  });
+  lastQuestGroups = next;
+  return items;
+});
+
+// Big dungeons mount their cards in batches: the first screenful shows at once, the rest a batch a
+// frame, instead of the editor freezing for seconds while hundreds of cards build. A jump to a
+// card not built yet builds through it first (renderThrough).
+const FIRST_CARDS = 12;
+const CARDS_PER_FRAME = 10;
+const cardLimit = ref(FIRST_CARDS);
+let cardFrame = 0;
+
+const renderedItems = computed(() => cardLimit.value >= groupedItems.value.length
+  ? groupedItems.value
+  : groupedItems.value.slice(0, cardLimit.value));
+
+function renderMoreCards() {
+  cardFrame = 0;
+  // Done: from here on every card renders, cards added later included.
+  if (cardLimit.value >= groupedItems.value.length) {
+    cardLimit.value = Infinity;
+    return;
+  }
+  cardLimit.value += CARDS_PER_FRAME;
+  cardFrame = requestAnimationFrame(renderMoreCards);
+}
+
+function restartCardRendering() {
+  cancelAnimationFrame(cardFrame);
+  cardLimit.value = FIRST_CARDS;
+  cardFrame = requestAnimationFrame(renderMoreCards);
+}
+
+/** Build the cards through the one holding block `index`. True when it wasn't built yet: wait a tick. */
+function renderThrough(index: number): boolean {
+  const at = groupedItems.value.findIndex((item) => item.kind === 'block'
+    ? item.idx === index
+    : index >= item.group.startIndex && index < item.group.endIndex);
+  if (at < 0 || at < cardLimit.value) return false;
+  cardLimit.value = at + CARDS_PER_FRAME;
+  return true;
+}
+
+watch(() => localItem.value?.id, () => {
+  restartCardRendering();
+  assistCache = null;
+});
+onMounted(restartCardRendering);
+onBeforeUnmount(() => cancelAnimationFrame(cardFrame));
+// Search and the filters count and step through the matches in the page: every card must be
+// there, its text editors highlighting (they otherwise switch on a few at a time).
+watch([searchQuery, dungeonStructuredFilter, dungeonStatusFilter], ([q, structured, status]) => {
+  if (!q && !structured && !status) return;
+  cardLimit.value = Infinity;
+  nextTick(activateAllLazy);
+});
 
 // A grouped item is "visible" when any of its members would be visible by
 // search/filter. Quest groups stay if any member matches; single blocks use
@@ -1313,19 +1449,48 @@ const lintTexts = shallowRef<Map<string, string>>(new Map());
 let lintCtxSeq = 0;
 let lintCtxBuiltAt = 0;
 
+const lintKey = () => `${editorInstance.selectedGame}|${editorInstance.selectedMod}`;
+
+function useLintContext(built: BuiltLintContext) {
+  // A new object: the cached one is updated in place, and the shallow ref must see a change.
+  lintCtx.value = { ...built.ctx };
+  lintTexts.value = new Map(built.texts);
+  if (liveChecks.value || lintCurrent.value) runLint();
+}
+
+/** Read the whole game again. Until it lands, what the last read knew is used. */
 async function refreshLintContext() {
   const id = localItem.value?.id;
   if (!id) return;
+  const key = lintKey();
   const seq = ++lintCtxSeq;
+  const cached = cachedLintContext(key);
+  if (cached && !lintCtx.value) useLintContext(cached);
   try {
     const built = await buildLintContext(editorLintIO(editorInstance), id);
     if (seq !== lintCtxSeq) return;
-    lintCtx.value = built.ctx;
-    lintTexts.value = built.texts;
+    cacheLintContext(key, built);
     lintCtxBuiltAt = Date.now();
-    if (liveChecks.value || lintCurrent.value) runLint();
+    useLintContext(built);
   } catch (err) {
     console.warn('[DungeonContentEditor] Building the check context failed:', err);
+  }
+}
+
+/**
+ * Another dungeon opened: nothing but the one left (just saved, perhaps) and the one opened (new,
+ * perhaps) can have changed since the last read, so only they are read again.
+ */
+async function switchLintContext(id: string | undefined, previous: string | undefined) {
+  const cached = cachedLintContext(lintKey());
+  if (!id || !cached) return refreshLintContext();
+  const seq = ++lintCtxSeq;
+  useLintContext(cached);
+  try {
+    await refreshDungeons(editorLintIO(editorInstance), cached, [...new Set([id, previous].filter((d): d is string => !!d))]);
+    if (seq === lintCtxSeq) useLintContext(cached);
+  } catch (err) {
+    console.warn('[DungeonContentEditor] Reading the dungeons for the checks failed:', err);
   }
 }
 
@@ -1338,7 +1503,7 @@ function runLint() {
   lintCurrent.value = true;
 }
 
-// Scripts and the other dungeons change outside the popup: read them again when the window is back.
+// Scripts and the other dungeons change outside this editor: read them again when the window is back.
 function onWindowFocus() {
   if (Date.now() - lintCtxBuiltAt > 3000) refreshLintContext();
 }
@@ -1356,7 +1521,7 @@ watchDebounced(
   },
   { debounce: 300 },
 );
-watch(() => localItem.value?.id, () => refreshLintContext());
+watch(() => localItem.value?.id, (id, previous) => switchLintContext(id, previous));
 watch(liveChecks, (on) => { if (on) runLint(); });
 onMounted(() => {
   refreshLintContext();
@@ -1524,13 +1689,13 @@ async function jumpToGameIssue(issue: GameIssue) {
     jumpToIssue(fresh);
     return;
   }
-  if (popupDirty.value || editorInstance.hasUnsavedChanges.value) {
+  if (editorInstance.hasUnsavedChanges.value) {
     global.addNotification('Save your changes before opening another dungeon');
     return;
   }
   await editorInstance.setDungeon(issue.dungeonId);
   if (editorInstance.selectedDungeon !== issue.dungeonId) return;
-  onDungeonChange();
+  // The new config reaches this view through `item` on the next flush.
   await nextTick();
   runLint();
   const fresh = lintIssues.value.find((i) => i.line === issue.line && i.message === issue.message);
@@ -1540,15 +1705,10 @@ async function jumpToGameIssue(issue: GameIssue) {
 watchDebounced(
   serialized,
   async () => {
-    if (!autosave.value) return;
-    if (!localItem.value) return;
-    const ao = editorInstance.activeObject.value;
-    if (!ao || Array.isArray(ao)) return;
-    Object.assign(ao, localItem.value);
-    editorInstance.hasUnsavedChanges.value = true;
+    // Only after an edit: a dungeon switch or reload changes the text too.
+    if (!autosave.value || !editorInstance.hasUnsavedChanges.value) return;
     try {
       await editorInstance.saveActiveObject({ silent: true });
-      popupDirty.value = false;
     } catch (err) {
       console.warn('[DungeonContentEditor] Autosave failed:', err);
     }
@@ -1575,19 +1735,30 @@ watchDebounced(
 // Live edits add/remove highlight spans; keep the counter honest without
 // scrolling — the user is typing inside a block.
 watchDebounced(
-  () => doc.value.blocks,
+  serialized,
   () => {
     if (!searchQuery.value.trim() && !dungeonStructuredFilter.value && !dungeonStatusFilter.value) return;
     const els = collectMatchEls();
     matchCount.value = els.length;
     if (activeMatchPos.value >= els.length) activeMatchPos.value = Math.max(0, els.length - 1);
   },
-  { debounce: 400, deep: true },
+  { debounce: 400 },
 );
 
-// --- Completion and hover: what every editable of the popup reads -------------------------------
+// --- Completion and hover: what every editable of the editor reads ------------------------------
 
 let assistCache: { key: string; self: DungeonIndex; scopes: ReturnType<typeof blockScopes> } | null = null;
+let assistIndexTimer = 0;
+
+function scheduleAssistIndex() {
+  window.clearTimeout(assistIndexTimer);
+  assistIndexTimer = window.setTimeout(() => {
+    const id = localItem.value?.id;
+    const ctx = lintCtx.value;
+    if (!assistCache || assistCache.key !== serialized.value || !id || !ctx) return;
+    assistCache.self = indexDungeon(doc.value, ctx.dungeons.get(id)?.rooms ?? []);
+  }, 400);
+}
 
 /** The place of the text in `el`: its block (from the `data-block-index` around it) and the checks' context. */
 function assistPlace(el: HTMLElement, mode: AssistMode): AssistPlace | null {
@@ -1597,8 +1768,13 @@ function assistPlace(el: HTMLElement, mode: AssistMode): AssistPlace | null {
   if (!ctx || !id || !holder) return null;
   const index = Number(holder.getAttribute('data-block-index'));
   const key = serialized.value;
-  if (!assistCache || assistCache.key !== key) {
+  if (!assistCache) {
     assistCache = { key, self: indexDungeon(doc.value, ctx.dungeons.get(id)?.rooms ?? []), scopes: blockScopes(doc.value) };
+  } else if (assistCache.key !== key) {
+    // Indexing the whole dungeon is the slow part (~10ms on the biggest): while typing, the last
+    // index serves and a pause refreshes it. Scopes follow block positions, so they stay exact.
+    assistCache = { key, self: assistCache.self, scopes: blockScopes(doc.value) };
+    scheduleAssistIndex();
   }
   const scope = assistCache.scopes[index];
   return scope ? { mode, scope, lint: forDungeon(ctx, id), self: assistCache.self } : null;
@@ -1640,13 +1816,12 @@ async function jumpToTarget(target: JumpTarget) {
     return;
   }
   if (target.dungeon !== localItem.value?.id) {
-    if (popupDirty.value || editorInstance.hasUnsavedChanges.value) {
+    if (editorInstance.hasUnsavedChanges.value) {
       global.addNotification('Save your changes before opening another dungeon');
       return;
     }
     await editorInstance.setDungeon(target.dungeon);
     if (editorInstance.selectedDungeon !== target.dungeon) return;
-    onDungeonChange();
     await nextTick();
   }
   const index = blockIndexFor(target);
@@ -1656,7 +1831,7 @@ async function jumpToTarget(target: JumpTarget) {
 const activeAssist = shallowRef<ContentAssist | null>(null);
 provide(CONTENT_ASSIST, { place: assistPlace, autoOpen: suggest, jump: jumpToTarget, active: activeAssist });
 
-/** Run the checks now and count the errors: the wrapper asks before saving past any. */
+/** Run the checks now and count the errors: the tab's Save asks before saving past any. */
 function lintErrorCount(): number {
   runLint();
   const errors = lintCounts.value.errors;
@@ -1774,6 +1949,11 @@ function jumpToIssue(issue: LintIssue) {
     revealRawLine(issue.line);
     return;
   }
+  // The reveal below is consumed in one tick: its card must exist before it is sent.
+  if (renderThrough(issue.blockIndex)) {
+    nextTick(() => jumpToIssue(issue));
+    return;
+  }
   jumpToBlock(issue.blockIndex);
   if (!issue.at) return;
   revealRequest.value = { seq: ++revealSeq, blockIndex: issue.blockIndex, at: issue.at };
@@ -1836,7 +2016,17 @@ useSortable(tocListRef, doc.value.blocks, {
   },
 });
 
+function restoreScrollTo(idx: number, offset: number) {
+  const el = blocksListRef.value;
+  const target = el?.querySelector(`[data-block-index="${idx}"]`) as HTMLElement | null;
+  if (el && target) el.scrollTop = target.offsetTop + offset;
+}
+
 function scrollToBlock(index: number) {
+  if (renderThrough(index)) {
+    nextTick(() => scrollToBlock(index));
+    return;
+  }
   const root = blocksListRef.value;
   if (!root) return;
   const el = root.querySelector(`[data-block-index="${index}"]`) as HTMLElement | null;
@@ -1848,7 +2038,7 @@ function scrollToBlock(index: number) {
 
 // Keep the TOC viewport showing the currently-selected block. Triggered on
 // selection change (clicking a block, jumping via lint banner, search hits)
-// and on popup open / dungeon switch via the watcher below.
+// and on mount / dungeon switch via the watcher below.
 function scrollTocToSelected(index: number) {
   const root = tocListRef.value;
   if (!root) return;
@@ -1895,6 +2085,10 @@ function prevMatch() {
 // card is in view + lazy-mounted), then on next tick targets the inner
 // `[data-scene-row]` / `[data-scene-col]` element rendered by SceneEditor.
 function jumpToSceneSub(blockIndex: number, rowIdx: number, colIdx?: number) {
+  if (renderThrough(blockIndex)) {
+    nextTick(() => jumpToSceneSub(blockIndex, rowIdx, colIdx));
+    return;
+  }
   selectedIndex.value = blockIndex;
   scrollToBlock(blockIndex);
   nextTick(() => {
@@ -1915,6 +2109,70 @@ function jumpToSceneSub(blockIndex: number, rowIdx: number, colIdx?: number) {
   });
 }
 
+/**
+ * The `n`th paragraph (1-based) of a column's text, as the game numbers them: blank lines split
+ * paragraphs, and comment lines don't exist for it.
+ */
+function paragraphRange(content: string, n: number): [number, number] | null {
+  let offset = 0;
+  let count = 0;
+  let start = -1;
+  let end = -1;
+  let inParagraph = false;
+  for (const line of content.split('\n')) {
+    const lineEnd = offset + line.length;
+    if (line.trim() === '') {
+      if (inParagraph && count === n) return [start, end];
+      inParagraph = false;
+    } else if (!isCommentLine(line)) {
+      if (!inParagraph) {
+        inParagraph = true;
+        count++;
+        start = offset;
+      }
+      end = lineEnd;
+    }
+    offset = lineEnd + 1;
+  }
+  return inParagraph && count === n ? [start, end] : null;
+}
+
+/** Land on what a playtest was showing: the paragraph `#room.scene.row.col.para`, else its room. */
+function landOnPlace(place: PlayPlace) {
+  const m = place.sceneId?.match(/^#(.+)\.([^.]+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const [, room, scene] = m;
+    const row = Number(m[3]) - 1;
+    const col = Number(m[4]) - 1;
+    const blocks = doc.value.blocks;
+    const idx = blocks.findIndex((b, i) => b?.kind === 'scene' && (b as any).id === scene && (roomByBlockIndex.value[i] ?? '') === room);
+    if (idx >= 0) {
+      jumpToSceneSub(idx, row, col);
+      const content = (blocks[idx] as SceneBlock).rows[row]?.columns[col]?.content ?? '';
+      const range = paragraphRange(content, Number(m[5]));
+      if (range) {
+        // The card mounts once scrolled into view; select the paragraph after it has.
+        window.setTimeout(() => {
+          revealRequest.value = { seq: ++revealSeq, blockIndex: idx, at: { target: 'column-content', rowIndex: row, colIndex: col, start: range[0], end: range[1] } };
+          nextTick(() => { revealRequest.value = null; });
+        }, 300);
+      }
+      return;
+    }
+  }
+  const roomId = place.roomId ?? m?.[1];
+  const roomIdx = roomId ? doc.value.blocks.findIndex(b => b?.kind === 'room' && (b as any).id === roomId) : -1;
+  if (roomIdx >= 0) jumpToBlock(roomIdx);
+}
+
+// After a playtest hands over, land on its place once this dungeon is loaded. Deferred past the
+// mount's own scroll restore, which would otherwise win.
+watch([pendingPlace, () => localItem.value?.id], ([place, id]) => {
+  if (!place || place.dungeonId !== id) return;
+  pendingPlace.value = null;
+  window.setTimeout(() => landOnPlace(place), 0);
+}, { immediate: true });
+
 type QuestKind = 'title' | 'main_stage' | 'goal' | 'goal_stage';
 
 function questKindOf(id: string | undefined): QuestKind | null {
@@ -1930,110 +2188,164 @@ function questKindOf(id: string | undefined): QuestKind | null {
 
 <template>
   <div class="dungeon-content-editor">
-    <div class="editor-toolbar">
-      <div class="toolbar-left">
-        <DungeonSelect class="popup-dungeon-select" @change="onDungeonChange"
-          :disabled="popupDirty || editorInstance.hasUnsavedChanges.value" v-tooltip.bottom="(popupDirty || editorInstance.hasUnsavedChanges.value)
-            ? 'Save your changes before switching dungeons'
-            : ''" />
-        <label class="auto-open-toggle" v-tooltip.bottom="'Open this popup automatically on Dungeon → Config'">
-          <ToggleSwitch v-model="autoOpen" />
-          <span class="auto-open-label">Auto-open</span>
-        </label>
-        <label class="auto-open-toggle" v-tooltip.bottom="'Save to disk automatically on edit (skips error checking)'">
-          <ToggleSwitch v-model="autosave" />
-          <span class="auto-open-label">Autosave</span>
-        </label>
-        <Button icon="pi pi-sliders-h" label="Typing" size="small" text severity="secondary"
-          v-tooltip.bottom="'Curly quotes, en dashes and suggestions while you type'"
-          @click="(e: Event) => typingMenuRef?.toggle(e)" />
-        <Popover ref="typingMenuRef">
-          <div class="typing-menu">
-            <label class="auto-open-toggle"
-              v-tooltip.right="'Convert straight quotes to curly quotes as you type (like Google Docs)'">
-              <ToggleSwitch v-model="autoCurlyQuotes" />
-              <span class="auto-open-label">Curly quotes</span>
-            </label>
-            <label class="auto-open-toggle" v-tooltip.right="'Convert `--` to en dash `–` as you type'">
-              <ToggleSwitch v-model="autoEnDash" />
-              <span class="auto-open-label">En dash</span>
-            </label>
-            <label class="auto-open-toggle"
-              v-tooltip.right="'Suggest ids and names as you type inside {…}, if{}, |, [[ and [. Ctrl+Space suggests anywhere; hover an id to see it, Ctrl+click to open it.'">
-              <ToggleSwitch v-model="suggest" />
-              <span class="auto-open-label">Suggestions</span>
-            </label>
-          </div>
-        </Popover>
-        <span class="toolbar-divider" aria-hidden="true"></span>
-        <button type="button" class="lint-chip" :class="{
-          'lint-chip--error': lintCurrent && lintCounts.errors,
-          'lint-chip--warning': lintCurrent && !lintCounts.errors && lintCounts.warnings,
-          'lint-chip--clean': lintCurrent && !lintIssues.length,
-          'lint-chip--open': lintPanelOpen,
-        }" v-tooltip.bottom="lintCurrent ? 'Problems in this dungeon: click for the list' : 'Check this dungeon'"
-          @click="toggleLintPanel">
-          <i class="pi" :class="!lintCurrent ? 'pi-search' : lintCounts.errors ? 'pi-times-circle'
-            : lintCounts.warnings ? 'pi-exclamation-triangle' : 'pi-check-circle'" />
-          <span>{{ lintChipLabel }}</span>
-        </button>
-        <span class="toolbar-divider" aria-hidden="true"></span>
-        <Button icon="pi pi-play" label="Playtest" size="small"
-          :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
-          v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
-            ? 'You have unsaved changes'
-            : 'Start playtesting with dev mode (Ctrl/Cmd+P)'" @click="startPlaytest" />
-        <Button icon="pi pi-replay" label="Continue" size="small" severity="success"
-          :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
-          v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
-            ? 'You have unsaved changes'
-            : 'Resume your last playtest and hard-reset the scene you were on — reloads with your latest content edits and re-plays the scene fresh (plain resume if you left outside a scene).'" @click="continuePlaytest" />
-        <Button icon="pi pi-file-arrow-up" size="small" text
-          :disabled="!editorInstance.selectedGame || editorInstance.hasUnsavedChanges.value || popupDirty"
-          v-tooltip.bottom="(editorInstance.hasUnsavedChanges.value || popupDirty)
-            ? 'You have unsaved changes'
-            : 'Load save in dev mode'" @click="openLoadGamePopup" />
-        <!--
-        <span class="counts">
-          <span>^ {{ stats.room }}</span>
-          <span>@ {{ stats.encounter }}</span>
-          <span># {{ stats.scene }}</span>
-          <span>$ {{ stats.template }}</span>
-          <span v-if="stats.raw">raw {{ stats.raw }}</span>
-        </span>
-        -->
+    <FirstStepsBanner />
+    <div class="toolbar-stack" :class="{ 'toolbar-stack--focus': focusMode }">
+      <div class="editor-toolbar">
+        <div class="toolbar-left">
+          <SubtabActions />
+          <label class="auto-open-toggle" v-tooltip.bottom="'Save to disk automatically on edit (skips error checking)'">
+            <ToggleSwitch v-model="autosave" />
+            <span class="auto-open-label">Autosave</span>
+          </label>
+          <Button icon="pi pi-sliders-h" label="Typing" size="small" text severity="secondary" class="focus-compact"
+            v-tooltip.bottom="'Curly quotes, en dashes and suggestions while you type'"
+            @click="(e: Event) => typingMenuRef?.toggle(e)" />
+          <Popover ref="typingMenuRef">
+            <div class="typing-menu">
+              <label class="auto-open-toggle"
+                v-tooltip.right="'Convert straight quotes to curly quotes as you type (like Google Docs)'">
+                <ToggleSwitch v-model="autoCurlyQuotes" />
+                <span class="auto-open-label">Curly quotes</span>
+              </label>
+              <label class="auto-open-toggle" v-tooltip.right="'Convert `--` to en dash `–` as you type'">
+                <ToggleSwitch v-model="autoEnDash" />
+                <span class="auto-open-label">En dash</span>
+              </label>
+              <label class="auto-open-toggle"
+                v-tooltip.right="'Suggest ids and names as you type inside {…}, if{}, |, [[ and [. Ctrl+Space suggests anywhere; hover an id to see it, Ctrl+click to open it.'">
+                <ToggleSwitch v-model="suggest" />
+                <span class="auto-open-label">Suggestions</span>
+              </label>
+            </div>
+          </Popover>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button type="button" class="lint-chip" :class="{
+            'lint-chip--error': lintCurrent && lintCounts.errors,
+            'lint-chip--warning': lintCurrent && !lintCounts.errors && lintCounts.warnings,
+            'lint-chip--clean': lintCurrent && !lintIssues.length,
+            'lint-chip--open': lintPanelOpen,
+          }" v-tooltip.bottom="lintCurrent ? 'Problems in this dungeon: click for the list' : 'Check this dungeon'"
+            @click="toggleLintPanel">
+            <i class="pi" :class="!lintCurrent ? 'pi-search' : lintCounts.errors ? 'pi-times-circle'
+              : lintCounts.warnings ? 'pi-exclamation-triangle' : 'pi-check-circle'" />
+            <span>{{ lintChipLabel }}</span>
+          </button>
+          <Button icon="pi pi-sync" label="Sync" size="small" text severity="secondary" class="focus-compact"
+            v-tooltip.bottom="'Match the Rooms and Encounters tabs to the saved content'"
+            @click="(e: Event) => syncMenuRef?.toggle(e)" />
+          <Popover ref="syncMenuRef">
+            <AnalyserComponent />
+          </Popover>
+          <!--
+          <span class="counts">
+            <span>^ {{ stats.room }}</span>
+            <span>@ {{ stats.encounter }}</span>
+            <span># {{ stats.scene }}</span>
+            <span>$ {{ stats.template }}</span>
+            <span v-if="stats.raw">raw {{ stats.raw }}</span>
+          </span>
+          -->
+        </div>
+        <div class="toolbar-right">
+          <!-- Focus mode shows each block's sigil instead of its name -->
+          <Button :label="focusMode ? '^' : 'Room'" icon="pi pi-plus" size="small" text
+            class="room-btn" v-tooltip.bottom="focusMode ? 'Add a room' : ''" @click="addBlock('room')" />
+          <Button :label="focusMode ? '@' : 'Encounter'" icon="pi pi-plus" size="small" text class="encounter-btn"
+            v-tooltip.bottom="focusMode ? 'Add an encounter' : ''" @click="addBlock('encounter')" />
+          <Button :label="focusMode ? '#' : 'Scene'" icon="pi pi-plus" size="small" text class="scene-btn"
+            v-tooltip.bottom="focusMode ? 'Add a scene' : ''" @click="addBlock('scene')" />
+          <Button :label="focusMode ? '$' : 'Template'" icon="pi pi-plus" size="small" severity="secondary" text
+            v-tooltip.bottom="focusMode ? 'Add a template' : ''" @click="addBlock('template')" />
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <Button label="Quest" icon="pi pi-plus" size="small" text class="quest-btn quest-btn--title"
+            @click="addQuest" />
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <Button v-if="isPovActive" :label="povFeedback !== null ? `Converted ${povFeedback}` : '|I| POV'"
+            :icon="povFeedback !== null ? 'pi pi-check' : focusMode ? 'pi pi-user-edit' : undefined" size="small"
+            severity="secondary" class="focus-compact"
+            v-tooltip.bottom="'Convert first-person prose (I, me, my…) to POV |placeholders|. Skips dialogue in quotes, {params}, [code] and // lines. Of `id:` replicas, only the MC\'s convert (mc_id in the Gender & POV plugin config). Review before saving.'"
+            @click="convertPovDoc" />
+          <Button :label="copyFeedback === 'text' ? 'Copied!' : 'Copy text'"
+            :icon="copyFeedback === 'text' ? 'pi pi-check' : 'pi pi-copy'" size="small" severity="secondary"
+            class="focus-compact"
+            v-tooltip.bottom="'Copy as plain DryadScript source. Paste anywhere (editors, chat, email) to share the raw dungeon text.'"
+            @click="copyAsText" />
+          <Button :label="copyFeedback === 'html' ? 'Copied!' : 'Copy tables'"
+            :icon="copyFeedback === 'html' ? 'pi pi-check' : 'pi pi-table'" size="small" severity="secondary"
+            class="focus-compact"
+            v-tooltip.bottom="'Copy as Google Docs–ready tables. Paste into a Google Doc, share for collaboration, and import back via gdoc_id later.'"
+            @click="copyAsHtml" />
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <Button :label="showRaw ? 'Visual' : 'Raw'" :icon="showRaw ? 'pi pi-th-large' : 'pi pi-code'" size="small"
+            severity="secondary" class="focus-compact" v-tooltip.bottom="focusMode ? (showRaw ? 'Visual view' : 'Raw text') : ''"
+            @click="showRaw = !showRaw" />
+        </div>
       </div>
-      <div class="toolbar-right">
-        <Button v-if="!isScreenDungeon" label="Room" icon="pi pi-plus" size="small" text class="room-btn"
-          @click="addBlock('room')" />
-        <Button label="Encounter" icon="pi pi-plus" size="small" text class="encounter-btn"
-          @click="addBlock('encounter')" />
-        <Button label="Scene" icon="pi pi-plus" size="small" text class="scene-btn" @click="addBlock('scene')" />
-        <Button label="Template" icon="pi pi-plus" size="small" severity="secondary" text
-          @click="addBlock('template')" />
-        <span class="toolbar-divider" aria-hidden="true"></span>
-        <Button label="Quest" icon="pi pi-plus" size="small" text class="quest-btn quest-btn--title"
-          @click="addQuest" />
-        <span class="toolbar-divider" aria-hidden="true"></span>
-        <Button v-if="isPovActive" :label="povFeedback !== null ? `Converted ${povFeedback}` : '|I| POV'"
-          :icon="povFeedback !== null ? 'pi pi-check' : undefined" size="small" severity="secondary"
-          v-tooltip.bottom="'Convert first-person prose (I, me, my…) to POV |placeholders|. Skips dialogue in quotes, {params}, [code] and // lines. Of `id:` replicas, only the MC\'s convert (mc_id in the Gender & POV plugin config). Review before saving.'"
-          @click="convertPovDoc" />
-        <Button :label="copyFeedback === 'text' ? 'Copied!' : 'Copy text'"
-          :icon="copyFeedback === 'text' ? 'pi pi-check' : 'pi pi-copy'" size="small" severity="secondary"
-          v-tooltip.bottom="'Copy as plain DryadScript source. Paste anywhere (editors, chat, email) to share the raw dungeon text.'"
-          @click="copyAsText" />
-        <Button :label="copyFeedback === 'html' ? 'Copied!' : 'Copy tables'"
-          :icon="copyFeedback === 'html' ? 'pi pi-check' : 'pi pi-table'" size="small" severity="secondary"
-          v-tooltip.bottom="'Copy as Google Docs–ready tables. Paste into a Google Doc, share for collaboration, and import back via gdoc_id later.'"
-          @click="copyAsHtml" />
-        <span class="toolbar-divider" aria-hidden="true"></span>
-        <Button :label="showRaw ? 'Visual' : 'Raw'" :icon="showRaw ? 'pi pi-th-large' : 'pi pi-code'" size="small"
-          severity="secondary" @click="showRaw = !showRaw" />
+      <div v-if="!showRaw" class="search-row">
+        <i class="pi pi-search search-icon" />
+        <input ref="searchInputRef" v-model="searchQuery" class="search-input" type="text" placeholder="Search…" />
+        <span v-if="matchingBlockIndices" class="search-count">{{ matchCount ? activeMatchPos + 1 : 0 }}/{{
+          matchCount }}</span>
+        <button v-if="matchingBlockIndices" type="button" class="search-nav" :disabled="!matchCount"
+          @click="prevMatch" title="Previous match">
+          <i class="pi pi-chevron-left" />
+        </button>
+        <button v-if="matchingBlockIndices" type="button" class="search-nav" :disabled="!matchCount"
+          @click="nextMatch" title="Next match">
+          <i class="pi pi-chevron-right" />
+        </button>
+        <button v-show="searchQuery" type="button" class="search-clear" @click="searchQuery = ''" title="Clear">
+          <i class="pi pi-times" />
+        </button>
+        <span v-if="dungeonStructuredFilter" class="filter-chip" :title="filterChipLabel">
+          <span class="filter-chip-label">{{ filterChipLabel }}</span>
+          <button type="button" class="filter-chip-clear" @click="clearStructuredFilter"
+            :title="global.getString('dungeon_editor.index.clear_filter')">
+            <i class="pi pi-times" />
+          </button>
+        </span>
+        <span class="search-divider" aria-hidden="true"></span>
+        <Button :label="global.getString('dungeon_editor.index.actions')" icon="pi pi-bolt" size="small" text
+          class="index-btn focus-compact" v-tooltip.bottom="focusMode ? global.getString('dungeon_editor.index.actions') : ''"
+          @click="indexActionsRef?.toggle($event)" />
+        <Button :label="global.getString('dungeon_editor.index.flags')" icon="pi pi-flag" size="small" text
+          class="index-btn focus-compact" v-tooltip.bottom="focusMode ? global.getString('dungeon_editor.index.flags') : ''"
+          @click="indexFlagsRef?.toggle($event)" />
+        <Button :label="global.getString('dungeon_editor.index.anchors')" icon="pi pi-link" size="small" text
+          class="index-btn focus-compact" v-tooltip.bottom="focusMode ? global.getString('dungeon_editor.index.anchors') : ''"
+          @click="indexAnchorsRef?.toggle($event)" />
+        <span class="search-divider" aria-hidden="true"></span>
+        <button v-for="st in STATUS_FILTERS" :key="st" type="button" class="status-filter"
+          :class="[`status-filter--${st}`, { 'status-filter--active': dungeonStatusFilter === st }]"
+          :disabled="!statusCounts[st] && dungeonStatusFilter !== st"
+          v-tooltip.top="`${FILTER_LABEL[st]} — ${statusCounts[st]} block(s)`"
+          @click="toggleStatusFilter(st)">
+          <i :class="FILTER_ICON[st]" />
+          <span class="status-filter-count">{{ statusCounts[st] }}</span>
+        </button>
+        <IndexPopover ref="indexActionsRef" :entries="docIndex.action"
+          :label="global.getString('dungeon_editor.index.actions')"
+          :selected-name="dungeonStructuredFilter?.kind === 'action' ? dungeonStructuredFilter.name : null"
+          @select="(name: string) => setStructuredFilter('action', name)" />
+        <IndexPopover ref="indexFlagsRef" :entries="docIndex.flag" :label="global.getString('dungeon_editor.index.flags')"
+          :selected-name="dungeonStructuredFilter?.kind === 'flag' ? dungeonStructuredFilter.name : null"
+          @select="(name: string) => setStructuredFilter('flag', name)" />
+        <IndexPopover ref="indexAnchorsRef" :entries="docIndex.anchor"
+          :label="global.getString('dungeon_editor.index.anchors')"
+          :selected-name="dungeonStructuredFilter?.kind === 'anchor' ? dungeonStructuredFilter.name : null"
+          @select="(name: string) => setStructuredFilter('anchor', name)" />
       </div>
     </div>
 
     <AssistLayer v-if="activeAssist" :state="activeAssist" />
+    <!-- The cards use plain inputs and textareas in PrimeVue's classes (hundreds of PrimeVue
+         components took a quarter second to build). PrimeVue loads a component's CSS and theme
+         tokens when one first mounts: these make sure that has happened. -->
+    <div hidden aria-hidden="true">
+      <InputText tabindex="-1" />
+      <Textarea tabindex="-1" />
+    </div>
+    <PlayFromPopover ref="playFromRef" />
 
     <div v-if="lintPanelOpen" class="lint-panel">
       <div class="lint-panel-header">
@@ -2115,58 +2427,6 @@ function questKindOf(id: string | undefined): QuestKind | null {
       </div>
     </div>
 
-    <div v-if="!showRaw" class="search-row">
-      <i class="pi pi-search search-icon" />
-      <input ref="searchInputRef" v-model="searchQuery" class="search-input" type="text" placeholder="Search…" />
-      <span v-if="matchingBlockIndices" class="search-count">{{ matchCount ? activeMatchPos + 1 : 0 }}/{{
-        matchCount }}</span>
-      <button v-if="matchingBlockIndices" type="button" class="search-nav" :disabled="!matchCount"
-        @click="prevMatch" title="Previous match">
-        <i class="pi pi-chevron-left" />
-      </button>
-      <button v-if="matchingBlockIndices" type="button" class="search-nav" :disabled="!matchCount"
-        @click="nextMatch" title="Next match">
-        <i class="pi pi-chevron-right" />
-      </button>
-      <button v-show="searchQuery" type="button" class="search-clear" @click="searchQuery = ''" title="Clear">
-        <i class="pi pi-times" />
-      </button>
-      <span v-if="dungeonStructuredFilter" class="filter-chip" :title="filterChipLabel">
-        <span class="filter-chip-label">{{ filterChipLabel }}</span>
-        <button type="button" class="filter-chip-clear" @click="clearStructuredFilter"
-          :title="global.getString('dungeon_editor.index.clear_filter')">
-          <i class="pi pi-times" />
-        </button>
-      </span>
-      <span class="search-divider" aria-hidden="true"></span>
-      <Button :label="global.getString('dungeon_editor.index.actions')" icon="pi pi-bolt" size="small" text
-        class="index-btn" @click="indexActionsRef?.toggle($event)" />
-      <Button :label="global.getString('dungeon_editor.index.flags')" icon="pi pi-flag" size="small" text
-        class="index-btn" @click="indexFlagsRef?.toggle($event)" />
-      <Button :label="global.getString('dungeon_editor.index.anchors')" icon="pi pi-link" size="small" text
-        class="index-btn" @click="indexAnchorsRef?.toggle($event)" />
-      <span class="search-divider" aria-hidden="true"></span>
-      <button v-for="st in STATUS_FILTERS" :key="st" type="button" class="status-filter"
-        :class="[`status-filter--${st}`, { 'status-filter--active': dungeonStatusFilter === st }]"
-        :disabled="!statusCounts[st] && dungeonStatusFilter !== st"
-        v-tooltip.top="`${FILTER_LABEL[st]} — ${statusCounts[st]} block(s)`"
-        @click="toggleStatusFilter(st)">
-        <i :class="FILTER_ICON[st]" />
-        <span class="status-filter-count">{{ statusCounts[st] }}</span>
-      </button>
-      <IndexPopover ref="indexActionsRef" :entries="docIndex.action"
-        :label="global.getString('dungeon_editor.index.actions')"
-        :selected-name="dungeonStructuredFilter?.kind === 'action' ? dungeonStructuredFilter.name : null"
-        @select="(name: string) => setStructuredFilter('action', name)" />
-      <IndexPopover ref="indexFlagsRef" :entries="docIndex.flag" :label="global.getString('dungeon_editor.index.flags')"
-        :selected-name="dungeonStructuredFilter?.kind === 'flag' ? dungeonStructuredFilter.name : null"
-        @select="(name: string) => setStructuredFilter('flag', name)" />
-      <IndexPopover ref="indexAnchorsRef" :entries="docIndex.anchor"
-        :label="global.getString('dungeon_editor.index.anchors')"
-        :selected-name="dungeonStructuredFilter?.kind === 'anchor' ? dungeonStructuredFilter.name : null"
-        @select="(name: string) => setStructuredFilter('anchor', name)" />
-    </div>
-
     <div class="editor-main">
       <aside v-if="!showRaw" class="toc-panel">
         <div class="toc-title">Contents</div>
@@ -2241,14 +2501,15 @@ function questKindOf(id: string | undefined): QuestKind | null {
         <div v-if="doc.blocks.length === 0" class="empty-state">
           <p>Empty dungeon. Start by adding a Room, Encounter, Scene, or Template above.</p>
         </div>
-        <template v-for="item in groupedItems" :key="item.kind === 'quest'
+        <template v-for="item in renderedItems" :key="item.kind === 'quest'
           ? `quest:${(doc.blocks[item.group.startIndex] as any).__uid ?? item.group.startIndex}`
           : (doc.blocks[item.idx] as any).__uid ?? item.idx">
           <template v-if="item.kind === 'block'">
             <div v-bind="{ 'data-block-index': item.idx }" class="block-anchor" :class="{
               'block-anchor--selected': selectedIndex === item.idx,
               'block-anchor--indented': indented[item.idx],
-            }" @click="(e: MouseEvent) => onBlockClick(item.idx, e)">
+            }" @click="(e: MouseEvent) => onBlockClick(item.idx, e)"
+              @focusin="doc.blocks[item.idx]?.kind === 'scene' && noteEditingScene(item.idx)">
               <BlockCard :block="doc.blocks[item.idx]" :index="item.idx" :can-move-up="item.idx > 0"
                 :can-move-down="item.idx < doc.blocks.length - 1" :issues="issuesForBlock(item.idx)"
                 :reveal="revealFor(item.idx)"
@@ -2309,6 +2570,46 @@ function questKindOf(id: string | undefined): QuestKind | null {
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+/* Focus mode: the toolbar and the search row share one line, wrapping the search row under it when
+   the window is too narrow, and the buttons with a tooltip drop their labels. */
+.toolbar-stack--focus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.75rem;
+  padding: 0.2rem 0.25rem;
+  border-bottom: 1px solid var(--editor-border);
+}
+
+.toolbar-stack--focus > .editor-toolbar {
+  display: contents;
+}
+
+.toolbar-stack--focus .toolbar-left,
+.toolbar-stack--focus .toolbar-right {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.toolbar-stack--focus .toolbar-left {
+  gap: 0.6rem;
+}
+
+/* Sized by its content, so a line too full for a usable search box sends the whole row to the next line. */
+.toolbar-stack--focus > .search-row {
+  flex: 1 1 auto;
+  padding: 0;
+  border-bottom: none;
+}
+
+.toolbar-stack--focus .search-input {
+  min-width: 12rem;
+}
+
+.toolbar-stack--focus .focus-compact :deep(.p-button-label) {
+  display: none;
 }
 
 .auto-open-toggle {

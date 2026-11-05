@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import InputText from 'primevue/inputtext';
 import Textarea from 'primevue/textarea';
-import Button from 'primevue/button';
+import IconButton from './IconButton.vue';
 import type { Row } from '../../../../utility/dungeonEditor/ast';
 import { inputMatchesSearch, paramsMatchSearch } from './searchState';
 import { flashElement, focusFieldAt, type RevealRequest } from './reveal';
@@ -71,19 +70,19 @@ function updateField(key: string, value: any) {
     <div class="row-body">
       <!-- choice: !name<value>{params} — name is the engine id, value is the display title -->
       <template v-if="row.kind === 'choice'">
-        <InputText
-          :model-value="row.name"
-          @update:model-value="(v: any) => updateField('name', v ?? '')"
+        <input type="text"
+          :value="row.name"
+          @input="updateField('name', ($event.target as HTMLInputElement).value)"
           placeholder="id"
-          class="choice-id-input"
+          class="p-inputtext p-component choice-id-input"
           :class="{ 'input-search-hit': inputMatchesSearch(row.name) }"
         />
         <span class="angle">&lt;</span>
-        <InputText
-          :model-value="row.value ?? ''"
-          @update:model-value="(v: any) => updateField('value', v === '' ? undefined : v)"
+        <input type="text"
+          :value="row.value ?? ''"
+          @input="updateField('value', ($event.target as HTMLInputElement).value === '' ? undefined : ($event.target as HTMLInputElement).value)"
           placeholder="title"
-          class="value-input"
+          class="p-inputtext p-component value-input"
           :class="{ 'input-search-hit': inputMatchesSearch(row.value) }"
         />
         <span class="angle">&gt;</span>
@@ -116,11 +115,11 @@ function updateField(key: string, value: any) {
 
       <!-- comment -->
       <template v-else-if="row.kind === 'comment'">
-        <InputText
-          :model-value="row.text"
-          @update:model-value="(v: any) => updateField('text', v ?? '')"
+        <input type="text"
+          :value="row.text"
+          @input="updateField('text', ($event.target as HTMLInputElement).value)"
           placeholder="//comment"
-          class="flex-1 comment-input"
+          class="p-inputtext p-component flex-1 comment-input"
           :class="{ 'input-search-hit': inputMatchesSearch(row.text) }"
         />
       </template>
@@ -139,28 +138,28 @@ function updateField(key: string, value: any) {
 
       <!-- fallback raw -->
       <template v-else>
-        <InputText
-          :model-value="(row as any).text ?? ''"
-          @update:model-value="(v: any) => updateField('text', v ?? '')"
+        <input type="text"
+          :value="(row as any).text ?? ''"
+          @input="updateField('text', ($event.target as HTMLInputElement).value)"
           placeholder="raw"
-          class="flex-1"
+          class="p-inputtext p-component flex-1"
           :class="{ 'input-search-hit': inputMatchesSearch((row as any).text) }"
         />
       </template>
     </div>
 
     <div class="row-actions">
-      <Button v-if="row.kind === 'choice'" icon="pi pi-sign-in" severity="success" text rounded
+      <IconButton v-if="row.kind === 'choice'" icon="pi pi-sign-in" severity="success"
         :disabled="sceneExists" class="insert-scene-btn" :class="{ 'insert-scene-btn--disabled': sceneExists }"
         @click="emit('insert-scene')"
-        :aria-label="sceneExists ? 'Scene already exists for this choice' : 'Insert scene for this choice'"
+        :label="sceneExists ? 'Scene already exists for this choice' : 'Insert scene for this choice'"
         :title="sceneExists ? 'Scene already exists for this choice' : 'Insert scene for this choice'" />
-      <Button icon="pi pi-chevron-up" severity="secondary" text rounded
-        :disabled="!canMoveUp" @click="emit('move-up')" aria-label="Move up" />
-      <Button icon="pi pi-chevron-down" severity="secondary" text rounded
-        :disabled="!canMoveDown" @click="emit('move-down')" aria-label="Move down" />
-      <Button icon="pi pi-times" severity="danger" text rounded
-        @click="emit('remove')" aria-label="Remove" />
+      <IconButton icon="pi pi-chevron-up" severity="secondary"
+        :disabled="!canMoveUp" @click="emit('move-up')" label="Move up" />
+      <IconButton icon="pi pi-chevron-down" severity="secondary"
+        :disabled="!canMoveDown" @click="emit('move-down')" label="Move down" />
+      <IconButton icon="pi pi-times" severity="danger"
+        @click="emit('remove')" label="Remove" />
     </div>
   </div>
 </template>

@@ -2,6 +2,8 @@
 
 The fastest way to understand Dryad Engine is to **play** with it before you try to build anything.
 
+If you'd rather make something right away, ->introduction.first_15_minutes takes you from an empty editor to a scene you wrote, playing in your own game.
+
 ### 1. Play the Tutorial Game
 
 Dryad Engine comes with a **Tutorial** game that walks you through the core ideas:

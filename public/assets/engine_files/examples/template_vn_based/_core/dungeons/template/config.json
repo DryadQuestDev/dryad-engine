@@ -1,7 +1,6 @@
 {
   "id": "template",
   "dungeon_type": "screen",
-  "gdoc_id": "https://docs.google.com/document/d/1wCTCV1QgscSP31zFoyQYfn1GTUQpR64s1wk2xpW6JLg",
   "music": "music_track1",
-  "image": "assets/games_assets/tutorial/_core/bgs/rikomap_floor2.webp"
+  "image": "assets/engine_files/template_assets/bgs/rikomap_floor2.webp"
 }

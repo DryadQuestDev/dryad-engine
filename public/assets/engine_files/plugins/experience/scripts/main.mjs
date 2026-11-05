@@ -85,8 +85,8 @@ function snapshotStats(/** @type {Character} */ character) {
     return snap;
 }
 
-game.on('character_resource_change', (/** @type {Character} */ character, /** @type {string} */ statId, /** @type {number} */ oldValue, /** @type {number} */ newValue) => {
-    if (statId !== 'xp') return;
+/** Rolls every level-up an XP change passes and records the gain for the reward panel. */
+function settleXp(/** @type {Character} */ character, /** @type {number} */ oldValue, /** @type {number} */ newValue) {
     let level = character.getTrait('level');
     if (!level) return;
 
@@ -172,6 +172,36 @@ game.on('character_resource_change', (/** @type {Character} */ character, /** @t
 
     character.setStat('xp', threshold);
     character.setResource('xp', xp);
+}
+
+game.on('character_resource_change', (/** @type {Character} */ character, /** @type {string} */ statId, /** @type {number} */ oldValue, /** @type {number} */ newValue) => {
+    if (statId === 'xp') settleXp(character, oldValue, newValue);
+});
+
+// The threshold is saved on the character and only recomputed at a level-up, so a retuned curve
+// would reach a save one level late. On load, a character saved on another curve keeps the same
+// fill of the bar on the current one. game_initiated, not save_migrated: the migration pass puts
+// every resource pool back after its hook, which would undo the XP write.
+game.on('game_initiated', () => {
+    for (const character of game.getAllCharacters()) {
+        const level = character.getTrait('level');
+        if (!(level > 0)) continue;
+        const saved = character.getStat('xp');
+        const threshold = getThreshold(level);
+        const xp = character.getResource('xp');
+        silentLevelSync = true;
+        try {
+            if (saved !== threshold) {
+                character.setStat('xp', threshold);
+                character.setResource('xp', saved > 0 ? Math.round(xp / saved * threshold) : 0);
+            } else if (xp >= threshold) {
+                // Overflow a save kept without its level-ups (a debug edit) is rolled now.
+                settleXp(character, xp, xp);
+            }
+        } finally {
+            silentLevelSync = false;
+        }
+    }
 });
 
 // ── Shared level: sync a joining member up to the MC ──
@@ -273,14 +303,17 @@ game.registerCondition('_level', (/** @type {string} */ characterId) => {
 
 // ── Actions ──
 
+// Grows with the receiver's level, not the dungeon's: the dungeon snapshot is a brake on farming
+// fights, and a one-time quest reward finished long after entry would otherwise pay a sliver.
 function applyXp(/** @type {Character} */ char, /** @type {number} */ amount) {
-    char.addResource('xp', Math.round(amount * getXpModifier(char)));
+    char.addResource('xp', Math.round(amount * dungeonScale(char.getTrait('level')) * getXpModifier(char)));
 }
 
 // Delayed: the player reads the paragraph first; the continue-click grants the XP and opens the
 // reward popup (no flash — the popup + level-up fanfare replace it). Mid-battle grants skip the
 // popup and surface in the battle victory panel instead.
 // A numeric value grants the MC; with `shared_level` on it grants the whole (levelled) party.
+// Amounts are authored at the level-1 baseline and grow on the same curve as fight XP.
 game.registerAction('xp', {
     help: 'Grant XP: a number to the MC (or the leveled party), an amount to each named character, or a battle id for that victory\'s XP.',
     value: { oneOf: ['number', { list: { pair: ['any', 'number'], optional: true } }] },

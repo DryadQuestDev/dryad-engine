@@ -265,12 +265,38 @@ const onFogShadowMaskEnter = (el: Element, done: () => void) => {
 };
 
 
-let screenContentScale = ref(1);
-let screenWidth = ref(dungeon.value?.widthBackground ?? 0);
 let isScene = ref(dungeon.value?.dungeon_type == "screen");
 
+// What the view draws: a screen dungeon's current room picture, else the dungeon's own image.
+const stage = computed(() => {
+  const picture = game.dungeonSystem.screenPicture.value;
+  if (picture) return picture;
+  const d = dungeon.value;
+  return { src: d?.image ?? '', width: d?.widthBackground ?? 0, height: d?.heightBackground ?? 0, sized: true };
+});
+
+const stagePadding = computed(() => dungeon.value?.padding || 0);
+
+const screenContentScale = computed(() => {
+  const indent = (dungeon.value?.indent || 0) / 2;
+  const effectiveDisplayableContentWidth = stage.value.width - 2 * indent;
+  if (mainWrapperObservedWidth.value > 0 && effectiveDisplayableContentWidth > 0) {
+    return mainWrapperObservedWidth.value / effectiveDisplayableContentWidth;
+  }
+  return 1;
+});
+
+// Screen dungeons show one room's picture at a time, so only that room's encounters stand on it.
+const isOnStage = (encounter: DungeonEncounter) =>
+  !isScene.value || (stage.value.sized && encounter.isHere(game.dungeonSystem.currentRoom.value));
+
+const onPictureLoad = (event: Event) => {
+  if (stage.value.sized) return;
+  const img = event.target as HTMLImageElement;
+  game.dungeonSystem.screenPictureSizes.set(stage.value.src, { width: img.naturalWidth, height: img.naturalHeight });
+};
+
 watch(dungeon, (newDungeon) => {
-  screenWidth.value = newDungeon?.widthBackground ?? 0;
   isScene.value = newDungeon?.dungeon_type === "screen";
   if (newDungeon?.dungeon_type === "screen") {
     // scroll to top left
@@ -289,23 +315,11 @@ const stopWatchingResize = () => {
 };
 
 const startWatchingResize = () => {
-  if (mainWrapperRef.value && screenWidth.value > 0) {
+  if (mainWrapperRef.value) {
     resizeObserver = new ResizeObserver(entries => {
       for (let entry of entries) {
-        const mwWidth = entry.contentRect.width;
-        const mwHeight = entry.contentRect.height;
-        mainWrapperObservedWidth.value = mwWidth;
-        mainWrapperObservedHeight.value = mwHeight;
-
-        const indent = (dungeon.value?.indent || 0) / 2;
-        const contentSourceWidth = screenWidth.value; // This is dungeon.widthBackground
-        const effectiveDisplayableContentWidth = contentSourceWidth - 2 * indent;
-
-        if (contentSourceWidth > 0 && effectiveDisplayableContentWidth > 0) {
-          screenContentScale.value = mwWidth / effectiveDisplayableContentWidth;
-        } else {
-          screenContentScale.value = 1; // Fallback scale
-        }
+        mainWrapperObservedWidth.value = entry.contentRect.width;
+        mainWrapperObservedHeight.value = entry.contentRect.height;
       }
     });
     resizeObserver.observe(mainWrapperRef.value);
@@ -355,7 +369,7 @@ const subWrapperOffsets = computed(() => {
   const indentEffect = (d.indent || 0) / 2;
   const padding = d.padding || 0;
 
-  const contentSourceHeight = d.heightBackground ?? 0;
+  const contentSourceHeight = stage.value.height;
   const effectiveDisplayableContentHeight = contentSourceHeight - 2 * indentEffect;
 
   const scaledEffectiveDisplayableContentHeight = effectiveDisplayableContentHeight * scale;
@@ -410,8 +424,8 @@ const noMapLabel = computed(() => global.getString('exploration.no_map'));
         '--map-zoom-factor': game.coreSystem.getState('map_zoom_factor')
       }">
       <div id="sub-wrapper" class="map-wrapper" :style="{
-        width: dungeon.widthBackgroundWithPadding + 'px',
-        height: dungeon.heightBackgroundWithPadding + 'px',
+        width: stage.width + stagePadding * 2 + 'px',
+        height: stage.height + stagePadding * 2 + 'px',
         padding: (dungeon.padding) + 'px',
         '--screen-content-scale': screenContentScale,
         left: subWrapperOffsets.left,
@@ -420,8 +434,12 @@ const noMapLabel = computed(() => global.getString('exploration.no_map'));
 
         <div class="map">
 
-          <img v-if="dungeon?.image" class="map-image" draggable="false" :src="dungeon.image"
-            :style="{ transform: 'scale(' + (dungeon.image_scaling ?? 1) + ')', filter: gradeFilter }" />
+          <!-- keyed by picture: a screen dungeon's room change cross-fades the old picture out -->
+          <transition :name="isScene ? 'screen-picture' : 'none'">
+            <img v-if="stage.src" :key="stage.src" class="map-image" draggable="false" :src="stage.src"
+              :style="{ transform: 'scale(' + (dungeon.image_scaling ?? 1) + ')', filter: gradeFilter }"
+              @load="onPictureLoad" />
+          </transition>
 
 
 
@@ -451,11 +469,27 @@ const noMapLabel = computed(() => global.getString('exploration.no_map'));
                the Transition stays put and encounters fade as they show/hide. Encounters already
                visible when the map first renders still appear instantly, which is what we want. -->
           <template v-for="encounter in dungeon.encounters.values()" :key="encounter.id">
-            <transition v-if="!encounter.polygon" @enter="(el, done) => onImageEnter(el, done, encounter)"
+            <!-- A spot: a labeled marker at x/y (the title comes from the content's @id{title: "…"} header).
+                 Counter-scaled so the marker reads the same size whatever the picture's fit. -->
+            <transition v-if="encounter.type === 'spot'" @enter="(el, done) => onImageEnter(el, done, encounter)"
+              @leave="(el, done) => onImageLeave(el, done, encounter)" :css="false">
+              <div v-if="encounter.isVisible && isOnStage(encounter)" class="encounter-spot" :id="encounter.id"
+                :style="{ left: encounter.x + 'px', top: encounter.y + 'px', zIndex: encounter.z }"
+                :class="{
+                  'interactable': isMapInteractive && encounter.isHere(game.dungeonSystem.currentRoom.value),
+                  'clue': isMapInteractive && encounter.isClue(),
+                  'active': isMapInteractive && encounter === game.dungeonSystem.selectedEncounter.value
+                }" @click="interact(encounter)">
+                <span class="encounter-spot-ring"></span>
+                <span v-if="encounter.title" class="encounter-spot-label"
+                  v-script="{ html: game.logicSystem.resolveLabel(encounter.title), resolver: false }"></span>
+              </div>
+            </transition>
+            <transition v-else-if="!encounter.polygon" @enter="(el, done) => onImageEnter(el, done, encounter)"
               @leave="(el, done) => onImageLeave(el, done, encounter)" :css="false">
               <!-- Grade on the wrapper, not the img: the img's filter is where the interactable /
                    clue drop-shadow glows land, and taking it over would kill them. -->
-              <div v-if="encounter.isVisible" class="encounter-wrapper" :id="encounter.id" :style="{
+              <div v-if="encounter.isVisible && isOnStage(encounter)" class="encounter-wrapper" :id="encounter.id" :style="{
                 left: encounter.x + 'px',
                 top: encounter.y + 'px',
                 transform: 'scale(' + (encounter.scale ?? 1) + ')',
@@ -478,8 +512,8 @@ const noMapLabel = computed(() => global.getString('exploration.no_map'));
             </transition>
             <transition v-else @enter="(el, done) => onPolygonEnter(el, done, encounter)"
               @leave="(el, done) => onPolygonLeave(el, done, encounter)" :css="false">
-              <svg v-if="encounter.isVisible && encounter.isHere(game.dungeonSystem.currentRoom.value)"
-                :width="dungeon.widthBackground" :height="dungeon.heightBackground" class="svg_contour"
+              <svg v-if="encounter.isVisible && encounter.isHere(game.dungeonSystem.currentRoom.value) && isOnStage(encounter)"
+                :width="stage.width" :height="stage.height" class="svg_contour"
                 :style="{ zIndex: encounter.z }">
                 <polygon :id="encounter.id" class="poly_encounter " @click="interact(encounter)" fill="none"
                   stroke-width="1" :points="encounter.polygon" :class="{
@@ -495,7 +529,11 @@ const noMapLabel = computed(() => global.getString('exploration.no_map'));
 
       <!--Fog-->
       <template v-if="dungeon.fog_default && !game.coreSystem.getDebugSetting('disable_fog')">
-        <svg v-if="dungeon" class='map_fog' :width="dungeon.widthBackgroundWithPadding"
+        <!-- Keyed by dungeon: the mask items are keyed by room id, and room ids repeat across
+             dungeons ("1", "2"...). Without a remount, a dungeon switch diffs the old dungeon's
+             circles against the new one's, so only the ids the old dungeon lacked play the reveal.
+             A fresh transition-group renders its first children without the enter hook. -->
+        <svg v-if="dungeon" :key="dungeon.id" class='map_fog' :width="dungeon.widthBackgroundWithPadding"
           :height="dungeon.heightBackgroundWithPadding">
           <defs>
 
@@ -597,4 +635,47 @@ const noMapLabel = computed(() => global.getString('exploration.no_map'));
 
 </template>
 
-<style scoped src="./exploration.component.css"></style>
+<style scoped src="./exploration.component.css">
+/* Spot encounters: a ring and a title at a point of the picture. */
+.encounter-spot {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--screen-content-scale, 1)));
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.encounter-spot-ring {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid rgba(253, 230, 138, 0.9);
+  box-shadow: 0 0 10px rgba(253, 230, 138, 0.6), inset 0 0 8px rgba(253, 230, 138, 0.4);
+}
+
+.encounter-spot.interactable .encounter-spot-ring {
+  animation: encounter-spot-pulse 1.8s infinite;
+}
+
+.encounter-spot.active .encounter-spot-ring,
+.encounter-spot:hover .encounter-spot-ring {
+  background: rgba(253, 230, 138, 0.25);
+}
+
+.encounter-spot-label {
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: rgba(10, 14, 22, 0.75);
+  color: #fff;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+@keyframes encounter-spot-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+</style>

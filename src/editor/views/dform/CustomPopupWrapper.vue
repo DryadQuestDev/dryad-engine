@@ -7,6 +7,7 @@ import Select from 'primevue/select';
 import { useConfirm } from 'primevue/useconfirm';
 import { Editor } from '../../editor';
 import { jumpToEntity } from '../../editorJump';
+import { confirmLintErrors } from './confirmLintErrors';
 import { Global } from '../../../global/global';
 import type { Schema } from '../../../utility/schema';
 
@@ -163,24 +164,8 @@ watch(() => props.visible, (newVisible) => {
   }
 }, { immediate: true });
 
-/**
- * A child that checks its content (the dungeon content editor) reports its errors here. Warnings
- * never stop a save; errors ask first, since the game may not read that content.
- */
-async function confirmChildErrors(): Promise<boolean> {
-  const errors: number = childRef.value?.lintErrorCount?.() ?? 0;
-  if (!errors) return true;
-  return new Promise((resolve) => {
-    confirm.require({
-      header: 'Save with errors?',
-      message: `${errors} ${errors === 1 ? 'error' : 'errors'} in this content — the game may stop or skip there. They are listed above the editor.`,
-      acceptLabel: 'Save anyway',
-      rejectLabel: 'Keep editing',
-      accept: () => resolve(true),
-      reject: () => resolve(false),
-      onHide: () => resolve(false),
-    });
-  });
+function confirmChildErrors(): Promise<boolean> {
+  return confirmLintErrors(confirm, childRef.value);
 }
 
 async function commitItem(): Promise<boolean> {

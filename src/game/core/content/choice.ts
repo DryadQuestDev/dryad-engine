@@ -1,5 +1,6 @@
 import { ComputedRef } from "vue";
 import { Game } from "../../game";
+import { devLogOn, devLogChoice } from "../../utils/devLog";
 
 export class Choice {
 
@@ -114,7 +115,11 @@ export class Choice {
         ? this.nameComputed
         : this.nameComputed?.value;
       Game.getInstance().dungeonSystem.addLog(label || this.name, true);
+      if (devLogOn) devLogChoice(this.id, label || this.name);
     }
+
+    // Before the actions: they may play the next paragraph, which replaces the menu the pick came from.
+    Game.getInstance().scenePointSystem.onChoicePicked(this);
 
     // A held-back flow (flow_advance_before) moved nothing, so a one-shot continue stays live.
     if (!Game.getInstance().logicSystem.resolveActions(this.params)) {

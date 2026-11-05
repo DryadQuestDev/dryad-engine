@@ -133,7 +133,7 @@ export function sideFreeSlots(side) {
     const alive = battle.enemyParty.filter(id => (game.getCharacter(id)?.getResource('health') || 0) > 0).length;
     return Math.max(0, (config?.max_enemy_units || 6) - alive);
   }
-  // Player cap is battle-lifetime (max_total_units): dead sprouts still spent their slot.
+  // Player cap is battle-lifetime (max_total_units): dead units still spent their slot.
   // Supports never occupy slots, so they don't eat the summon budget.
   return Math.max(0, (config?.max_total_units || 5) - battle.playerParty.filter(id => !isSupport(id)).length);
 }

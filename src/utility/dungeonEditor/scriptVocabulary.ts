@@ -125,7 +125,7 @@ export function readScripts(files: ScriptFile[]): ScriptVocabulary {
     }
     for (const st of m.ast.body as AnyNode[]) {
       const decl = st.type === 'ExportNamedDeclaration' ? st.declaration : st;
-      if (decl?.type === 'VariableDeclaration' && decl.kind === 'const') declare(decl, m.scope, m);
+      if (decl?.type === 'VariableDeclaration' && decl.kind === 'const') bindDeclaration(decl, m.scope, m);
     }
     evaluating.delete(key);
     ready.add(key);
@@ -238,7 +238,7 @@ export function readScripts(files: ScriptFile[]): ScriptVocabulary {
   }
 
   /** Bind a `const` / `let` / loop declaration's names. */
-  function declare(decl: AnyNode, scope: Scope, m: Module) {
+  function bindDeclaration(decl: AnyNode, scope: Scope, m: Module) {
     for (const d of decl.declarations) {
       if (d.init?.type === 'ArrowFunctionExpression' || d.init?.type === 'FunctionExpression') {
         if (d.id.type === 'Identifier') scope.fns.set(d.id.name, d.init);
@@ -350,7 +350,7 @@ export function readScripts(files: ScriptFile[]): ScriptVocabulary {
       case 'ExportAllDeclaration':
         return;
       case 'VariableDeclaration':
-        if (scope.parent !== null) declare(node, scope, m);
+        if (scope.parent !== null) bindDeclaration(node, scope, m);
         for (const d of node.declarations) {
           if (d.init?.type === 'ArrowFunctionExpression' || d.init?.type === 'FunctionExpression') continue;
           walk(d.init, scope, m, chain, depth, statementStart);

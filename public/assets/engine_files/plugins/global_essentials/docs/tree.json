@@ -1,8 +1,11 @@
 {
   "introduction": [
     "overview",
+    "first_15_minutes",
     "getting_started",
-    "creating_new_game"
+    "creating_new_game",
+    "coming_from_renpy",
+    "coming_from_twine"
   ],
   "dungeons": [
     "what_is_dungeon",
@@ -13,6 +16,7 @@
     "glossary",
     "text_tags",
     "grades",
+    "scene_points",
     "dungeons_api"
   ],
   "characters": [

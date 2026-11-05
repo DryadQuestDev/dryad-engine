@@ -11,12 +11,14 @@ import { CharacterSystem, StatComputerFunction, type StatGroupResolverFunction }
 import { ItemSystem, PARTY_INVENTORY_ID } from './systems/itemSystem';
 import { CoreSystem, type EmitterMap, type CustomComponent, type SaveOptions, type SaveMigrationOptions } from './systems/coreSystem';
 import { AccoladeSystem } from './systems/accoladeSystem';
+import { ScenePointSystem, type ScenePointInfo } from './systems/scenePointSystem';
 import { gameLogger } from './utils/logger';
 import { preloadCharacterAssets, type PreloadCharacterAssetsOptions } from './utils/assetPreloader';
 import { Character } from './core/character/character';
 import { Inventory } from './core/character/inventory';
 import { Item } from './core/character/item';
 import { Status } from './core/character/status';
+import { ItemSlot } from './core/character/itemSlot';
 import { Choice } from './core/content/choice';
 import { PoolEntryObject } from '../schemas/poolEntrySchema';
 import { ManifestObject } from '../schemas/manifestSchema';
@@ -59,6 +61,12 @@ export class Game {
    */
   @Skip()
   public logicSystem = new LogicSystem();
+
+  /**
+   * Scene point system - point layouts on the scene's picture, point-bound choices and the zoom toward them.
+   */
+  @Skip()
+  public scenePointSystem = new ScenePointSystem();
 
   /**
    * Narrative system - data-driven component selection for narrative slots.
@@ -173,15 +181,17 @@ export class Game {
   }
 
   /**
-   * Declare how old saves should be restored. Call this once at script-load time (module top level, not
-   * inside a listener) — the engine merges every declaration and runs one pass on save load, right before
-   * `game_initiated`, whenever the save's `(game + mods)` versions differ from the current ones. In dev mode
-   * it runs on every load, version bump or not.
+   * Tune how old saves are restored. The engine runs one pass on save load, right before `game_initiated`,
+   * whenever the save's `(game + mods)` versions differ from the current ones (in dev mode on every load),
+   * declared or not: every character is rebuilt from its template with what the game wrote replayed on
+   * top, and every item's template-owned fields re-sync. Call this once at script-load time (module top
+   * level, not inside a listener) to narrow or widen that pass.
    *
    * Each section — stats, traits, attributes, abilities, skinLayers, spine, staticArt, itemSlots, skillTrees,
    * learnedSkills, statuses, itemTraits, items — takes `true` (whole
-   * section), `false` (skip it), `{ only: [ids] }` or `{ skip: [ids] }`. Sections nobody mentions follow
-   * `mode`: `opt-out` (default) syncs them, `opt-in` skips them.
+   * section), `false` (skip it), `{ only: [ids] }` or `{ skip: [ids] }`. Sections nobody names follow `mode`:
+   * omitted, every section syncs except `itemTraits`; `opt-out` syncs `itemTraits` too; `opt-in` syncs only
+   * what `true` or `only` turns on. A `skip` never turns a section on.
    *
    * The pass fires `item_migrate(item, template)` for every inventory item it visits,
    * `status_migrate(character, status, previous)` for every status it recreates, and `save_migrated`
@@ -189,8 +199,9 @@ export class Game {
    * restore what they derive per instance there (level scaling, runtime-added choices).
    *
    * The game, each mod and each plugin register their own declaration and the merge is restrictive, so a mod
-   * can only make the pass do less: a `false` or a `skip` from any source always wins, `only` lists union,
-   * and `mode` is honored on the `_core` declaration alone. Re-registering a source replaces its declaration.
+   * can only make the pass do less: a `false` or a `skip` from any source always wins, `only` lists union
+   * (only the game's own `only` narrows a section the mode already syncs), and `mode` is honored on the
+   * `_core` declaration alone. Re-registering a source replaces its declaration.
    *
    * Resource pools are never touched: snapshot at the start, restored verbatim at the end, so a stats sync or
    * status reapply can't clamp or refill them. Item slots are backfilled and repositioned — never removed.
@@ -470,6 +481,29 @@ export class Game {
   }
 
   /**
+   * The points of the scene point layout in force ({inspect}), with where each sits on screen now in viewport
+   * pixels (mapped through the reference picture as drawn: fitted, zoomed, moved). `choice` is the visible
+   * choice bound to the point on the menu up now ({point}), while its marker shows. Empty with no layout.
+   * @example
+   * for (const p of game.getScenePoints()) console.log(p.id, p.x, p.y, p.character);
+   */
+  public getScenePoints(): ScenePointInfo[] {
+    return this.scenePointSystem.getScenePoints();
+  }
+
+  /**
+   * A staged actor's on-screen box (the character's 1:1 doll frame) in viewport pixels, or null when the
+   * character isn't drawn on stage. Pair it with the face_shift traits to find the face (mirror x when
+   * `mirrored`). `hidden` while the body is staged but not shown (a scene point layout's hide_actors fade,
+   * a plate that hides actors): its box is still there, nobody sees it.
+   * @example
+   * const r = game.getActorRect('alice'); if (r && !r.hidden) console.log(r.left + r.width / 2);
+   */
+  public getActorRect(characterId: string): { left: number; top: number; width: number; height: number; mirrored: boolean; hidden: boolean } | null {
+    return this.scenePointSystem.getActorRect(characterId);
+  }
+
+  /**
    * The characters in the current scene: the staged actors (mid-exit ones included — they are
    * still on screen), followed by any `panel_actor` listed without art. Empty outside a scene.
    */
@@ -704,6 +738,14 @@ export class Game {
     return this.itemSystem.isItemDiscovered(itemId);
   }
 
+  /**
+   * Open an item's `readable` text, as the inventory's Read choice does. Takes a live item or an item
+   * template id; an id need not be carried. Returns false when the item has no readable source.
+   */
+  public readItem(itemOrId: Item | string): boolean {
+    return this.itemSystem.readItem(itemOrId);
+  }
+
   public getDiscoveredItems(): Set<string> {
     return this.itemSystem.getDiscoveredItems();
   }
@@ -824,12 +866,40 @@ export class Game {
     return this.itemSystem.getInventory(PARTY_INVENTORY_ID);
   }
 
+  /**
+   * The stats an item grants where it sits, after the game's `item_stats` listeners: what its
+   * item card shows and what equipping it gives. Read item stats through this rather than
+   * `item.statusObject.stats`, which holds them before any listener. With no slot, a worn item
+   * resolves in the slot it is in and a loose one in none; pass a slot (null for none) and its
+   * character to ask how it would be there instead.
+   * @returns A fresh copy, safe to edit.
+   * @example
+   * const stats = game.getItemStats(item);
+   * const inSlot = game.getItemStats(item, character.getItemSlots()[0], character);
+   */
+  public getItemStats(item: Item, slot?: ItemSlot | null, character?: Character | null): Record<string, number> {
+    return this.itemSystem.getItemStats(item, slot, character);
+  }
+
   public canUseItems(): boolean {
     return this.itemSystem.canUseItems();
   }
 
   public closeExchangeInventory(exchangeInventory: Inventory): void {
     this.itemSystem.closeExchangeInventory(exchangeInventory);
+  }
+
+  /**
+   * Move an item across the open exchange, exactly as clicking it there does: in a trade the
+   * receiving side pays the item's trade price × quantity and the giving side is paid.
+   * @param silent - Suppress the failure notifications, for batch moves that report once at the end.
+   * @returns true if the item moved; a refused move changes nothing.
+   * @example
+   * const party = game.getPartyInventory();
+   * game.exchangeItem(item, party, merchant, item.quantity);
+   */
+  public exchangeItem(item: Item, source: Inventory, target: Inventory, quantity: number, silent: boolean = false): boolean {
+    return this.itemSystem.exchangeItem(item, source, target, quantity, silent);
   }
 
   // ============================================

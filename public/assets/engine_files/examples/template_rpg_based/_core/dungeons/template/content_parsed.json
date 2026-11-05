@@ -4,9 +4,8 @@
     "params": {
       "id": "template",
       "dungeon_type": "map",
-      "gdoc_id": "https://docs.google.com/document/d/1ghVNkyM0YWOWDR1mggddE0gJJk8wUuFZwOzE7Jf1G9s/edit?tab=t.0",
       "music": "music_track1",
-      "image": "assets/games_assets/tutorial/_core/maps/riko_map.webp",
+      "image": "assets/engine_files/template_assets/maps/riko_map.webp",
       "fog_default": 200,
       "fog_shadow_coef": 1.5,
       "image_scaling": 0.5,
@@ -17,30 +16,30 @@
   },
   {
     "id": "$dungeon_name",
-    "val": "My Dungeon Name"
+    "val": "Chapter 1"
   },
   {
     "id": "@1.description",
-    "val": "Room1 Description"
+    "val": "Riko's room. Morning light comes through the blinds, and the door to the hall stands open."
   },
   {
     "id": "@1.encounter1",
-    "val": "Test Encounter"
+    "val": "A desk covered in notes and half-finished sketches."
   },
   {
     "id": "!1.encounter1.choice1",
-    "val": "__Default__:choice1"
+    "val": "Read the notes"
   },
   {
     "id": "#1.encounter1~choice1.1.1.1",
-    "val": "Test interaction"
+    "val": "The top note says: *Water the plants. Fix the lamp. Call Mom.*{sound: \"page_turn\", flag: \"notes_read = 1\"}"
   },
   {
     "id": "@2.description",
-    "val": "Room2 Description"
+    "val": "The hallway. A rug runs to the stairs, and a lamp hums at the far end.if{notes_read = 1} It must be the lamp from the note.fi{}"
   },
   {
     "id": "@3.description",
-    "val": "Room3 Description"
+    "val": "The kitchen. Something on the stove smells faintly of cinnamon."
   }
 ]

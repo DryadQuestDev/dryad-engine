@@ -354,3 +354,19 @@
     stroke: black;
     stroke-width: 0.5px;
 }
+.screen-room-picker {
+    position: sticky;
+    z-index: 999;
+    top: 30px;
+    left: 14px;
+    width: fit-content;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 2px 5px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    border-radius: 3px;
+    font-size: 12px;
+}

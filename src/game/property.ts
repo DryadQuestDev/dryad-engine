@@ -1,6 +1,7 @@
 import { PropertyObject } from '../schemas/propertySchema';
 import { gameLogger } from './utils/logger';
 import { Game } from './game';
+import { devLogOn, devLogVar } from './utils/devLog';
 
 // Interface for the mutable state
 interface StatState {
@@ -122,6 +123,12 @@ export class Property {
             gameLogger.warn(`Cannot modify constant property '${this.id}'`);
             return;
         }
+        const old = this.state.currentValue;
+        this.assignValue(value);
+        if (devLogOn) devLogVar('property', this.id, old, this.state.currentValue);
+    }
+
+    private assignValue(value: any): void {
         if (this.type === 'number' && typeof value === 'number') {
             let processedValue = this.clampValue(value);
             processedValue = this.applyPrecision(processedValue);
