@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Global } from '../../global';
 import { ManifestObject } from '../../../schemas/manifestSchema';
 import { displayCalendarDate } from '../../../utility/calendarDate';
-import { sortedChangelog } from './changelog';
+import { groupedChangelog } from './changelog';
 
 const props = defineProps<{
   manifest: ManifestObject;
@@ -13,8 +13,9 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const global = Global.getInstance();
 
-const entries = computed(() => sortedChangelog(props.manifest));
-// The newest release opens expanded; older ones fold until the player asks for them.
+// One block per release, its hotfixes folded in. The newest opens expanded; older ones fold until
+// the player asks for them.
+const entries = computed(() => groupedChangelog(props.manifest, (version) => global.getString('changelog.hotfix', { version })));
 const open = ref<Set<number>>(new Set([0]));
 
 function toggle(index: number) {
@@ -67,7 +68,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
       </div>
 
       <div class="changelog-overlay-list dark-scrollbar">
-        <section v-for="(entry, i) in entries" :key="entry.uid || entry.version || i" class="changelog-entry"
+        <section v-for="(entry, i) in entries" :key="entry.key" class="changelog-entry"
           :class="{ 'changelog-entry--open': open.has(i) }">
           <button type="button" class="changelog-entry-header" :aria-expanded="open.has(i)" @click="toggle(i)">
             <span class="changelog-entry-version">{{ versionLabel(entry.version) }}</span>
@@ -278,6 +279,15 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
 .changelog-entry-notes :deep(h3) {
   margin: 14px 0 6px;
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(216, 221, 228, 0.7);
+}
+
+.changelog-entry-notes :deep(h4.changelog-hotfix) {
+  margin: 14px 0 6px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;

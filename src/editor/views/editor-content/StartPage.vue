@@ -4,7 +4,7 @@ import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import { Editor } from '../../editor';
 import { Global } from '../../../global/global';
-import { renderManifestDescription } from '../../../global/views/main-screen/changelog';
+import { renderManifestDescription, changelogLabels } from '../../../global/views/main-screen/changelog';
 import { startPlaytest } from '../editor-screen/usePlaytest';
 
 const editor = Editor.getInstance();
@@ -55,7 +55,7 @@ async function loadTemplates() {
     loaded.push({
       id: folder,
       name: manifest.name || folder,
-      description: renderManifestDescription(manifest, () => '', false),
+      description: renderManifestDescription(manifest, changelogLabels(() => ''), false),
       cover: Array.isArray(manifest.cover_assets) ? manifest.cover_assets[0] ?? '' : '',
       youGet: meta?.you_get || '',
       order: typeof meta?.order === 'number' ? meta.order : 999,

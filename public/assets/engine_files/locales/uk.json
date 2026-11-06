@@ -263,6 +263,7 @@
   "changelog.expand_all": "Розгорнути все",
   "changelog.collapse_all": "Згорнути все",
   "changelog.new_in": "Нове у |version|",
+  "changelog.hotfix": "Виправлення |version|",
   "manifest_panel.collapse_description": "Згорнути опис",
   "manifest_panel.expand_description": "Розгорнути опис",
   "manifest_panel.screenshots": "Знімки екрана",

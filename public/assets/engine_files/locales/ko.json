@@ -263,6 +263,7 @@
   "changelog.expand_all": "모두 펼치기",
   "changelog.collapse_all": "모두 접기",
   "changelog.new_in": "|version| 새 소식",
+  "changelog.hotfix": "핫픽스 |version|",
   "manifest_panel.collapse_description": "설명 접기",
   "manifest_panel.expand_description": "설명 펼치기",
   "manifest_panel.screenshots": "스크린샷",

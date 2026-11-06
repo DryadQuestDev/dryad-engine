@@ -87,7 +87,7 @@ Widgets are positioned inside a centered 16:9 stage that letterboxes to fit the 
 }
 ```
 
-A widget's `html` can hold `[changes]` too: it shows the newest changelog entry of the manifest that wrote the widget, so a base-game widget shows the base game's notes.
+A widget's `html` can hold `[changes]` too: it shows the newest release of the manifest that wrote the widget, so a base-game widget shows the base game's notes.
 
 Widgets stack across active manifests in load order, just like `landing_bg_asset`. Keep in mind that inactive mods contribute nothing to the landing page – a banner promoting a mod belongs in the **base game's** manifest, since the whole point is showing it before the mod is activated.
 
@@ -105,13 +105,19 @@ Add an entry to the `changelog` field in **General → Manifest** for every rele
 | `image` | Optional picture shown above the notes |
 | `notes` | Rich text: headings such as *New*, *Changes* and *Fixes* over bullet lists read well |
 
-Entries are sorted by version, newest first, whatever their order in the form. When a player comes back after an update, **What's new** carries a dot until they open it; a first-time player sees no dot. Dates are shown in the player's language.
+Entries are sorted by version, newest first, whatever their order in the form.
+
+### Hotfixes
+
+Give a hotfix its own entry with the full version (`0.23.1`) and only the fix in `notes`. The landing page shows it inside its release instead of as a release of its own: entries that share `a.b` form one block, headed by the newest version and date, with the oldest entry's notes first and each hotfix after them under a **Hotfix 0.23.1** heading. `[changes]` shows that whole block too, so the description reads **New in 0.23.1** over the release's notes and the fix. Restyle the heading with the `.changelog-hotfix` class in `landing_css`.
+
+When a player comes back after an update, **What's new** carries a dot until they open it; a first-time player sees no dot. Dates are shown in the player's language.
 
 A mod keeps its own changelog in its own manifest, and its panel on the landing page gets the same **What's new** link.
 
 ### Showing the latest release in the description
 
-Put `[changes]` on its own line in `description` and the landing page shows your newest changelog entry there: a **New in 0.23.0** heading (in the player's language) over that entry's notes. Write each release's notes once, in `changelog`, and the description keeps up by itself:
+Put `[changes]` on its own line in `description` and the landing page shows your newest release there: a **New in 0.23.0** heading (in the player's language) over that release's notes, its hotfixes included. Write each release's notes once, in `changelog`, and the description keeps up by itself:
 
 ```html
 <p>Play as a dryad who …</p>

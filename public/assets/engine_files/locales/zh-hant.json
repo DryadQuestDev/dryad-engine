@@ -263,6 +263,7 @@
   "changelog.expand_all": "全部展開",
   "changelog.collapse_all": "全部收合",
   "changelog.new_in": "|version| 新內容",
+  "changelog.hotfix": "|version| 熱修復",
   "manifest_panel.collapse_description": "收合說明",
   "manifest_panel.expand_description": "展開說明",
   "manifest_panel.screenshots": "截圖",

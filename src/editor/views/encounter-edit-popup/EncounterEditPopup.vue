@@ -46,9 +46,11 @@ watch(encounter,
 
 function saveChanges(): void {
   if (editableEncounter.value && props.encounter) {
+    // Start from the whole original: the map replaces the encounter with this object, so any field
+    // this popup does not edit (type, collect_item, regrow…) would otherwise be wiped on save.
+    const { image: _image, polygon: _polygon, ...untouched } = props.encounter;
     const finalEncounter: DungeonEncounterObject = {
-      uid: props.encounter.uid,
-      id: props.encounter.id, // Keep original ID
+      ...untouched,
       ...(editableEncounter.value.image && { image: editableEncounter.value.image }),
       ...(editableEncounter.value.polygon && !editableEncounter.value.image && { polygon: editableEncounter.value.polygon }),
       x: Number(editableEncounter.value.x) || 0,

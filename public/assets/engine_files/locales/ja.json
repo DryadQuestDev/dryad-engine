@@ -263,6 +263,7 @@
   "changelog.expand_all": "すべて展開",
   "changelog.collapse_all": "すべて折りたたむ",
   "changelog.new_in": "|version| の新要素",
+  "changelog.hotfix": "ホットフィックス |version|",
   "manifest_panel.collapse_description": "説明を折りたたむ",
   "manifest_panel.expand_description": "説明を展開",
   "manifest_panel.screenshots": "スクリーンショット",

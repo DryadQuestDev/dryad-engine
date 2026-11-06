@@ -16,7 +16,7 @@ export const ManifestSchema = {
   description: { type: 'htmlarea', tooltip: 'Rich text description of the game/mod shown to players.' },
   changelog: {
     type: 'schema[]',
-    tooltip: 'Release notes players open from "What\'s new" next to the version on the landing page. Listed newest version first, whatever the order here. A mod keeps its own list in its own manifest.',
+    tooltip: 'Release notes players open from "What\'s new" next to the version on the landing page. Listed newest version first, whatever the order here. A hotfix (a.b.1, a.b.2…) gets its own entry and shows inside its a.b release under a Hotfix heading. A mod keeps its own list in its own manifest.',
     objects: {
       uid: { type: 'uid' },
       version: { type: 'string', tooltip: 'Version this entry describes, in the a.b.c format of the version field.' },

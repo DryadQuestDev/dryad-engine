@@ -257,6 +257,7 @@
   "changelog.expand_all": "Expand all",
   "changelog.collapse_all": "Collapse all",
   "changelog.new_in": "New in |version|",
+  "changelog.hotfix": "Hotfix |version|",
   "manifest_panel.collapse_description": "Collapse description",
   "manifest_panel.expand_description": "Expand description",
   "manifest_panel.screenshots": "Screenshots",

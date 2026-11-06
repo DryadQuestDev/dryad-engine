@@ -263,6 +263,7 @@
   "changelog.expand_all": "Развернуть все",
   "changelog.collapse_all": "Свернуть все",
   "changelog.new_in": "Новое в |version|",
+  "changelog.hotfix": "Исправление |version|",
   "manifest_panel.collapse_description": "Свернуть описание",
   "manifest_panel.expand_description": "Развернуть описание",
   "manifest_panel.screenshots": "Скриншоты",

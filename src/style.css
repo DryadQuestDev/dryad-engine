@@ -1410,3 +1410,14 @@ body.reduced-effects .fx-glow,
 body.reduced-effects .fx-spooky {
   animation: none;
 }
+
+/* A hotfix's heading inside rendered release notes (the [changes] token, the What's new overlay).
+   Global because those notes arrive as v-html; a game's landing CSS can restyle it. */
+.changelog-hotfix {
+  margin: 12px 0 4px;
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}

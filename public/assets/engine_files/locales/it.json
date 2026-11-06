@@ -263,6 +263,7 @@
   "changelog.expand_all": "Espandi tutto",
   "changelog.collapse_all": "Comprimi tutto",
   "changelog.new_in": "Novità della |version|",
+  "changelog.hotfix": "Hotfix |version|",
   "manifest_panel.collapse_description": "Comprimi la descrizione",
   "manifest_panel.expand_description": "Espandi la descrizione",
   "manifest_panel.screenshots": "Screenshot",

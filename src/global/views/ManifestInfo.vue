@@ -3,7 +3,7 @@ import { computed, ref, watch, onMounted, nextTick } from 'vue';
 import { ManifestObject } from '../../schemas/manifestSchema';
 import { isImage, isVideo } from '../../utility/functions';
 import { Global } from '../global';
-import { renderManifestDescription } from './main-screen/changelog';
+import { renderManifestDescription, changelogLabels } from './main-screen/changelog';
 import Galleria from 'primevue/galleria';
 
 interface Props {
@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const global = Global.getInstance();
-const descriptionHtml = computed(() => renderManifestDescription(props.manifest, (version) => global.getString('changelog.new_in', { version })));
+const descriptionHtml = computed(() => renderManifestDescription(props.manifest, changelogLabels((id, params) => global.getString(id, params))));
 
 // Galleria active index for video control
 const activeIndex = ref(0);

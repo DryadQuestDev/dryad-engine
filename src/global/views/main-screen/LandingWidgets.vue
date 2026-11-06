@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { ManifestObject } from '../../../schemas/manifestSchema';
 import { Global } from '../../global';
-import { replaceChangesToken } from './changelog';
+import { replaceChangesToken, changelogLabels } from './changelog';
 
 const props = defineProps<{
   manifests: ManifestObject[];
@@ -71,7 +71,7 @@ const widgets = computed<PlacedWidget[]>(() => {
     .filter(w => w.html && !w.disabled)
     .map(({ disabled, source, ...w }) => ({
       ...w,
-      html: replaceChangesToken(w.html, source, (version) => global.getString('changelog.new_in', { version })),
+      html: replaceChangesToken(w.html, source, changelogLabels((id, params) => global.getString(id, params))),
     }));
 });
 </script>

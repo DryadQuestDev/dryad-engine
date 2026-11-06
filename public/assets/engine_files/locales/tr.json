@@ -263,6 +263,7 @@
   "changelog.expand_all": "Tümünü genişlet",
   "changelog.collapse_all": "Tümünü daralt",
   "changelog.new_in": "|version| yenilikleri",
+  "changelog.hotfix": "Düzeltme |version|",
   "manifest_panel.collapse_description": "Açıklamayı daralt",
   "manifest_panel.expand_description": "Açıklamayı genişlet",
   "manifest_panel.screenshots": "Ekran görüntüleri",

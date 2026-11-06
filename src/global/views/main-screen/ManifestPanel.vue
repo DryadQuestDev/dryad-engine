@@ -3,7 +3,7 @@ import { computed, watch } from 'vue';
 import { ManifestObject } from '../../../schemas/manifestSchema';
 import { manifestPanelCollapsed as collapsed } from './manifestPanelState';
 import { Global } from '../../global';
-import { sortedChangelog, hasUnseenChangelog, recordFirstVisit, markChangelogSeen, renderManifestDescription } from './changelog';
+import { sortedChangelog, hasUnseenChangelog, recordFirstVisit, markChangelogSeen, renderManifestDescription, changelogLabels } from './changelog';
 
 const props = withDefaults(defineProps<{
   manifest: ManifestObject | null;
@@ -20,7 +20,7 @@ const global = Global.getInstance();
 
 const hasScreenshots = computed(() => (props.manifest?.cover_assets || []).length > 0);
 const hasChangelog = computed(() => sortedChangelog(props.manifest).length > 0);
-const descriptionHtml = computed(() => renderManifestDescription(props.manifest, (version) => global.getString('changelog.new_in', { version })));
+const descriptionHtml = computed(() => renderManifestDescription(props.manifest, changelogLabels((id, params) => global.getString(id, params))));
 const showMeta = computed(() => !!(props.manifest?.version || props.manifest?.author || hasChangelog.value));
 const changelogUnseen = computed(() => hasUnseenChangelog(props.manifest));
 const whatsNewLabel = computed(() => global.getString('changelog.whats_new'));
